@@ -76,6 +76,26 @@ pub fn set_host(host: NotifyHost) {
     HOST.with(|slot| *slot.borrow_mut() = Some(host));
 }
 
+thread_local! {
+    static UNREAD_HOST: std::cell::Cell<Option<RwSignal<usize>>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Tab-title wiring (#1405): App installs a signal here and the bell
+/// publishes its unread count into it — the same count the badge shows,
+/// from state the bell already holds. No new fetch is made for this.
+pub fn set_unread_host(signal: RwSignal<usize>) {
+    UNREAD_HOST.with(|slot| slot.set(Some(signal)));
+}
+
+fn publish_unread(count: usize) {
+    UNREAD_HOST.with(|slot| {
+        if let Some(signal) = slot.get() {
+            signal.set(count);
+        }
+    });
+}
+
 /// Slot render for `src/shell/contrib/notifications.rs`.
 pub fn bell_view() -> AnyView {
     let host = HOST.with(|slot| slot.borrow().clone());
@@ -1199,6 +1219,12 @@ pub fn NotificationBell(
             .filter(|n| !dismissed.iter().any(|id| id == &n.id))
             .count()
     };
+
+    // #1405: keep the App's tab-title unread signal in step with the
+    // badge count above (same state, no extra fetch).
+    Effect::new(move |_| {
+        publish_unread(unread());
+    });
 
     view! {
         <div class="notify">

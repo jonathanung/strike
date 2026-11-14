@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::api::{self, delete_json, get_text, post_json_value};
+use load_guard::{apply_provider_load, prepare_provider_load, LoadEpoch, ProviderView};
 use wasm_bindgen::JsCast;
 
 /// Wire dialects `config.ValidateWireAPI` accepts. Not a provider catalog.
@@ -190,6 +191,42 @@ fn note_from(raw: &str, key: &str) -> String {
     scrub_secret(&error_message(raw), key)
 }
 
+/// What the note says after a custom provider's "Remove provider" (#1544).
+/// `credential` is the `DELETE /v1/auth/{name}` result; `definition` is the
+/// `DELETE /v1/custom-providers/{name}` result, or `None` when it was never
+/// attempted — the flow deletes the credential first and stops on failure,
+/// so a failed removal changes nothing and leaves no orphan credential
+/// behind for a provider that is already gone. Errors arrive scrubbed by
+/// `note_from`. The copy never claims more than actually happened.
+pub fn custom_removal_note(
+    credential: &Result<(), String>,
+    definition: Option<&Result<(), String>>,
+) -> String {
+    match (credential, definition) {
+        (Ok(()), Some(Ok(()))) => "Provider removed.".into(),
+        (Ok(()), Some(Err(err))) => format!(
+            "Stored credential removed, but the provider definition could not be deleted: {err}"
+        ),
+        (Ok(()), None) => "Stored credential removed.".into(),
+        (Err(err), Some(Ok(()))) => format!(
+            "Provider definition deleted, but its stored credential could not be removed: {err}"
+        ),
+        (Err(err), _) => {
+            format!("Could not remove the stored credential: {err} The provider was not removed.")
+        }
+    }
+}
+
+fn clock_label() -> String {
+    let now = js_sys::Date::new_0();
+    format!(
+        "{:02}:{:02}:{:02}",
+        now.get_hours(),
+        now.get_minutes(),
+        now.get_seconds()
+    )
+}
+
 fn focus_provider(name: &str) {
     let Some(doc) = web_sys::window().and_then(|window| window.document()) else {
         return;
@@ -358,18 +395,53 @@ fn ProviderCard(
         });
     };
 
-    let remove_stored = move |name: String| {
+    // "Remove provider" is rendered only for custom providers, and for them
+    // it must remove the provider (#1544): after the shared confirm, delete
+    // the stored credential, then the provider definition itself, so the
+    // provider is still gone after a reload. A credential failure stops
+    // before the definition delete; a definition failure is reported as the
+    // partial removal it is. Built-in providers never render this button —
+    // their credential-only path is the palette's "Remove stored key".
+    let remove_provider = move |name: String| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
-        spawn_local(async move {
-            let path = format!("/v1/auth/{}", api::js_encode(&name));
-            match delete_json(&b, &t, &path, None).await {
-                Ok(()) => {
-                    map_insert(&notes, name, "Stored credential removed.".into());
-                    request_reload(bump);
-                }
-                Err(err) => map_insert(&notes, name, note_from(&err, "")),
-            }
+        let run_name = name.clone();
+        let run = Rc::new(move || {
+            let (b, t) = (b.clone(), t.clone());
+            let name = run_name.clone();
+            spawn_local(async move {
+                let cred_path = format!("/v1/auth/{}", api::js_encode(&name));
+                let credential = delete_json(&b, &t, &cred_path, None)
+                    .await
+                    .map_err(|err| note_from(&err, ""));
+                let definition = if credential.is_ok() {
+                    let def_path = format!("/v1/custom-providers/{}", api::js_encode(&name));
+                    Some(
+                        delete_json(&b, &t, &def_path, None)
+                            .await
+                            .map_err(|err| note_from(&err, "")),
+                    )
+                } else {
+                    None
+                };
+                map_insert(
+                    &notes,
+                    name,
+                    custom_removal_note(&credential, definition.as_ref()),
+                );
+                request_reload(bump);
+            });
         });
+        let opened = crate::confirm::ask(
+            crate::confirm::ConfirmRequest {
+                title: format!("Remove provider {name}?"),
+                body: "This deletes the provider definition and its stored credential from the daemon. The provider stays gone after a reload.".into(),
+                confirm_label: "Remove provider".into(),
+            },
+            run,
+        );
+        if !opened {
+            map_insert(&notes, name, crate::confirm::BUSY.into());
+        }
     };
 
     let save_base = {
@@ -491,7 +563,7 @@ fn ProviderCard(
                     {custom.then(|| {
                         let name_remove_key = name_remove_key.clone();
                         view! {
-                            <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_stored(name_remove_key.clone())>"Remove provider"</button>
+                            <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_provider(name_remove_key.clone())>"Remove provider"</button>
                         }
                     })}
                 </div>
@@ -501,7 +573,7 @@ fn ProviderCard(
                 <div class="providers-actions">
                     <button type="button" class="secondary" data-test-provider="true" on:click=move |_| test_provider(name_test_plain.clone())>"Test"</button>
                     {(custom && !builtin).then(|| view! {
-                        <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_stored(name_remove_plain.clone())>"Remove provider"</button>
+                        <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_provider(name_remove_plain.clone())>"Remove provider"</button>
                     })}
                 </div>
             })}
@@ -534,41 +606,88 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
     let new_note = RwSignal::new(String::new());
 
     let bump = RwSignal::new(0u32);
+    let load_epoch = RwSignal::new(LoadEpoch::new());
+    let loaded_base = RwSignal::new(String::new());
+    let loaded_at = RwSignal::new(String::new());
+    let stale_note = RwSignal::new(String::new());
     Effect::new(move |_| {
         let _ = base.get();
         let _ = bump.get();
         let (b, t) = (base.get_untracked(), token.get_untracked());
-        loading.set(true);
+        let mut view = ProviderView {
+            rows: rows.get_untracked(),
+            customs: customs.get_untracked(),
+            load_error: load_error.get_untracked(),
+            stale_note: stale_note.get_untracked(),
+            loading: loading.get_untracked(),
+            loaded_base: loaded_base.get_untracked(),
+            loaded_at: loaded_at.get_untracked(),
+        };
+        let mut epoch = load_epoch.get_untracked();
+        let ticket = prepare_provider_load(&mut epoch, &mut view, &b);
+        load_epoch.set(epoch);
+        rows.set(view.rows.clone());
+        customs.set(view.customs.clone());
+        load_error.set(view.load_error.clone());
+        stale_note.set(view.stale_note.clone());
+        loading.set(view.loading);
+        loaded_base.set(view.loaded_base.clone());
+        loaded_at.set(view.loaded_at.clone());
         spawn_local(async move {
             let listed = get_text(&b, &t, "/v1/providers").await;
+            if !load_epoch.get_untracked().accept(ticket) {
+                return;
+            }
             let custom = get_text(&b, &t, "/v1/custom-providers").await;
-            match listed {
+            if !load_epoch.get_untracked().accept(ticket) {
+                return;
+            }
+            let rows_result = match listed {
                 Ok(body) => match serde_json::from_str::<ProviderList>(&body) {
-                    Ok(list) => {
-                        publish_key_names(&list.providers);
-                        rows.set(list.providers);
-                        load_error.set(String::new());
-                    }
-                    Err(err) => load_error.set(format!("Could not read providers: {err}")),
+                    Ok(list) => Ok(list.providers),
+                    Err(err) => Err(format!("Could not read providers: {err}")),
                 },
-                Err(err) => load_error.set(note_from(&err, "")),
-            }
-            match custom {
+                Err(err) => Err(note_from(&err, "")),
+            };
+            let published = match &rows_result {
+                Ok(rows) => Some(rows.clone()),
+                Err(_) => None,
+            };
+            let customs_result = match custom {
                 Ok(body) => match serde_json::from_str::<CustomList>(&body) {
-                    Ok(list) => {
-                        customs.set(list.providers);
-                        custom_error.set(String::new());
-                    }
-                    Err(err) => custom_error.set(format!(
-                        "Custom providers could not be loaded — the list below may be incomplete. ({err})"
-                    )),
+                    Ok(list) => Ok(list.providers),
+                    Err(_) => Err("Could not read custom providers.".into()),
                 },
-                Err(err) => custom_error.set(format!(
-                    "Custom providers could not be loaded — the list below may be incomplete. ({})",
-                    note_from(&err, "")
-                )),
+                Err(err) => Err(err),
+            };
+            // Main's #1670 surfacing, applied only inside the guarded commit
+            // below: a superseded load must not paint this notice either.
+            let custom_notice = match &customs_result {
+                Ok(_) => String::new(),
+                Err(err) => format!(
+                    "Custom providers could not be loaded — the list below may be incomplete. ({err})"
+                ),
+            };
+            if apply_provider_load(
+                &load_epoch.get_untracked(),
+                ticket,
+                &mut view,
+                rows_result,
+                customs_result,
+                &clock_label(),
+            ) {
+                if let Some(rows) = published {
+                    publish_key_names(&rows);
+                }
+                custom_error.set(custom_notice);
+                rows.set(view.rows);
+                customs.set(view.customs);
+                load_error.set(view.load_error);
+                stale_note.set(view.stale_note);
+                loading.set(view.loading);
+                loaded_base.set(view.loaded_base);
+                loaded_at.set(view.loaded_at);
             }
-            loading.set(false);
         });
     });
 
@@ -685,6 +804,9 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
             </Show>
             <Show when=move || !load_error.get().is_empty()>
                 <p class="notice" role="alert">{move || load_error.get()}</p>
+            </Show>
+            <Show when=move || !stale_note.get().is_empty()>
+                <p class="hint" data-providers-stale="true">{move || stale_note.get()}</p>
             </Show>
             <Show when=move || !custom_error.get().is_empty()>
                 <p class="notice" role="alert" data-custom-load-error="true">{move || custom_error.get()}</p>
@@ -840,6 +962,32 @@ mod tests {
         );
         let oauth = probe_note("unsupported", "signed in with OAuth — there is no API key to test");
         assert!(oauth.starts_with("Nothing to test"));
+    }
+
+    #[test]
+    fn custom_removal_note_claims_only_what_happened() {
+        // Full removal: honest success matching the button's label.
+        assert_eq!(
+            custom_removal_note(&Ok(()), Some(&Ok(()))),
+            "Provider removed."
+        );
+        // The issue's partial case, verbatim shape: credential gone,
+        // definition still there, and the note says exactly that.
+        assert_eq!(
+            custom_removal_note(&Ok(()), Some(&Err("no such provider".into()))),
+            "Stored credential removed, but the provider definition could not be deleted: no such provider"
+        );
+        // Credential failure stops the flow: definition never attempted,
+        // and the note must not claim a removal.
+        assert_eq!(
+            custom_removal_note(&Err("HTTP 400".into()), None),
+            "Could not remove the stored credential: HTTP 400 The provider was not removed."
+        );
+        // Credential-only path (no definition step) keeps the old copy.
+        assert_eq!(
+            custom_removal_note(&Ok(()), None),
+            "Stored credential removed."
+        );
     }
 
     #[test]

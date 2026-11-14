@@ -2861,6 +2861,11 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 .file-meta { display: flex; gap: 8px; align-items: baseline; margin-top: 2px; }
 .exist { color: var(--muted); font-size: var(--type-sm); }
 .exist.on { color: var(--success); }
+/* feature:localfiles-copy-path begin */
+.file-item { display: flex; gap: 8px; align-items: flex-start; }
+.file-item .file-main { flex: 1; min-width: 0; }
+.file-copy { flex: 0 0 auto; min-height: 44px; min-width: 44px; padding: 4px 10px; }
+/* feature:localfiles-copy-path end */
 .shortcut-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .shortcut-list li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 .shortcut-list span { color: var(--muted); }
