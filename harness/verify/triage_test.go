@@ -363,17 +363,24 @@ func TestTriageEnvironmentalFocusedFailureRunsFullGate(t *testing.T) {
 func TestIsPlainGoTest(t *testing.T) {
 	t.Parallel()
 	for cmd, want := range map[string]bool{
-		"go test ./...":                        true,
-		" go test -race -count=1 ./pkg/... ":   true,
-		"go test -run=^TestA$ ./a":             false,
-		"go test ./... | tee out":              false,
-		"TZ=UTC go test ./...":                 false,
-		"make test":                            false,
-		"go test ./... && go vet ./...":        false,
-		"go test -run '^TestA$' ./a":           false,
-		"go vet ./...":                         false,
-		"go test ./... > out.txt":              false,
-		"go test $(go list ./... | grep -v x)": false,
+		"go test ./...":                         true,
+		" go test -race -count=1 ./pkg/... ":    true,
+		"go test -run=^TestA$ ./a":              false,
+		"go test ./... | tee out":               false,
+		"TZ=UTC go test ./...":                  false,
+		"make test":                             false,
+		"go test ./... && go vet ./...":         false,
+		"go test -run '^TestA$' ./a":            false,
+		"go vet ./...":                          false,
+		"go test ./... > out.txt":               false,
+		"go test $(go list ./... | grep -v x)":  false,
+		"go test -v -failfast -count=2 ./a ./b": true,
+		"go test -tags=integration ./...":       false,
+		"go test -timeout=30m ./...":            false,
+		"go test -shuffle=on ./...":             false,
+		"go test -exec=sudo ./...":              false,
+		"go test":                               true,
+		"go test ./a\nrm x":                     false,
 	} {
 		if got := isPlainGoTest(cmd); got != want {
 			t.Errorf("isPlainGoTest(%q) = %v, want %v", cmd, got, want)

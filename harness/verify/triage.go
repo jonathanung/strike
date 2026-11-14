@@ -324,18 +324,38 @@ func triageKey(workDir, command string) string {
 	return workDir + "\x00" + command
 }
 
-// plainGoTestRE matches a gate that is a bare `go test` invocation (no env
-// assignments, wrappers, pipes, or command chaining). Only then does the
-// focused command share the gate's environment closely enough that a
-// focused failure may stand in for the full gate.
-var plainGoTestRE = regexp.MustCompile(`^go\s+test(\s+[A-Za-z0-9_./=:,^*+-]+)*\s*$`)
+// plainGoFlagRE is the allowlist of go test flags that cannot make a
+// focused rerun fail where the full gate would pass. Flags such as -tags,
+// -timeout, -exec, -ldflags, or -shuffle change build or run behavior the
+// focused command does not carry, so a gate using them is not plain.
+var (
+	plainGoFlagRE = regexp.MustCompile(`^-(v|race|failfast|count=[0-9]+)$`)
+	goPackageRE   = regexp.MustCompile(`^[A-Za-z0-9_.][A-Za-z0-9_./~-]*$`)
+)
 
+// isPlainGoTest reports whether command is a bare `go test` invocation with
+// only allowlisted flags and package patterns (no env assignments, wrappers,
+// pipes, or chaining). Only then may a focused failure stand in for it.
 func isPlainGoTest(command string) bool {
-	c := strings.TrimSpace(command)
-	if strings.ContainsAny(c, ";&<>`\n\"'\\") || strings.Contains(c, "$(") {
+	if strings.ContainsAny(command, "\n\r;&|<>`$\"'\\(){}*?[]#") {
 		return false
 	}
-	return plainGoTestRE.MatchString(c)
+	fields := strings.Fields(command)
+	if len(fields) < 2 || fields[0] != "go" || fields[1] != "test" {
+		return false
+	}
+	for _, f := range fields[2:] {
+		if strings.HasPrefix(f, "-") {
+			if !plainGoFlagRE.MatchString(f) {
+				return false
+			}
+			continue
+		}
+		if !goPackageRE.MatchString(f) {
+			return false
+		}
+	}
+	return true
 }
 
 // runTriagedCmd runs a cmd gate with focused-rerun triage. When a previous
