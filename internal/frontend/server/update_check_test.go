@@ -202,3 +202,16 @@ func TestUpdateCheckCapability(t *testing.T) {
 		t.Fatalf("bootstrap probed (%d hits)", n)
 	}
 }
+
+func TestSettingsDropsUpdateCheckForChangedDial(t *testing.T) {
+	gh := newFakeReleases(t, http.StatusOK, "v1.0.0")
+	srv := newUpdateServer(t, "notify", gh, false)
+	srv.updateLast = &updateCheckResponse{Mode: "off", State: updateStateOff}
+	if s := getSettings(t, srv); s.UpdateCheck != nil {
+		t.Fatalf("stale off result surfaced under notify: %+v", s.UpdateCheck)
+	}
+	srv.updateLast = &updateCheckResponse{Mode: "notify", State: updateStateCurrent}
+	if s := getSettings(t, srv); s.UpdateCheck == nil || s.UpdateCheck.State != updateStateCurrent {
+		t.Fatalf("matching result dropped: %+v", s.UpdateCheck)
+	}
+}

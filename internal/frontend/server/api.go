@@ -484,8 +484,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 // settingsSnapshot adds daemon-held state (last update check) to defaults.
 func (s *Server) settingsSnapshot(d host.UserDefaults) settingsResponse {
 	out := settingsFromDefaults(d)
+	// A result for a different dial (changed since the last check) is stale.
 	if s.updateCheckEnabled() {
-		out.UpdateCheck = s.lastUpdateCheck()
+		if last := s.lastUpdateCheck(); last != nil && last.Mode == out.AutoupdateEffective {
+			out.UpdateCheck = last
+		}
 	}
 	return out
 }
