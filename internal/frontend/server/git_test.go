@@ -370,9 +370,9 @@ func TestGitAttachOnlyRejectsMutations(t *testing.T) {
 }
 
 func TestParseStashList(t *testing.T) {
-	out := []byte("aaaa111\x1fOn main: one\x1f2026-01-02T00:00:00Z\nbbbb222\x1fWIP on main: 123 subj\x1f2026-01-01T00:00:00Z\n")
+	out := []byte("aaaa111\x1f2026-01-02T00:00:00Z\x1fOn main: one\x1fwith sep\nbbbb222\x1f2026-01-01T00:00:00Z\x1fWIP on main: 123 subj\n")
 	got := parseStashList(out)
-	if len(got) != 2 || got[0].Ref != "stash@{0}" || got[1].Index != 1 || got[1].Hash != "bbbb222" || got[0].Message != "On main: one" {
+	if len(got) != 2 || got[0].Ref != "stash@{0}" || got[1].Index != 1 || got[1].Hash != "bbbb222" || got[0].Message != "On main: one\x1fwith sep" || got[0].Date != "2026-01-02T00:00:00Z" {
 		t.Fatalf("stashes = %+v", got)
 	}
 	if empty := parseStashList(nil); empty == nil || len(empty) != 0 {
@@ -491,7 +491,7 @@ func TestGitStashRoutes(t *testing.T) {
 	if len(got) != 3 || !strings.HasPrefix(got[0].Message, "WIP on main") || !strings.Contains(got[2].Message, "-p not an option") {
 		t.Fatalf("several stashes = %+v", got)
 	}
-	for _, bad := range []string{`{"message":"two\nlines"}`, `{"message":"` + strings.Repeat("x", gitStashMessageMax+1) + `"}`} {
+	for _, bad := range []string{`{"message":"two\nlines"}`, `{"message":"a\u001fb"}`, `{"message":"` + strings.Repeat("x", gitStashMessageMax+1) + `"}`} {
 		write("a.txt", "dirty\n")
 		if code, raw := call(http.MethodPost, "/v1/git/stash", bad); code != http.StatusBadRequest {
 			t.Errorf("bad message = %d %s", code, raw)
@@ -504,6 +504,11 @@ func TestGitStashRoutes(t *testing.T) {
 	code, raw := call(http.MethodGet, fmt.Sprintf("/v1/git/stash/diff?index=%d&hash=%s", oldest.Index, oldest.Hash), "")
 	if code != http.StatusOK || !strings.Contains(raw, "+two") {
 		t.Fatalf("stash diff = %d %s", code, raw)
+	}
+	// The -u stash preview includes its untracked file.
+	code, raw = call(http.MethodGet, fmt.Sprintf("/v1/git/stash/diff?index=%d&hash=%s", got[1].Index, got[1].Hash), "")
+	if code != http.StatusOK || !strings.Contains(raw, "new.txt") {
+		t.Fatalf("untracked stash diff = %d %s", code, raw)
 	}
 	// The hash pin refuses a shifted index.
 	if code, raw := call(http.MethodPost, "/v1/git/stash/apply", fmt.Sprintf(`{"index":0,"hash":%q}`, oldest.Hash)); code != http.StatusBadRequest || !strings.Contains(raw, "changed") {

@@ -333,6 +333,10 @@ pub fn GitPanel(
     let stash_diff = RwSignal::new(String::new());
     let stash_diff_truncated = RwSignal::new(false);
     let stash_epoch = RwSignal::new(LoadEpoch::new());
+    // Stash errors live here, not in `error`: a failed apply/pop reloads
+    // the panel (load() rewrites `error`) and git's conflict text must stay.
+    let stash_note = RwSignal::new(String::new());
+    let stash_diff_loaded = RwSignal::new(false);
     let cursor = RwSignal::new(0usize);
     let open_diff = RwSignal::new(false);
     let diff_text = RwSignal::new(String::new());
@@ -662,13 +666,30 @@ pub fn GitPanel(
 
     // #1471: stash actions. Pop/apply conflicts come back as the daemon's
     // 409 with git's own words; nothing here resolves or discards.
+    // Stash mutations reload on failure too: a conflicting apply/pop has
+    // still written markers / restored files, and the panel must show it
+    // next to git's own words (#1471).
+    let stash_mutate = move |path: String, body: serde_json::Value, ok: String, on_ok: Rc<dyn Fn()>| {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match post_json_value(&b, &t, &path, body).await {
+                Ok(_) => {
+                    on_ok();
+                    stash_note.set(String::new());
+                    status_line.set(ok);
+                }
+                Err(e) => stash_note.set(http_message(&e)),
+            }
+            load();
+        });
+    };
     let do_stash = move || {
         let msg = stash_msg.get_untracked().trim().to_string();
         let mut body = serde_json::json!({"includeUntracked": stash_untracked.get_untracked()});
         if !msg.is_empty() {
             body["message"] = serde_json::Value::String(msg);
         }
-        mutate_with(
+        stash_mutate(
             "/v1/git/stash".into(),
             body,
             "Stashed changes.".into(),
@@ -681,7 +702,7 @@ pub fn GitPanel(
         } else {
             ("/v1/git/stash/apply", format!("Applied {}.", stash.r#ref))
         };
-        mutate(path.into(), stash_body(&stash, None), ok);
+        stash_mutate(path.into(), stash_body(&stash, None), ok, Rc::new(|| {}));
     };
     let do_stash_drop = move |stash: GitStash| {
         let label = stash.r#ref.clone();
@@ -693,15 +714,16 @@ pub fn GitPanel(
                 confirm_label: "Drop stash".into(),
             },
             Rc::new(move || {
-                mutate(
+                stash_mutate(
                     "/v1/git/stash/drop".into(),
                     stash_body(&run, Some("drop-stash")),
                     format!("Dropped {}.", run.r#ref),
+                    Rc::new(|| {}),
                 );
             }),
         );
         if !asked {
-            error.set(crate::confirm::BUSY.into());
+            stash_note.set(crate::confirm::BUSY.into());
         }
     };
     let toggle_stash_preview = move |stash: GitStash| {
@@ -714,6 +736,7 @@ pub fn GitPanel(
         stash_open.set(stash.hash.clone());
         stash_diff.set(String::new());
         stash_diff_truncated.set(false);
+        stash_diff_loaded.set(false);
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             let path = format!("/v1/git/stash/diff?index={}&hash={}", stash.index, stash.hash);
@@ -725,8 +748,9 @@ pub fn GitPanel(
                 Ok(body) => {
                     stash_diff_truncated.set(body.truncated);
                     stash_diff.set(body.diff);
+                    stash_diff_loaded.set(true);
                 }
-                Err(e) => error.set(http_message(&e)),
+                Err(e) => stash_note.set(http_message(&e)),
             }
         });
     };
@@ -1152,6 +1176,9 @@ pub fn GitPanel(
                         on:click=move |_| do_stash()
                     >"Stash changes"</button>
                 </div>
+                <Show when=move || !stash_note.get().is_empty()>
+                    <p class="hint" role="alert" data-git-stash-note="true">{move || stash_note.get()}</p>
+                </Show>
                 <Show when=move || stashes.get().is_empty()>
                     <p class="hint">"No stashes."</p>
                 </Show>
@@ -1185,6 +1212,9 @@ pub fn GitPanel(
                         }).collect_view()
                     }}
                 </ul>
+                <Show when=move || !stash_open.get().is_empty() && stash_diff_loaded.get() && stash_diff.get().is_empty()>
+                    <p class="hint">"This stash has no changes to preview."</p>
+                </Show>
                 <Show when=move || !stash_diff.get().is_empty()>
                     <pre class="git-diff" aria-label="Stash diff" data-git-stash-diff="true">{move || {
                         stash_diff.get().lines().take(400).map(|line| {

@@ -229,12 +229,18 @@ func (s *Server) handleGitStashDiff(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), gitReadTimeout)
 	defer cancel()
-	ref, err := pinnedStash(ctx, cwd, index, r.URL.Query().Get("hash"))
+	ref, full, err := pinnedStash(ctx, cwd, index, r.URL.Query().Get("hash"))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
-	out, stderr, err := gitRun(ctx, cwd, "stash", "show", "--patch", "--no-color", ref)
+	// Show by the verified hash, untracked files included: a preview that
+	// hid -u files would invite dropping work the user never saw.
+	out, stderr, err := gitRun(ctx, cwd, "stash", "show", "--patch", "--no-color", "--include-untracked", full)
+	if err != nil && (strings.Contains(stderr, "include-untracked") || strings.Contains(stderr, "unknown option")) {
+		// git < 2.32: tracked part only.
+		out, stderr, err = gitRun(ctx, cwd, "stash", "show", "--patch", "--no-color", full)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: gitErr("stash show", err, stderr)})
 		return
@@ -266,7 +272,7 @@ func (s *Server) handleGitStashPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msg := strings.TrimSpace(body.Message)
-	if len(msg) > gitStashMessageMax || strings.ContainsAny(msg, "\x00\n\r") {
+	if len(msg) > gitStashMessageMax || strings.ContainsFunc(msg, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "stash message must be one line of at most 500 bytes"})
 		return
 	}
@@ -329,12 +335,18 @@ func (s *Server) gitStashApplyOrPop(w http.ResponseWriter, r *http.Request, verb
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), gitWriteTimeout)
 	defer cancel()
-	ref, err := pinnedStash(ctx, cwd, body.Index, body.Hash)
+	ref, full, err := pinnedStash(ctx, cwd, body.Index, body.Hash)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
-	out, stderr, err := gitRun(ctx, cwd, "stash", verb, ref)
+	// apply takes the verified commit itself, closing the check-then-act
+	// window; pop must name the reflog entry it drops.
+	target := full
+	if verb == "pop" {
+		target = ref
+	}
+	out, stderr, err := gitRun(ctx, cwd, "stash", verb, target)
 	if err != nil {
 		writeJSON(w, http.StatusConflict, opErrorResponse{Error: stashFailure(verb, err, string(out), stderr)})
 		return
@@ -363,7 +375,7 @@ func (s *Server) handleGitStashDrop(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), gitWriteTimeout)
 	defer cancel()
-	ref, err := pinnedStash(ctx, cwd, body.Index, body.Hash)
+	ref, _, err := pinnedStash(ctx, cwd, body.Index, body.Hash)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
@@ -1061,7 +1073,8 @@ func gitLog(ctx context.Context, cwd string, limit int) ([]gitCommitJSON, error)
 
 // gitStashList reads `git stash list`, newest first (stash@{0}).
 func gitStashList(ctx context.Context, cwd string) ([]gitStashJSON, error) {
-	out, stderr, err := gitRun(ctx, cwd, "stash", "list", "--format=%H%x1f%gs%x1f%cI")
+	// Message last: SplitN keeps any separator inside it intact.
+	out, stderr, err := gitRun(ctx, cwd, "stash", "list", "--format=%H%x1f%cI%x1f%gs")
 	if err != nil {
 		if strings.Contains(stderr, "does not have any commits") {
 			return []gitStashJSON{}, nil
@@ -1084,7 +1097,7 @@ func parseStashList(out []byte) []gitStashJSON {
 		i := len(stashes)
 		stashes = append(stashes, gitStashJSON{
 			Index: i, Ref: "stash@{" + strconv.Itoa(i) + "}",
-			Hash: parts[0], Message: parts[1], Date: parts[2],
+			Hash: parts[0], Date: parts[1], Message: parts[2],
 		})
 	}
 	return stashes
@@ -1099,20 +1112,21 @@ func stashTop(ctx context.Context, cwd string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// pinnedStash returns "stash@{index}" only when that entry still has the
-// given hash; otherwise the list changed under the panel and the caller
-// must refresh rather than act on a different stash.
-func pinnedStash(ctx context.Context, cwd string, index int, hash string) (string, error) {
+// pinnedStash returns "stash@{index}" and its full hash only when that
+// entry still has the given hash; otherwise the list changed under the
+// panel and the caller must refresh rather than act on another stash.
+func pinnedStash(ctx context.Context, cwd string, index int, hash string) (string, string, error) {
 	hash = strings.TrimSpace(hash)
 	if index < 0 || index > 10000 || len(hash) < 7 || len(hash) > 64 || strings.Trim(hash, "0123456789abcdef") != "" {
-		return "", errors.New("invalid stash reference")
+		return "", "", errors.New("invalid stash reference")
 	}
 	ref := "stash@{" + strconv.Itoa(index) + "}"
 	out, _, err := gitRun(ctx, cwd, "rev-parse", "--verify", "--quiet", ref)
-	if err != nil || !strings.HasPrefix(strings.TrimSpace(string(out)), hash) {
-		return "", errors.New("the stash list changed — refresh and try again")
+	full := strings.TrimSpace(string(out))
+	if err != nil || !strings.HasPrefix(full, hash) {
+		return "", "", errors.New("the stash list changed — refresh and try again")
 	}
-	return ref, nil
+	return ref, full, nil
 }
 
 // stashFailure names a failed apply/pop with git's own words, stdout
