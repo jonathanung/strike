@@ -729,6 +729,9 @@ Opt-in sleep inhibition for the gateway host while `strike serve` runs, so a
 phone-steered daemon does not fall asleep mid-turn
 ([#1496](https://github.com/jonathanung/strike/issues/1496)). Default **off**
 because it changes host power behaviour; nothing is held until you turn it on.
+Host-scoped: only the **global** `~/.strike/config` value is honoured; project
+and managed layers are ignored for this key so a repo cannot re-arm it behind
+the cockpit toggle.
 
 | Value | Behavior |
 |---|---|

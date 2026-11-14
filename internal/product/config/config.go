@@ -808,6 +808,9 @@ func Load(workDir string) (Config, error) {
 			return cfg, err
 		default:
 			cfg = merge(cfg, layer)
+			// Host-scoped: the gateway keep-awake dial comes from the global
+			// file only, matching what GET/PATCH /v1/settings read and write.
+			cfg.KeepAwake = layer.KeepAwake
 		}
 	}
 	// Global mcp.jsonc/json (optional; loads even when config is absent).
@@ -1630,9 +1633,8 @@ func merge(base, layer Config) Config {
 	if layer.Autoupdate != "" {
 		base.Autoupdate = layer.Autoupdate
 	}
-	if layer.KeepAwake != "" {
-		base.KeepAwake = layer.KeepAwake
-	}
+	// KeepAwake is intentionally not merged: it is a host-scoped dial owned by
+	// the global file (see Load), so a project layer cannot re-arm it.
 	if layer.PermissionAutoApproveSeconds != 0 {
 		base.PermissionAutoApproveSeconds = layer.PermissionAutoApproveSeconds
 	}

@@ -2158,3 +2158,40 @@ func TestNormalizeKeepAwake(t *testing.T) {
 		}
 	}
 }
+
+func TestKeepAwakeIsGlobalOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	work := t.TempDir()
+
+	global := filepath.Join(home, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(work, ".strike", "config")
+	if err := os.MkdirAll(filepath.Dir(project), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A repo cannot re-arm the host dial behind the cockpit toggle.
+	if err := os.WriteFile(project, []byte(`{"keepAwake":"on"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.KeepAwake != "" {
+		t.Fatalf("project layer set keepAwake=%q, want unset", cfg.KeepAwake)
+	}
+	// The global file is the single writer and is honoured.
+	if err := os.WriteFile(global, []byte(`{"keepAwake":"on"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.KeepAwake != KeepAwakeOn {
+		t.Fatalf("global keepAwake = %q, want on", cfg.KeepAwake)
+	}
+}
