@@ -991,6 +991,13 @@ try {
   if (smokeFolder.status !== 201) {
     throw new Error(`smoke folder create ${smokeFolder.status} ${smokeFolder.text}`);
   }
+  // File Alpha session into the folder so Remove proves the "sessions stay,
+  // become unfiled" half of the confirm copy, not just the folder vanishing.
+  const smokeFolderId = JSON.parse(smokeFolder.text).id;
+  const filed = await call("PATCH", "/v1/session-list/sessions/alpha-session", { folderId: smokeFolderId });
+  if (filed.status !== 200) {
+    throw new Error(`file alpha into smoke folder ${filed.status} ${filed.text}`);
+  }
   const folderRowProbe = async () => {
     const raw = await evaluate(`(() => {
       const row = [...document.querySelectorAll(".ss-folder-row")].find((r) => r.textContent.includes("Smoke folder"));
@@ -1076,6 +1083,16 @@ try {
     },
     { timeout: WAIT_MS, interval: 250 },
   );
+  const afterRemove = await call("GET", "/v1/session-list");
+  const afterOrg = JSON.parse(afterRemove.text || "{}");
+  const alphaOrg = (afterOrg.sessions || {})["alpha-session"];
+  if (
+    afterRemove.status !== 200 ||
+    (afterOrg.folders || []).some((f) => f.id === smokeFolderId) ||
+    (alphaOrg && alphaOrg.folderId)
+  ) {
+    throw new Error(`folder remove did not unfile alpha: ${afterRemove.status} ${afterRemove.text.slice(0, 300)}`);
+  }
   const before = await send("Runtime.evaluate", {
     expression: `(() => {
       const panel = document.querySelector(".ss-panel");

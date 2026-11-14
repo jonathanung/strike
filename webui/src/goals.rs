@@ -121,7 +121,7 @@ pub fn abort_confirm(title: &str) -> crate::confirm::ConfirmRequest {
     crate::confirm::ConfirmRequest {
         title: "Abort this goal?".into(),
         body: format!(
-            "This stops the loop for \u{201c}{title}\u{201d} now. The goal cannot be resumed or run again; re-create the goal from scratch to run the same spec again."
+            "Abort \u{201c}{title}\u{201d}? Any running loop stops now. The goal cannot be resumed or run again; to run the same spec again, use Duplicate."
         ),
         confirm_label: "Abort goal".into(),
     }
@@ -999,7 +999,7 @@ mod tests {
         assert_eq!(req.confirm_label, "Abort goal");
         assert!(req.body.contains("tests pass"));
         assert!(req.body.contains("cannot be resumed or run again"));
-        assert!(req.body.contains("re-create the goal"));
+        assert!(req.body.contains("use Duplicate"));
     }
 
     #[test]
