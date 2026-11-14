@@ -28,6 +28,13 @@ materially affect the shipped product.
 
 - **Reconnect path when a provider credential dies mid-session** — when a provider rejects the saved API key or OAuth grant (vendor 401, or a 403 that explicitly says authentication), the turn now ends with a named notice ("OpenAI authentication failed — the saved credential was rejected.") instead of raw vendor text. The notice offers **Open Providers**, focused on that provider's card, and **Retry** to re-send the failed message once the credential is fixed — nothing is re-sent automatically. The vendor message stays under Details, and the session reads as blocked rather than cleanly stopped until the next turn. Wire: `EngineError` code `provider_auth` with an optional `provider` name (protocol 1.23.0); never carries credential material.
 
+- **Customize** — the web client lists skills, agents, MCP servers, plugins,
+  hooks, rules files, and the roster stall/handoff gate. A write is a redacted
+  preview, then a confirm. MCP env, header, and URL secrets stay masked.
+  Permission rules are shown and preserved. Open it from the command
+  palette (Ctrl/Cmd+K `customize`)
+  ([#1281](https://github.com/jonathanung/strike/issues/1281)).
+
 - **"Allow in this folder" approval scope** — write/edit approval cards in the web cockpit offer a fourth grant scope between Allow once and Allow session/project: the daemon records a session-only grant for the folder the file lives in (covering its subfolders), derived server-side from the ask — never from a client-supplied pattern. The card names the exact folder before you commit, the grant is listed under Permissions → Rules and audit as a "session folder" rule, and removing it there revokes it in the live session. Hard and managed denies still win. Wire: `PermissionReply` decision `folder` (protocol 1.22.0); older daemons treat it as allow-once.
 
 ### Security

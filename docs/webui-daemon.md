@@ -223,6 +223,16 @@ On a bundle merge conflict, resolve it the same way: take `origin/main`'s
 static files. To rebuild main's bundle by hand, run
 `gh workflow run webui-bundle.yml --ref main`.
 
+## Customize
+
+`GET /v1/customize` is the catalog the agent already loads (skills, agents,
+MCP, plugins, hooks, rules, roster). `GET /v1/customize/doc` opens one item.
+`POST /v1/customize/preview` returns a redacted diff and does not write.
+`POST /v1/customize/apply` writes only when `confirm` is true and `diffHash`
+matches that preview. Env, header, and URL secrets are masked; sending `••••`
+keeps the stored value. Plugin enable and disable use the existing
+`/v1/plugins/enable` and `/v1/plugins/disable` routes.
+
 ## Several workspaces, one daemon
 
 One `strike serve` process can hold several live roots at once. Each root
