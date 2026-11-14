@@ -21,6 +21,7 @@ import (
 	"github.com/jonathanung/strike/internal/composer/triggers"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/product/version"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/usageaudit"
@@ -130,6 +131,9 @@ type capabilities struct {
 	// and stopped via /v1/sessions/{id}/loops (#1588). Needs a live engine;
 	// false for attach-only and --read-only.
 	Loops bool `json:"loops"`
+	// UpdateCheck is true when GET /v1/update can run the release probe
+	// (settings readable + probe wired). Check-only; never installs (#1583).
+	UpdateCheck bool `json:"updateCheck"`
 }
 
 type bootstrapResponse struct {
@@ -191,6 +195,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		c.Scheduler = h.SchedulerPresets != nil
 		c.ConfigFiles = h.ConfigFiles != nil
 		c.Themes = h.Themes != nil
+		c.UpdateCheck = s.updateCheckEnabled()
 		// Capabilities describe browser surfaces, not merely host interfaces.
 		// Roots, project init, and telemetry remain false until exposed.
 		for _, skill := range h.Skills {
@@ -348,6 +353,13 @@ type settingsResponse struct {
 	PruneMinimumTokens           int      `json:"pruneMinimumTokens,omitempty"`
 	PruneKeepUserTurns           int      `json:"pruneKeepUserTurns,omitempty"`
 	PruneProtectTools            []string `json:"pruneProtectTools,omitempty"`
+
+	// AutoupdateEffective is config.EffectiveAutoupdate(autoupdate): the
+	// mode the probe honours (empty/unknown → notify).
+	AutoupdateEffective string `json:"autoupdateEffective,omitempty"`
+	// UpdateCheck is the last GET /v1/update result this daemon served
+	// (omitted until a check ran). Reading settings never probes.
+	UpdateCheck *updateCheckResponse `json:"updateCheck,omitempty"`
 }
 
 // settingsPatchBody is the PATCH /v1/settings payload. Empty scalars leave the
@@ -422,6 +434,7 @@ func settingsFromDefaults(d host.UserDefaults) settingsResponse {
 		PruneMinimumTokens:           d.PruneMinimumTokens,
 		PruneKeepUserTurns:           d.PruneKeepUserTurns,
 		PruneProtectTools:            append([]string(nil), d.PruneProtectTools...),
+		AutoupdateEffective:          config.EffectiveAutoupdate(d.Autoupdate),
 	}
 }
 
@@ -432,7 +445,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	settings := s.opts.Services.Settings
 	if r.Method == http.MethodGet {
-		writeJSON(w, http.StatusOK, settingsFromDefaults(settings.Defaults()))
+		writeJSON(w, http.StatusOK, s.settingsSnapshot(settings.Defaults()))
 		return
 	}
 	if !s.requireMutable(w) {
@@ -469,7 +482,19 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if len(fields) > 0 {
 		s.noteAudit(usageaudit.ActionConfig, "", "settings updated", map[string]any{"fields": fields})
 	}
-	writeJSON(w, http.StatusOK, settingsFromDefaults(settings.Defaults()))
+	writeJSON(w, http.StatusOK, s.settingsSnapshot(settings.Defaults()))
+}
+
+// settingsSnapshot adds daemon-held state (last update check) to defaults.
+func (s *Server) settingsSnapshot(d host.UserDefaults) settingsResponse {
+	out := settingsFromDefaults(d)
+	// A result for a different dial (changed since the last check) is stale.
+	if s.updateCheckEnabled() {
+		if last := s.lastUpdateCheck(); last != nil && last.Mode == out.AutoupdateEffective {
+			out.UpdateCheck = last
+		}
+	}
+	return out
 }
 
 // applySettingsPatch writes non-empty dial groups through host.Settings.

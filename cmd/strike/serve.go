@@ -27,6 +27,7 @@ import (
 	"github.com/jonathanung/strike/internal/persist/taskrun"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/config"
+	"github.com/jonathanung/strike/internal/product/update"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/audit"
 	"github.com/jonathanung/strike/internal/trust/usageaudit"
@@ -770,6 +771,8 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		TerminalSandboxFor:    terminalSandboxFor,
 		Assembled:             assembled,
 		KeepAwake:             keepAwake,
+		// Check-only release probe for GET /v1/update (#1583); never installs.
+		UpdateProbe: server.NewUpdateProbe(update.ProbeOptions{}),
 	})
 	if err != nil {
 		return err

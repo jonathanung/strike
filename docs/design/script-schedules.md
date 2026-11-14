@@ -373,8 +373,8 @@ type ScriptRunPayload struct {
     CommandHash string `json:"commandHash" telemetry:"redact=none"`
     Dir         string `json:"dir" telemetry:"redact=scrub"`
     ClientIP    string `json:"clientIp,omitempty" telemetry:"redact=none"` // lifecycle records only
-    StartedAt   time.Time `json:"startedAt,omitempty"`
-    EndedAt     time.Time `json:"endedAt,omitempty"`
+    StartedAt   time.Time `json:"startedAt,omitzero"`
+    EndedAt     time.Time `json:"endedAt,omitzero"`
     ExitCode    *int   `json:"exitCode,omitempty"`
     Timeout     string `json:"timeout,omitempty" telemetry:"redact=none"`
     OutputTail  string `json:"outputTail,omitempty" telemetry:"redact=scrub"` // last 4 KiB
