@@ -734,6 +734,95 @@ try {
     throw new Error(`remove deny: ${apprRemoved.status} ${apprRemoved.text.slice(0, 300)}`);
   }
 
+  // Rule duplicate (#1433): the surviving smoke-allow row's Duplicate
+  // button prefills the Add form verbatim and focuses Pattern. Prefill
+  // alone creates nothing; the copy is stored only through the existing
+  // Add path, dangerous-add confirm included.
+  await apprOpenPalette();
+  await waitFor(
+    "rule duplicate button in the rules panel",
+    async () => {
+      const hit = await apprEval(`!!document.querySelector('[data-rule-duplicate]')`);
+      if (hit === true) return { ok: true };
+      await apprEval(`document.querySelector('[data-command-id="approvals.rules"]')?.click()`);
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const dupClicked = await apprEval(`(() => {
+    const row = [...document.querySelectorAll(".approvals-rule")].find((li) => (li.textContent || "").includes("smoke-allow"));
+    const btn = row ? row.querySelector("[data-rule-duplicate]") : null;
+    if (!btn) return "missing";
+    btn.click();
+    return "clicked";
+  })()`);
+  if (dupClicked !== "clicked") {
+    throw new Error(`rule duplicate click: ${dupClicked}`);
+  }
+  await waitFor(
+    "duplicate prefill (all four fields, pattern focused)",
+    async () => {
+      const state = JSON.parse(
+        await apprEval(`JSON.stringify((() => {
+          const pattern = document.querySelector('input[aria-label="Pattern"]');
+          return {
+            scope: document.querySelector('select[aria-label="Rule scope"]')?.value || "",
+            permission: document.querySelector('select[aria-label="Permission name"]')?.value || "",
+            pattern: pattern?.value || "",
+            action: document.querySelector('select[aria-label="Rule action"]')?.value || "",
+            focused: document.activeElement === pattern,
+          };
+        })())`),
+      );
+      return {
+        ok:
+          state.scope === "global" &&
+          state.permission === "bash" &&
+          state.pattern === "smoke-allow" &&
+          state.action === "allow" &&
+          state.focused,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const prefillListed = await fetch(`http://127.0.0.1:${port}/v1/permissions/rules`, { headers: apprAuth });
+  const prefillDoc = JSON.parse(await prefillListed.text());
+  if ((prefillDoc.rules || []).filter((row) => row.pattern === "smoke-allow").length !== 1) {
+    throw new Error(`prefill must not create a rule: ${JSON.stringify(prefillDoc.rules)}`);
+  }
+  await apprEval(`(() => {
+    const input = document.querySelector('input[aria-label="Pattern"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "smoke-allow-copy");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    [...document.querySelectorAll(".approvals-form button")]
+      .find((b) => (b.textContent || "").trim() === "Add rule")?.click();
+    return "ok";
+  })()`);
+  await waitFor(
+    "duplicated add hits the dangerous-add confirm",
+    async () => {
+      const t = await apprText();
+      if (t.includes("Add allow rule?")) {
+        await apprEval(`[...document.querySelectorAll(".approvals-dialog button")].find((b) => (b.textContent || "").trim() === "Add rule")?.click()`);
+        return { ok: true };
+      }
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await waitFor(
+    "duplicated rule stored beside the original",
+    async () => {
+      const res = await fetch(`http://127.0.0.1:${port}/v1/permissions/rules`, { headers: apprAuth });
+      const doc = JSON.parse(await res.text());
+      const pats = (doc.rules || []).map((row) => row.pattern);
+      return { ok: pats.includes("smoke-allow") && pats.includes("smoke-allow-copy") };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await apprEval(`[...document.querySelectorAll(".approvals-panel-head button")].find((b) => (b.textContent || "").trim() === "Close")?.click()`);
+
   const evalValue = async (expression) => {
     const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
     if (ev.result?.exceptionDetails) {
