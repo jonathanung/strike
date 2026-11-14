@@ -659,7 +659,6 @@ pub fn GitPanel(
         else {
             return;
         };
-        log_limit.set(next);
         // Fetch only the log: a full load() would blank the changed-file
         // rows and refetch status/branches just for more history.
         let gen = begin(log_epoch);
@@ -671,7 +670,12 @@ pub fn GitPanel(
                 return;
             }
             match res {
-                Ok(body) => commits.set(body.commits),
+                // Raise the limit only once the larger page arrived, so a
+                // failed fetch never claims "End of history" (#1432).
+                Ok(body) => {
+                    log_limit.set(next);
+                    commits.set(body.commits);
+                }
                 Err(e) => error.set(format!("Log: {}", http_message(&e))),
             }
         });
@@ -1085,6 +1089,12 @@ pub fn GitPanel(
                 // with no match, selected_row() refuses every action.
                 if let Some(i) = snap_cursor(&rows.get_untracked(), &query, cursor.get_untracked()) {
                     select_row(i);
+                } else {
+                    // Nothing visible: close a diff whose row is hidden.
+                    open_diff.set(false);
+                    diff_expanded.set(false);
+                    diff_text.set(String::new());
+                    diff_truncated.set(false);
                 }
             }/>
             {move || {
