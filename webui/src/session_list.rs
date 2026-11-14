@@ -69,6 +69,7 @@ pub struct LayoutItem {
     pub status_kind: String,
     pub pinned: bool,
     pub archived: bool,
+    pub unread: bool,
     pub selectable: bool,
     pub slot: Option<u8>,
     pub depth: u8,
@@ -81,6 +82,49 @@ pub struct LayoutItem {
 pub struct Layout {
     pub items: Vec<LayoutItem>,
     pub hidden_older: usize,
+}
+
+/// Session-list sort order (#1458). Recent is the historical behaviour
+/// and the default. Pinning is not a sort key: pinned sessions stay
+/// first under every order, and the order applies within the pinned
+/// and unpinned groups.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SortOrder {
+    #[default]
+    Recent,
+    Oldest,
+    Title,
+}
+
+impl SortOrder {
+    pub fn parse(value: &str) -> SortOrder {
+        match value {
+            "oldest" => SortOrder::Oldest,
+            "title" => SortOrder::Title,
+            _ => SortOrder::Recent,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SortOrder::Recent => "recent",
+            SortOrder::Oldest => "oldest",
+            SortOrder::Title => "title",
+        }
+    }
+}
+
+fn compare_rows(a: &SourceSession, b: &SourceSession, sort: SortOrder) -> std::cmp::Ordering {
+    let by_sort = match sort {
+        SortOrder::Recent => b.mtime.cmp(&a.mtime),
+        SortOrder::Oldest => a.mtime.cmp(&b.mtime),
+        SortOrder::Title => a
+            .title
+            .to_ascii_lowercase()
+            .cmp(&b.title.to_ascii_lowercase())
+            .then(b.mtime.cmp(&a.mtime)),
+    };
+    b.pinned.cmp(&a.pinned).then(by_sort).then(a.id.cmp(&b.id))
 }
 
 #[derive(Clone, Copy)]
@@ -97,6 +141,7 @@ pub struct AssembleArgs<'a> {
     pub now_s: i64,
     pub older_days: i64,
     pub show_older: bool,
+    pub sort: SortOrder,
 }
 
 /// Display title. A stored id, or the id's own hex prefix, is not a title.
@@ -154,6 +199,14 @@ fn clip_chars(s: &str, max: usize) -> String {
     let mut out: String = s.chars().take(max - 1).collect();
     out.push('…');
     out
+}
+
+/// Whether a row offers "Mark unread" (#1557): only a session that is
+/// currently read and is not the open one — opening re-marks seen by
+/// design, so offering it on the open session would be undone at once,
+/// and an already-unread row has nothing to do.
+pub fn can_mark_unread(unread: bool, is_active: bool) -> bool {
+    !unread && !is_active
 }
 
 /// Server unread wins. `None` keeps the seen-map shim (#1263 swap point).
@@ -279,6 +332,46 @@ pub fn alt_digit(key: &str) -> Option<usize> {
     }
 }
 
+/// Folders no session is filed under (#1566): the batch-cleanup set.
+/// `filed_folder_ids` is one entry per session (its folder id, empty
+/// when unfiled), taken from the unfiltered snapshot — never from the
+/// rendered layout, whose per-folder count drops sessions the current
+/// filter, search, or older-folding hides, and would call a folder
+/// "empty" while it still holds archived or folded sessions. A folder
+/// listed here therefore renders count 0 in the unfiltered view, and a
+/// folder holding anything at all is never listed. Order follows
+/// `folder_ids`; blank ids (the synthetic Ungrouped row) never qualify.
+pub fn empty_folder_ids(folder_ids: &[String], filed_folder_ids: &[String]) -> Vec<String> {
+    let used: HashSet<&str> = filed_folder_ids
+        .iter()
+        .map(String::as_str)
+        .filter(|id| !id.is_empty())
+        .collect();
+    folder_ids
+        .iter()
+        .filter(|id| !id.is_empty() && !used.contains(id.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// The candidates from `wanted` that a fresh snapshot still shows as
+/// empty (#1566): a folder that gained a session since the panel last
+/// rendered is dropped here, not removed from under its sessions.
+pub fn still_empty_folder_ids(
+    wanted: &[String],
+    folder_ids: &[String],
+    filed_folder_ids: &[String],
+) -> Vec<String> {
+    let empty: HashSet<String> = empty_folder_ids(folder_ids, filed_folder_ids)
+        .into_iter()
+        .collect();
+    wanted
+        .iter()
+        .filter(|id| empty.contains(*id))
+        .cloned()
+        .collect()
+}
+
 pub fn toggle_id(selected: &[String], id: &str) -> Vec<String> {
     if selected.iter().any(|s| s == id) {
         selected
@@ -316,12 +409,7 @@ pub fn assemble(args: AssembleArgs) -> Layout {
         .filter(|row| chip_ok(row, args.filter))
         .filter(|row| query_ok(row, &args, &q))
         .collect();
-    matched.sort_by(|a, b| {
-        b.pinned
-            .cmp(&a.pinned)
-            .then(b.mtime.cmp(&a.mtime))
-            .then(a.id.cmp(&b.id))
-    });
+    matched.sort_by(|a, b| compare_rows(a, b, args.sort));
 
     let mut hidden_older = 0usize;
     let mut shown = Vec::new();
@@ -472,6 +560,7 @@ fn folder_item(id: &str, name: &str, count: usize, collapsed: bool) -> LayoutIte
         status_kind: String::new(),
         pinned: false,
         archived: false,
+        unread: false,
         selectable: false,
         slot: None,
         depth: 0,
@@ -526,6 +615,7 @@ fn push_session(
         status_kind: kind.to_string(),
         pinned: row.pinned,
         archived: row.archived,
+        unread: row.unread,
         selectable: true,
         slot: alt,
         depth: 0,
@@ -577,6 +667,7 @@ fn push_children(
             status_kind: sk.to_string(),
             pinned: false,
             archived: false,
+            unread: false,
             selectable: true,
             slot: None,
             depth,
@@ -645,7 +736,60 @@ mod tests {
             now_s: 1_700_000_000,
             older_days: 7,
             show_older: false,
+            sort: SortOrder::Recent,
         }
+    }
+
+    fn sorted_ids(sessions: &[SourceSession], sort: SortOrder) -> Vec<String> {
+        let folders = Vec::new();
+        let collapsed = HashSet::new();
+        let content = HashSet::new();
+        let mut a = args(sessions, &[], &folders, &collapsed, &content);
+        a.sort = sort;
+        a.show_older = true;
+        assemble(a)
+            .items
+            .iter()
+            .filter(|i| i.kind == LayoutKind::Session)
+            .map(|i| i.id.clone())
+            .collect()
+    }
+
+    #[test]
+    fn sort_orders_apply_within_pinned_groups() {
+        let now = 1_700_000_000i64;
+        let mut pinned_old = session("p-old", now - 900);
+        pinned_old.pinned = true;
+        pinned_old.title = "Zulu pinned".into();
+        let mut pinned_new = session("p-new", now - 100);
+        pinned_new.pinned = true;
+        pinned_new.title = "Alpha pinned".into();
+        let mut bravo = session("bravo", now - 500);
+        bravo.title = "Bravo".into();
+        let mut alpha = session("alpha", now - 200);
+        alpha.title = "alpha".into();
+        let sessions = vec![bravo, pinned_old, alpha, pinned_new];
+
+        assert_eq!(SortOrder::parse("oldest"), SortOrder::Oldest);
+        assert_eq!(SortOrder::parse("title"), SortOrder::Title);
+        assert_eq!(SortOrder::parse("bogus"), SortOrder::Recent);
+        assert_eq!(SortOrder::default().as_str(), "recent");
+
+        // Recent: pinned first (newest pin first), then newest first.
+        assert_eq!(
+            sorted_ids(&sessions, SortOrder::Recent),
+            vec!["p-new", "p-old", "alpha", "bravo"]
+        );
+        // Oldest: pinned still first, oldest first within each group.
+        assert_eq!(
+            sorted_ids(&sessions, SortOrder::Oldest),
+            vec!["p-old", "p-new", "bravo", "alpha"]
+        );
+        // Title: pinned still first, A-Z (case-insensitive) within groups.
+        assert_eq!(
+            sorted_ids(&sessions, SortOrder::Title),
+            vec!["p-new", "p-old", "alpha", "bravo"]
+        );
     }
 
     #[test]
@@ -660,6 +804,29 @@ mod tests {
         );
         assert_eq!(human_title("Fix login", "", id), "Fix login");
         assert_eq!(human_title("Reviews", "", id), "Reviews");
+    }
+
+    #[test]
+    fn mark_unread_only_for_read_inactive_sessions() {
+        assert!(can_mark_unread(false, false));
+        assert!(!can_mark_unread(true, false), "already unread");
+        assert!(!can_mark_unread(false, true), "open session re-marks seen");
+        assert!(!can_mark_unread(true, true));
+        // The layout carries the source row's unread flag for the panel.
+        // Fresh mtime: an old one would be folded into hidden-older
+        // (args() pins now_s and show_older=false) and never appear.
+        let mut row = session("x", 1_700_000_000 - 100);
+        row.unread = true;
+        let folders = Vec::new();
+        let collapsed = HashSet::new();
+        let content = HashSet::new();
+        let layout = assemble(args(&[row], &[], &folders, &collapsed, &content));
+        let item = layout
+            .items
+            .iter()
+            .find(|i| i.kind == LayoutKind::Session)
+            .unwrap();
+        assert!(item.unread);
     }
 
     #[test]
@@ -945,6 +1112,41 @@ mod tests {
         );
         let order = vec!["a".into(), "b".into(), "c".into()];
         assert_eq!(select_range(&order, "c", "a"), order);
+    }
+
+    #[test]
+    fn empty_folder_ids_counts_only_unfiled_folders() {
+        let folders: Vec<String> = vec!["f1".into(), "f2".into(), "f3".into(), "".into()];
+        // f1 holds two sessions, f2 one; the blank filed ids are
+        // unfiled sessions and must not make any folder non-empty.
+        let filed: Vec<String> = vec!["f1".into(), "f1".into(), "f2".into(), "".into(), "".into()];
+        assert_eq!(empty_folder_ids(&folders, &filed), vec!["f3".to_string()]);
+        // No sessions at all: every real folder is empty.
+        assert_eq!(
+            empty_folder_ids(&folders, &[]),
+            vec!["f1".to_string(), "f2".to_string(), "f3".to_string()]
+        );
+        // Every folder filed: nothing to clean up.
+        let all: Vec<String> = vec!["f1".into(), "f2".into(), "f3".into()];
+        assert!(empty_folder_ids(&folders, &all).is_empty());
+        assert!(empty_folder_ids(&[], &filed).is_empty());
+    }
+
+    #[test]
+    fn still_empty_folder_ids_rechecks_against_a_fresh_snapshot() {
+        let wanted: Vec<String> = vec!["f1".into(), "f2".into(), "f3".into()];
+        // f3 is absent here: someone else already deleted it.
+        let folders: Vec<String> = vec!["f1".into(), "f2".into(), "f4".into()];
+        // Since the render, f2 gained a session and f3 was deleted by
+        // someone else; only f1 may still be removed. f4 is empty in
+        // the fresh snapshot but was not in the confirmed set, so it
+        // is not swept up either.
+        let filed: Vec<String> = vec!["f2".into()];
+        assert_eq!(
+            still_empty_folder_ids(&wanted, &folders, &filed),
+            vec!["f1".to_string()]
+        );
+        assert!(still_empty_folder_ids(&[], &folders, &filed).is_empty());
     }
 
     #[test]

@@ -770,3 +770,35 @@ func TestClampMaxChildDepth(t *testing.T) {
 		}
 	}
 }
+
+func TestSetGlobalKeepAwake(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if err := SetGlobalTheme("dracula"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetGlobalKeepAwake("on"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.KeepAwake != KeepAwakeOn || got.Theme != "dracula" {
+		t.Fatalf("after on: %+v", got)
+	}
+	if err := SetGlobalKeepAwake("sometimes"); err == nil {
+		t.Fatal("accepted unknown keepAwake")
+	}
+	if err := SetGlobalKeepAwake("false"); err != nil {
+		t.Fatal(err)
+	}
+	got, err = ReadGlobalDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.KeepAwake != KeepAwakeOff {
+		t.Fatalf("after off: %+v", got)
+	}
+}

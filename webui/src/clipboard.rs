@@ -79,6 +79,16 @@ pub fn file_copy_feedback(ok: bool) -> &'static str {
     }
 }
 
+/// Status line for a session-ID copy attempt from the session list
+/// (#1414). Success may only be claimed when the write resolved.
+pub fn session_copy_feedback(ok: bool) -> &'static str {
+    if ok {
+        "Session ID copied."
+    } else {
+        COPY_FAILED
+    }
+}
+
 /// Page-note line for a transcript copy attempt (keyboard path).
 pub fn transcript_copy_feedback(ok: bool) -> &'static str {
     if ok {
@@ -149,6 +159,12 @@ mod tests {
         assert_eq!(path_copy_feedback(false), COPY_FAILED);
         assert_eq!(file_copy_feedback(true), "File contents copied.");
         assert_eq!(file_copy_feedback(false), COPY_FAILED);
+    }
+
+    #[test]
+    fn session_feedback_claims_copied_only_on_success() {
+        assert_eq!(session_copy_feedback(true), "Session ID copied.");
+        assert_eq!(session_copy_feedback(false), COPY_FAILED);
     }
 
     #[test]

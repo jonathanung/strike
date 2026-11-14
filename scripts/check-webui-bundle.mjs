@@ -13,7 +13,9 @@
 //      `body[data-phone="1"] .page-header .segmented { display: none }`,
 //      or still contains a blanket `body[data-phone="1"] .segmented` hide.
 //
-// Fix a failure by running `make webui-build` and committing the result.
+// CI runs this against a freshly built bundle (ci.yml webui-smoke) and
+// before webui-bundle.yml commits main's bundle. A failure there means the
+// webui/ sources themselves are wrong. PRs never commit the bundle.
 // Run locally with: node scripts/check-webui-bundle.mjs
 // (or `make webui-bundle-check`).
 
