@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/internal/schedule/sessionloop"
 )
 
 // RootSummary is a public response payload for one active root.
@@ -253,6 +254,37 @@ func (h *LiveHub) LiveFor(rootID string) *Live {
 	return nil
 }
 
+// LiveForSession returns the live bridge serving durable sessionID, or nil.
+// Unlike LiveFor, an empty id never falls back to the active root. The entry
+// keyed by sessionID wins; otherwise the unique entry whose Live reports it.
+func (h *LiveHub) LiveForSession(sessionID string) *Live {
+	if h == nil {
+		return nil
+	}
+	sessionID = trimRootID(sessionID)
+	if sessionID == "" {
+		return nil
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if entry, ok := h.entries[sessionID]; ok && entry.live != nil {
+		if sid := entry.live.SessionID(); sid == "" || sid == sessionID {
+			return entry.live
+		}
+	}
+	var found *Live
+	for _, e := range h.entries {
+		if e.live == nil || e.live.SessionID() != sessionID {
+			continue
+		}
+		if found != nil && found != e.live {
+			return nil // ambiguous: refuse rather than guess
+		}
+		found = e.live
+	}
+	return found
+}
+
 // ActiveID returns the active root id.
 func (h *LiveHub) ActiveID() string {
 	if h == nil {
@@ -474,6 +506,9 @@ type StatusSnapshot struct {
 	// TurnState is the canonical status id for this root, including child
 	// attention. Computed by Status; not stored.
 	TurnState string `json:"turnState,omitempty"`
+	// Loops is the number of active /loop jobs on this session (#1588).
+	// Computed by Status; details via GET /v1/sessions/{id}/loops.
+	Loops int `json:"loops,omitempty"`
 }
 
 // SandboxSnapshot is host-safe OS sandbox chrome for GET /v1/sandbox.
@@ -566,6 +601,10 @@ type Live struct {
 
 	memoryModeGet func() string
 	memoryModeSet func(string) error
+
+	// loops holds this session's /loop jobs (#1588). Closed with the
+	// session so loops never outlive it. Nil only for zero-value Live.
+	loops *sessionloop.Registry
 }
 
 // NewLive creates a live session bridge. ops must be the engine Ops channel.
@@ -583,7 +622,21 @@ func NewLive(sessionID, cwd string, agents []AgentInfo, ops chan<- protocol.Op) 
 		},
 		team: emptyTeamSnapshot(),
 	}
+	// A firing is an ordinary UserInput: the engine queues it behind a busy
+	// turn on the same FIFO as a queued send (#1331), and it is a normal turn
+	// for usage, budget, and guardrail accounting.
+	l.loops = sessionloop.New(func(ctx context.Context, job string) error {
+		return l.Submit(ctx, protocol.UserInput{Text: job})
+	})
 	return l
+}
+
+// Loops returns the session's /loop registry, or nil for a zero-value Live.
+func (l *Live) Loops() *sessionloop.Registry {
+	if l == nil {
+		return nil
+	}
+	return l.loops
 }
 
 func emptyTeamSnapshot() TeamSnapshot {
@@ -736,6 +789,7 @@ func (l *Live) Status() StatusSnapshot {
 		out.NetworkAllow = append([]string(nil), l.status.NetworkAllow...)
 	}
 	running, waiting, blocked := childAttention(l.team)
+	out.Loops = l.loops.Len()
 	out.TurnState = protocol.ClassifyLive(protocol.LiveStatusInput{
 		Busy:              out.Busy,
 		PermissionPending: out.PermissionPending,
@@ -903,6 +957,9 @@ func (l *Live) Close() {
 	if l == nil {
 		return
 	}
+	// Loops die with the session; stop them before the bridge closes so no
+	// firing races the close.
+	l.loops.Close()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.closed {

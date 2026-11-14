@@ -24,6 +24,7 @@ func (m Model) View() tea.View {
 	if m.textSel.active() {
 		frame = applyTextSelection(frame, m.textSel, m.th.S().TextSelection)
 	}
+	frame = m.applyCopyToast(frame)
 	// Cache the visible frame without OSC52 so suppressed Views stay current
 	// and one-shot clipboard sequences are never replayed (#496).
 	m.noteCachedFrame(frame)

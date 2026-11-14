@@ -414,3 +414,17 @@ func TestPersistReload(t *testing.T) {
 		t.Fatalf("reload = %#v ok=%v err=%v", got, ok, err)
 	}
 }
+
+func TestSessionReportTypeRegisteredAndDaemonOnly(t *testing.T) {
+	if !ValidType(TypeSessionReport) {
+		t.Fatal("session_report must be a registered type")
+	}
+	if !DaemonOnlyType(TypeSessionReport) {
+		t.Fatal("session_report must be daemon-only")
+	}
+	for _, typ := range []string{TypePlan, TypeContract, TypeFindings, TypePatch, TypeTestReport} {
+		if DaemonOnlyType(typ) {
+			t.Fatalf("%s must stay agent-writable", typ)
+		}
+	}
+}
