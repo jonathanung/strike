@@ -1961,7 +1961,10 @@ try {
   const logRes = await fetch(`http://127.0.0.1:${port}/v1/git/log?limit=30`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (logRes.ok) {
+  if (!logRes.ok) {
+    throw new Error(`git log route failed: HTTP ${logRes.status} (copy-hash/show-more unchecked)`);
+  }
+  {
     const logBody = await logRes.json();
     const commitCount = (logBody.commits || []).length;
     if (commitCount > 0) {
@@ -1990,6 +1993,14 @@ try {
           { timeout: STEP_MS, interval: 250 },
         );
       }
+      // Toggle the log back closed so later Git-tab probes see the
+      // default panel.
+      await evaluate(`(() => {
+        const panel = document.getElementById("git-panel");
+        panel.focus();
+        panel.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true }));
+        return true;
+      })()`);
     }
   }
   // Branch switcher regression (#1314): the rendered <select> value must

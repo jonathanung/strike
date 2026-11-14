@@ -278,6 +278,24 @@ fn filtered_cursor_step(
     Some(visible[next_pos])
 }
 
+/// Where the cursor belongs after the filter or the row list changed:
+/// the cursor itself when visible, else the next visible original index
+/// (the last one if none follow). `None` when nothing is visible (#1435).
+fn snap_cursor(rows: &[GitRow], query: &str, cursor: usize) -> Option<usize> {
+    filtered_cursor_step(rows, query, cursor, 0)
+}
+
+/// The row a selected-row action (Stage / Unstage / Commit selected /
+/// Discard) may target: only the cursor row, and only while it is
+/// visible under the filter — never a hidden file (#1435).
+fn selected_row(rows: &[GitRow], query: &str, cursor: usize) -> Option<GitRow> {
+    if filtered_row_indices(rows, query).contains(&cursor) {
+        rows.get(cursor).cloned()
+    } else {
+        None
+    }
+}
+
 fn short_path(path: &str) -> String {
     if let Some(i) = path.find(".strike/worktrees/") {
         return path[i..].to_string();
@@ -371,10 +389,27 @@ pub fn GitPanel(
     let message = RwSignal::new(String::new());
     let switch_to = RwSignal::new(String::new());
     let load_epoch = RwSignal::new(LoadEpoch::new());
+    // Log-only fetches (Show more commits, #1432) race full loads; the
+    // newest log request wins.
+    let log_epoch = RwSignal::new(LoadEpoch::new());
+
+    // Move the cursor and close a diff that belonged to the old row
+    // (#1435): an open diff must always show the row actions target.
+    let select_row = move |i: usize| {
+        if cursor.get_untracked() == i {
+            return;
+        }
+        cursor.set(i);
+        open_diff.set(false);
+        diff_expanded.set(false);
+        diff_text.set(String::new());
+        diff_truncated.set(false);
+    };
 
 
     let load = move || {
         let gen = begin(load_epoch);
+        let log_gen = begin(log_epoch);
         // Rows are what Stage / Discard act on. Drop them before the new
         // status arrives so the previous branch's files are not clickable
         // under a checkout that has already moved on.
@@ -460,11 +495,12 @@ pub fn GitPanel(
                             inline_diff: String::new(),
                         });
                     }
-                    let n = list.len();
+                    let snapped =
+                        snap_cursor(&list, &file_filter.get_untracked(), cursor.get_untracked());
                     rows.set(list);
-                    if cursor.get_untracked() >= n {
-                        cursor.set(0);
-                    }
+                    // Rows reorder after Stage etc.; keep the cursor on a
+                    // visible row so actions never hit a hidden file.
+                    select_row(snapped.unwrap_or(0));
                 }
                 Err(e) => {
                     if !live() {
@@ -500,7 +536,9 @@ pub fn GitPanel(
                 "Log",
                 get_json::<GitLog>(&b, &t, &log_path).await,
             ) {
-                commits.set(body.commits);
+                if log_epoch.with_untracked(|epoch| epoch.accept(log_gen)) {
+                    commits.set(body.commits);
+                }
             }
             if live() {
                 error.set(err);
@@ -539,8 +577,11 @@ pub fn GitPanel(
         }
         // Per-diff expansion (#1428): every (re)load starts capped again.
         diff_expanded.set(false);
-        let rows = rows.get_untracked();
-        let Some(row) = rows.get(cursor.get_untracked()).cloned() else {
+        let Some(row) = selected_row(
+            &rows.get_untracked(),
+            &file_filter.get_untracked(),
+            cursor.get_untracked(),
+        ) else {
             diff_text.set(String::new());
             diff_truncated.set(false);
             return;
@@ -609,11 +650,7 @@ pub fn GitPanel(
         ) else {
             return;
         };
-        cursor.set(next);
-        open_diff.set(false);
-        diff_expanded.set(false);
-        diff_text.set(String::new());
-        diff_truncated.set(false);
+        select_row(next);
     };
 
     let show_more_log = move |_| {
@@ -623,7 +660,21 @@ pub fn GitPanel(
             return;
         };
         log_limit.set(next);
-        load();
+        // Fetch only the log: a full load() would blank the changed-file
+        // rows and refetch status/branches just for more history.
+        let gen = begin(log_epoch);
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = format!("/v1/git/log?limit={next}");
+            let res = get_json::<GitLog>(&b, &t, &path).await;
+            if !log_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
+            }
+            match res {
+                Ok(body) => commits.set(body.commits),
+                Err(e) => error.set(format!("Log: {}", http_message(&e))),
+            }
+        });
     };
 
     let open_selected = move || {
@@ -740,16 +791,14 @@ pub fn GitPanel(
     };
     let commit_staged = move |_| do_commit(vec![]);
     let commit_selected = move || {
-        let rows = rows.get();
-        let Some(row) = rows.get(cursor.get()) else {
+        let Some(row) = selected_row(&rows.get(), &file_filter.get(), cursor.get()) else {
             error.set("Select a file first.".into());
             return;
         };
         do_commit(vec![row.path.clone()]);
     };
     let stage_selected = move |_| {
-        let rows = rows.get();
-        let Some(row) = rows.get(cursor.get()) else {
+        let Some(row) = selected_row(&rows.get(), &file_filter.get(), cursor.get()) else {
             error.set("Select a file first.".into());
             return;
         };
@@ -761,8 +810,9 @@ pub fn GitPanel(
         );
     };
     let unstage_selected = move |_| {
-        let rows = rows.get();
-        let Some(row) = rows.get(cursor.get()).filter(|r| r.staged) else {
+        let Some(row) = selected_row(&rows.get(), &file_filter.get(), cursor.get())
+            .filter(|r| r.staged)
+        else {
             error.set("Select a staged file.".into());
             return;
         };
@@ -801,8 +851,7 @@ pub fn GitPanel(
         );
     };
     let discard_selected = move || {
-        let rows = rows.get();
-        let Some(row) = rows.get(cursor.get()) else {
+        let Some(row) = selected_row(&rows.get(), &file_filter.get(), cursor.get()) else {
             error.set("Select a file first.".into());
             return;
         };
@@ -879,11 +928,13 @@ pub fn GitPanel(
     crate::shell::bind(
         "git.discard",
         Rc::new(move |_| {
-            let path = rows
-                .get_untracked()
-                .get(cursor.get_untracked())
-                .map(|row| row.path.clone())
-                .unwrap_or_default();
+            let path = selected_row(
+                &rows.get_untracked(),
+                &file_filter.get_untracked(),
+                cursor.get_untracked(),
+            )
+            .map(|row| row.path)
+            .unwrap_or_default();
             if path.is_empty() {
                 return Err("Select a file first.".into());
             }
@@ -1030,9 +1081,10 @@ pub fn GitPanel(
             <input class="git-field git-filter" data-git-filter type="text" aria-label="Filter changed files by path" placeholder="Filter changed files by path…" prop:value=move || file_filter.get() on:input=move |ev| {
                 let query = event_target_value(&ev);
                 file_filter.set(query.clone());
-                // Keep the cursor on a visible original index (#1435).
-                if let Some(first) = filtered_row_indices(&rows.get_untracked(), &query).first().copied() {
-                    cursor.set(first);
+                // Keep the cursor on a visible original index (#1435);
+                // with no match, selected_row() refuses every action.
+                if let Some(i) = snap_cursor(&rows.get_untracked(), &query, cursor.get_untracked()) {
+                    select_row(i);
                 }
             }/>
             {move || {
@@ -1449,6 +1501,39 @@ mod tests {
         // Unfiltered behaviour is the old clamp.
         assert_eq!(filtered_cursor_step(&rows, "", 0, 1), Some(1));
         assert_eq!(filtered_cursor_step(&rows, "", 3, 1), Some(3));
+    }
+
+    #[test]
+    fn selected_row_refuses_hidden_and_no_match_cursor() {
+        let rows = sample_rows();
+        // No match: nothing visible, so no action target.
+        assert!(selected_row(&rows, "zz", 1).is_none());
+        assert_eq!(snap_cursor(&rows, "zz", 1), None);
+        // A cursor on a hidden row is not a target either.
+        assert!(selected_row(&rows, "webui/", 1).is_none());
+        assert_eq!(
+            selected_row(&rows, "webui/", 2).map(|r| r.path).as_deref(),
+            Some("webui/src/main.rs")
+        );
+        assert_eq!(
+            selected_row(&rows, "", 1).map(|r| r.path).as_deref(),
+            Some("README.md")
+        );
+    }
+
+    #[test]
+    fn snap_cursor_follows_reordered_rows_to_a_visible_row() {
+        // After Stage, src/a.rs moves to index 0 and README.md to 1;
+        // a stale cursor of 1 must snap off hidden README.md.
+        let rows = vec![
+            row("Staged", "src/a.rs", true),
+            row("Unstaged", "README.md", false),
+        ];
+        assert_eq!(snap_cursor(&rows, "src", 1), Some(0));
+        assert_eq!(snap_cursor(&rows, "src", 0), Some(0));
+        assert_eq!(snap_cursor(&rows, "", 1), Some(1));
+        // A hidden cursor before a visible row snaps forward.
+        assert_eq!(snap_cursor(&sample_rows(), "webui/", 1), Some(2));
     }
 
     #[test]
