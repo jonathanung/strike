@@ -17,7 +17,7 @@ use web_sys::{Element, MessageEvent, ResizeObserver, WebSocket};
 use crate::api::{api, auth_header, get_json, post_json_value};
 use crate::outcome;
 use crate::same_origin;
-use crate::term::{key_bytes, Screen};
+use crate::term::{key_bytes, Screen, ScrollFollow};
 use crate::EmptyState;
 
 #[derive(Clone, Deserialize, Default)]
@@ -86,6 +86,10 @@ struct TermCtl {
     size: RwSignal<(i32, i32)>,
     timer_id: RwSignal<i32>,
     screen_ref: NodeRef<Pre>,
+    /// #1520: pinned (scrolled-away) state. Deliberately NOT reset by
+    /// attach/hello replay, so re-attaching keeps the reading position.
+    follow: StoredValue<ScrollFollow, LocalStorage>,
+    scrolled_away: RwSignal<bool>,
     screen: StoredValue<Screen, LocalStorage>,
     live: StoredValue<Option<Live>, LocalStorage>,
     fit: StoredValue<Option<Fit>, LocalStorage>,
@@ -96,6 +100,32 @@ impl TermCtl {
     fn paint(self) {
         let rendered = self.screen.with_value(|screen| screen.render_html());
         self.html.set(rendered);
+        if let Some(el) = self.screen_ref.get_untracked() {
+            let el: &Element = &el;
+            // #1520: only autoscroll when the user is at the bottom.
+            // While pinned, restore the saved reading position — the
+            // inner_html update itself may have reset scrollTop.
+            let target = self
+                .follow
+                .with_value(|follow| follow.paint_target(el.scroll_height()));
+            el.set_scroll_top(target);
+        }
+    }
+
+    /// Scroll event on the screen: update the pinned state from the
+    /// user's actual position (proximity to the bottom resumes follow).
+    fn on_scroll(self, el: &Element) {
+        self.follow.update_value(|follow| {
+            follow.on_scroll(el.scroll_top(), el.scroll_height(), el.client_height());
+        });
+        let away = self.follow.with_value(|follow| !follow.following());
+        self.scrolled_away.set(away);
+    }
+
+    /// Jump-to-bottom control: resume following and land on the tail.
+    fn jump_to_bottom(self) {
+        self.follow.update_value(|follow| follow.jump_to_bottom());
+        self.scrolled_away.set(false);
         if let Some(el) = self.screen_ref.get_untracked() {
             let el: &Element = &el;
             el.set_scroll_top(el.scroll_height());
@@ -527,6 +557,8 @@ pub fn TerminalPanel(
         size: RwSignal::new((0, 0)),
         timer_id: RwSignal::new(0),
         screen_ref: NodeRef::<Pre>::new(),
+        follow: StoredValue::new_local(ScrollFollow::new()),
+        scrolled_away: RwSignal::new(false),
         screen,
         live: StoredValue::new_local(None),
         fit: StoredValue::new_local(None),
@@ -627,6 +659,7 @@ pub fn TerminalPanel(
     }
     let workspace_id = ctl.workspace_id;
     let screen_ref = ctl.screen_ref;
+    let scrolled_away = ctl.scrolled_away;
 
     view! {
         <div class="term">
@@ -688,6 +721,11 @@ pub fn TerminalPanel(
                     tabindex=0
                     node_ref=screen_ref
                     inner_html=move || html.get()
+                    on:scroll=move |ev: web_sys::Event| {
+                        if let Some(el) = ev.target().and_then(|t| t.dyn_into::<Element>().ok()) {
+                            ctl.on_scroll(&el);
+                        }
+                    }
                     on:keydown=move |ev: web_sys::KeyboardEvent| {
                         if let Some(data) = key_bytes(&ev.key(), ev.ctrl_key(), ev.alt_key(), ev.meta_key()) {
                             ev.prevent_default();
@@ -703,6 +741,11 @@ pub fn TerminalPanel(
                         }
                     }
                 ></pre>
+            </Show>
+            <Show when=move || scrolled_away.get()>
+                <button class="term-jump" on:click=move |_| ctl.jump_to_bottom()>
+                    "Jump to bottom"
+                </button>
             </Show>
             <p class="hint">{move || {
                 let dir = cwd.get();

@@ -144,6 +144,15 @@ func (l *Loop) Run(ctx context.Context, id string) (Goal, error) {
 		if err != nil {
 			return g, err
 		}
+		if err := ctx.Err(); err != nil {
+			// The iteration was cut short by a stop (pause/abort
+			// cancel the run context, and the critic records a
+			// killed check as a failed criterion rather than an
+			// error, so oneIteration can return normally). Do not
+			// commit a half-run iteration: resume re-runs it, with
+			// completed actions skipped via intents (#1417).
+			return g, err
+		}
 
 		// Reload goal after side effects; apply critic marks.
 		// Preserve pause/abort written concurrently during the iteration.

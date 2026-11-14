@@ -832,14 +832,31 @@ fn message_view(
         .filter(|h| h.field == crate::transcript_find::Field::Title)
         .map(|h| (h.start, h.end))
         .collect();
+    let detail_ranges: Vec<(usize, usize)> = find_hits
+        .iter()
+        .filter(|h| h.field == crate::transcript_find::Field::Detail)
+        .map(|h| (h.start, h.end))
+        .collect();
     let cur_body = find_current
         .filter(|h| h.field == crate::transcript_find::Field::Body)
         .map(|h| (h.start, h.end));
     let cur_title = find_current
         .filter(|h| h.field == crate::transcript_find::Field::Title)
         .map(|h| (h.start, h.end));
+    let cur_detail = find_current
+        .filter(|h| h.field == crate::transcript_find::Field::Detail)
+        .map(|h| (h.start, h.end));
     let find_body = !body_ranges.is_empty();
     let find_title = !title_ranges.is_empty();
+    let find_detail = !detail_ranges.is_empty();
+    // #1576: the fold opens when the current match sits inside it, so
+    // stepping onto a folded hit lands somewhere visible. Only the
+    // current match's fold is forced open; other folds keep the user's
+    // own open/closed state, which #1441 records in `folds` (per-fold
+    // toggles and Expand all / Collapse all) so the controlled `open`
+    // attribute never closes a fold the user opened.
+    let find_forced = cur_detail.is_some();
+    let fold_open = fold_open || find_forced;
     let _ = (prose, retry_text, keep);
     let class = move || {
         let on = cursor.get() == Some(id);
@@ -910,12 +927,21 @@ fn message_view(
             }}
             {if !detail.is_empty() {
                 let summary = if diff.is_some() { "Diff" } else { "Output" };
+                // Detail hits highlight through MarkedText, exactly
+                // like body hits (#1576); without hits the fold is the
+                // plain <pre> it has always been.
+                let detail_inner = if find_detail {
+                    view! { <crate::transcript_find::MarkedText text=detail.clone() kind="pre" ranges=detail_ranges current=cur_detail /> }.into_any()
+                } else {
+                    view! { <pre>{detail.clone()}</pre> }.into_any()
+                };
                 view! {
                     <details
                         class="sx-fold"
                         open=fold_open
                         data-fold-open=if fold_open { "true" } else { "false" }
                         data-fold-id=id.to_string()
+                        data-tf-fold-current=if find_forced { "true" } else { "false" }
                         on:toggle=move |ev: web_sys::Event| {
                             let Some(target) = ev.target() else { return };
                             let Ok(el) = target.dyn_into::<web_sys::Element>() else { return };
@@ -923,11 +949,16 @@ fn message_view(
                                 .ok()
                                 .and_then(|v| v.as_bool())
                                 .unwrap_or(fold_open);
-                            folds.update(|map| record_fold_toggle(map, id, open));
+                            // Only a user change from the rendered state is
+                            // recorded: a find-forced open (#1576) must not
+                            // stick once the match moves on.
+                            if open != fold_open {
+                                folds.update(|map| record_fold_toggle(map, id, open));
+                            }
                         }
                     >
                         <summary>{summary}</summary>
-                        <pre>{detail}</pre>
+                        {detail_inner}
                     </details>
                 }.into_any()
             } else {
