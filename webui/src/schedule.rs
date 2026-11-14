@@ -16,6 +16,7 @@ use crate::load_epoch::begin;
 
 use crate::api::{self, get_json, patch_json, post_json_value};
 use crate::outcome;
+use crate::scheduler_presets::SchedulerPresetsSection;
 use crate::shell::Choice;
 
 thread_local! {
@@ -957,6 +958,7 @@ pub fn SchedulePage(
                     </div>
                 </form>
             </div>
+            <SchedulerPresetsSection base=base token=token />
         </div>
     }
 }

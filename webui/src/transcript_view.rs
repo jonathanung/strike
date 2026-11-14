@@ -15,6 +15,7 @@ use wasm_bindgen::JsValue;
 
 use crate::shell::Choice;
 use crate::status::{StatusKind, StatusMark, StatusSlot};
+use transcript_window as tw;
 
 thread_local! {
     static MESSAGES: RefCell<Vec<Choice>> = RefCell::new(Vec::new());
@@ -78,6 +79,7 @@ pub fn TranscriptPane(
     let cursor_session = RwSignal::new(String::new());
     let rename_for = RwSignal::new(String::new());
     let seen_session = RwSignal::new(None::<String>);
+    let win_start = RwSignal::new(tw::TAIL);
     Effect::new(move |_| {
         let next = session.get();
         let prev = seen_session.get_untracked();
@@ -94,11 +96,98 @@ pub fn TranscriptPane(
         cursor.set(None);
         cursor_session.set(String::new());
         rename_for.set(String::new());
+        win_start.set(tw::TAIL);
         folds.map.set(HashMap::new());
         folds.dismissed.update_untracked(|d| *d = None);
     });
     let scroller = NodeRef::<leptos::html::Div>::new();
     let scroller_fx = scroller;
+
+    // Windowed rendering (#1515): only `messages[win_start..]` is
+    // mounted. A following reader's window slides forward in steps so
+    // the DOM stays bounded; a reader scrolled up keeps every row above
+    // them. Row indices stay absolute (find hits, `tf-line-<idx>`).
+    Effect::new(move |_| {
+        let len = transcript.with(|t| t.messages.len());
+        let stick = pinned.get();
+        // Tracked so a reset to TAIL (session switch) resolves even when
+        // the new list happens to have the same length.
+        let cur = win_start.get();
+        let next = tw::follow(cur, len, stick);
+        if next != cur {
+            win_start.set(next);
+        }
+    });
+    // Mounts row `idx` if it sits above the window. Callers scroll to
+    // it after render (`scroll_message` / find's `scroll_to_line_soon`
+    // both defer a task, after the list has re-rendered).
+    let reveal_row = move |idx: usize| {
+        let len = transcript.with_untracked(|t| t.messages.len());
+        let base = tw::follow(win_start.get_untracked(), len, false);
+        let next = tw::reveal(base, idx);
+        if next != base {
+            pinned.set(false);
+            win_start.set(next);
+        }
+    };
+    // Find-in-transcript: the current match's row must be mounted
+    // before the shell scrolls to its `tf-line-<idx>` article. The
+    // window (and follow state) from before find opened is put back when
+    // it closes, because the shell then restores the scroll offset it
+    // saved at open, which only means the same place over the same
+    // mounted rows.
+    let find_base = StoredValue::new(None::<(usize, bool)>);
+    Effect::new(move |_| {
+        let (active, line) =
+            find.with(|f| (!f.hits.is_empty() || f.current.is_some(), f.current.map(|h| h.line)));
+        if active {
+            if find_base.get_value().is_none() {
+                let len = transcript.with_untracked(|t| t.messages.len());
+                let start = tw::follow(win_start.get_untracked(), len, false);
+                find_base.set_value(Some((start, pinned.get_untracked())));
+            }
+            if let Some(line) = line {
+                reveal_row(line);
+            }
+        } else if let Some((start, was_pinned)) = find_base.get_value() {
+            find_base.set_value(None);
+            pinned.set(was_pinned);
+            win_start.set(start);
+        }
+    });
+    // Mounts one page of earlier rows, keeping the first row that was
+    // already mounted at the same place on screen.
+    let earlier_busy = StoredValue::new(false);
+    let show_earlier = move || {
+        if earlier_busy.get_value() {
+            return;
+        }
+        let len = transcript.with_untracked(|t| t.messages.len());
+        let cur = tw::follow(win_start.get_untracked(), len, false);
+        if cur == 0 {
+            return;
+        }
+        let anchor_y = |idx: usize| -> Option<f64> {
+            let doc = web_sys::window()?.document()?;
+            let el = doc.get_element_by_id(&format!("tf-line-{idx}"))?;
+            Some(el.get_bounding_client_rect().top())
+        };
+        let before = anchor_y(cur);
+        earlier_busy.set_value(true);
+        win_start.set(tw::earlier(cur));
+        after_render(move || {
+            if let (Some(before), Some(after), Some(el)) =
+                (before, anchor_y(cur), scroller_fx.get_untracked())
+            {
+                let top = el.scroll_top() as f64;
+                let next = tw::anchor_scroll_top(top, before, after);
+                if (next - top).abs() > 0.5 {
+                    el.set_scroll_top(next as i32);
+                }
+            }
+            earlier_busy.set_value(false);
+        });
+    };
 
     Effect::new(move |_| {
         let count = transcript.with(|t| t.messages.len());
@@ -155,6 +244,10 @@ pub fn TranscriptPane(
                 );
                 if pinned.get_untracked() != next {
                     pinned.set(next);
+                }
+                let top = el.scroll_top() as f64;
+                if !next && tw::wants_earlier(win_start.get_untracked(), top) {
+                    show_earlier();
                 }
             }
         }
@@ -258,12 +351,14 @@ pub fn TranscriptPane(
                     let idx = ids.iter().position(|x| *x == id).unwrap_or(0);
                     let n = idx as isize + delta;
                     let n = n.clamp(0, ids.len() as isize - 1) as usize;
+                    reveal_row(n);
                     ids[n]
                 }
                 None => {
                     if delta < 0 {
                         *ids.last().unwrap()
                     } else {
+                        reveal_row(0);
                         ids[0]
                     }
                 }
@@ -285,6 +380,7 @@ pub fn TranscriptPane(
             "Home" => {
                 ev.prevent_default();
                 if let Some(id) = ids.first().copied() {
+                    reveal_row(0);
                     cursor.set(Some(id));
                     cursor_session.set(session.get_untracked());
                     scroll_message(id);
@@ -411,6 +507,10 @@ pub fn TranscriptPane(
                 .trim()
                 .parse()
                 .map_err(|_| "Pick a message.".to_string())?;
+            let idx = transcript.with_untracked(|t| t.messages.iter().position(|m| m.id == id));
+            if let Some(idx) = idx {
+                reveal_row(idx);
+            }
             cursor.set(Some(id));
             cursor_session.set(session.get_untracked());
             pinned.set(false);
@@ -429,6 +529,11 @@ pub fn TranscriptPane(
         }
         MESSAGES.with(|slot| slot.borrow_mut().clear());
     });
+
+    let hidden_rows = move || {
+        let len = transcript.with(|t| t.messages.len());
+        tw::mounted(win_start.get(), len).start
+    };
 
     view! {
         <div class="sx-head">
@@ -527,54 +632,47 @@ pub fn TranscriptPane(
                         </button>
                     </div>
                 </Show>
-                {move || {
-                    let fv = find.get();
-                    let fold_map = folds.map.get();
-                    let snap = transcript.get();
-                    let msgs = snap.messages.clone();
-                    // A day separator precedes the first timed message of
-                    // each local day (#1349). Untimed messages never open
-                    // a new day.
-                    let mut prev_day: Option<(u32, u32, u32)> = None;
-                    let seps: Vec<Option<String>> = msgs
-                        .iter()
-                        .map(|msg| {
-                            if msg.at_ms <= 0.0 {
-                                return None;
-                            }
-                            let day = line_day(msg.at_ms);
-                            let label = if prev_day == Some(day) {
-                                None
+                <Show when=move || hidden_rows() != 0>
+                    <button type="button" class="sx-quiet sx-earlier" on:click=move |_| show_earlier()>
+                        {move || {
+                            let n = hidden_rows();
+                            let page = n.min(tw::PAGE);
+                            if page == n {
+                                format!("Show {n} earlier")
                             } else {
-                                Some(line_day_label(msg.at_ms))
-                            };
-                            prev_day = Some(day);
-                            label
-                        })
-                        .collect();
-                    msgs.into_iter()
-                        .zip(seps)
-                        .enumerate()
-                        .map(|(idx, (msg, sep))| {
-                            let msg_hits: Vec<crate::transcript_find::TMatch> = fv
-                                .hits
-                                .iter()
-                                .filter(|h| h.line == idx)
-                                .copied()
-                                .collect();
-                            let msg_current = fv.current.filter(|h| h.line == idx);
-                            let msg_elapsed = snap.elapsed_for(msg.id).map(str::to_owned);
-                            let msg_fold_open = fold_is_open(&fold_map, msg.id);
-                            let msg_usage = snap
-                                .usage_for(msg.id)
-                                .and_then(|u| u.label().map(|label| (label, u.detail())));
-                            view! {
-                                {sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                {message_view(msg, idx, cursor, open_file, retry, fork, msg_hits, msg_current, msg_elapsed, msg_usage, msg_fold_open, folds)}
+                                format!("Show {page} earlier ({n} hidden)")
                             }
-                        })
-                        .collect_view()
-                }}
+                        }}
+                    </button>
+                </Show>
+                // Keyed by absolute index: a streaming delta re-renders
+                // only the row whose data changed (each row memoizes its
+                // own slice), not the whole list.
+                <For
+                    each=move || {
+                        let len = transcript.with(|t| t.messages.len());
+                        tw::mounted(win_start.get(), len)
+                    }
+                    key=|idx: &usize| *idx
+                    children=move |idx: usize| {
+                        let row = Memo::new(move |_| {
+                            transcript.with(|t| find.with(|fv| row_at(t, fv, idx)))
+                        });
+                        move || {
+                            row.get().map(|r| {
+                                // Tracked here, not in the row memo: a fold
+                                // `notify()` re-renders every mounted row so
+                                // each `<details open>` re-syncs with the
+                                // fold state (see `FoldState`).
+                                let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
+                                view! {
+                                    {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, fold_open, folds)}
+                                }
+                            })
+                        }
+                    }
+                />
             </div>
             <Show when=move || !pinned.get() && transcript.with(|t| !t.messages.is_empty())>
                 <button type="button" class="sx-jump" on:click=jump>"Latest"</button>
@@ -705,7 +803,67 @@ fn palette_fork(active: &str, cursor: Option<&CursorBind>, messages: &[CursorMsg
     })
 }
 
+/// Everything one transcript row renders from. Compared per row on
+/// each transcript change so an unchanged row keeps its DOM.
+#[derive(Clone, PartialEq)]
+struct RowData {
+    msg: Message,
+    sep: Option<String>,
+    hits: Vec<crate::transcript_find::TMatch>,
+    current: Option<crate::transcript_find::TMatch>,
+    elapsed: Option<String>,
+    usage: Option<(String, String)>,
+}
+
+fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
+    let msg = t.messages.get(idx)?;
+    // A day separator precedes the first timed message of each local
+    // day (#1349). Untimed messages never open a new day; the previous
+    // day comes from the nearest earlier timed message, mounted or not.
+    let sep = if msg.at_ms > 0.0 {
+        let day = line_day(msg.at_ms);
+        let prev = t.messages[..idx]
+            .iter()
+            .rev()
+            .find(|m| m.at_ms > 0.0)
+            .map(|m| line_day(m.at_ms));
+        (prev != Some(day)).then(|| line_day_label(msg.at_ms))
+    } else {
+        None
+    };
+    Some(RowData {
+        msg: msg.clone(),
+        sep,
+        hits: fv.hits.iter().filter(|h| h.line == idx).copied().collect(),
+        current: fv.current.filter(|h| h.line == idx),
+        elapsed: t.elapsed_for(msg.id).map(str::to_owned),
+        usage: t
+            .usage_for(msg.id)
+            .and_then(|u| u.label().map(|label| (label, u.detail()))),
+    })
+}
+
+/// Runs `f` in a task after the current one, by which point pending
+/// reactive updates (the windowed list) have rendered.
+fn after_render(f: impl FnOnce() + 'static) {
+    let Some(w) = web_sys::window() else {
+        return;
+    };
+    let cb = Closure::once(f);
+    let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(
+        cb.as_ref().unchecked_ref(),
+        0,
+    );
+    cb.forget();
+}
+
+/// Scrolls to message `id` after render, so a row just mounted by
+/// `reveal_row` exists when the lookup runs.
 fn scroll_message(id: u32) {
+    after_render(move || scroll_message_now(id));
+}
+
+fn scroll_message_now(id: u32) {
     if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
         // Articles carry their find-in-transcript id (`tf-line-<idx>`) as
         // the element id, so the pane's own cursor scroll keys off the

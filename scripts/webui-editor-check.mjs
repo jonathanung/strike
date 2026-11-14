@@ -929,6 +929,69 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       throw new Error(plainOutline);
     }
 
+    // Download (#1420): the saved copy is the whole file, past the
+    // 2,000-line render cap — select-all on the read view cannot do
+    // this, the Blob download must.
+    const longDl = await captureDownload("editor-long.txt");
+    if (longDl !== `${longLines.join("\n")}\n`) {
+      throw new Error(
+        `long download has ${longDl.split("\n").length} lines, want 5001 segments (5000 lines + trailing newline)`,
+      );
+    }
+
+    // Markdown view (#1421): a fenced block renders with the fence bar
+    // — language label plus a Copy button whose label reports the
+    // outcome — instead of the old bare <pre>.
+    await writeFile(md, "# Notes\n\n```rust\nfn greet() { println!(\"hi\"); }\n```\n");
+    await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("textarea") ? "ok" : "no composer")()`,
+      "composer before md file",
+    );
+    const mdTab = await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Files"); if (!b) return "no files tab"; b.click(); return "ok"; })()`,
+    );
+    if (mdTab !== "ok") {
+      throw new Error(`files tab click (md): ${mdTab}`);
+    }
+    await waitFor(
+      send,
+      `(() => document.querySelector('[data-ev-open="editor-md.md"]') ? "ok" : "no md file row")()`,
+      "open button for editor-md.md",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-open="editor-md.md"]').click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const b = document.querySelector("[data-ev-copy-code]");
+        if (!b) return "no copy-code button";
+        const bar = b.closest(".sx-fence-bar");
+        return bar && bar.innerText.includes("rust") ? "ok" : "no lang label: " + (bar ? bar.innerText : "no bar");
+      })()`,
+      "md fence bar with lang and copy",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector("[data-ev-copy-code]").click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const b = document.querySelector("[data-ev-copy-code]");
+        const t = b ? b.textContent.trim() : "gone";
+        return t === "Copied" || t === "Copy failed" ? "ok" : "label=" + t;
+      })()`,
+      "md fence copy feedback",
+    );
+
     // Markdown outline (#1446): nested headings listed in document
     // order with unique ids, and clicking the last entry scrolls the
     // rendered pane to that heading.
@@ -1001,69 +1064,6 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
         return pane.scrollTop > 0 && top >= -2 && top < pane.clientHeight ? "ok" : "scrollTop=" + pane.scrollTop + " top=" + top;
       })()`,
       "outline click scrolled to heading",
-    );
-
-    // Download (#1420): the saved copy is the whole file, past the
-    // 2,000-line render cap — select-all on the read view cannot do
-    // this, the Blob download must.
-    const longDl = await captureDownload("editor-long.txt");
-    if (longDl !== `${longLines.join("\n")}\n`) {
-      throw new Error(
-        `long download has ${longDl.split("\n").length} lines, want 5001 segments (5000 lines + trailing newline)`,
-      );
-    }
-
-    // Markdown view (#1421): a fenced block renders with the fence bar
-    // — language label plus a Copy button whose label reports the
-    // outcome — instead of the old bare <pre>.
-    await writeFile(md, "# Notes\n\n```rust\nfn greet() { println!(\"hi\"); }\n```\n");
-    await evalValue(
-      send,
-      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
-    );
-    await waitFor(
-      send,
-      `(() => document.querySelector("textarea") ? "ok" : "no composer")()`,
-      "composer before md file",
-    );
-    const mdTab = await evalValue(
-      send,
-      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Files"); if (!b) return "no files tab"; b.click(); return "ok"; })()`,
-    );
-    if (mdTab !== "ok") {
-      throw new Error(`files tab click (md): ${mdTab}`);
-    }
-    await waitFor(
-      send,
-      `(() => document.querySelector('[data-ev-open="editor-md.md"]') ? "ok" : "no md file row")()`,
-      "open button for editor-md.md",
-    );
-    await evalValue(
-      send,
-      `(() => { document.querySelector('[data-ev-open="editor-md.md"]').click(); return "ok"; })()`,
-    );
-    await waitFor(
-      send,
-      `(() => {
-        const b = document.querySelector("[data-ev-copy-code]");
-        if (!b) return "no copy-code button";
-        const bar = b.closest(".sx-fence-bar");
-        return bar && bar.innerText.includes("rust") ? "ok" : "no lang label: " + (bar ? bar.innerText : "no bar");
-      })()`,
-      "md fence bar with lang and copy",
-    );
-    await evalValue(
-      send,
-      `(() => { document.querySelector("[data-ev-copy-code]").click(); return "ok"; })()`,
-    );
-    await waitFor(
-      send,
-      `(() => {
-        const b = document.querySelector("[data-ev-copy-code]");
-        const t = b ? b.textContent.trim() : "gone";
-        return t === "Copied" || t === "Copy failed" ? "ok" : "label=" + t;
-      })()`,
-      "md fence copy feedback",
     );
 
     await evalValue(
