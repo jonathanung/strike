@@ -65,6 +65,44 @@ export async function scenario(ctx) {
     "phone dialog body leaked a secret",
   );
   await shoot("shell-phone", ["desk1024", "desk1440", "mobile"]);
+  // Clipboard honesty (#1582): force the Clipboard API to reject, click
+  // Copy URL, and the dialog must NOT claim "Pairing URL copied." — it
+  // must show the manual-copy fallback instead. Then let the write
+  // resolve and confirm the fallback clears.
+  await page.evaluate(`Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: () => Promise.reject(new Error("denied")) },
+  })`);
+  const copyBtn = await page.evaluate(`(() => {
+    const b = [...document.querySelectorAll(".gq-dialog button")]
+      .find((x) => x.textContent.trim() === "Copy URL");
+    if (b) b.click();
+    return Boolean(b);
+  })()`);
+  check(Boolean(copyBtn), "Copy URL button missing from the phone dialog");
+  const fallback = await waitUntil(
+    `Boolean(document.querySelector(".gq-copy-fallback"))`,
+    4000,
+    "clipboard failure fallback",
+  );
+  check(Boolean(fallback), "rejected clipboard write did not show the manual-copy fallback");
+  const claimedCopied = await page.evaluate(
+    `document.body.innerText.includes("Pairing URL copied.")`,
+  );
+  check(!claimedCopied, "dialog claimed 'Pairing URL copied.' after a rejected write");
+  await shoot("gateway-copy-failed", ["desk1440", "mobile"]);
+  await page.evaluate(`Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: () => Promise.resolve() },
+  })`);
+  await page.evaluate(`[...document.querySelectorAll(".gq-dialog button")]
+    .find((x) => x.textContent.trim() === "Copy URL")?.click()`);
+  const fallbackGone = await waitUntil(
+    `!document.querySelector(".gq-copy-fallback")`,
+    4000,
+    "clipboard success clears fallback",
+  );
+  check(Boolean(fallbackGone), "successful copy did not clear the failure fallback");
   await click("button.gq-new", "New code");
   const noCode = await waitUntil(
     `document.body && document.body.innerText.includes("No pairing code")`,

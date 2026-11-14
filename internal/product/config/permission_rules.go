@@ -18,6 +18,21 @@ import (
 // earlier deny in that file. Removing a deny is the same kind of weaken.
 var ErrConfirmRequired = errors.New("confirmation required")
 
+// ErrRuleListChanged is returned when a client names the rule it meant to
+// remove and the rule at that index is a different one. The list shifted
+// between the panel's fetch and the POST. Nothing is deleted.
+var ErrRuleListChanged = errors.New("rule list changed — reload and try again")
+
+// RuleIdentity is the rule a client claims sits at an index. A nil identity
+// means the client did not send one (an older cockpit): removal stays
+// positional. A non-nil identity must match the stored rule before it is
+// removed.
+type RuleIdentity struct {
+	Permission string
+	Pattern    string
+	Action     string
+}
+
 // PermissionRuleRecord is one user-authored rule in the global or project file.
 type PermissionRuleRecord struct {
 	Scope      string `json:"scope"`
@@ -127,15 +142,24 @@ func AppendPermissionRule(workDir, scope string, rule permission.Rule, confirm b
 }
 
 // DeletePermissionRule removes the rule at index. Removing a deny requires confirm.
-func DeletePermissionRule(workDir, scope string, index int, confirm bool) error {
+// When id is non-nil the rule at index must match that identity; a mismatch
+// returns ErrRuleListChanged and leaves the file unchanged.
+func DeletePermissionRule(workDir, scope string, index int, confirm bool, id *RuleIdentity) error {
 	if index < 0 {
 		return fmt.Errorf("index out of range")
 	}
 	drop := func(cfg *Config) error {
 		if index >= len(cfg.Permissions) {
+			if id != nil {
+				return ErrRuleListChanged
+			}
 			return fmt.Errorf("index out of range")
 		}
-		if cfg.Permissions[index].Action == permission.Deny && !confirm {
+		rule := cfg.Permissions[index]
+		if id != nil && !ruleMatches(rule, id) {
+			return ErrRuleListChanged
+		}
+		if rule.Action == permission.Deny && !confirm {
 			return fmt.Errorf("%w to remove a deny rule", ErrConfirmRequired)
 		}
 		cfg.Permissions = append(cfg.Permissions[:index], cfg.Permissions[index+1:]...)
@@ -166,6 +190,16 @@ func validateStoredRulePatterns(scope string, rules permission.Ruleset) error {
 		}
 	}
 	return nil
+}
+
+func ruleMatches(rule permission.Rule, id *RuleIdentity) bool {
+	if id == nil {
+		return true
+	}
+	action := strings.ToLower(strings.TrimSpace(id.Action))
+	return rule.Permission == strings.TrimSpace(id.Permission) &&
+		rule.Pattern == id.Pattern &&
+		string(rule.Action) == action
 }
 
 func normalizeRule(rule permission.Rule) (permission.Rule, error) {

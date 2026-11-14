@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use leptos::prelude::*;
 
-use crate::model::permission_modes;
+use crate::model::{autonomies, permission_modes};
 
 use super::host;
 use super::rank::unique_match;
@@ -335,6 +335,24 @@ pub fn install(reg: &mut ShellHook) {
             run(move |_| host::set_perm(wire)),
         ));
     }
+    // Autonomy (#1572) sits beside the approval modes: same Settings
+    // group, same direct-run shape. `skip-all` still confirms — that
+    // discipline lives in the page's set_autonomy, not the palette row.
+    for (index, mode) in autonomies().iter().enumerate() {
+        let id = autonomy_command_id(mode.id);
+        let wire = mode.id;
+        reg.command(command(
+            id,
+            Group::Settings,
+            autonomy_label(mode.id),
+            mode.detail,
+            "",
+            &["autonomy", "exit gate", "phase"],
+            40 + index as i32,
+            None,
+            run(move |_| host::set_autonomy(wire)),
+        ));
+    }
     for (index, (id, label, detail)) in THEMES.iter().copied().enumerate() {
         let theme = id;
         reg.command(command(
@@ -487,6 +505,26 @@ pub fn install(reg: &mut ShellHook) {
         collapse_below_px: 0,
         render: Rc::new(view_switcher),
     });
+}
+
+fn autonomy_command_id(id: &str) -> &'static str {
+    match id {
+        "supervised" => "autonomy-supervised",
+        "agent" => "autonomy-agent",
+        "checks" => "autonomy-checks",
+        "skip-all" => "autonomy-skip-all",
+        _ => "autonomy-supervised",
+    }
+}
+
+fn autonomy_label(id: &str) -> &'static str {
+    match id {
+        "supervised" => "Autonomy: Supervised",
+        "agent" => "Autonomy: Agent",
+        "checks" => "Autonomy: Checks",
+        "skip-all" => "Autonomy: Skip-all",
+        _ => "Autonomy: Supervised",
+    }
 }
 
 fn mode_command_id(id: &str) -> &'static str {

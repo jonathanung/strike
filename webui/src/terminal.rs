@@ -15,8 +15,9 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Element, MessageEvent, ResizeObserver, WebSocket};
 
 use crate::api::{api, auth_header, get_json, post_json_value};
+use crate::outcome;
 use crate::same_origin;
-use crate::term::{key_bytes, Screen};
+use crate::term::{key_bytes, Screen, ScrollFollow};
 use crate::EmptyState;
 
 #[derive(Clone, Deserialize, Default)]
@@ -51,6 +52,8 @@ struct Live {
     ws: WebSocket,
     // Closures stay alive for as long as the socket does.
     _on_message: Closure<dyn FnMut(MessageEvent)>,
+    _on_open: Closure<dyn FnMut(JsValue)>,
+    _on_error: Closure<dyn FnMut(JsValue)>,
     _on_close: Closure<dyn FnMut(JsValue)>,
 }
 
@@ -83,6 +86,10 @@ struct TermCtl {
     size: RwSignal<(i32, i32)>,
     timer_id: RwSignal<i32>,
     screen_ref: NodeRef<Pre>,
+    /// #1520: pinned (scrolled-away) state. Deliberately NOT reset by
+    /// attach/hello replay, so re-attaching keeps the reading position.
+    follow: StoredValue<ScrollFollow, LocalStorage>,
+    scrolled_away: RwSignal<bool>,
     screen: StoredValue<Screen, LocalStorage>,
     live: StoredValue<Option<Live>, LocalStorage>,
     fit: StoredValue<Option<Fit>, LocalStorage>,
@@ -95,6 +102,32 @@ impl TermCtl {
         self.html.set(rendered);
         if let Some(el) = self.screen_ref.get_untracked() {
             let el: &Element = &el;
+            // #1520: only autoscroll when the user is at the bottom.
+            // While pinned, restore the saved reading position — the
+            // inner_html update itself may have reset scrollTop.
+            let target = self
+                .follow
+                .with_value(|follow| follow.paint_target(el.scroll_height()));
+            el.set_scroll_top(target);
+        }
+    }
+
+    /// Scroll event on the screen: update the pinned state from the
+    /// user's actual position (proximity to the bottom resumes follow).
+    fn on_scroll(self, el: &Element) {
+        self.follow.update_value(|follow| {
+            follow.on_scroll(el.scroll_top(), el.scroll_height(), el.client_height());
+        });
+        let away = self.follow.with_value(|follow| !follow.following());
+        self.scrolled_away.set(away);
+    }
+
+    /// Jump-to-bottom control: resume following and land on the tail.
+    fn jump_to_bottom(self) {
+        self.follow.update_value(|follow| follow.jump_to_bottom());
+        self.scrolled_away.set(false);
+        if let Some(el) = self.screen_ref.get_untracked() {
+            let el: &Element = &el;
             el.set_scroll_top(el.scroll_height());
         }
     }
@@ -103,6 +136,8 @@ impl TermCtl {
         self.live.update_value(|live| {
             if let Some(cur) = live.take() {
                 cur.ws.set_onmessage(None);
+                cur.ws.set_onopen(None);
+                cur.ws.set_onerror(None);
                 cur.ws.set_onclose(None);
                 let _ = cur.ws.close();
             }
@@ -251,7 +286,14 @@ impl TermCtl {
         let t = self.token.get_untracked();
         self.active.set(id.clone());
         spawn_local(async move {
-            let ticket = mint_ticket(&b, &t, &id).await.unwrap_or_default();
+            let ticket = match outcome::require_ticket(mint_ticket(&b, &t, &id).await) {
+                Ok(ticket) => ticket,
+                Err(note) => {
+                    self.stop();
+                    self.note.set(note);
+                    return;
+                }
+            };
             self.stop();
             let sock = match open_socket(&url, &ticket) {
                 Ok(sock) => sock,
@@ -267,32 +309,36 @@ impl TermCtl {
                 }
             }) as Box<dyn FnMut(MessageEvent)>);
             let ctl = self;
+            let on_open = Closure::wrap(Box::new(move |_| {
+                ctl.connected.set(true);
+                let (cols, rows) = ctl.size.get_untracked();
+                if cols >= 2 && rows >= 2 {
+                    ctl.send_resize(cols, rows, true);
+                }
+            }) as Box<dyn FnMut(JsValue)>);
+            let ctl = self;
+            let on_error = Closure::wrap(Box::new(move |_| {
+                let failed = outcome::socket_failed();
+                ctl.connected.set(failed.connected);
+                ctl.note.set(failed.note);
+            }) as Box<dyn FnMut(JsValue)>);
+            let ctl = self;
             let on_close = Closure::wrap(Box::new(move |_| {
                 ctl.connected.set(false);
             }) as Box<dyn FnMut(JsValue)>);
             sock.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+            sock.set_onopen(Some(on_open.as_ref().unchecked_ref()));
+            sock.set_onerror(Some(on_error.as_ref().unchecked_ref()));
             sock.set_onclose(Some(on_close.as_ref().unchecked_ref()));
             self.live.update_value(|live| {
                 *live = Some(Live {
                     ws: sock,
                     _on_message: on_message,
+                    _on_open: on_open,
+                    _on_error: on_error,
                     _on_close: on_close,
                 });
             });
-            let open = self.live.with_value(|live| {
-                live.as_ref()
-                    .map(|cur| cur.ws.ready_state() == WebSocket::OPEN)
-                    .unwrap_or(false)
-            });
-            if open {
-                self.connected.set(true);
-                let (cols, rows) = self.size.get_untracked();
-                if cols >= 2 && rows >= 2 {
-                    self.send_resize(cols, rows, true);
-                }
-            } else {
-                self.connected.set(true);
-            }
         });
     }
 
@@ -511,6 +557,8 @@ pub fn TerminalPanel(
         size: RwSignal::new((0, 0)),
         timer_id: RwSignal::new(0),
         screen_ref: NodeRef::<Pre>::new(),
+        follow: StoredValue::new_local(ScrollFollow::new()),
+        scrolled_away: RwSignal::new(false),
         screen,
         live: StoredValue::new_local(None),
         fit: StoredValue::new_local(None),
@@ -611,6 +659,7 @@ pub fn TerminalPanel(
     }
     let workspace_id = ctl.workspace_id;
     let screen_ref = ctl.screen_ref;
+    let scrolled_away = ctl.scrolled_away;
 
     view! {
         <div class="term">
@@ -672,6 +721,11 @@ pub fn TerminalPanel(
                     tabindex=0
                     node_ref=screen_ref
                     inner_html=move || html.get()
+                    on:scroll=move |ev: web_sys::Event| {
+                        if let Some(el) = ev.target().and_then(|t| t.dyn_into::<Element>().ok()) {
+                            ctl.on_scroll(&el);
+                        }
+                    }
                     on:keydown=move |ev: web_sys::KeyboardEvent| {
                         if let Some(data) = key_bytes(&ev.key(), ev.ctrl_key(), ev.alt_key(), ev.meta_key()) {
                             ev.prevent_default();
@@ -687,6 +741,11 @@ pub fn TerminalPanel(
                         }
                     }
                 ></pre>
+            </Show>
+            <Show when=move || scrolled_away.get()>
+                <button class="term-jump" on:click=move |_| ctl.jump_to_bottom()>
+                    "Jump to bottom"
+                </button>
             </Show>
             <p class="hint">{move || {
                 let dir = cwd.get();

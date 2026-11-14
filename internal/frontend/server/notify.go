@@ -269,6 +269,8 @@ func (s *Server) handleNotificationStream(w http.ResponseWriter, r *http.Request
 		select {
 		case <-r.Context().Done():
 			return
+		case <-s.streamDone():
+			return
 		case <-ticker.C:
 			if err := writeNew(); err != nil {
 				return

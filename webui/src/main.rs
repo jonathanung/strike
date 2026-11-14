@@ -12,9 +12,13 @@ mod apps;
 mod approvals;
 mod approvals_ui;
 mod chat_mode;
+mod clipboard;
 mod confirm;
 mod composer_triggers;
+mod diag;
+mod draft_size;
 mod editor;
+mod load_epoch;
 mod localfiles;
 mod gateway;
 mod gateway_qr;
@@ -25,6 +29,7 @@ mod providers;
 mod schedule;
 mod model;
 mod notify;
+mod outcome;
 mod onboarding;
 mod park;
 mod steer_queue;
@@ -34,10 +39,12 @@ mod session_list;
 mod settings;
 mod session_panel;
 mod storage;
+mod tab_title;
 mod task_runner;
 mod transcript_find;
 mod usage_audit;
 mod session_delete;
+mod session_restore;
 mod shell;
 mod side_chat;
 mod status;
@@ -73,13 +80,20 @@ use session_panel::{dispatch_session_key, SessionPanel};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
+use load_guard::{
+    bootstrap_gate, clear_loading, commit_load, gateway_switched, key_matches, BootstrapGate,
+    Commit, ErrPolicy, LoadEpoch,
+};
+
 use crate::api::{
     get_json, get_text, idempotency_key, now_ms, patch_json, post_json, post_json_value, post_op,
     put_json,
 };
-use crate::approvals::{begin_session_mode, ModeChange};
+use crate::load_epoch::begin;
+use crate::approvals::{begin_autonomy_change, begin_session_mode, ModeChange};
 use crate::approvals_ui::{
-    apply_perm_notes, commit_session_mode, ApprovalCards, ApprovalHost, ApprovalMenu,
+    apply_perm_notes, commit_autonomy, commit_session_mode, ApprovalCards, ApprovalHost,
+    ApprovalMenu, AutonomyMenu,
 };
 use crate::transcript::Transcript;
 use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
@@ -92,7 +106,7 @@ use crate::side_chat::SideChatPanel;
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 use crate::model_menu::{active_context, context_view, reduce_envelope, LiveModelState, ModelDefaults};
 use crate::status::{
-    apply_document_chrome, elapsed_since, session_kind, StatusKind, StatusMark, StatusSlot,
+    apply_document_favicon, elapsed_since, session_kind, StatusKind, StatusMark, StatusSlot,
     StatusTab, StatusTabs, HEARTBEAT_STALE_MS,
 };
 
@@ -109,6 +123,12 @@ pub(crate) fn load(key: &str) -> String {
 pub(crate) fn save(key: &str, value: &str) {
     if let Some(s) = storage() {
         let _ = s.set_item(key, value);
+    }
+}
+
+pub(crate) fn remove_key(key: &str) {
+    if let Some(s) = storage() {
+        let _ = s.remove_item(key);
     }
 }
 
@@ -259,6 +279,187 @@ fn textarea_state(target: Option<web_sys::EventTarget>) -> Option<(String, u32)>
     let el = target?.dyn_into::<web_sys::HtmlTextAreaElement>().ok()?;
     let cursor = el.selection_start().ok().flatten().unwrap_or(0);
     Some((el.value(), cursor))
+}
+
+// --- Composer auto-grow (#1411) + prompt history (#1402) -----------------
+// One sizing function for every draft mutation: typing calls it from the
+// textarea's input handler, and an Effect tracking the draft signal calls
+// it (deferred one tick, after Leptos has written `prop:value`) for every
+// programmatic restore — per-session draft restore, queue recall, dictation,
+// suggestions, and prompt-history recall. The 44px/160px clamps are the
+// pre-existing CSS clamps, kept for parity across surfaces (#1411 Q1).
+
+pub(crate) const COMPOSER_MIN_HEIGHT_PX: i32 = 44;
+pub(crate) const COMPOSER_MAX_HEIGHT_PX: i32 = 160;
+pub(crate) const PROMPT_HISTORY_CAP: usize = 100;
+
+fn composer_height_px(scroll_height: i32) -> i32 {
+    scroll_height.clamp(COMPOSER_MIN_HEIGHT_PX, COMPOSER_MAX_HEIGHT_PX)
+}
+
+fn sync_composer_height_for(el: &web_sys::HtmlTextAreaElement) {
+    let Some(html) = el.dyn_ref::<web_sys::HtmlElement>() else {
+        return;
+    };
+    // Reset first: `scrollHeight` never shrinks below the current box, so
+    // measuring without the reset would grow but never shrink.
+    let _ = html.style().set_property("height", "auto");
+    let height = composer_height_px(el.scroll_height());
+    let _ = html
+        .style()
+        .set_property("height", &format!("{height}px"));
+}
+
+fn sync_composer_height_target(target: Option<web_sys::EventTarget>) {
+    if let Some(el) = target.and_then(|t| t.dyn_into::<web_sys::HtmlTextAreaElement>().ok()) {
+        sync_composer_height_for(&el);
+    }
+}
+
+fn sync_composer_height() {
+    let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|doc| doc.query_selector("#composer-input").ok().flatten())
+        .and_then(|el| el.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
+    else {
+        return;
+    };
+    sync_composer_height_for(&el);
+}
+
+/// Defer the DOM sync one tick so a programmatic `draft.set(..)` has been
+/// written into the textarea's value before `scrollHeight` is measured.
+/// Also places the caret at the end of the restored text, which is where
+/// history recall / draft restore leaves the user ready to edit or send.
+fn sync_composer_height_soon() {
+    let Some(win) = web_sys::window() else {
+        return;
+    };
+    let cb = Closure::once(move || {
+        sync_composer_height();
+    });
+    let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+        cb.as_ref().unchecked_ref(),
+        0,
+    );
+    cb.forget();
+}
+
+fn place_composer_caret_end_soon() {
+    let Some(win) = web_sys::window() else {
+        return;
+    };
+    let cb = Closure::once(move || {
+        if let Some(el) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|doc| doc.query_selector("#composer-input").ok().flatten())
+            .and_then(|el| el.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
+        {
+            let end = el.value().encode_utf16().count() as u32;
+            let _ = el.set_selection_range(end, end);
+        }
+        sync_composer_height();
+    });
+    let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+        cb.as_ref().unchecked_ref(),
+        0,
+    );
+    cb.forget();
+}
+
+/// TUI rule (docs/keybinds.md:99): ↑/↓ navigate prompt history only when
+/// they would not move the caret within a multiline draft. Caret offsets
+/// from the DOM are UTF-16 units, matching `selection_start`.
+fn caret_can_move_up(text: &str, caret_utf16: u32) -> bool {
+    let byte = composer_triggers::utf16_to_byte(text, caret_utf16 as usize);
+    text[..byte.min(text.len())].contains('\n')
+}
+
+fn caret_can_move_down(text: &str, caret_utf16: u32) -> bool {
+    let byte = composer_triggers::utf16_to_byte(text, caret_utf16 as usize);
+    text[byte.min(text.len())..].contains('\n')
+}
+
+/// In-memory sent-prompt history (#1402 slice 1): per loaded page, no
+/// persistence and no daemon change. `cursor == None` means the user is
+/// on their own draft, not cycling. Cycling stashes that draft and hands
+/// it back when the user cycles down past the newest entry.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct PromptHistory {
+    entries: Vec<String>,
+    cursor: Option<usize>,
+    stash: String,
+    /// Last value handed out by `prev`/`next`; if the live draft no
+    /// longer matches it, the draft was edited or replaced since the
+    /// recall, so navigation restarts / abandons instead of clobbering.
+    recalled: Option<String>,
+}
+
+impl PromptHistory {
+    fn push(&mut self, raw: &str) {
+        let text = raw.trim();
+        if text.is_empty() {
+            return;
+        }
+        if self.entries.last().map(String::as_str) != Some(text) {
+            self.entries.push(text.to_string());
+            if self.entries.len() > PROMPT_HISTORY_CAP {
+                let excess = self.entries.len() - PROMPT_HISTORY_CAP;
+                self.entries.drain(..excess);
+            }
+        }
+        self.cursor = None;
+        self.stash.clear();
+        self.recalled = None;
+    }
+
+    fn prev(&mut self, current_draft: &str) -> Option<String> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        let last = self.entries.len() - 1;
+        let idx = match self.cursor {
+            None => {
+                self.stash = current_draft.to_string();
+                last
+            }
+            Some(i) if self.recalled.as_deref() != Some(current_draft) => {
+                // Draft changed since the last recall (edited, or set
+                // programmatically): restart from the newest entry and
+                // stash the live draft rather than losing it.
+                self.stash = current_draft.to_string();
+                last
+            }
+            Some(0) => 0,
+            Some(i) => i - 1,
+        };
+        self.cursor = Some(idx);
+        let value = self.entries[idx].clone();
+        self.recalled = Some(value.clone());
+        Some(value)
+    }
+
+    fn next(&mut self, current_draft: &str) -> Option<String> {
+        let idx = self.cursor?;
+        if self.recalled.as_deref() != Some(current_draft) {
+            // Edited since recall: abandon cycling, keep the edit.
+            self.cursor = None;
+            self.stash.clear();
+            self.recalled = None;
+            return None;
+        }
+        if idx + 1 < self.entries.len() {
+            self.cursor = Some(idx + 1);
+            let value = self.entries[idx + 1].clone();
+            self.recalled = Some(value.clone());
+            Some(value)
+        } else {
+            self.cursor = None;
+            let value = std::mem::take(&mut self.stash);
+            self.recalled = Some(value.clone());
+            Some(value)
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -535,27 +736,16 @@ fn note_live_title(
         }
     });
 }
-/// The body text find-in-transcript (#1342) may search for one line:
-/// the rendered body, except long / JSON-ish tool bodies the transcript
-/// folds into a collapsed <details> — those stay unsearchable in this
-/// slice, matching the rendering rule in the transcript view below.
-fn transcript_search_body(line: &ChatLine) -> &str {
-    let card = line.role == "child";
-    let prose = line.role == "you" || line.role == "strike";
-    let body = &line.body;
-    let tool_dump = !card
-        && !prose
-        && (body.trim_start().starts_with('{')
-            || body.trim_start().starts_with('[')
-            || body.chars().count() > 240);
-    if tool_dump {
-        ""
-    } else {
-        body
-    }
-}
-
 /// All find-in-transcript matches over a line list, in transcript order.
+///
+/// The corpus is the whole line (#1576): the title, the full body —
+/// long and JSON-ish tool bodies included; the >240-char / `{`/`[`
+/// exclusion this projection used to apply is gone — and the collapsed
+/// `detail` the transcript folds into a <details>. Detail hits carry
+/// `Field::Detail` so the pane can expand the fold they land in and
+/// highlight them there. Nothing in the open transcript is excluded,
+/// so the find bar needs no scope note: "No matches" now means the
+/// string is not in the transcript.
 fn transcript_matches(
     list: &[ChatLine],
     query: &str,
@@ -564,10 +754,82 @@ fn transcript_matches(
         .iter()
         .map(|line| transcript_find::SearchLine {
             title: &line.title,
-            body: transcript_search_body(line),
+            body: &line.body,
+            detail: &line.detail,
         })
         .collect();
     transcript_find::matches_for_lines(&rows, query)
+}
+
+#[cfg(test)]
+mod transcript_matches_tests {
+    use super::*;
+
+    fn line(role: &str, title: &str, body: &str, detail: &str) -> ChatLine {
+        ChatLine {
+            id: 0,
+            role: role.into(),
+            title: title.into(),
+            body: body.into(),
+            badge: String::new(),
+            detail: detail.into(),
+            key: String::new(),
+            at_ms: 0.0,
+        }
+    }
+
+    #[test]
+    fn long_tool_body_is_searched() {
+        // >240 chars: the old projection returned "" for this body.
+        let body = format!("{}needle", "log line\n".repeat(40));
+        assert!(body.chars().count() > 240);
+        let list = vec![line("tool", "bash", &body, "")];
+        let hits = transcript_matches(&list, "needle");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line, 0);
+        assert_eq!(hits[0].field, transcript_find::Field::Body);
+    }
+
+    #[test]
+    fn json_tool_body_is_searched() {
+        // Starts with `{`: the old projection returned "" for this body.
+        let list = vec![line(
+            "tool",
+            "read",
+            "{\"path\": \"/tmp/needle.json\"}",
+            "",
+        )];
+        let hits = transcript_matches(&list, "needle.json");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].field, transcript_find::Field::Body);
+    }
+
+    #[test]
+    fn folded_detail_hit_carries_its_line_identity() {
+        let list = vec![
+            line("you", "You", "run the tests", ""),
+            line("tool", "bash", "tests ran", "FAIL needle-test panicked"),
+            line("strike", "Strike", "done", ""),
+        ];
+        let hits = transcript_matches(&list, "needle-test");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line, 1);
+        assert_eq!(hits[0].field, transcript_find::Field::Detail);
+        assert!(hits[0].in_fold());
+    }
+
+    #[test]
+    fn absent_string_is_an_honest_zero_over_the_full_corpus() {
+        let list = vec![
+            line("tool", "bash", "{\"a\": 1}", "long folded output"),
+            line("you", "You", "hello", ""),
+        ];
+        assert!(transcript_matches(&list, "not-present").is_empty());
+        assert_eq!(
+            transcript_find::count_label("not-present", 0, 0),
+            "No matches"
+        );
+    }
 }
 
 fn note_steer(
@@ -617,6 +879,27 @@ fn memory_mode_label(mode: &str) -> &'static str {
         "incognito" => "Incognito",
         "temporary" => "Temporary",
         _ => "Normal",
+    }
+}
+
+/// Chip text for the memory mode (#1585). The chip is a privacy control:
+/// it may only name a mode the daemon has confirmed. Before a successful
+/// load (or after a failed one with nothing confirmed) it asserts
+/// "Unknown" instead of the invented default "Normal".
+fn memory_chip_text(known: bool, mode: &str) -> String {
+    if known {
+        format!("Memory · {}", memory_mode_label(mode))
+    } else {
+        "Memory · Unknown".to_string()
+    }
+}
+
+/// The mode to show after a rejected change (#1585): the last confirmed
+/// mode, or unknown when nothing was ever confirmed.
+fn revert_memory_mode(previous: Option<String>) -> (bool, String) {
+    match previous {
+        Some(mode) => (true, mode),
+        None => (false, String::new()),
     }
 }
 
@@ -771,6 +1054,8 @@ fn App() -> impl IntoView {
     let base = RwSignal::new(load("strike.base"));
     let token = RwSignal::new(gateway::initial_token());
     let status = RwSignal::new("connecting…".to_string());
+    // Bootstrap capability `diag` (#1489): gates Download diagnostics.
+    let diag_capable = RwSignal::new(false);
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -788,6 +1073,11 @@ fn App() -> impl IntoView {
     let roots = RwSignal::new(Vec::<RootSummary>::new());
     let sessions = RwSignal::new(Vec::<SessionItem>::new());
     let active_root = RwSignal::new(String::new());
+    // Session restore (#1391): false until the first refresh that got a
+    // roots response has run the one-time saved-session decision, so
+    // later polls that find `active_root` empty again (e.g. the open
+    // session was deleted) use the plain fallback, not a re-restore.
+    let restore_attempted = RwSignal::new(false);
     // Flattened session order published by SessionPanel for edge-swipe
     // navigation (#1490 slice 5): (open_id, live) pairs in display order.
     let session_nav = RwSignal::new(Vec::<(String, bool)>::new());
@@ -798,8 +1088,22 @@ fn App() -> impl IntoView {
     let ux_note = RwSignal::new(String::new());
     let activity = RwSignal::new(Vec::<ActivityRow>::new());
     let team_note = RwSignal::new(String::new());
+    let children_note = RwSignal::new(String::new());
     let draft = RwSignal::new(String::new());
+    // Sent-prompt history (#1402): in-memory only, per loaded page.
+    let prompt_history = RwSignal::new(PromptHistory::default());
+    // Auto-grow (#1411): every programmatic draft change (per-session
+    // restore, queue recall, send clearing the draft, history recall,
+    // suggestions, dictation) resizes the composer once Leptos has
+    // written the new value into the textarea. Typing resizes directly
+    // from the input handler, where the DOM value is already current.
+    Effect::new(move |_| {
+        let _ = draft.get();
+        sync_composer_height_soon();
+    });
     let loading = RwSignal::new(true);
+    let meta_epoch = RwSignal::new(LoadEpoch::new());
+    let meta_base = RwSignal::new(load("strike.base"));
     let tick = RwSignal::new(0u32);
     let stream_note = RwSignal::new(String::new());
     let load_error = RwSignal::new(String::new());
@@ -818,6 +1122,13 @@ fn App() -> impl IntoView {
     let seen = RwSignal::new(load_seen());
     let children = RwSignal::new(Vec::<model::ChildSession>::new());
     let perm_mode = RwSignal::new("default".to_string());
+    // Session dials (#1569 Fast, #1572 autonomy). Both signals hold only
+    // daemon-reported state: autonomy is seeded from bootstrap/status and
+    // afterwards changes solely on `autonomy.selected`; fast changes
+    // solely on `fast.selected`. Neither is set optimistically on click.
+    let autonomy = RwSignal::new("supervised".to_string());
+    let autonomy_menu = RwSignal::new(false);
+    let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
     let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
@@ -839,6 +1150,8 @@ fn App() -> impl IntoView {
     let context_limit = RwSignal::new(0i64);
     let context_fit = RwSignal::new(String::new());
     let model_defaults = RwSignal::new(ModelDefaults::default());
+    // False until GET /v1/settings succeeds. Empty defaults are not "none saved".
+    let defaults_known = RwSignal::new(false);
     let catalog = RwSignal::new(Vec::<ModelInfo>::new());
     let catalog_note = RwSignal::new(String::new());
     let catalog_once = RwSignal::new(false);
@@ -876,6 +1189,40 @@ fn App() -> impl IntoView {
     let font_id = RwSignal::new(appearance::normalize_font(&load("strike.font")));
     let density_id = RwSignal::new(appearance::normalize_density(&load("strike.density")));
     let onboarded = RwSignal::new(load("strike.onboarded") == "1");
+    // Daemon-side onboarding acknowledgement (#1552): localStorage is only
+    // a per-browser fast path. Until GET /v1/onboarding has answered for
+    // the current base, the first-run card stays hidden, so a browser
+    // against an already-onboarded daemon never flashes it. A failed
+    // check (old or attach-only daemon) counts as checked and falls back
+    // to the localStorage behaviour.
+    let onboarding_daemon_checked = RwSignal::new(load("strike.onboarded") == "1");
+    Effect::new(move |_| {
+        let b = base.get();
+        if onboarded.get_untracked() {
+            onboarding_daemon_checked.set(true);
+            return;
+        }
+        let t = token.get_untracked();
+        spawn_local(async move {
+            let ack = match get_json::<serde_json::Value>(&b, &t, "/v1/onboarding").await {
+                Ok(v) => v
+                    .get("acknowledged")
+                    .and_then(|x| x.as_bool())
+                    .unwrap_or(false),
+                Err(_) => false,
+            };
+            // Stale-response guard: the gateway changed while the check
+            // was in flight; the effect re-runs for the new base.
+            if base.get_untracked() != b {
+                return;
+            }
+            if ack {
+                save("strike.onboarded", "1");
+                onboarded.set(true);
+            }
+            onboarding_daemon_checked.set(true);
+        });
+    });
     let queue_items = RwSignal::new(Vec::<steer_queue::QueueItem>::new());
     let queue_focus = RwSignal::new(String::new());
     let editing_id = RwSignal::new(String::new());
@@ -884,6 +1231,9 @@ fn App() -> impl IntoView {
     let steer_mode = RwSignal::new(String::new());
     let queue_note = RwSignal::new(String::new());
     let hold_bypass = RwSignal::new(false);
+    // Draft-size second-press arm (#1542): the exact draft text whose
+    // first Send press was held at projected-critical. Empty = unarmed.
+    let draft_armed = RwSignal::new(String::new());
     // Cancel and Stop drop work. The first click arms the button; the
     // second click is the confirm. Escape still stops immediately.
     let confirm_cancel = RwSignal::new(String::new());
@@ -892,6 +1242,9 @@ fn App() -> impl IntoView {
     let live_busy_root = RwSignal::new(String::new());
     let side_tab = RwSignal::new("activity".to_string());
     let memory_mode = RwSignal::new("normal".to_string());
+    // False until the daemon confirms a mode (#1585): the chip must not
+    // assert the invented "normal" default before a successful load.
+    let memory_mode_known = RwSignal::new(false);
     let memory_menu = RwSignal::new(false);
     let storage_rev = RwSignal::new(0u32);
     // Find in transcript (#1342): bar visibility, query, current match,
@@ -937,6 +1290,11 @@ fn App() -> impl IntoView {
     let files_path = RwSignal::new(String::new());
     let files = RwSignal::new(Vec::<model::DirEntry>::new());
     let files_error = RwSignal::new(String::new());
+    // Sentinel until a listing commits, so the first paint cannot treat an
+    // empty vec as this folder or as the previous folder's rows.
+    let files_for = RwSignal::new("\u{0}".to_string());
+    let files_loading = RwSignal::new(false);
+    let files_epoch = RwSignal::new(LoadEpoch::new());
     let changes = RwSignal::new(Vec::<model::ChangedFile>::new());
     let changes_error = RwSignal::new(String::new());
     let phone_pane = RwSignal::new(mobile::PANE_CHAT.to_string());
@@ -1035,13 +1393,34 @@ fn App() -> impl IntoView {
         });
     };
 
+    // new_session parks an activation failure here so the meta refresh,
+    // which rewrites the connection status, does not erase it.
+    let activation_hold = RwSignal::new(None::<String>);
+
     let refresh_meta = move || {
         let (b, t) = (base.get_untracked(), token.get_untracked());
+        let ticket = begin(meta_epoch);
+        // Another machine's sessions are not a loading state. Clear them
+        // before the new pipeline returns; a superseded pipeline cannot
+        // write them back.
+        if gateway_switched(&meta_base.get_untracked(), &b) {
+            sessions.set(Vec::new());
+            workspaces.set(Vec::new());
+            workspace_recents.set(Vec::new());
+            roots.set(Vec::new());
+            active_workspace.set(String::new());
+            meta_base.set(b.clone());
+        }
         spawn_local(async move {
+            let live = move || meta_epoch.get_untracked().accept(ticket);
             let mut err = String::new();
             let mut gateway_up = false;
             match get_json::<Health>(&b, &t, "/health").await {
                 Ok(h) if h.ok => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     let was = gateway.get_untracked();
                     let root_now = active_root.get_untracked();
                     gateway.set("connected".into());
@@ -1059,6 +1438,10 @@ fn App() -> impl IntoView {
                     status.set(format!("Connected · {}", h.version));
                 }
                 Ok(_) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     gateway.set("unreachable".into());
                     gateway_kind.set(StatusKind::Disconnected);
                     gateway_label.set("Unreachable".into());
@@ -1066,6 +1449,10 @@ fn App() -> impl IntoView {
                     err = "The daemon answered, but it is not ok.".into();
                 }
                 Err(e) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     gateway.set("unreachable".into());
                     gateway_kind.set(StatusKind::Disconnected);
                     gateway_label.set("Unreachable".into());
@@ -1076,11 +1463,19 @@ fn App() -> impl IntoView {
             if gateway_up {
                 match get_json::<StatusBoard>(&b, &t, "/v1/status/sessions").await {
                     Ok(board) => {
+                        if !live() {
+                            poll_team();
+                            return;
+                        }
                         let kind = StatusKind::parse(&board.gateway);
                         gateway_kind.set(kind);
                         gateway_label.set(kind.label().into());
                     }
                     Err(e) => {
+                        if !live() {
+                            poll_team();
+                            return;
+                        }
                         if err.is_empty() {
                             err = format!("Status board failed to load: {e}");
                         }
@@ -1089,11 +1484,19 @@ fn App() -> impl IntoView {
             }
             match get_json::<WorkspacesResponse>(&b, &t, "/v1/workspaces").await {
                 Ok(r) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     active_workspace.set(r.active_id);
                     workspaces.set(r.workspaces);
                     workspace_recents.set(r.recents);
                 }
                 Err(e) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     if e.contains("HTTP 401") || e.contains("HTTP 403") {
                         gateway.set("unauthorized".into());
                     }
@@ -1102,29 +1505,112 @@ fn App() -> impl IntoView {
                     }
                 }
             }
+            // Captured (not applied inline) so the open-session decision
+            // below can validate the saved session (#1391) against both
+            // the live roots and the saved sessions before picking one.
+            let mut roots_resp: Option<RootsResponse> = None;
             match get_json::<RootsResponse>(&b, &t, "/v1/roots").await {
                 Ok(r) => {
-                    if active_root.get_untracked().is_empty() {
-                        let id = if !r.active_id.is_empty() {
-                            r.active_id.clone()
-                        } else {
-                            r.roots.first().map(|x| x.id.clone()).unwrap_or_default()
-                        };
-                        active_root.set(id);
+                    if !live() {
+                        poll_team();
+                        return;
                     }
-                    roots.set(r.roots);
+                    roots.set(r.roots.clone());
+                    roots_resp = Some(r);
                 }
                 Err(e) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     if err.is_empty() {
                         err = format!("Sessions failed to load: {e}");
                     }
                 }
             }
+            let mut session_ids: Vec<String> = Vec::new();
+            let mut sessions_ok = false;
             match get_json::<SessionsResponse>(&b, &t, "/v1/sessions").await {
-                Ok(r) => sessions.set(r.sessions),
+                Ok(r) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
+                    session_ids = r.sessions.iter().map(|s| s.id.clone()).collect();
+                    sessions_ok = true;
+                    sessions.set(r.sessions);
+                }
                 Err(e) => {
+                    if !live() {
+                        poll_team();
+                        return;
+                    }
                     if err.is_empty() {
                         err = format!("Saved sessions failed to load: {e}");
+                    }
+                }
+            }
+            if active_root.get_untracked().is_empty() {
+                if let Some(r) = &roots_resp {
+                    let root_ids: Vec<String> =
+                        r.roots.iter().map(|x| x.id.clone()).collect();
+                    // Only the first decision consults storage; after
+                    // that, an empty `active_root` means the open
+                    // session went away and the plain fallback applies.
+                    let saved = if restore_attempted.get_untracked() {
+                        String::new()
+                    } else {
+                        session_restore::saved_id()
+                    };
+                    let pick = session_restore::pick_initial(
+                        &saved,
+                        &root_ids,
+                        &session_ids,
+                        &r.active_id,
+                    );
+                    restore_attempted.set(true);
+                    // A stale id is only declared (and cleared) when
+                    // the saved-session list actually loaded — a failed
+                    // list fetch must not erase a dormant session's id.
+                    if pick.clear_saved && sessions_ok {
+                        session_restore::clear();
+                    }
+                    if !pick.id.is_empty() {
+                        if pick.resume {
+                            // Dormant saved session: set the view
+                            // optimistically (like `activate_root`) and
+                            // resume it; a failed resume clears both the
+                            // view and the saved id so the next poll
+                            // lands on the fallback, never an empty
+                            // screen for a session that cannot resume.
+                            let id = pick.id.clone();
+                            active_root.set(id.clone());
+                            session_restore::persist(&id);
+                            let (rb, rt) = (b.clone(), t.clone());
+                            spawn_local(async move {
+                                let path = format!("/v1/roots/{id}/resume");
+                                if let Err(e) =
+                                    post_json(&rb, &rt, &path, serde_json::json!({})).await
+                                {
+                                    status.set(format!("resume failed: {e}"));
+                                    if active_root.get_untracked() == id {
+                                        active_root.set(String::new());
+                                    }
+                                    // Only forget the id that failed —
+                                    // a newer switch may already have
+                                    // persisted a different session.
+                                    if session_restore::saved_id() == id {
+                                        session_restore::clear();
+                                    }
+                                }
+                            });
+                        } else {
+                            // View-local restore: no activate POST, so
+                            // two devices never fight over the daemon's
+                            // active id — each keeps its own place.
+                            active_root.set(pick.id.clone());
+                            session_restore::persist(&pick.id);
+                        }
                     }
                 }
             }
@@ -1133,35 +1619,98 @@ fn App() -> impl IntoView {
                 let path = format!("/v1/bootstrap?root={}", api::js_encode(&root));
                 match get_json::<Bootstrap>(&b, &t, &path).await {
                     Ok(boot) => {
-                        if let Some(st) = boot.status {
-                            provider_name.set(st.provider);
-                            model_name.set(st.model);
-                            effort_level.set(st.effort);
-                            context_used.set(st.context_used);
-                            context_limit.set(st.context_limit);
-                            context_fit.set(st.context_fit);
-                            if !st.permission_mode.is_empty() {
-                                perm_mode.set(st.permission_mode);
+                        match bootstrap_gate(
+                            &meta_epoch.get_untracked(),
+                            ticket,
+                            &root,
+                            &active_root.get_untracked(),
+                        ) {
+                            BootstrapGate::Superseded => {
+                                poll_team();
+                                return;
                             }
-                            session_cwd.set(st.cwd);
-                            live_busy.set(st.busy);
-                            live_busy_root.set(root);
-                        }
-                        skills.set(boot.skills);
-                        commands.set(boot.composer_commands);
-                        if !catalog_once.get_untracked() {
-                            catalog_once.set(true);
-                            load_model_catalog();
+                            BootstrapGate::SkipRoot => {}
+                            BootstrapGate::Paint => {
+                                if let Some(st) = boot.status {
+                                    provider_name.set(st.provider);
+                                    model_name.set(st.model);
+                                    effort_level.set(st.effort);
+                                    context_used.set(st.context_used);
+                                    context_limit.set(st.context_limit);
+                                    context_fit.set(st.context_fit);
+                                    if !st.permission_mode.is_empty() {
+                                        perm_mode.set(st.permission_mode);
+                                    }
+                                    if !st.autonomy.is_empty() {
+                                        autonomy.set(
+                                            crate::model::autonomy_or_default(&st.autonomy)
+                                                .to_string(),
+                                        );
+                                    }
+                                    session_cwd.set(st.cwd);
+                                    live_busy.set(st.busy);
+                                    live_busy_root.set(root);
+                                }
+                                diag_capable.set(boot.capabilities.diag);
+                                skills.set(boot.skills);
+                                commands.set(boot.composer_commands);
+                                if !catalog_once.get_untracked() {
+                                    catalog_once.set(true);
+                                    load_model_catalog();
+                                }
+                            }
                         }
                     }
-                    Err(e) => model_note.set(format!("Live status unavailable: {e}")),
+                    Err(e) => {
+                        match bootstrap_gate(
+                            &meta_epoch.get_untracked(),
+                            ticket,
+                            &root,
+                            &active_root.get_untracked(),
+                        ) {
+                            BootstrapGate::Superseded => {
+                                poll_team();
+                                return;
+                            }
+                            BootstrapGate::SkipRoot => {}
+                            BootstrapGate::Paint => {
+                                model_note.set(format!("Live status unavailable: {e}"));
+                            }
+                        }
+                    }
                 }
             }
-            if let Ok(defaults) = get_json::<ModelDefaults>(&b, &t, "/v1/settings").await {
-                model_defaults.set(defaults);
+            let settings = get_json::<ModelDefaults>(&b, &t, "/v1/settings").await;
+            if !live() {
+                poll_team();
+                return;
             }
-            load_error.set(err);
-            loading.set(false);
+            match settings {
+                Ok(defaults) => {
+                    model_defaults.set(defaults);
+                    defaults_known.set(true);
+                    model_note.set(outcome::merge_defaults_note(
+                        &model_note.get_untracked(),
+                        None,
+                    ));
+                }
+                Err(e) => {
+                    defaults_known.set(false);
+                    model_note.set(outcome::merge_defaults_note(
+                        &model_note.get_untracked(),
+                        Some(&e),
+                    ));
+                }
+            }
+            if clear_loading(&meta_epoch.get_untracked(), ticket) {
+                load_error.set(err);
+                loading.set(false);
+                if let Some(msg) = activation_hold.get_untracked() {
+                    activation_hold.set(None);
+                    status.set(msg.clone());
+                    ux_note.set(msg);
+                }
+            }
             poll_team();
         });
     };
@@ -1227,6 +1776,7 @@ fn App() -> impl IntoView {
             transcript.set(Transcript::new());
             ux_note.set(String::new());
             children.set(Vec::new());
+            children_note.set(String::new());
             asks.set(Vec::new());
             live_audit.set(Vec::new());
             confirm.set(None);
@@ -1242,6 +1792,7 @@ fn App() -> impl IntoView {
             steer_mode.set(String::new());
             queue_note.set(String::new());
             hold_bypass.set(false);
+            draft_armed.set(String::new());
             confirm_cancel.set(String::new());
             confirm_stop.set(false);
         } else if mobile::resume_after(cursor_fx.get(), false).is_some() {
@@ -1252,6 +1803,12 @@ fn App() -> impl IntoView {
             wipe_on_replay.set(true);
         }
         effort_level.set(String::new());
+        // A new session's dials are unknown until its bootstrap/status or
+        // its replayed confirmations land — never carry the previous
+        // session's Fast/autonomy across the switch.
+        fast_on.set(false);
+        autonomy.set("supervised".to_string());
+        autonomy_menu.set(false);
         context_used.set(0);
         context_limit.set(0);
         context_fit.set(String::new());
@@ -1263,8 +1820,12 @@ fn App() -> impl IntoView {
         let (cb, ct, child_root) = (b.clone(), token.get_untracked(), root.clone());
         spawn_local(async move {
             let path = format!("/v1/sessions/{}/children", api::js_encode(&child_root));
-            if let Ok(found) = get_json::<ChildrenResponse>(&cb, &ct, &path).await {
-                children.set(found.sessions);
+            match get_json::<ChildrenResponse>(&cb, &ct, &path).await {
+                Ok(found) => {
+                    children.set(found.sessions);
+                    children_note.set(String::new());
+                }
+                Err(e) => children_note.set(outcome::children_failure_note(&e)),
             }
         });
         poll_team();
@@ -1366,6 +1927,8 @@ fn App() -> impl IntoView {
                         provider: provider_name.get_untracked(),
                         model: model_name.get_untracked(),
                         effort: effort_level.get_untracked(),
+                        fast: fast_on.get_untracked(),
+                        autonomy: autonomy.get_untracked(),
                         context_used: context_used.get_untracked(),
                         context_limit: context_limit.get_untracked(),
                         context_fit: context_fit.get_untracked(),
@@ -1376,6 +1939,10 @@ fn App() -> impl IntoView {
                     provider_name.set(next.provider);
                     model_name.set(next.model);
                     effort_level.set(next.effort);
+                    fast_on.set(next.fast);
+                    if !next.autonomy.is_empty() {
+                        autonomy.set(next.autonomy);
+                    }
                     context_used.set(next.context_used);
                     context_limit.set(next.context_limit);
                     context_fit.set(next.context_fit);
@@ -1610,25 +2177,22 @@ fn App() -> impl IntoView {
         *status_tail_fx.borrow_mut() = Some(es);
     });
 
+    // #1405 tab title: the notification bell publishes its unread count
+    // into this signal (see notify::set_unread_host below); the chrome
+    // effect combines it with unread sessions.
+    let notify_unread = RwSignal::new(0usize);
     Effect::new(move |_| {
         let kind = gateway_kind.get();
         let root_rows = roots.get();
         let saved = sessions.get();
         let active = active_root.get();
-        let mut n = 0usize;
-        let mut live_ids = std::collections::HashSet::new();
-        for row in &root_rows {
-            live_ids.insert(row.id.clone());
-            if row.unread == Some(true) && row.id != active {
-                n += 1;
-            }
-        }
-        for row in &saved {
-            if row.unread == Some(true) && !live_ids.contains(&row.id) {
-                n += 1;
-            }
-        }
-        apply_document_chrome(kind, n);
+        let blocking = tab_title::blocking_count(&root_rows);
+        let unread = tab_title::unread_session_count(&root_rows, &saved, &active)
+            + notify_unread.get();
+        // Favicon behaviour is unchanged (status module owns it); only
+        // the title text follows the #1405 waiting/unread precedence.
+        apply_document_favicon(kind);
+        tab_title::apply_title(blocking, unread);
     });
 
     let session_busy = move |root: &str| -> bool {
@@ -1734,12 +2298,45 @@ fn App() -> impl IntoView {
             status.set("no live session yet".into());
             return;
         }
+        // Draft-size gate (#1542): when the draft itself projects the
+        // session to critical, the first press arms the warning —
+        // nothing is dispatched and the draft is kept. A second press
+        // on the same draft sends anyway. Below critical this never
+        // blocks, and an active session hold defers (no double gate).
+        {
+            let ctx = active_context(
+                &catalog.get_untracked(),
+                &provider_name.get_untracked(),
+                &model_name.get_untracked(),
+            );
+            let base_view = context_view(
+                context_used.get_untracked(),
+                context_limit.get_untracked(),
+                ctx,
+                &context_fit.get_untracked(),
+            );
+            let dview = draft_size::draft_size_view(
+                base_view.used,
+                base_view.limit,
+                base_view.held,
+                &text,
+            );
+            if draft_size::send_held(&dview, &draft_armed.get_untracked(), &text) {
+                draft_armed.set(text.clone());
+                return;
+            }
+            draft_armed.set(String::new());
+        }
         let op = steer_queue::send_op(session_busy(&root), &enter_mode.get_untracked(), which);
         queue_note.set(String::new());
         if op == "steer" {
             steer_note.set(steer_queue::STEER_WAITING.into());
             steer_mode.set(String::new());
         }
+        // Prompt history (#1402): record the trimmed prompt before the
+        // draft is cleared, deduping consecutive repeats. Attachments-only
+        // sends have no text and record nothing.
+        prompt_history.update(|h| h.push(&text));
         // Take the composer before the first await so a repeated Enter or a
         // second click cannot post the same attachments again.
         sending.set(true);
@@ -1755,7 +2352,11 @@ fn App() -> impl IntoView {
                 *d = chat_mode::merge_failed_send(d, &failed_text);
             });
             pending_files.update(|rows| {
-                *rows = chat_mode::merge_failed_files(failed.clone(), rows.clone());
+                let (merged, dropped) = chat_mode::merge_failed_files(failed.clone(), rows.clone());
+                *rows = merged;
+                if let Some(msg) = chat_mode::restore_cap_status(dropped) {
+                    status.set(msg);
+                }
             });
             sending.set(false);
         };
@@ -1911,14 +2512,18 @@ fn App() -> impl IntoView {
                             back_stack.update(|s| s.push(cur));
                             forward_stack.set(Vec::new());
                         }
-                        let _ = post_json(
+                        let activated = post_json(
                             &b,
                             &t,
                             &format!("/v1/roots/{id}/activate"),
                             serde_json::json!({}),
                         )
                         .await;
-                        active_root.set(id);
+                        if let Some(msg) = outcome::new_session_activation(activated) {
+                            activation_hold.set(Some(msg));
+                        }
+                        active_root.set(id.clone());
+                        session_restore::persist(&id);
                     }
                     refresh_meta();
                 }
@@ -1930,6 +2535,7 @@ fn App() -> impl IntoView {
     let activate_root = move |id: String| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         active_root.set(id.clone());
+        session_restore::persist(&id);
         spawn_local(async move {
             if let Err(e) = post_json(
                 &b,
@@ -1949,7 +2555,10 @@ fn App() -> impl IntoView {
         spawn_local(async move {
             let path = format!("/v1/roots/{id}/resume");
             match post_json(&b, &t, &path, serde_json::json!({})).await {
-                Ok(()) => active_root.set(id),
+                Ok(()) => {
+                    session_restore::persist(&id);
+                    active_root.set(id);
+                }
                 Err(e) => status.set(format!("resume failed: {e}")),
             }
         });
@@ -2080,6 +2689,21 @@ fn App() -> impl IntoView {
     let finish_onboarding = move || {
         save("strike.onboarded", "1");
         onboarded.set(true);
+        // Record the acknowledgement on the daemon too (#1552), for both
+        // Continue and "Not now" (both reach this via on_done), so other
+        // browsers and devices against this daemon skip the card. The
+        // local ack above stands either way; a failed daemon write is
+        // surfaced, not swallowed, so the repeat is not a surprise.
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            if let Err(e) =
+                post_json(&b, &t, "/v1/onboarding/acknowledge", serde_json::json!({})).await
+            {
+                status.set(format!(
+                    "Onboarding is saved in this browser only. The daemon record was not written: {e}"
+                ));
+            }
+        });
     };
     let on_cleared = move || {
         set_theme("strike".into());
@@ -2087,6 +2711,7 @@ fn App() -> impl IntoView {
         set_font("md".into());
         set_density("comfortable".into());
         onboarded.set(false);
+        onboarding_daemon_checked.set(false);
         set_layout("cockpit".into());
         base.set(String::new());
         token.set(String::new());
@@ -2149,26 +2774,56 @@ fn App() -> impl IntoView {
 
     let set_memory = move |mode: String| {
         memory_menu.set(false);
-        memory_mode.set(mode.clone());
+        // Snapshot the confirmed mode before any optimistic update so a
+        // rejected change can revert the chip (#1585). The optimistic set
+        // happens only after the live-session check passes.
+        let previous = if memory_mode_known.get_untracked() {
+            Some(memory_mode.get_untracked())
+        } else {
+            None
+        };
         let root = active_root.get_untracked();
         if root.is_empty() {
             status.set("no live session yet".into());
             return;
         }
+        memory_mode.set(mode.clone());
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             let path = format!("/v1/memory/mode?root={}", api::js_encode(&root));
             match put_json(&b, &t, &path, serde_json::json!({"mode": mode})).await {
                 Ok(text) => {
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if let Some(saved) = v.get("mode").and_then(|m| m.as_str()) {
-                            if !saved.is_empty() {
-                                memory_mode.set(saved.to_string());
+                    let saved = serde_json::from_str::<serde_json::Value>(&text)
+                        .ok()
+                        .and_then(|v| {
+                            v.get("mode")
+                                .and_then(|m| m.as_str())
+                                .map(str::to_string)
+                        })
+                        .filter(|saved| !saved.is_empty());
+                    match saved {
+                        Some(saved) => {
+                            memory_mode.set(saved);
+                            memory_mode_known.set(true);
+                        }
+                        None => {
+                            let (known, mode) = revert_memory_mode(previous);
+                            memory_mode_known.set(known);
+                            if known {
+                                memory_mode.set(mode);
                             }
+                            status.set("memory mode was not confirmed by the daemon".into());
                         }
                     }
                 }
-                Err(e) => status.set(format!("memory mode failed: {e}")),
+                Err(e) => {
+                    let (known, mode) = revert_memory_mode(previous);
+                    memory_mode_known.set(known);
+                    if known {
+                        memory_mode.set(mode);
+                    }
+                    status.set(format!("memory mode failed: {e}"));
+                }
             }
         });
     };
@@ -2187,6 +2842,29 @@ fn App() -> impl IntoView {
             ModeChange::Same => {}
             ModeChange::Apply(mode) => {
                 commit_session_mode(base, token, active_root, perm_mode, status, mode);
+            }
+            ModeChange::Confirm(pending) => confirm.set(Some(pending)),
+        }
+    };
+
+    // Autonomy (#1572), cloned from set_perm with two deliberate
+    // differences: a running turn refuses up front with the reason on
+    // the status line (the daemon rejects the op mid-turn), and applying
+    // never touches the autonomy signal — only the daemon's
+    // `autonomy.selected` confirmation does.
+    let set_autonomy = move |mode: String| {
+        autonomy_menu.set(false);
+        let root = active_root.get_untracked();
+        if !root.is_empty() && session_busy(&root) {
+            status.set(
+                "This turn is still running. Autonomy changes wait until it finishes.".into(),
+            );
+            return;
+        }
+        match begin_autonomy_change(&autonomy.get_untracked(), &mode) {
+            ModeChange::Same => {}
+            ModeChange::Apply(mode) => {
+                commit_autonomy(base, token, active_root, status, mode);
             }
             ModeChange::Confirm(pending) => confirm.set(Some(pending)),
         }
@@ -2233,6 +2911,10 @@ fn App() -> impl IntoView {
         let cur = active_root.get_untracked();
         if session_delete::remaining_active(&cur, &id).is_none() && !cur.is_empty() {
             active_root.set(String::new());
+            // The viewed session is gone (#1391): forget it now so a
+            // reload before the fallback lands cannot restore a ghost;
+            // the next refresh persists the fallback it picks.
+            session_restore::clear();
         }
         status.set("Session deleted.".into());
         if was_live {
@@ -2255,21 +2937,40 @@ fn App() -> impl IntoView {
     });
 
     let load_files = move || {
+        let gen = begin(files_epoch);
         let (b, t, path) = (
             base.get_untracked(),
             token.get_untracked(),
             files_path.get_untracked(),
         );
+        files.set(Vec::new());
+        files_error.set(String::new());
+        files_loading.set(true);
+        let files_epoch = files_epoch;
         spawn_local(async move {
             let q = format!("/v1/files?path={}", api::js_encode(&path));
-            match get_json::<FilesResponse>(&b, &t, &q).await {
+            let fetched = get_json::<FilesResponse>(&b, &t, &q).await;
+            if !key_matches(&path, &files_path.get_untracked()) {
+                return;
+            }
+            let mapped = match fetched {
                 Ok(r) => {
                     let mut entries = r.entries;
                     entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
-                    files.set(entries);
-                    files_error.set(String::new());
+                    Ok(entries)
                 }
-                Err(e) => files_error.set(e),
+                Err(e) => Err(e),
+            };
+            match files_epoch.with_untracked(|epoch| {
+                commit_load(epoch, gen, mapped, Vec::new(), ErrPolicy::Clear)
+            }) {
+                Commit::Drop => return,
+                Commit::Apply { value, error } => {
+                    files.set(value);
+                    files_error.set(error);
+                    files_for.set(path);
+                    files_loading.set(false);
+                }
             }
         });
     };
@@ -2364,10 +3065,25 @@ fn App() -> impl IntoView {
         let (b, t) = (base.get(), token.get());
         spawn_local(async move {
             let path = format!("/v1/memory/mode?root={}", api::js_encode(&root));
-            if let Ok(v) = get_json::<serde_json::Value>(&b, &t, &path).await {
-                if let Some(mode) = v.get("mode").and_then(|m| m.as_str()) {
-                    if !mode.is_empty() {
-                        memory_mode.set(mode.to_string());
+            // A failed or empty load must not leave the chip asserting the
+            // invented default (#1585): mark the mode unknown and say so.
+            let loaded = match get_json::<serde_json::Value>(&b, &t, &path).await {
+                Ok(v) => v
+                    .get("mode")
+                    .and_then(|m| m.as_str())
+                    .filter(|mode| !mode.is_empty())
+                    .map(str::to_string),
+                Err(_) => None,
+            };
+            match loaded {
+                Some(mode) => {
+                    memory_mode.set(mode);
+                    memory_mode_known.set(true);
+                }
+                None => {
+                    memory_mode_known.set(false);
+                    if !root.is_empty() {
+                        status.set("memory mode could not be loaded".into());
                     }
                 }
             }
@@ -2447,6 +3163,7 @@ fn App() -> impl IntoView {
                         d.provider = provider;
                         d.model = id;
                     });
+                    defaults_known.set(true);
                     model_note.set("Saved as the global default. This session stays on its current model until you pick one.".into());
                 }
                 Err(e) => model_note.set(format!("saving the default failed: {e}")),
@@ -2472,6 +3189,37 @@ fn App() -> impl IntoView {
             }
         });
     });
+    // Fast (#1569), cloned from on_effort: post the real `set.fast` op
+    // and nothing else. `fast_on` is never set here — it flips only when
+    // the daemon's `fast.selected` confirmation reduces in the SSE path
+    // above. A running turn refuses up front with the reason surfaced,
+    // matching the model menu's disabled state.
+    let on_fast = Callback::new(move |enabled: bool| {
+        let root = active_root.get_untracked();
+        if !root.is_empty() && session_busy(&root) {
+            model_note.set(
+                "This turn is still running. Fast changes wait until it finishes.".into(),
+            );
+            return;
+        }
+        model_note_after.set(now_ms() as i64);
+        model_note.set(String::new());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(
+                &b,
+                &t,
+                &root,
+                "set.fast",
+                serde_json::json!({"enabled": enabled}),
+            )
+            .await
+            {
+                model_note.set(format!("fast change failed: {e}"));
+                model_note_after.set(0);
+            }
+        });
+    });
     let on_default_effort = Callback::new(move |level: String| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
@@ -2485,6 +3233,7 @@ fn App() -> impl IntoView {
             {
                 Ok(()) => {
                     model_defaults.update(|d| d.effort = level);
+                    defaults_known.set(true);
                     model_note.set("Saved the effort as the global default.".into());
                 }
                 Err(e) => model_note.set(format!("saving the effort default failed: {e}")),
@@ -2516,6 +3265,10 @@ fn App() -> impl IntoView {
             if !level.trim().is_empty() {
                 save.run(level);
             }
+        }));
+        let fast = on_fast.clone();
+        shell::set_fast_setter(Rc::new(move |enabled| {
+            fast.run(enabled);
         }));
     }
 
@@ -2563,6 +3316,7 @@ fn App() -> impl IntoView {
         gateway,
         on_focus: on_notify,
     });
+    notify::set_unread_host(notify_unread);
 
     shell::boot();
     shell::set_host(shell::HostBridge {
@@ -2572,6 +3326,7 @@ fn App() -> impl IntoView {
         view: Rc::new(move || mode.get()),
         set_enter: Rc::new(move |next: &str| set_enter(next.to_string())),
         set_perm: Rc::new(move |next: &str| set_perm(next.to_string())),
+        set_autonomy: Rc::new(move |next: &str| set_autonomy(next.to_string())),
         set_theme: Rc::new(move |next: &str| set_theme(next.to_string())),
         set_scheme: Rc::new(move |next: &str| set_scheme(next.to_string())),
         travel: Rc::new(move |back: bool| travel(back)),
@@ -3195,6 +3950,13 @@ fn App() -> impl IntoView {
             ux_note.set("A title needs at least one character.".into());
             return;
         }
+        let prev_title = transcript.with_untracked(|t| t.snapshot_title());
+        let prev_session = sessions.with_untracked(|list| {
+            list.iter().find(|s| s.id == id).map(|s| s.title.clone())
+        });
+        let prev_root = roots.with_untracked(|list| {
+            list.iter().find(|r| r.id == id).map(|r| r.title.clone())
+        });
         transcript.update(|t| t.pin_title(title.clone()));
         sessions.update(|list| {
             if let Some(s) = list.iter_mut().find(|s| s.id == id) {
@@ -3211,7 +3973,24 @@ fn App() -> impl IntoView {
             let path = format!("/v1/sessions/{}", api::js_encode(&id));
             match patch_json(&b, &t, &path, serde_json::json!({"title": title})).await {
                 Ok(()) => ux_note.set(String::new()),
-                Err(e) => ux_note.set(format!("Rename failed: {e}")),
+                Err(e) => {
+                    transcript.update(|doc| doc.restore_title(prev_title));
+                    if let Some(old) = prev_session {
+                        sessions.update(|list| {
+                            if let Some(s) = list.iter_mut().find(|s| s.id == id) {
+                                s.title = old;
+                            }
+                        });
+                    }
+                    if let Some(old) = prev_root {
+                        roots.update(|list| {
+                            if let Some(r) = list.iter_mut().find(|r| r.id == id) {
+                                r.title = old;
+                            }
+                        });
+                    }
+                    ux_note.set(format!("Rename failed: {e}"));
+                }
             }
         });
     })
@@ -3742,7 +4521,7 @@ fn App() -> impl IntoView {
         <Show when=move || mode.get() == "providers" fallback=move || ()>
             <providers::ProvidersPage base=base token=token />
         </Show>
-        <Show when=move || !onboarded.get()>
+        <Show when=move || !onboarded.get() && onboarding_daemon_checked.get()>
             <onboarding::OnboardingCard
                 base=base
                 token=token
@@ -3759,6 +4538,8 @@ fn App() -> impl IntoView {
                 gateway=gateway
                 mode=mode
                 status=status
+                diag_capable=diag_capable
+                root=active_root
                 theme=theme_id
                 scheme=scheme_id
                 font=font_id
@@ -4118,6 +4899,16 @@ fn App() -> impl IntoView {
                             root=active_root
                             status=status
                         />
+                        <AutonomyMenu
+                            menu_open=autonomy_menu
+                            autonomy=autonomy
+                            confirm=confirm
+                            busy=session_busy_now
+                            base=base
+                            token=token
+                            root=active_root
+                            status=status
+                        />
                         <Show when=move || {
                             let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
                             context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).held
@@ -4133,6 +4924,33 @@ fn App() -> impl IntoView {
                                 }>"Send anyway"</button>
                             </div>
                         </Show>
+                        <Show when=move || {
+                            let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                            let base_view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                            draft_size::draft_size_view(base_view.used, base_view.limit, base_view.held, &draft.get()).level != draft_size::DraftSizeLevel::None
+                        }>
+                            <p class=move || {
+                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                let base_view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                                let view = draft_size::draft_size_view(base_view.used, base_view.limit, base_view.held, &draft.get());
+                                if view.level == draft_size::DraftSizeLevel::Critical { "hint draft-size-warn critical" } else { "hint draft-size-warn" }
+                            } role="status" data-draft-size=move || {
+                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                let base_view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                                let view = draft_size::draft_size_view(base_view.used, base_view.limit, base_view.held, &draft.get());
+                                match view.level { draft_size::DraftSizeLevel::Critical => "critical", draft_size::DraftSizeLevel::Warn => "warn", draft_size::DraftSizeLevel::None => "none" }
+                            }>{move || {
+                                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                                let base_view = context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get());
+                                let text = draft.get();
+                                let view = draft_size::draft_size_view(base_view.used, base_view.limit, base_view.held, &text);
+                                if view.level == draft_size::DraftSizeLevel::Critical && draft_armed.get() == text.trim() && !text.trim().is_empty() {
+                                    draft_size::armed_message(&view)
+                                } else {
+                                    view.message
+                                }
+                            }}</p>
+                        </Show>
                         <Show when=move || memory_menu.get()>
                             <div class="menu" role="menu" aria-label="Memory mode">
                                 {["normal", "incognito", "temporary"].into_iter().map(|id| {
@@ -4143,7 +4961,7 @@ fn App() -> impl IntoView {
                                         _ => "Reads and writes memory.",
                                     };
                                     let set = set_memory;
-                                    let on = memory_mode.get() == id;
+                                    let on = memory_mode_known.get() && memory_mode.get() == id;
                                     let klass = if on { "palette-row on" } else { "palette-row" };
                                     let id = id.to_string();
                                     view! {
@@ -4355,6 +5173,9 @@ fn App() -> impl IntoView {
                                         draft.set(text.clone());
                                         sync_composer_trigger(text, cursor, &ui);
                                     }
+                                    // Auto-grow (#1411): the DOM value is
+                                    // already current in the input handler.
+                                    sync_composer_height_target(ev.target());
                                 }
                                 on:click=move |ev: web_sys::MouseEvent| {
                                     if let Some((text, cursor)) = textarea_state(ev.target()) {
@@ -4375,6 +5196,35 @@ fn App() -> impl IntoView {
                                             ev.prevent_default();
                                             let delta = if ev.key() == "ArrowDown" { 1 } else { -1 };
                                             ac_index.set(move_index(&items, ac_index.get_untracked(), delta));
+                                        } else if !ev.ctrl_key() && !ev.meta_key() && !ev.alt_key() {
+                                            // Prompt history (#1402), after the
+                                            // autocomplete popup above has had
+                                            // first claim on ↑/↓. TUI rule
+                                            // (docs/keybinds.md:99): cycle only
+                                            // when the key would not move the
+                                            // caret within a multiline draft.
+                                            if let Some((text, cursor)) = textarea_state(ev.target()) {
+                                                let up = ev.key() == "ArrowUp";
+                                                let can_move = if up {
+                                                    caret_can_move_up(&text, cursor)
+                                                } else {
+                                                    caret_can_move_down(&text, cursor)
+                                                };
+                                                if !can_move {
+                                                    let mut hist = prompt_history.get_untracked();
+                                                    let recalled = if up {
+                                                        hist.prev(&text)
+                                                    } else {
+                                                        hist.next(&text)
+                                                    };
+                                                    if let Some(value) = recalled {
+                                                        ev.prevent_default();
+                                                        prompt_history.set(hist);
+                                                        draft.set(value);
+                                                        place_composer_caret_end_soon();
+                                                    }
+                                                }
+                                            }
                                         }
                                     } else if ev.key() == "Escape" && (ac_open.get_untracked() || plus_open.get_untracked()) {
                                         ev.prevent_default();
@@ -4466,6 +5316,24 @@ fn App() -> impl IntoView {
                                         "composer-glance approvals-mode-chip"
                                     }
                                 } data-approval-status="true">{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</span>
+                                <button type="button" class=move || {
+                                    // Non-default autonomy is safety-relevant
+                                    // state (#1572): a session not on the
+                                    // supervised default must read that way at
+                                    // a glance, phone included.
+                                    if crate::model::autonomy_or_default(&autonomy.get()) != "supervised" {
+                                        "composer-glance approvals-mode-chip danger"
+                                    } else {
+                                        "composer-glance approvals-mode-chip"
+                                    }
+                                } data-autonomy-status="true" title="Autonomy — who clears a workflow phase exit. Opens the autonomy picker." on:click=move |_| {
+                                    mode_menu.set(false);
+                                    model_menu.set(false);
+                                    autonomy_menu.update(|v| *v = !*v);
+                                }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
+                                <Show when=move || fast_on.get()>
+                                    <span class="composer-glance" data-fast-status="true" title="Fast (priority service tier) is on for this session, as confirmed by the daemon. The current provider may not support priority tier.">"Fast · on"</span>
+                                </Show>
                                 <span class="composer-glance" data-model-status="true">{move || {
                                     let model = model_name.get();
                                     let name = if model.is_empty() { provider_name.get() } else { model };
@@ -4496,15 +5364,17 @@ fn App() -> impl IntoView {
                         </Show>
                         <p class="hint composer-statusline" data-composer-triggers="status">{
                             let memory_mode = memory_mode;
+                            let memory_mode_known = memory_mode_known;
                             move || {
                             let note = transcript.with(|t| t.trigger_note.clone());
                             let pending = transcript.with(|t| t.asks.len());
                             let custom = trigger_status(&note, pending);
                             let mode = memory_mode.get();
-                            let memory = if mode == "normal" || mode.is_empty() {
+                            let known = memory_mode_known.get();
+                            let memory = if known && (mode == "normal" || mode.is_empty()) {
                                 String::new()
                             } else {
-                                format!("Memory · {}", memory_mode_label(&mode))
+                                memory_chip_text(known, &mode)
                             };
                             let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
                             let meter = {
@@ -4541,13 +5411,26 @@ fn App() -> impl IntoView {
                         <StatCard label="Tasks".into()>{move || activity.get().len().to_string()}</StatCard>
                     </div>
                     <Show when=move || !team_note.get().is_empty()>
-                        <p class="hint">{move || team_note.get()}</p>
+                        <p class="hint" data-team-note="true">{move || team_note.get()}</p>
+                    </Show>
+                    <Show when=move || !children_note.get().is_empty()>
+                        <p class="hint" data-children-note="true">{move || children_note.get()}</p>
                     </Show>
                     <Show when=move || activity.get().is_empty()>
-                        <EmptyState
-                            title="No live tasks".into()
-                            body="Delegated work for this session shows its status here.".into()
-                        />
+                        {move || {
+                            let failed = !children_note.get().is_empty();
+                            let title = if failed {
+                                "Delegation history unavailable".to_string()
+                            } else {
+                                "No live tasks".to_string()
+                            };
+                            let body = if failed {
+                                "Saved children did not load, so this panel is not a complete delegation history.".to_string()
+                            } else {
+                                "Delegated work for this session shows its status here.".to_string()
+                            };
+                            view! { <EmptyState title=title body=body /> }
+                        }}
                     </Show>
                     <ul class="plain">
                         {move || {
@@ -4657,7 +5540,11 @@ fn App() -> impl IntoView {
                     </Show>
                     <Show when=move || side_tab.get() == "files">
                         <div class="files">
-                            <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
+                            <div class="files-head">
+                                <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
+                                <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
+                            </div>
+                            <p class="hint">"Click a file to open it. @ mentions it in chat; drag also inserts @path."</p>
                             <Show when=move || !files_error.get().is_empty()>
                                 <div class="notice" role="alert">
                                     <span>{move || files_error.get()}</span>
@@ -4668,11 +5555,19 @@ fn App() -> impl IntoView {
                                 <button class="secondary" on:click=move |_| files_path.set(parent_path(&files_path.get()))>"Up"</button>
                             </Show>
                             <ul class="plain">
-                                {move || files.get().into_iter().map(|entry| {
+                                {move || {
+                                    let pending = files_loading.get() || files_for.get() != files_path.get();
+                                    if pending {
+                                        return view! { <li class="hint">"Loading…"</li> }.into_any();
+                                    }
+                                    files.get().into_iter().map(|entry| {
                                     let name = entry.name.clone();
                                     let path = join_path(&files_path.get(), &entry.name);
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
+                                    let mention_attr = path.clone();
+                                    let mention_click = path.clone();
+                                    let mention_label = format!("Mention {path} in chat");
                                     let is_dir = entry.is_dir;
                                     let label = if is_dir { format!("{name}/") } else { name.clone() };
                                     let open_attr = if is_dir { String::new() } else { path.clone() };
@@ -4690,14 +5585,26 @@ fn App() -> impl IntoView {
                                                     }
                                                 }
                                             >{label}</button>
+                                            {(!is_dir).then(move || view! {
+                                                <button type="button" class="secondary ev-mention" data-ev-mention=mention_attr.clone()
+                                                    aria-label=mention_label.clone() title="Mention in chat"
+                                                    on:click=move |_| insert_mention(mention_click.clone())
+                                                >"@"</button>
+                                            })}
                                         </li>
                                     }
-                                }).collect_view()}
+                                }).collect_view().into_any()
+                                }}
                             </ul>
                         </div>
                     </Show>
                     <Show when=move || side_tab.get() == "changes">
                         <div class="changes">
+                            <div class="changes-head">
+                                <p class="hint">"Changed files"</p>
+                                <button class="secondary" on:click=move |_| load_changes()>"Refresh"</button>
+                            </div>
+                            <p class="hint">"Click a change to open its diff. @ mentions it in chat; drag also inserts @path."</p>
                             <Show when=move || !changes_error.get().is_empty()>
                                 <div class="notice" role="alert">
                                     <span>{move || changes_error.get()}</span>
@@ -4712,6 +5619,9 @@ fn App() -> impl IntoView {
                                     let path = file.path.clone();
                                     let path_drag = path.clone();
                                     let path_click = path.clone();
+                                    let mention_attr = path.clone();
+                                    let mention_click = path.clone();
+                                    let mention_label = format!("Mention {path} in chat");
                                     let added = file.added;
                                     let deleted = file.deleted;
                                     view! {
@@ -4728,6 +5638,10 @@ fn App() -> impl IntoView {
                                                 <span class="diff-add">{format!("+{added}")}</span>
                                                 <span class="diff-del">{format!("-{deleted}")}</span>
                                             </button>
+                                            <button type="button" class="secondary ev-mention" data-ev-mention=mention_attr.clone()
+                                                aria-label=mention_label.clone() title="Mention in chat"
+                                                on:click=move |_| insert_mention(mention_click.clone())
+                                            >"@"</button>
                                         </li>
                                     }
                                 }).collect_view()}
@@ -4809,6 +5723,97 @@ fn DaemonPane(gateway_detail: RwSignal<String>) -> impl IntoView {
     }
 }
 
+#[cfg(test)]
+mod composer_grow_history_tests {
+    use super::*;
+
+    #[test]
+    fn height_clamps_to_existing_bounds() {
+        assert_eq!(composer_height_px(0), COMPOSER_MIN_HEIGHT_PX);
+        assert_eq!(composer_height_px(43), COMPOSER_MIN_HEIGHT_PX);
+        assert_eq!(composer_height_px(44), 44);
+        assert_eq!(composer_height_px(100), 100);
+        assert_eq!(composer_height_px(160), 160);
+        assert_eq!(composer_height_px(900), COMPOSER_MAX_HEIGHT_PX);
+    }
+
+    #[test]
+    fn caret_rules_follow_multiline_motion() {
+        // Single line: neither arrow can move the caret within the draft.
+        assert!(!caret_can_move_up("hello", 5));
+        assert!(!caret_can_move_down("hello", 0));
+        // Caret on the second line: Up moves, Down does not.
+        assert!(caret_can_move_up("a\nb", 3));
+        assert!(!caret_can_move_down("a\nb", 3));
+        // Caret on the first line of two: Down moves, Up does not.
+        assert!(!caret_can_move_up("a\nb", 1));
+        assert!(caret_can_move_down("a\nb", 1));
+        // Caret in the middle line of three: both move.
+        assert!(caret_can_move_up("a\nb\nc", 3));
+        assert!(caret_can_move_down("a\nb\nc", 3));
+    }
+
+    #[test]
+    fn history_cycles_and_restores_the_stash() {
+        let mut h = PromptHistory::default();
+        assert_eq!(h.prev("wip"), None);
+        h.push("first prompt");
+        h.push("second prompt");
+        assert_eq!(h.prev("wip draft").as_deref(), Some("second prompt"));
+        assert_eq!(h.prev("second prompt").as_deref(), Some("first prompt"));
+        // Oldest entry sticks instead of wrapping.
+        assert_eq!(h.prev("first prompt").as_deref(), Some("first prompt"));
+        assert_eq!(h.next("first prompt").as_deref(), Some("second prompt"));
+        // Down past the newest entry restores the stashed draft.
+        assert_eq!(h.next("second prompt").as_deref(), Some("wip draft"));
+        // And cycling is over: a further Down has nothing to do.
+        assert_eq!(h.next("wip draft"), None);
+    }
+
+    #[test]
+    fn history_dedupes_consecutive_and_caps() {
+        let mut h = PromptHistory::default();
+        h.push("  same  ");
+        h.push("same");
+        h.push("");
+        h.push("   ");
+        assert_eq!(h.entries, vec!["same".to_string()]);
+        h.push("other");
+        h.push("same");
+        assert_eq!(h.entries.len(), 3, "non-consecutive repeats are kept");
+        for i in 0..(PROMPT_HISTORY_CAP + 5) {
+            h.push(&format!("prompt {i}"));
+        }
+        assert_eq!(h.entries.len(), PROMPT_HISTORY_CAP);
+        assert_eq!(h.entries.first().map(String::as_str), Some("prompt 5"));
+    }
+
+    #[test]
+    fn history_edit_since_recall_is_not_clobbered() {
+        let mut h = PromptHistory::default();
+        h.push("one");
+        h.push("two");
+        assert_eq!(h.prev("").as_deref(), Some("two"));
+        // User edited the recalled prompt, then presses Down: the edit
+        // stays and cycling is abandoned.
+        assert_eq!(h.next("two, edited"), None);
+        // Pressing Up with the edited draft stashes the edit and recalls
+        // the newest entry again.
+        assert_eq!(h.prev("two, edited").as_deref(), Some("two"));
+        assert_eq!(h.next("two").as_deref(), Some("two, edited"));
+    }
+
+    #[test]
+    fn push_resets_navigation() {
+        let mut h = PromptHistory::default();
+        h.push("one");
+        assert_eq!(h.prev("wip").as_deref(), Some("one"));
+        h.push("two");
+        assert_eq!(h.cursor, None);
+        assert_eq!(h.prev("new wip").as_deref(), Some("two"));
+    }
+}
+
 fn main() {
     leptos::mount::mount_to_body(App);
     // The cockpit mounted, so the static boot shell from index.html has
@@ -4820,5 +5825,28 @@ fn main() {
         if let Some(el) = doc.query_selector(".boot-shell").ok().flatten() {
             el.remove();
         }
+    }
+}
+
+#[cfg(test)]
+mod memory_mode_tests {
+    use super::*;
+
+    #[test]
+    fn chip_asserts_only_confirmed_modes() {
+        assert_eq!(memory_chip_text(true, "incognito"), "Memory · Incognito");
+        assert_eq!(memory_chip_text(true, "temporary"), "Memory · Temporary");
+        assert_eq!(memory_chip_text(true, "normal"), "Memory · Normal");
+        assert_eq!(memory_chip_text(false, "normal"), "Memory · Unknown");
+        assert_eq!(memory_chip_text(false, "incognito"), "Memory · Unknown");
+    }
+
+    #[test]
+    fn revert_restores_the_confirmed_mode_or_unknown() {
+        assert_eq!(
+            revert_memory_mode(Some("incognito".to_string())),
+            (true, "incognito".to_string())
+        );
+        assert_eq!(revert_memory_mode(None), (false, String::new()));
     }
 }

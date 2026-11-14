@@ -100,6 +100,20 @@
   .side:has(.git-panel), .side:has(.worktree-panel) { max-height: 70vh; }
 }
 /* feature:git-worktree end */
+
+/* feature:git-diff-expand begin */
+.git-diff-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+}
+.git-diff-expand { align-self: flex-start; }
+/* feature:git-diff-expand end */
+/* feature:git-copy-diff begin */
+.git-diff-bar { display: flex; justify-content: flex-end; }
+.git-copy-diff { min-height: 44px; padding: 4px 12px; }
+/* feature:git-copy-diff end */
 /* feature:git-panel-small begin */
 .git-copy-hash { align-self: flex-start; }
 .git-filter { flex: none; }

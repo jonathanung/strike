@@ -20,6 +20,9 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::api::{delete_json, get_json, js_encode, now_ms, post_json_value};
+use load_guard::{
+    apply_search, request_current_for, session_reload_err, session_reload_ok, LoadEpoch,
+};
 use crate::model::{is_running, merge_sessions, ActivityRow, RootSummary, SessionItem, Workspace};
 use crate::session_list::{
     alt_digit, assemble, human_title, select_range, stamp_times, step_index, title_is_raw_id,
@@ -121,7 +124,7 @@ fn load_prefs() -> ViewPrefs {
         serde_json::from_str(&load("strike.sessionList.view")).unwrap_or_default();
     if !matches!(
         prefs.filter.as_str(),
-        "all" | "unread" | "progress" | "pinned" | "archived"
+        "all" | "unread" | "needs-you" | "progress" | "pinned" | "archived"
     ) {
         prefs.filter = filter_all();
     }
@@ -281,45 +284,89 @@ pub(crate) fn SessionPanel(
     let anchor = RwSignal::new(String::new());
     let action_note = RwSignal::new(String::new());
     let migrated = RwSignal::new(false);
-    let search_gen = RwSignal::new(0u32);
+    let search_epoch = RwSignal::new(LoadEpoch::new());
+    let reload_epoch = RwSignal::new(LoadEpoch::new());
 
     let reload = move || {
+        // Reloads commit in start order, not arrival order (#1641, via the
+        // shared load-guard epoch): a superseded snapshot must never paint
+        // over a newer list, and only the newest snapshot may drive the
+        // one-time pin migration — a stale one would POST its own pin
+        // verdict and then wipe the local pin store for good.
         let (b, t) = (base.get_untracked(), token.get_untracked());
+        let ticket = crate::load_epoch::begin(reload_epoch);
         spawn_local(async move {
+            // Still current only while no newer reload has started and
+            // the panel still points at the gateway this reload was
+            // issued against (a gateway switch must not be painted with
+            // the old gateway's sessions).
+            let still = |b: &str| {
+                request_current_for(
+                    &reload_epoch.get_untracked(),
+                    ticket,
+                    &base.get_untracked(),
+                    b,
+                )
+            };
             match get_json::<Snapshot>(&b, &t, "/v1/session-list").await {
                 Ok(snap) => {
                     let local = load_string_list("strike.pins");
                     let any_pin = snap.sessions.values().any(|org| org.pinned);
+                    let Some(decision) = session_reload_ok(
+                        &reload_epoch.get_untracked(),
+                        ticket,
+                        &base.get_untracked(),
+                        &b,
+                        migrated.get_untracked(),
+                        any_pin,
+                        &local,
+                        load_failed.get_untracked(),
+                    ) else {
+                        return;
+                    };
                     snapshot.set(snap);
-                    if load_failed.get_untracked() {
+                    if decision.clear_error {
                         load_failed.set(false);
                         list_error.set(String::new());
                     }
-                    if !migrated.get_untracked() {
+                    // Migration is one-shot and wipes the local pin store.
+                    // A superseded snapshot must not claim it or POST.
+                    if decision.claim_migration {
                         migrated.set(true);
-                        if !any_pin && !local.is_empty() {
+                        if !decision.post_ids.is_empty() {
                             let body = serde_json::json!({
-                                "ids": local,
+                                "ids": decision.post_ids,
                                 "op": "pin",
                                 "folderId": "",
                             });
                             if post_json_value(&b, &t, "/v1/session-list/bulk", body)
                                 .await
                                 .is_ok()
+                                && still(&b)
                             {
                                 save("strike.pins", "[]");
                                 if let Ok(again) =
                                     get_json::<Snapshot>(&b, &t, "/v1/session-list").await
                                 {
-                                    snapshot.set(again);
+                                    if still(&b) {
+                                        snapshot.set(again);
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    load_failed.set(true);
-                    list_error.set(friendly(&e));
+                    if let Some(msg) = session_reload_err(
+                        &reload_epoch.get_untracked(),
+                        ticket,
+                        &base.get_untracked(),
+                        &b,
+                        friendly(&e),
+                    ) {
+                        load_failed.set(true);
+                        list_error.set(msg);
+                    }
                 }
             }
         });
@@ -341,8 +388,7 @@ pub(crate) fn SessionPanel(
 
     Effect::new(move |_| {
         let q = query.get();
-        let n = search_gen.get_untracked().wrapping_add(1);
-        search_gen.set(n);
+        let n = crate::load_epoch::begin(search_epoch);
         let trimmed = q.trim().to_string();
         if trimmed.is_empty() {
             hits.set(Vec::new());
@@ -351,17 +397,26 @@ pub(crate) fn SessionPanel(
         }
         let (b, t) = (base.get_untracked(), token.get_untracked());
         let fire = Closure::once(move || {
-            if search_gen.get_untracked() != n {
+            if !search_epoch.get_untracked().accept(n) {
                 return;
             }
             spawn_local(async move {
                 let path = format!("/v1/session-list/search?q={}", js_encode(&trimmed));
-                match get_json::<SearchResponse>(&b, &t, &path).await {
-                    Ok(found) => {
-                        hits.set(found.hits);
-                        search_error.set(String::new());
-                    }
-                    Err(e) => search_error.set(friendly(&e)),
+                let result = match get_json::<SearchResponse>(&b, &t, &path).await {
+                    Ok(found) => Ok(found.hits),
+                    Err(e) => Err(friendly(&e)),
+                };
+                let mut next_hits = hits.get_untracked();
+                let mut next_error = search_error.get_untracked();
+                if apply_search(
+                    &search_epoch.get_untracked(),
+                    n,
+                    &mut next_hits,
+                    &mut next_error,
+                    result,
+                ) {
+                    hits.set(next_hits);
+                    search_error.set(next_error);
                 }
             });
         });
@@ -703,6 +758,13 @@ pub(crate) fn SessionPanel(
         }),
     );
     crate::shell::bind(
+        "session.filter.needs-you",
+        Rc::new(move |_| {
+            filter.set("needs-you".into());
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
         "session.filter.progress",
         Rc::new(move |_| {
             filter.set("progress".into());
@@ -873,6 +935,7 @@ pub(crate) fn SessionPanel(
     on_cleanup(|| {
         for id in [
             "session.conductor",
+            "session.filter.needs-you",
             "session.filter.progress",
             "session.filter.pinned",
             "session.filter.archived",
@@ -914,9 +977,11 @@ pub(crate) fn SessionPanel(
             <div class="ss-chips" role="tablist" aria-label="Session filter">
                 {chip("all", "All")}
                 {chip("unread", "Unread")}
+                {chip("needs-you", "Needs you")}
             </div>
-            <Show when=move || !matches!(filter.get().as_str(), "all" | "unread")>
+            <Show when=move || !matches!(filter.get().as_str(), "all" | "unread" | "needs-you")>
                 <p class="hint">{move || match filter.get().as_str() {
+                    "needs-you" => "Showing sessions that need you".into(),
                     "progress" => "Showing in progress".into(),
                     "pinned" => "Showing pinned".into(),
                     "archived" => "Showing archived".into(),
@@ -1058,6 +1123,9 @@ fn build_layout(
                 ),
                 folder_id: org.map(|org| org.folder_id.clone()).unwrap_or_default(),
                 team_state: String::new(),
+                status: row.status.clone(),
+                permission_pending: row.permission_pending,
+                question_pending: row.question_pending,
                 workspace: workspaces
                     .iter()
                     .find(|w| w.id == row.workspace_id)
