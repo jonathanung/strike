@@ -368,6 +368,21 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   check(modelText.includes("Model ·"), "model status missing on the phone composer");
   const modelH = await minControl(page, "[data-model-status]");
   check(modelH >= 44, `model status height ${modelH} < 44`);
+  // #1512: the model chip must be visible in the 390px composer without
+  // scrolling the chip strip, and tapping it opens Switch model.
+  const modelVisible = await page.evaluate(`(() => {
+    const el = document.querySelector("[data-model-status]");
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.left >= 0 && r.right <= window.innerWidth;
+  })()`);
+  check(modelVisible, "model chip is clipped out of the phone composer");
+  await page.evaluate(`document.querySelector("[data-model-status]")?.click()`);
+  await delay(200);
+  const modelPrompt = await page.evaluate(`Boolean(document.querySelector("[data-nav='palette-dialog'] [data-choice-id]"))`);
+  check(modelPrompt, "tapping the model chip did not open Switch model");
+  await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
+  await delay(100);
   await page.evaluate(`document.querySelector("[data-nav='phone-more']")?.click()`);
   await delay(200);
   const modelCmd = await page.evaluate(`Boolean(document.querySelector('[data-command-id="switch-model"]'))`);
