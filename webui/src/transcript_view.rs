@@ -3,6 +3,7 @@
 //! stream; this pane only emits `path:line` links.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use leptos::callback::{Callable, Callback};
@@ -62,6 +63,15 @@ pub fn TranscriptPane(
     find: RwSignal<FindView>,
 ) -> impl IntoView {
     let editing = RwSignal::new(false);
+    // Controlled fold open-state (#1441): message id -> open override.
+    // Absent = collapsed (today's default). Bulk actions are a snapshot:
+    // they only write entries for folds present at click time, so a fold
+    // streamed in afterwards has no entry and starts collapsed. Cleared
+    // on session switch below (bulk state does not survive sessions).
+    let folds = FoldState {
+        map: RwSignal::new(HashMap::<u32, bool>::new()),
+        dismissed: RwSignal::new(None),
+    };
     let draft = RwSignal::new(String::new());
     let pinned = RwSignal::new(true);
     let cursor = RwSignal::new(None::<u32>);
@@ -84,6 +94,8 @@ pub fn TranscriptPane(
         cursor.set(None);
         cursor_session.set(String::new());
         rename_for.set(String::new());
+        folds.map.set(HashMap::new());
+        folds.dismissed.update_untracked(|d| *d = None);
     });
     let scroller = NodeRef::<leptos::html::Div>::new();
     let scroller_fx = scroller;
@@ -193,6 +205,15 @@ pub fn TranscriptPane(
             });
         }
     });
+
+    let expand_all_folds = move |_| {
+        let ids = transcript.with_untracked(|t| fold_ids(&t.messages));
+        folds.map.update(|map| apply_bulk_fold(map, &ids, true));
+    };
+    let collapse_all_folds = move |_| {
+        let ids = transcript.with_untracked(|t| fold_ids(&t.messages));
+        folds.map.update(|map| apply_bulk_fold(map, &ids, false));
+    };
 
     let rename = handlers.rename;
     let open_file = handlers.open_file;
@@ -441,6 +462,38 @@ pub fn TranscriptPane(
             <Show when=move || !note.get().is_empty()>
                 <p class="sx-note" role="alert">{move || note.get()}</p>
             </Show>
+            {move || {
+                // Count what is visibly open among the folds that exist
+                // now: recorded state plus the fold find forces open
+                // (#1576), unless the user dismissed that one.
+                let ids = transcript.with(|t| fold_ids(&t.messages));
+                let count = ids.len();
+                let forced = find.with(|fv| {
+                    fv.current
+                        .filter(|m| m.field == crate::transcript_find::Field::Detail)
+                        .and_then(|m| transcript.with(|t| t.messages.get(m.line).map(|x| (x.id, m))))
+                });
+                let dismissed = folds.dismissed.get_untracked();
+                let open_count = folds.map.with(|map| {
+                    ids.iter()
+                        .filter(|id| {
+                            let f = forced.is_some_and(|(fid, _)| fid == **id);
+                            resolve_fold_open(fold_is_open(map, **id), f, f && dismissed == forced)
+                        })
+                        .count()
+                });
+                if count == 0 {
+                    view! { <span></span> }.into_any()
+                } else {
+                    view! {
+                        <div class="sx-toolbar sx-fold-toolbar" data-fold-all="true" data-fold-count=count.to_string() data-fold-open-count=open_count.to_string()>
+                            <button type="button" class="sx-quiet" data-fold-expand-all="true" on:click=expand_all_folds>"Expand all"</button>
+                            <button type="button" class="sx-quiet" data-fold-collapse-all="true" on:click=collapse_all_folds>"Collapse all"</button>
+                            <span class="sx-fold-count">{format!("{open_count}/{count} folds open")}</span>
+                        </div>
+                    }.into_any()
+                }
+            }}
         </div>
         <div class="sx-stage">
             <div
@@ -476,6 +529,7 @@ pub fn TranscriptPane(
                 </Show>
                 {move || {
                     let fv = find.get();
+                    let fold_map = folds.map.get();
                     let snap = transcript.get();
                     let msgs = snap.messages.clone();
                     // A day separator precedes the first timed message of
@@ -510,12 +564,13 @@ pub fn TranscriptPane(
                                 .collect();
                             let msg_current = fv.current.filter(|h| h.line == idx);
                             let msg_elapsed = snap.elapsed_for(msg.id).map(str::to_owned);
+                            let msg_fold_open = fold_is_open(&fold_map, msg.id);
                             let msg_usage = snap
                                 .usage_for(msg.id)
                                 .and_then(|u| u.label().map(|label| (label, u.detail())));
                             view! {
                                 {sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                {message_view(msg, idx, cursor, open_file, retry, fork, msg_hits, msg_current, msg_elapsed, msg_usage)}
+                                {message_view(msg, idx, cursor, open_file, retry, fork, msg_hits, msg_current, msg_elapsed, msg_usage, msg_fold_open, folds)}
                             }
                         })
                         .collect_view()
@@ -718,6 +773,114 @@ pub fn save_download(filename: &str, mime: &str, text: &str) {
     let _ = web_sys::Url::revoke_object_url(&url);
 }
 
+/// Ids of messages that actually render a fold (#1441): only a
+/// non-empty `detail` produces a `<details class="sx-fold">`.
+fn fold_ids(messages: &[Message]) -> Vec<u32> {
+    messages
+        .iter()
+        .filter(|m| !m.detail.is_empty())
+        .map(|m| m.id)
+        .collect()
+}
+
+/// A fold is open only when a bulk action or a per-fold toggle wrote
+/// an explicit `true` for it. No entry = collapsed, which is both
+/// today's default and the state a fold streamed in after a bulk
+/// Expand all starts in (bulk actions are a snapshot, not a mode).
+fn fold_is_open(overrides: &HashMap<u32, bool>, id: u32) -> bool {
+    overrides.get(&id).copied().unwrap_or(false)
+}
+
+/// Apply a bulk Expand/Collapse to exactly the folds that exist at
+/// click time. Entries for other ids are untouched; ids created
+/// later get no entry and therefore stay collapsed.
+fn apply_bulk_fold(overrides: &mut HashMap<u32, bool>, ids: &[u32], open: bool) {
+    for id in ids {
+        overrides.insert(*id, open);
+    }
+}
+
+/// Fold signals shared by the list and each message (#1441).
+#[derive(Clone, Copy)]
+struct FoldState {
+    /// Recorded open state per message id. Every write notifies, so
+    /// each render's `open` matches the DOM: tachys diffs a static
+    /// attribute against its previous render value, and a user toggle
+    /// that skipped the rebuild would leave that value stale and make
+    /// the next bulk action a no-op on the DOM.
+    map: RwSignal<HashMap<u32, bool>>,
+    /// The (message id, find match) whose forced-open fold the user
+    /// closed; only that exact pairing stays closed (#1576).
+    dismissed: RwSignal<Option<(u32, crate::transcript_find::TMatch)>>,
+}
+
+/// Rendered open state: the recorded/bulk state, plus the current find
+/// match's fold unless the user closed it while it was forced open. A
+/// recorded `false` never overrides the forced open (Collapse all must
+/// not stop find from revealing folded hits).
+fn resolve_fold_open(recorded: bool, find_forced: bool, dismissed: bool) -> bool {
+    recorded || (find_forced && !dismissed)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum FoldToggle {
+    /// DOM state equals the rendered state (our own re-render).
+    Ignore,
+    /// A user change: record it.
+    Record,
+    /// The user closed a find-forced fold: record closed and dismiss the
+    /// forced open for this match.
+    Dismiss,
+}
+
+fn fold_toggle_action(dom_open: bool, rendered_open: bool, find_forced: bool) -> FoldToggle {
+    if dom_open == rendered_open {
+        FoldToggle::Ignore
+    } else if find_forced && !dom_open {
+        FoldToggle::Dismiss
+    } else {
+        FoldToggle::Record
+    }
+}
+
+/// Apply one native `toggle` of fold `id` against the live state:
+/// the currently rendered open state is recomputed from `map` and
+/// `dismissed` (never a captured render-time value), then the change is
+/// ignored, recorded, or recorded as a dismissal of the forced open.
+/// Returns whether anything was written.
+fn handle_fold_toggle(
+    map: &mut HashMap<u32, bool>,
+    dismissed: &mut Option<(u32, crate::transcript_find::TMatch)>,
+    id: u32,
+    current_key: Option<(u32, crate::transcript_find::TMatch)>,
+    find_forced: bool,
+    dom_open: bool,
+) -> bool {
+    let is_dismissed = find_forced && current_key.is_some() && *dismissed == current_key;
+    let rendered = resolve_fold_open(fold_is_open(map, id), find_forced, is_dismissed);
+    match fold_toggle_action(dom_open, rendered, find_forced) {
+        FoldToggle::Ignore => false,
+        FoldToggle::Record => {
+            record_fold_toggle(map, id, dom_open);
+            true
+        }
+        FoldToggle::Dismiss => {
+            record_fold_toggle(map, id, false);
+            *dismissed = current_key;
+            true
+        }
+    }
+}
+
+/// Record a single fold's native toggle. Returns without writing
+/// when the state already matches, so the `toggle` event fired by
+/// our own controlled re-render does not loop.
+fn record_fold_toggle(overrides: &mut HashMap<u32, bool>, id: u32, open: bool) {
+    if fold_is_open(overrides, id) != open {
+        overrides.insert(id, open);
+    }
+}
+
 fn message_view(
     msg: Message,
     idx: usize,
@@ -729,6 +892,8 @@ fn message_view(
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
     turn_usage: Option<(String, String)>,
+    fold_open: bool,
+    folds: FoldState,
 ) -> impl IntoView {
     let id = msg.id;
     let role = msg.role.class();
@@ -790,9 +955,15 @@ fn message_view(
     // #1576: the fold opens when the current match sits inside it, so
     // stepping onto a folded hit lands somewhere visible. Only the
     // current match's fold is forced open; other folds keep the user's
-    // own open/closed state (the `open` attribute is only rendered in
-    // the forced branch below, never rendered as closed).
-    let fold_open = cur_detail.is_some();
+    // own open/closed state, which #1441 records in `folds` (per-fold
+    // toggles and Expand all / Collapse all) so the controlled `open`
+    // attribute never closes a fold the user opened.
+    let find_forced = cur_detail.is_some();
+    let current_key = find_current.map(|m| (id, m));
+    let dismissed = find_forced
+        && current_key.is_some()
+        && folds.dismissed.get_untracked() == current_key;
+    let fold_open = resolve_fold_open(fold_open, find_forced, dismissed);
     let _ = (prose, retry_text, keep);
     let class = move || {
         let on = cursor.get() == Some(id);
@@ -907,21 +1078,47 @@ fn message_view(
                 } else {
                     view! { <pre>{detail.clone()}</pre> }.into_any()
                 };
-                if fold_open {
-                    view! {
-                        <details class="sx-fold" open=true data-tf-fold-current="true">
-                            <summary>{summary}</summary>
-                            {detail_inner}
-                        </details>
-                    }.into_any()
-                } else {
-                    view! {
-                        <details class="sx-fold">
-                            <summary>{summary}</summary>
-                            {detail_inner}
-                        </details>
-                    }.into_any()
-                }
+                view! {
+                    <details
+                        class="sx-fold"
+                        open=fold_open
+                        data-fold-open=if fold_open { "true" } else { "false" }
+                        data-fold-id=id.to_string()
+                        data-tf-fold-current=if find_forced { "true" } else { "false" }
+                        on:toggle=move |ev: web_sys::Event| {
+                            let Some(target) = ev.target() else { return };
+                            let Ok(el) = target.dyn_into::<web_sys::Element>() else { return };
+                            let open = js_sys::Reflect::get(&el, &JsValue::from_str("open"))
+                                .ok()
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(fold_open);
+                            // Decided against live map/dismissed state, not
+                            // the render-time `fold_open`. A real change
+                            // notifies `map` so the rendered `open` is
+                            // re-synced with the DOM (see `FoldState`);
+                            // our own re-render's toggle writes nothing.
+                            let mut dismissed = folds.dismissed.get_untracked();
+                            let mut changed = false;
+                            folds.map.update_untracked(|map| {
+                                changed = handle_fold_toggle(
+                                    map,
+                                    &mut dismissed,
+                                    id,
+                                    current_key,
+                                    find_forced,
+                                    open,
+                                );
+                            });
+                            if changed {
+                                folds.dismissed.update_untracked(|d| *d = dismissed);
+                                folds.map.notify();
+                            }
+                        }
+                    >
+                        <summary>{summary}</summary>
+                        {detail_inner}
+                    </details>
+                }.into_any()
             } else {
                 view! { <span></span> }.into_any()
             }}
@@ -1145,6 +1342,113 @@ mod tests {
             Some("newest prompt")
         );
         assert_eq!(resolve_fork("sess-a", Some(&hit), &a), Some(4));
+    }
+
+    #[test]
+    fn fold_bulk_is_a_snapshot_and_per_fold_toggle_still_works() {
+        // Default: no entry = collapsed, as before #1441.
+        let mut map: HashMap<u32, bool> = HashMap::new();
+        assert!(!fold_is_open(&map, 1));
+        // Expand all over the folds present at click time.
+        apply_bulk_fold(&mut map, &[1, 2, 3], true);
+        assert!(fold_is_open(&map, 1) && fold_is_open(&map, 2) && fold_is_open(&map, 3));
+        // A fold streamed in after Expand all has no entry: collapsed,
+        // not force-opened (bulk is a snapshot, not a mode).
+        assert!(!fold_is_open(&map, 4));
+        // Per-fold toggle after a bulk action.
+        record_fold_toggle(&mut map, 2, false);
+        assert!(!fold_is_open(&map, 2));
+        assert!(fold_is_open(&map, 1));
+        // Recording the same state is a no-op (own re-render's toggle).
+        record_fold_toggle(&mut map, 1, true);
+        assert!(fold_is_open(&map, 1));
+        // Collapse all hides every present fold; the streamed-in fold
+        // stays collapsed too.
+        apply_bulk_fold(&mut map, &[1, 2, 3, 4], false);
+        assert!(!fold_is_open(&map, 1) && !fold_is_open(&map, 4));
+        // Session switch resets by clearing the map.
+        map.clear();
+        assert!(!fold_is_open(&map, 1));
+    }
+
+    #[test]
+    fn find_forced_fold_can_be_closed_and_collapse_all_does_not_hide_hits() {
+        // Collapse all recorded false: the current match still opens.
+        assert!(resolve_fold_open(false, true, false));
+        // Recorded open (Expand all), user closes the forced fold:
+        // dismiss, and the fold renders closed.
+        assert_eq!(fold_toggle_action(false, true, true), FoldToggle::Dismiss);
+        assert!(!resolve_fold_open(false, true, true));
+        // Own re-render toggles are ignored.
+        assert_eq!(fold_toggle_action(true, true, true), FoldToggle::Ignore);
+        assert_eq!(fold_toggle_action(false, false, false), FoldToggle::Ignore);
+        // Plain user toggles are recorded; reopening a dismissed fold
+        // records open.
+        assert_eq!(fold_toggle_action(true, false, false), FoldToggle::Record);
+        assert_eq!(fold_toggle_action(false, true, false), FoldToggle::Record);
+        assert_eq!(fold_toggle_action(true, false, true), FoldToggle::Record);
+        assert!(resolve_fold_open(true, true, true));
+        // No find: recorded state rules.
+        assert!(!resolve_fold_open(false, false, false));
+        assert!(resolve_fold_open(true, false, false));
+    }
+
+    #[test]
+    fn repeated_toggles_without_rebuild_use_live_state() {
+        let m = crate::transcript_find::TMatch {
+            line: 3,
+            field: crate::transcript_find::Field::Detail,
+            start: 0,
+            end: 2,
+        };
+        let key = Some((7, m));
+        let shown = |map: &HashMap<u32, bool>, d: &Option<(u32, crate::transcript_find::TMatch)>, forced: bool| {
+            resolve_fold_open(fold_is_open(map, 7), forced, forced && *d == key)
+        };
+        // Plain fold: open then close, no rebuild in between.
+        let (mut map, mut d) = (HashMap::new(), None);
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, None, false, true));
+        assert!(shown(&map, &d, false));
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, None, false, false));
+        assert!(!shown(&map, &d, false), "second toggle must not be ignored");
+        // A rebuild's own toggle (DOM equals state) writes nothing.
+        assert!(!handle_fold_toggle(&mut map, &mut d, 7, None, false, false));
+        // Forced fold: dismiss, reopen, close again.
+        let (mut map, mut d) = (HashMap::new(), None);
+        assert!(shown(&map, &d, true));
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, key, true, false));
+        assert!(!shown(&map, &d, true), "dismissed");
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, key, true, true));
+        assert!(shown(&map, &d, true), "reopen after dismiss sticks");
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, key, true, false));
+        assert!(!shown(&map, &d, true));
+        // After Collapse all the forced fold still shows (no dismissal).
+        let (mut map, d) = (HashMap::new(), None);
+        apply_bulk_fold(&mut map, &[7], false);
+        assert!(shown(&map, &d, true));
+    }
+
+    #[test]
+    fn fold_ids_only_count_messages_with_detail() {
+        let msg = |id: u32, detail: &str| Message {
+            id,
+            role: Role::Tool,
+            title: String::new(),
+            body: String::new(),
+            badge: String::new(),
+            detail: detail.into(),
+            key: String::new(),
+            call_id: String::new(),
+            diff: None,
+            chips: Vec::new(),
+            keep_events: -1,
+            retry_text: String::new(),
+            copy_text: String::new(),
+            at_ms: 0.0,
+        };
+        let msgs = vec![msg(1, "out"), msg(2, ""), msg(3, "diff")];
+        assert_eq!(fold_ids(&msgs), vec![1, 3]);
+        assert!(fold_ids(&[]).is_empty());
     }
 
     #[test]
