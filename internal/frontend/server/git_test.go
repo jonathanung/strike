@@ -366,3 +366,180 @@ func TestGitAttachOnlyRejectsMutations(t *testing.T) {
 		t.Fatalf("attach-only status = %d %s", res.Code, res.Body.String())
 	}
 }
+
+func TestParseNumstatFilesZ(t *testing.T) {
+	got := parseNumstatFilesZ([]byte("\n3\t1\tsrc/a.go\x00-\t-\timg.png\x00"))
+	want := []gitBranchFileJSON{{Path: "src/a.go", Added: 3, Deleted: 1}, {Path: "img.png", Binary: true}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("files = %+v", got)
+	}
+	if files := parseNumstatFilesZ(nil); files == nil || len(files) != 0 {
+		t.Fatalf("empty = %#v", files)
+	}
+}
+
+func TestOptionalBaseName(t *testing.T) {
+	for _, bad := range []string{"-p", "--output=x", "main..x", "HEAD~1", "HEAD@{1}", "a b"} {
+		if _, err := optionalBaseName(bad); err == nil {
+			t.Errorf("base %q accepted", bad)
+		}
+	}
+	for in, want := range map[string]string{"": "", " main ": "main", "origin/main": "origin/main"} {
+		if got, err := optionalBaseName(in); err != nil || got != want {
+			t.Errorf("optionalBaseName(%q) = %q %v", in, got, err)
+		}
+	}
+}
+
+// TestGitBranchChangesRoute covers #1450 against real repos: a branch
+// ahead of base (three-dot files exclude base-side churn), the branch
+// equal to base, an explicit base override, no merge-base, detached
+// HEAD, no commits, no detectable default, and the per-file diff.
+func TestGitBranchChangesRoute(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	newRepo := func(initial string) (string, func(...string) string, func(string, string)) {
+		repo := t.TempDir()
+		git := func(args ...string) string {
+			t.Helper()
+			cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+			cmd.Env = append(os.Environ(),
+				"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+				"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+			)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+			return strings.TrimSpace(string(out))
+		}
+		write := func(name, body string) {
+			t.Helper()
+			p := filepath.Join(repo, filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		git("init", "-b", initial)
+		return repo, git, write
+	}
+	serve := func(repo string) func(string) (int, gitBranchChangesJSON, string) {
+		live := NewLive("s1", repo, nil, make(chan protocol.Op, 1))
+		srv, err := New(Options{SessionDir: t.TempDir(), Live: live})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return func(target string) (int, gitBranchChangesJSON, string) {
+			t.Helper()
+			res := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, target, nil))
+			var body gitBranchChangesJSON
+			if res.Code == http.StatusOK && strings.HasPrefix(target, "/v1/git/branch-changes") {
+				if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+					t.Fatalf("decode: %v\n%s", err, res.Body.String())
+				}
+			}
+			return res.Code, body, res.Body.String()
+		}
+	}
+
+	repo, git, write := newRepo("main")
+	call := serve(repo)
+	if code, got, raw := call("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateNoCommits {
+		t.Fatalf("no commits = %d %s", code, raw)
+	}
+	write("base.txt", "base\n")
+	git("add", ".")
+	git("commit", "-m", "base")
+	if code, got, raw := call("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateOnBase || got.Base != "main" || !got.BaseDetected {
+		t.Fatalf("on base = %d %s", code, raw)
+	}
+	git("checkout", "-b", "feature")
+	write("feat.txt", "one\ntwo\n")
+	git("add", ".")
+	git("commit", "-m", "feat one")
+	write("base.txt", "base\nfeature edit\n")
+	git("add", ".")
+	git("commit", "-m", "feat two")
+	// Base-side churn after the fork must not show as branch changes.
+	git("checkout", "main")
+	write("main-only.txt", "m\n")
+	git("add", ".")
+	git("commit", "-m", "main moves on")
+	git("checkout", "feature")
+
+	code, got, raw := call("/v1/git/branch-changes")
+	if code != http.StatusOK || got.State != branchStateOK || got.Branch != "feature" || got.Base != "main" || !got.BaseDetected {
+		t.Fatalf("feature = %d %s", code, raw)
+	}
+	if got.CommitsTotal != 2 || len(got.Commits) != 2 || got.Commits[0].Subject != "feat two" || got.MergeBase == "" {
+		t.Fatalf("commits = %+v total=%d mb=%q", got.Commits, got.CommitsTotal, got.MergeBase)
+	}
+	files := map[string]gitBranchFileJSON{}
+	for _, f := range got.Files {
+		files[f.Path] = f
+	}
+	if len(got.Files) != 2 || files["feat.txt"].Added != 2 || files["base.txt"].Added != 1 {
+		t.Fatalf("files = %+v", got.Files)
+	}
+	if _, ok := files["main-only.txt"]; ok {
+		t.Fatal("base-side churn listed as a branch change (two-dot, want three-dot)")
+	}
+	// The commit list honours limit; the total stays honest.
+	if code, got, raw := call("/v1/git/branch-changes?limit=1"); code != http.StatusOK || len(got.Commits) != 1 || got.CommitsTotal != 2 {
+		t.Fatalf("limit = %d %s", code, raw)
+	}
+
+	// Per-file cumulative diff.
+	code, _, raw = call("/v1/git/branch-diff?base=main&path=base.txt")
+	if code != http.StatusOK || !strings.Contains(raw, "+feature edit") {
+		t.Fatalf("branch diff = %d %s", code, raw)
+	}
+	for _, target := range []string{
+		"/v1/git/branch-diff?path=base.txt",
+		"/v1/git/branch-diff?base=main&path=../etc/passwd",
+		"/v1/git/branch-diff?base=--output%3Dx&path=base.txt",
+		"/v1/git/branch-changes?base=-p",
+		"/v1/git/branch-changes?base=nope",
+		"/v1/git/branch-changes?limit=0",
+	} {
+		if code, _, raw := call(target); code != http.StatusBadRequest {
+			t.Errorf("%s = %d %s, want 400", target, code, raw)
+		}
+	}
+
+	// Explicit base override: compared with feature itself is on-base.
+	if code, got, raw := call("/v1/git/branch-changes?base=feature"); code != http.StatusOK || got.State != branchStateOnBase || got.BaseDetected {
+		t.Fatalf("override = %d %s", code, raw)
+	}
+
+	// Unrelated history: no merge-base.
+	git("checkout", "--orphan", "island")
+	git("rm", "-rf", "--quiet", ".")
+	write("island.txt", "i\n")
+	git("add", ".")
+	git("commit", "-m", "island")
+	if code, got, raw := call("/v1/git/branch-changes?base=main"); code != http.StatusOK || got.State != branchStateNoMergeBase {
+		t.Fatalf("no merge-base = %d %s", code, raw)
+	}
+
+	// Detached HEAD.
+	git("checkout", "--detach", "main")
+	if code, got, raw := call("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateDetached {
+		t.Fatalf("detached = %d %s", code, raw)
+	}
+
+	// No main/master/origin HEAD: the panel must ask, never guess.
+	repo2, git2, write2 := newRepo("trunk")
+	write2("a.txt", "a\n")
+	git2("add", ".")
+	git2("commit", "-m", "a")
+	git2("checkout", "-b", "work")
+	if code, got, raw := serve(repo2)("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateChooseBase || got.Base != "" {
+		t.Fatalf("choose base = %d %s", code, raw)
+	}
+}

@@ -114,3 +114,23 @@
 .git-diff-bar { display: flex; justify-content: flex-end; }
 .git-copy-diff { min-height: 44px; padding: 4px 12px; }
 /* feature:git-copy-diff end */
+/* feature:branch-changes begin */
+.git-branch-toggle { margin-left: auto; min-height: 44px; padding: 4px 12px; }
+.git-branch-toggle[aria-pressed="true"] { background: var(--raised); }
+.branch-changes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.branch-base {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.branch-stat {
+  color: var(--muted);
+  font-size: var(--type-sm);
+  white-space: nowrap;
+}
+/* feature:branch-changes end */

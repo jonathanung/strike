@@ -197,6 +197,87 @@ fn diff_kind(line: &str) -> &'static str {
     }
 }
 
+/// One changed path on the branch versus its base (#1450).
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct BranchFile {
+    path: String,
+    #[serde(default)]
+    added: i64,
+    #[serde(default)]
+    deleted: i64,
+    #[serde(default)]
+    binary: bool,
+}
+
+/// GET /v1/git/branch-changes — what this branch contains versus base.
+#[derive(Clone, Debug, Deserialize)]
+struct BranchChanges {
+    #[serde(default)]
+    state: String,
+    #[serde(default)]
+    branch: String,
+    #[serde(default)]
+    base: String,
+    #[serde(default, rename = "baseDetected")]
+    base_detected: bool,
+    #[serde(default, rename = "mergeBase")]
+    merge_base: String,
+    #[serde(default)]
+    commits: Vec<GitCommit>,
+    #[serde(default, rename = "commitsTotal")]
+    commits_total: usize,
+    #[serde(default)]
+    files: Vec<BranchFile>,
+}
+
+/// Honest empty-state text for a non-"ok" branch-changes state (#1450).
+/// `None` means the lists below are the answer.
+fn branch_state_message(state: &str, branch: &str, base: &str) -> Option<String> {
+    match state {
+        "ok" | "" => None,
+        "on-base" => Some(format!("You are on {base} — choose another base to compare {branch} against.")),
+        "no-merge-base" => Some(format!("{branch} and {base} share no history — nothing to compare.")),
+        "detached" => Some("Detached HEAD — check out a branch to see its changes.".into()),
+        "no-commits" => Some("No commits yet.".into()),
+        "choose-base" => Some("No default branch found — choose a base branch.".into()),
+        other => Some(format!("Unknown state: {other}")),
+    }
+}
+
+/// Header line: counts are stated even when the commit list is capped.
+fn branch_summary(c: &BranchChanges) -> String {
+    let commits = if c.commits_total > c.commits.len() {
+        format!("{} commits (showing {})", c.commits_total, c.commits.len())
+    } else {
+        format!("{} commits", c.commits_total)
+    };
+    let files = c.files.len();
+    let mb = short_hash(&c.merge_base);
+    format!("{commits} · {files} files vs {} (merge-base {mb})", c.base)
+}
+
+/// Base picker choices: local branches other than the current one, plus
+/// the base in use when it is not a local branch (e.g. origin/main).
+fn base_options(branches: &[GitBranch], current: &str, base: &str) -> Vec<String> {
+    let mut out: Vec<String> = branches
+        .iter()
+        .filter(|b| b.name != current)
+        .map(|b| b.name.clone())
+        .collect();
+    if !base.is_empty() && base != current && !out.iter().any(|n| n == base) {
+        out.insert(0, base.to_string());
+    }
+    out
+}
+
+fn branch_file_stat(f: &BranchFile) -> String {
+    if f.binary {
+        "binary".into()
+    } else {
+        format!("+{} -{}", f.added, f.deleted)
+    }
+}
+
 fn short_hash(hash: &str) -> String {
     hash.chars().take(7).collect()
 }
@@ -288,13 +369,95 @@ pub fn GitPanel(
     // copy partial rather than complete.
     let diff_truncated = RwSignal::new(false);
     let show_log = RwSignal::new(false);
+    // #1450: branch changes vs base. `bc_base` is the user's pick ("" =
+    // let the daemon detect the default branch).
+    let show_branch = RwSignal::new(false);
+    let bc = RwSignal::new(None::<BranchChanges>);
+    let bc_base = RwSignal::new(String::new());
+    let bc_note = RwSignal::new(String::new());
+    let bc_epoch = RwSignal::new(LoadEpoch::new());
+    let bc_file = RwSignal::new(String::new());
+    let bc_diff = RwSignal::new(String::new());
+    let bc_diff_truncated = RwSignal::new(false);
+    let bc_diff_expanded = RwSignal::new(false);
     let message = RwSignal::new(String::new());
     let switch_to = RwSignal::new(String::new());
     let load_epoch = RwSignal::new(LoadEpoch::new());
 
 
+    // #1450: fetch branch changes for the chosen (or detected) base.
+    let load_branch_changes = move || {
+        let gen = begin(bc_epoch);
+        bc_note.set(String::new());
+        bc_file.set(String::new());
+        bc_diff.set(String::new());
+        let pick = bc_base.get_untracked();
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = if pick.is_empty() {
+                "/v1/git/branch-changes".to_string()
+            } else {
+                format!("/v1/git/branch-changes?base={}", crate::api::js_encode(&pick))
+            };
+            let res = get_json::<BranchChanges>(&b, &t, &path).await;
+            if !bc_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
+            }
+            match res {
+                Ok(body) => bc.set(Some(body)),
+                Err(e) => {
+                    bc.set(None);
+                    bc_note.set(format!("Branch changes: {}", http_message(&e)));
+                }
+            }
+        });
+    };
+    // Cumulative merge-base...HEAD diff of one branch file (#1450).
+    let open_branch_file = move |path: String, against: String| {
+        if bc_file.get_untracked() == path {
+            bc_file.set(String::new());
+            bc_diff.set(String::new());
+            return;
+        }
+        let gen = begin(bc_epoch);
+        bc_file.set(path.clone());
+        bc_diff.set(String::new());
+        bc_diff_truncated.set(false);
+        bc_diff_expanded.set(false);
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let url = format!(
+                "/v1/git/branch-diff?base={}&path={}",
+                crate::api::js_encode(&against),
+                crate::api::js_encode(&path)
+            );
+            let res = get_json::<GitDiff>(&b, &t, &url).await;
+            if !bc_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
+            }
+            match res {
+                Ok(body) => {
+                    bc_diff_truncated.set(body.truncated);
+                    bc_diff.set(body.diff);
+                }
+                Err(e) => bc_note.set(format!("Branch diff: {}", http_message(&e))),
+            }
+        });
+    };
+    let toggle_branch = move || {
+        let on = !show_branch.get_untracked();
+        show_branch.set(on);
+        if on {
+            load_branch_changes();
+        }
+    };
+
     let load = move || {
         let gen = begin(load_epoch);
+        // A refresh (commit, checkout) can change what the branch holds.
+        if show_branch.get_untracked() {
+            load_branch_changes();
+        }
         // Rows are what Stage / Discard act on. Drop them before the new
         // status arrives so the previous branch's files are not clickable
         // under a checkout that has already moved on.
@@ -552,6 +715,10 @@ pub fn GitPanel(
                 diff_expanded.set(false);
                 diff_text.set(String::new());
                 diff_truncated.set(false);
+            }
+            "b" if !ev.meta_key() && !ev.ctrl_key() && !ev.alt_key() => {
+                ev.prevent_default();
+                toggle_branch();
             }
             "l" if !ev.meta_key() && !ev.ctrl_key() && !ev.alt_key() => {
                 ev.prevent_default();
@@ -867,7 +1034,118 @@ pub fn GitPanel(
                     let (a, b) = (ahead.get(), behind.get());
                     if a == 0 && b == 0 { String::new() } else { format!("ahead {a} · behind {b}") }
                 }}</span>
+                <button
+                    type="button"
+                    class="secondary git-branch-toggle"
+                    data-git-branch-toggle="true"
+                    aria-pressed=move || show_branch.get().to_string()
+                    on:click=move |_| toggle_branch()
+                >"Branch"</button>
             </div>
+            <Show when=move || show_branch.get()>
+                <section class="branch-changes" data-git-branch-changes="true" aria-label="Branch changes">
+                    {move || {
+                        let current = bc.get().map(|c| c.branch).unwrap_or_default();
+                        let in_use = bc.get().map(|c| c.base).unwrap_or_default();
+                        let options = base_options(&branches.get(), &current, &in_use);
+                        let selected = in_use.clone();
+                        view! {
+                            <label class="branch-base">
+                                <span class="git-meta">"Base"</span>
+                                <select
+                                    class="git-field"
+                                    data-git-branch-base="true"
+                                    aria-label="Base branch"
+                                    on:change=move |ev| {
+                                        bc_base.set(event_target_value(&ev));
+                                        load_branch_changes();
+                                    }
+                                >
+                                    <option value="" selected=in_use.is_empty()>"Choose a base branch"</option>
+                                    {options.into_iter().map(|name| {
+                                        let on = name == selected;
+                                        let label = name.clone();
+                                        view! { <option value=name selected=on>{label}</option> }
+                                    }).collect_view()}
+                                </select>
+                            </label>
+                        }
+                    }}
+                    <Show when=move || !bc_note.get().is_empty()>
+                        <p class="hint" role="alert">{move || bc_note.get()}</p>
+                    </Show>
+                    {move || bc.get().map(|c| {
+                        if let Some(msg) = branch_state_message(&c.state, &c.branch, &c.base) {
+                            return view! { <p class="hint" data-git-branch-state=c.state.clone()>{msg}</p> }.into_any();
+                        }
+                        let summary = branch_summary(&c);
+                        let against = c.base.clone();
+                        let no_commits = c.commits.is_empty();
+                        let no_files = c.files.is_empty();
+                        view! {
+                            <p class="git-meta" data-git-branch-summary="true">{summary}</p>
+                            <h3 class="git-section">"Commits"</h3>
+                            {no_commits.then(|| view! { <p class="hint">"No commits on this branch yet."</p> })}
+                            <ul class="plain">
+                                {c.commits.into_iter().map(|commit| {
+                                    let meta = format!("{} · {} · {}", short_hash(&commit.hash), commit.author, commit.date);
+                                    let full = commit.hash;
+                                    let subject = commit.subject;
+                                    view! {
+                                        <li class="wt-card">
+                                            <span class="name">{subject}</span>
+                                            <span class="path" title=full>{meta}</span>
+                                        </li>
+                                    }
+                                }).collect_view()}
+                            </ul>
+                            <h3 class="git-section">"Files"</h3>
+                            {no_files.then(|| view! { <p class="hint">"No file changes versus the merge-base."</p> })}
+                            {c.files.into_iter().map(|f| {
+                                let stat = branch_file_stat(&f);
+                                let path = f.path.clone();
+                                let path_on = f.path.clone();
+                                let attr = f.path.clone();
+                                let label = f.path;
+                                let against = against.clone();
+                                view! {
+                                    <button
+                                        type="button"
+                                        class="git-file"
+                                        class:on=move || bc_file.get() == path_on
+                                        data-git-branch-file=attr
+                                        on:click=move |_| open_branch_file(path.clone(), against.clone())
+                                    >
+                                        <span class="name">{label}</span>
+                                        <span class="branch-stat">{stat}</span>
+                                    </button>
+                                }
+                            }).collect_view()}
+                        }.into_any()
+                    })}
+                    <Show when=move || !bc_diff.get().is_empty()>
+                        <pre class="git-diff" aria-label="Branch diff" data-git-branch-diff="true">{move || {
+                            let limit = if bc_diff_expanded.get() { usize::MAX } else { 400 };
+                            bc_diff.get().lines().take(limit).map(|line| {
+                                let kind = diff_kind(line);
+                                let text = line.to_string();
+                                view! { <div class=kind>{text}</div> }.into_any()
+                            }).collect_view()
+                        }}</pre>
+                        {move || {
+                            let total = bc_diff.get().lines().count();
+                            (total > 400 && !bc_diff_expanded.get()).then(|| view! {
+                                <button type="button" class="secondary git-diff-expand" on:click=move |_| bc_diff_expanded.set(true)>
+                                    {format!("Show all {total} lines")}
+                                </button>
+                            })
+                        }}
+                        <Show when=move || bc_diff_truncated.get()>
+                            <p class="hint">"Diff truncated by the daemon — showing the first 200 KB."</p>
+                        </Show>
+                    </Show>
+                </section>
+            </Show>
             <Show when=move || !error.get().is_empty()>
                 <div class="notice" role="alert">
                     <span>{move || error.get()}</span>
@@ -1209,6 +1487,78 @@ pub fn WorktreePanel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn branch(name: &str, current: bool) -> GitBranch {
+        GitBranch { name: name.into(), current }
+    }
+
+    fn changes(total: usize, shown: usize, files: usize) -> BranchChanges {
+        BranchChanges {
+            state: "ok".into(),
+            branch: "feature".into(),
+            base: "main".into(),
+            base_detected: true,
+            merge_base: "0123456789abcdef".into(),
+            commits: (0..shown)
+                .map(|i| GitCommit {
+                    hash: format!("{i:040}"),
+                    subject: "s".into(),
+                    author: "a".into(),
+                    date: "d".into(),
+                })
+                .collect(),
+            commits_total: total,
+            files: (0..files)
+                .map(|i| BranchFile { path: format!("f{i}"), added: 1, deleted: 0, binary: false })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn branch_state_messages_name_every_empty_state() {
+        assert_eq!(branch_state_message("ok", "feature", "main"), None);
+        for state in ["on-base", "no-merge-base", "detached", "no-commits", "choose-base", "weird"] {
+            let msg = branch_state_message(state, "feature", "main").expect(state);
+            assert!(!msg.is_empty(), "{state}");
+        }
+        assert!(branch_state_message("on-base", "main", "main").unwrap().contains("main"));
+        assert!(branch_state_message("choose-base", "x", "").unwrap().contains("choose a base"));
+    }
+
+    #[test]
+    fn branch_summary_states_counts_even_when_capped() {
+        assert_eq!(
+            branch_summary(&changes(2, 2, 3)),
+            "2 commits · 3 files vs main (merge-base 0123456)"
+        );
+        assert_eq!(
+            branch_summary(&changes(120, 30, 1)),
+            "120 commits (showing 30) · 1 files vs main (merge-base 0123456)"
+        );
+    }
+
+    #[test]
+    fn base_options_exclude_current_and_include_remote_base() {
+        let branches = vec![branch("main", false), branch("feature", true), branch("dev", false)];
+        assert_eq!(base_options(&branches, "feature", "main"), vec!["main", "dev"]);
+        assert_eq!(
+            base_options(&branches, "feature", "origin/main"),
+            vec!["origin/main", "main", "dev"]
+        );
+        assert_eq!(base_options(&branches, "feature", ""), vec!["main", "dev"]);
+    }
+
+    #[test]
+    fn branch_changes_payload_decodes_daemon_shape() {
+        let raw = r#"{"state":"ok","branch":"feature","base":"main","baseDetected":true,"mergeBase":"abc","commits":[{"hash":"h","subject":"s","author":"a","date":"d"}],"commitsTotal":5,"files":[{"path":"x","added":1,"deleted":2,"binary":false}]}"#;
+        let got: BranchChanges = serde_json::from_str(raw).expect("decode");
+        assert!(got.base_detected);
+        assert_eq!(got.commits_total, 5);
+        assert_eq!(got.files[0].deleted, 2);
+        assert_eq!(branch_file_stat(&got.files[0]), "+1 -2");
+        let bin = BranchFile { path: "p".into(), added: 0, deleted: 0, binary: true };
+        assert_eq!(branch_file_stat(&bin), "binary");
+    }
 
     fn row(section: &str, path: &str, staged: bool) -> GitRow {
         GitRow {
