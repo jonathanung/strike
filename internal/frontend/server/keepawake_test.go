@@ -11,6 +11,7 @@ import (
 
 	"github.com/jonathanung/strike/internal/daemon/keepawake"
 	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 // fakeInhibitor is an in-memory keepawake.Process so tests never touch host
@@ -84,6 +85,23 @@ func newKeepAwakeService(fs *fakeInhibitStarter, lookPath func(string) (string, 
 	})
 }
 
+// newKeepAwakeServer builds a live (mutable) server so PATCH /v1/settings is
+// not refused as read-only attach mode.
+func newKeepAwakeServer(t *testing.T, svc *keepawake.Service) *Server {
+	t.Helper()
+	live := NewLive("live", t.TempDir(), nil, make(chan protocol.Op, 1))
+	srv, err := New(Options{
+		SessionDir: t.TempDir(),
+		Services:   &host.Services{Settings: newKeepAwakeSettings()},
+		Live:       live,
+		KeepAwake:  svc,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return srv
+}
+
 func gatewayBody(t *testing.T, srv *Server) string {
 	t.Helper()
 	res := httptest.NewRecorder()
@@ -105,11 +123,7 @@ func TestSettingsKeepAwakeAppliesLiveAndReportsOnGateway(t *testing.T) {
 	fs := &fakeInhibitStarter{}
 	svc := newKeepAwakeService(fs, func(string) (string, error) { return "/bin/fake-inhibit", nil })
 	t.Cleanup(svc.Close)
-	settings := newKeepAwakeSettings()
-	srv, err := New(Options{SessionDir: t.TempDir(), Services: &host.Services{Settings: settings}, KeepAwake: svc})
-	if err != nil {
-		t.Fatal(err)
-	}
+	srv := newKeepAwakeServer(t, svc)
 
 	if body := gatewayBody(t, srv); !strings.Contains(body, `"keepAwake":{"enabled":false,"supported":true,"state":"off","backend":"fake-inhibit"}`) {
 		t.Fatalf("initial gateway = %s", body)
@@ -162,11 +176,7 @@ func TestSettingsKeepAwakeAppliesLiveAndReportsOnGateway(t *testing.T) {
 func TestGatewayKeepAwakeUnsupportedIsHonest(t *testing.T) {
 	fs := &fakeInhibitStarter{}
 	svc := newKeepAwakeService(fs, func(string) (string, error) { return "", errors.New("not found") })
-	settings := newKeepAwakeSettings()
-	srv, err := New(Options{SessionDir: t.TempDir(), Services: &host.Services{Settings: settings}, KeepAwake: svc})
-	if err != nil {
-		t.Fatal(err)
-	}
+	srv := newKeepAwakeServer(t, svc)
 	// The preference persists, but the effective state never claims "on".
 	if res := patchSettings(t, srv, `{"keepAwake":"on"}`); res.Code != http.StatusOK {
 		t.Fatalf("patch on = %d %s", res.Code, res.Body.String())
