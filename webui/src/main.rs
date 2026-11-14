@@ -4486,6 +4486,22 @@ fn App() -> impl IntoView {
 
     let git_active = Memo::new(move |_| side_tab.get() == "git");
     let worktree_active = Memo::new(move |_| side_tab.get() == "worktrees");
+    // Names the open session for the chat-mode bar and the chat view's h1.
+    let chat_title = Memo::new(move |_| {
+        let id = active_root.get();
+        if id.is_empty() {
+            return "No session".to_string();
+        }
+        sessions
+            .get()
+            .into_iter()
+            .find(|s| s.id == id)
+            .map(|s| {
+                let fallback = short_id(&s.id);
+                session_label(&s.title, &fallback)
+            })
+            .unwrap_or_else(|| short_id(&id))
+    });
 
     view! {
         <ApprovalHost
@@ -4743,7 +4759,11 @@ fn App() -> impl IntoView {
                     </ul>
                     </details>
                 </aside>
-                <section class="chat">
+                <main class="chat" aria-labelledby="chat-heading">
+                    // #1516: landmark and heading so assistive tech can jump
+                    // to the conversation. Visually hidden; the status tabs
+                    // and chat-mode bar already show the session name.
+                    <h1 id="chat-heading" class="sr-only">{move || chat_title.get()}</h1>
                     {move || {
                         let _ = tick.get();
                         let active = active_root.get();
@@ -4770,16 +4790,7 @@ fn App() -> impl IntoView {
                             panel_drawer.set(false);
                             sessions_drawer.update(|v| *v = !*v);
                         }>"Sessions"</button>
-                        <span class="chat-mode-title">{move || {
-                            let id = active_root.get();
-                            if id.is_empty() {
-                                return "No session".to_string();
-                            }
-                            sessions.get().into_iter().find(|s| s.id == id).map(|s| {
-                                let fallback = short_id(&s.id);
-                                session_label(&s.title, &fallback)
-                            }).unwrap_or_else(|| short_id(&id))
-                        }}</span>
+                        <span class="chat-mode-title">{move || chat_title.get()}</span>
                         <button type="button" class="chip" data-chat-panel="true" on:click=move |_| {
                             sessions_drawer.set(false);
                             panel_drawer.update(|v| *v = !*v);
@@ -5166,6 +5177,7 @@ fn App() -> impl IntoView {
                             />
                             <textarea
                                 id="composer-input"
+                                aria-label="Message this session"
                                 placeholder="Message this session"
                                 prop:value=move || draft.get()
                                 on:input=move |ev| {
@@ -5387,7 +5399,7 @@ fn App() -> impl IntoView {
                             }
                         }}</p>
                     </div>
-                </section>
+                </main>
                 <aside class="side">
                     <div class="side-tabs" role="tablist" aria-label="Side panel">
                         <button class=move || if side_tab.get() == "activity" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("activity".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("activity")></span>"Activity"</button>

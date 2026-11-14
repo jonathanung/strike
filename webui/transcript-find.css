@@ -17,7 +17,7 @@
   min-width: 0;
   height: var(--control);
   background: var(--ground);
-  border: 1px solid var(--border-muted);
+  border: 1px solid var(--rule);
   border-radius: var(--radius-sm);
   padding: 0 var(--space-2);
   color: var(--ink);

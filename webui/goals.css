@@ -69,7 +69,7 @@
   width: 100%;
   background: var(--ground);
   color: var(--ink);
-  border: 1px solid var(--border-muted);
+  border: 1px solid var(--rule);
   border-radius: var(--radius-sm);
   padding: 6px 8px;
 }
