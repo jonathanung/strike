@@ -1084,7 +1084,6 @@ fn SourceView(
     hits: Vec<Hit>,
     current: usize,
     target_line: u32,
-    wrap: bool,
 ) -> impl IntoView {
     // The whole file is already loaded; only the rendered window is
     // capped (#1431). The window lives in a signal so "Show more" can
@@ -1107,9 +1106,8 @@ fn SourceView(
             .unwrap_or(target_line)
     };
     let limit = RwSignal::new(initial_render_limit(total, target));
-    let code_class = if wrap { "ev-codeview" } else { "ev-codeview ev-nowrap" };
     view! {
-        <div class=code_class>
+        <div class="ev-codeview">
             {move || {
                 let rows_lines = lines.clone();
                 let rows_hits = hits.clone();
@@ -1236,11 +1234,10 @@ fn marked_pieces(line: &str, hits: &[&Hit], current: Option<&Hit>) -> Vec<(Strin
 }
 
 #[component]
-fn DiffView(text: String, wrap: bool) -> impl IntoView {
-    let diff_class = if wrap { "ev-diff" } else { "ev-diff ev-nowrap" };
+fn DiffView(text: String) -> impl IntoView {
     if text.is_empty() {
         return view! {
-            <div class=diff_class>
+            <div class="ev-diff">
                 <p class="hint">"No agent diff for this file. The Changes tab lists git diffs for the working directory."</p>
             </div>
         }
@@ -1253,7 +1250,7 @@ fn DiffView(text: String, wrap: bool) -> impl IntoView {
     let full_footer = full.clone();
     let shown = RwSignal::new(MAX_DIFF_CHARS);
     view! {
-        <div class=diff_class>
+        <div class="ev-diff">
             {move || {
                 let visible = diff_visible(&full, shown.get());
                 let lines: Vec<String> = visible.split('\n').map(|s| s.to_string()).collect();
@@ -2138,7 +2135,6 @@ pub fn DocumentPane(
                             hits=hits.get()
                             current=hit_idx.get()
                             target_line=jump_line.get()
-                            wrap=wrap_on.get()
                         />
                     }}
                 </Show>
@@ -2155,7 +2151,7 @@ pub fn DocumentPane(
                     <Show when=move || !diff_note.get().is_empty()>
                         <p class="hint">{move || diff_note.get()}</p>
                     </Show>
-                    {move || view! { <DiffView text=agent_diff.get() wrap=wrap_on.get() /> }}
+                    {move || view! { <DiffView text=agent_diff.get() /> }}
                 </Show>
             </div>
             <div class="ev-tools">
