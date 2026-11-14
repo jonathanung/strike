@@ -4,7 +4,7 @@
     "ground": "#14131c"
   },
   "mustInclude": [
-    "Menu",
+    "Run a command",
     "Strike",
     "Sessions",
     "Activity",

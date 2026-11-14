@@ -30,8 +30,10 @@ mod schedule;
 mod model;
 mod notify;
 mod outcome;
+mod project_init;
 mod onboarding;
 mod park;
+mod permissions_explain;
 mod steer_queue;
 mod model_menu;
 mod model_menu_view;
@@ -1056,6 +1058,8 @@ fn App() -> impl IntoView {
     let status = RwSignal::new("connecting…".to_string());
     // Bootstrap capability `diag` (#1489): gates Download diagnostics.
     let diag_capable = RwSignal::new(false);
+    // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
+    let project_init_capable = RwSignal::new(false);
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -1659,6 +1663,7 @@ fn App() -> impl IntoView {
                                     live_busy_root.set(root);
                                 }
                                 diag_capable.set(boot.capabilities.diag);
+                                project_init_capable.set(boot.capabilities.project_init);
                                 skills.set(boot.skills);
                                 commands.set(boot.composer_commands);
                                 if !catalog_once.get_untracked() {
@@ -4616,6 +4621,7 @@ fn App() -> impl IntoView {
                 mode=mode
                 status=status
                 diag_capable=diag_capable
+                project_init_capable=project_init_capable
                 root=active_root
                 theme=theme_id
                 scheme=scheme_id
@@ -4629,10 +4635,20 @@ fn App() -> impl IntoView {
             />
         </Show>
         <Show when=move || mode.get() == "daemon" fallback=move || ()>
-            <DaemonPane gateway_detail=gateway_detail />
+            <DaemonPane gateway_detail=gateway_detail status=status />
         </Show>
         <Show when=move || mode.get() == "usage" || mode.get() == "audit" fallback=move || ()>
-            <usage_audit::UsageAuditPages mode=mode base=base token=token status=status />
+            <usage_audit::UsageAuditPages
+                mode=mode
+                base=base
+                token=token
+                status=status
+                open_session=move |id: String| {
+                    mode.set("chat".into());
+                    let live = roots.get_untracked().iter().any(|r| r.id == id);
+                    open_session(id, live);
+                }
+            />
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
@@ -5782,11 +5798,16 @@ fn App() -> impl IntoView {
 }
 
 #[component]
-fn DaemonPane(gateway_detail: RwSignal<String>) -> impl IntoView {
+fn DaemonPane(gateway_detail: RwSignal<String>, status: RwSignal<String>) -> impl IntoView {
     view! {
         <main class="daemon">
             <section class="card">
                 <h2 class="panel-title"><span class="icon-slot" aria-hidden="true" inner_html=icon("status")></span>"Daemon"</h2>
+                // Connection state and version ("Connected · v…" /
+                // "Unreachable"): this is their on-screen home now that the
+                // header prints neither (#1590 A6/A7); the brand mark only
+                // carries the same text as a tooltip.
+                <p class="hint" data-daemon-link="true">{move || status.get()}</p>
                 <p class="hint gw-detail">{move || {
                     let detail = gateway_detail.get();
                     if detail.is_empty() {
