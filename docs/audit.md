@@ -26,6 +26,7 @@ Every family below has a production emitter and an Observe→Record path (#1032)
 | `hook` | `hook.matched` (shell_* and declarative), and `tool.end` with `errorCode=blocked` |
 | `secret_ref_use` | `Sink.RecordSecretRefUse` at bash secret inject (class + name hash only — never values) |
 | `serve_op` | `strike serve` `POST /v1/ops` and WebSocket op frames (op type + source IP + channel + outcome; never op bodies) |
+| `script_run` | Script-schedule run outcomes (`started|finished|failed|denied|skipped|missed|error`) and lifecycle changes (`armed|rearmed|paused|resumed|deleted`); `command`, `dir`, `outputTail`, `error` scrubbed, `commandHash` + ids kept (design: `docs/design/script-schedules.md`) |
 
 Payloads are redacted via `pkg/telemetry` / `pkg/redact` before append.
 Raw credentials, sensitive tool bodies, and secret values never enter the log.

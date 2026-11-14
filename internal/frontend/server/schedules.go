@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/internal/schedule"
+	"github.com/jonathanung/strike/internal/trust/audit"
+	"github.com/jonathanung/strike/pkg/redact"
 )
 
 type scheduleDTO struct {
@@ -27,13 +29,21 @@ type scheduleDTO struct {
 	PermissionMode string `json:"permissionMode,omitempty"`
 	Overlap        string `json:"overlap"`
 	Missed         string `json:"missed"`
-	NextFire       string `json:"nextFire,omitempty"`
-	LastFire       string `json:"lastFire,omitempty"`
-	LastStatus     string `json:"lastStatus,omitempty"`
-	LastSessionID  string `json:"lastSessionId,omitempty"`
-	LastError      string `json:"lastError,omitempty"`
-	CreatedAt      string `json:"createdAt,omitempty"`
-	UpdatedAt      string `json:"updatedAt,omitempty"`
+	// Script-only (docs/design/script-schedules.md). Command is scrubbed on
+	// this read-side projection; the store keeps it verbatim.
+	Command       string   `json:"command,omitempty"`
+	Dir           string   `json:"dir,omitempty"`
+	Timeout       string   `json:"timeout,omitempty"`
+	SecretRefs    []string `json:"secretRefs,omitempty"`
+	ArmedAt       string   `json:"armedAt,omitempty"`
+	CommandHash   string   `json:"commandHash,omitempty"`
+	NextFire      string   `json:"nextFire,omitempty"`
+	LastFire      string   `json:"lastFire,omitempty"`
+	LastStatus    string   `json:"lastStatus,omitempty"`
+	LastSessionID string   `json:"lastSessionId,omitempty"`
+	LastError     string   `json:"lastError,omitempty"`
+	CreatedAt     string   `json:"createdAt,omitempty"`
+	UpdatedAt     string   `json:"updatedAt,omitempty"`
 }
 
 type runDTO struct {
@@ -45,6 +55,13 @@ type runDTO struct {
 	SessionID      string `json:"sessionId,omitempty"`
 	PermissionMode string `json:"permissionMode,omitempty"`
 	Error          string `json:"error,omitempty"`
+	// Script-run fields; empty for session runs.
+	StartedAt     string `json:"startedAt,omitempty"`
+	EndedAt       string `json:"endedAt,omitempty"`
+	ExitCode      *int   `json:"exitCode,omitempty"`
+	OutputPreview string `json:"outputPreview,omitempty"`
+	OutputRef     string `json:"outputRef,omitempty"`
+	Decision      string `json:"decision,omitempty"`
 }
 
 type scheduleSpecDTO struct {
@@ -63,6 +80,15 @@ type scheduleSpecDTO struct {
 	Overlap        string `json:"overlap"`
 	Missed         string `json:"missed"`
 	Enabled        *bool  `json:"enabled"`
+	// Script-only payload. armedAt and commandHash are never accepted from
+	// the client: the server stamps them when Confirm is set.
+	Command    string   `json:"command"`
+	Dir        string   `json:"dir"`
+	Timeout    string   `json:"timeout"`
+	SecretRefs []string `json:"secretRefs"`
+	// Confirm is the cockpit's explicit arming step; required for every
+	// script create or replace (the same gate as adding an allow rule).
+	Confirm bool `json:"confirm"`
 }
 
 func (s *Server) schedules() *schedule.Service {
@@ -97,6 +123,12 @@ func toScheduleDTO(sch schedule.Schedule) scheduleDTO {
 		PermissionMode: sch.PermissionMode,
 		Overlap:        sch.Overlap,
 		Missed:         sch.Missed,
+		Command:        scrubCommand(sch.Command),
+		Dir:            sch.Dir,
+		Timeout:        sch.Timeout,
+		SecretRefs:     append([]string(nil), sch.SecretRefs...),
+		ArmedAt:        rfc3339(sch.ArmedAt),
+		CommandHash:    sch.CommandHash,
 		NextFire:       rfc3339(sch.NextFire),
 		LastFire:       rfc3339(sch.LastFire),
 		LastStatus:     sch.LastStatus,
@@ -117,7 +149,55 @@ func toRunDTO(run schedule.Run) runDTO {
 		SessionID:      run.SessionID,
 		PermissionMode: run.PermissionMode,
 		Error:          run.Error,
+		StartedAt:      rfc3339(run.StartedAt),
+		EndedAt:        rfc3339(run.EndedAt),
+		ExitCode:       run.ExitCode,
+		OutputPreview:  run.OutputPreview,
+		OutputRef:      run.OutputRef,
+		Decision:       run.Decision,
 	}
+}
+
+func scrubCommand(cmd string) string {
+	if cmd == "" {
+		return ""
+	}
+	return redact.ScrubToolOutput(cmd)
+}
+
+func isScriptSource(source string) bool {
+	return strings.EqualFold(strings.TrimSpace(source), schedule.SourceScript)
+}
+
+// errConfirmRequired is the 400 body for a script write without confirm.
+const errConfirmRequired = "confirm required"
+
+// Script lifecycle statuses written to the script_run audit family.
+const (
+	scriptLifecycleArmed   = "armed"
+	scriptLifecycleRearmed = "rearmed"
+	scriptLifecyclePaused  = "paused"
+	scriptLifecycleResumed = "resumed"
+	scriptLifecycleDeleted = "deleted"
+)
+
+// auditScriptLifecycle writes one script_run lifecycle record for a script
+// schedule; other sources write nothing. A failed audit write does not undo
+// the mutation that already happened.
+func (s *Server) auditScriptLifecycle(r *http.Request, sch schedule.Schedule, status string) {
+	if sch.Source != schedule.SourceScript || s.opts.Audit == nil {
+		return
+	}
+	_ = s.opts.Audit.Record(audit.FamilyScriptRun, "", "", "", "", audit.ScriptRunPayload{
+		ScheduleID:  sch.ID,
+		Status:      status,
+		Mode:        sch.PermissionMode,
+		Command:     sch.Command,
+		CommandHash: sch.CommandHash,
+		Dir:         sch.Dir,
+		Timeout:     sch.Timeout,
+		ClientIP:    s.clientIPString(r),
+	})
 }
 
 func (s *Server) requireSchedules(w http.ResponseWriter) *schedule.Service {
@@ -168,6 +248,10 @@ func specFromDTO(body scheduleSpecDTO) (schedule.Spec, error) {
 		Overlap:        body.Overlap,
 		Missed:         body.Missed,
 		Enabled:        body.Enabled,
+		Command:        body.Command,
+		Dir:            body.Dir,
+		Timeout:        body.Timeout,
+		SecretRefs:     append([]string(nil), body.SecretRefs...),
 	}
 	if strings.TrimSpace(body.At) != "" {
 		at, err := time.Parse(time.RFC3339, strings.TrimSpace(body.At))
@@ -207,11 +291,19 @@ func (s *Server) handleScheduleCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "at must be RFC3339"})
 		return
 	}
+	if isScriptSource(body.Source) {
+		if !body.Confirm {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: errConfirmRequired})
+			return
+		}
+		spec.ArmedAt = time.Now().UTC()
+	}
 	sch, err := svc.Create(spec)
 	if err != nil {
 		writeScheduleErr(w, err)
 		return
 	}
+	s.auditScriptLifecycle(r, sch, scriptLifecycleArmed)
 	writeJSON(w, http.StatusCreated, toScheduleDTO(sch))
 }
 
@@ -243,11 +335,31 @@ func (s *Server) handleScheduleUpdate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "at must be RFC3339"})
 		return
 	}
-	sch, err := svc.Replace(strings.TrimSpace(r.PathValue("id")), spec)
+	id := strings.TrimSpace(r.PathValue("id"))
+	cur, ok := svc.Get(id)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, opErrorResponse{Error: "schedule not found"})
+		return
+	}
+	wantScript, isScript := isScriptSource(body.Source), cur.Source == schedule.SourceScript
+	if wantScript != isScript {
+		// Never a silent conversion: delete and recreate instead.
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "source cannot change to or from script; delete and recreate the schedule"})
+		return
+	}
+	if isScript {
+		if !body.Confirm {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: errConfirmRequired})
+			return
+		}
+		spec.ArmedAt = time.Now().UTC()
+	}
+	sch, err := svc.Replace(id, spec)
 	if err != nil {
 		writeScheduleErr(w, err)
 		return
 	}
+	s.auditScriptLifecycle(r, sch, scriptLifecycleRearmed)
 	writeJSON(w, http.StatusOK, toScheduleDTO(sch))
 }
 
@@ -256,10 +368,15 @@ func (s *Server) handleScheduleDelete(w http.ResponseWriter, r *http.Request) {
 	if svc == nil || s.rejectScheduleWrite(w) {
 		return
 	}
-	if err := svc.Delete(strings.TrimSpace(r.PathValue("id"))); err != nil {
+	id := strings.TrimSpace(r.PathValue("id"))
+	// Snapshot before delete so the lifecycle record carries the command
+	// and hash of what was removed.
+	prev, _ := svc.Get(id)
+	if err := svc.Delete(id); err != nil {
 		writeScheduleErr(w, err)
 		return
 	}
+	s.auditScriptLifecycle(r, prev, scriptLifecycleDeleted)
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
 }
 
@@ -281,6 +398,11 @@ func (s *Server) handleScheduleEnabled(w http.ResponseWriter, r *http.Request, e
 		writeScheduleErr(w, err)
 		return
 	}
+	status := scriptLifecyclePaused
+	if enabled {
+		status = scriptLifecycleResumed
+	}
+	s.auditScriptLifecycle(r, sch, status)
 	writeJSON(w, http.StatusOK, toScheduleDTO(sch))
 }
 
@@ -314,4 +436,48 @@ func (s *Server) handleScheduleHistory(w http.ResponseWriter, r *http.Request) {
 		out[i] = toRunDTO(run)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"runs": out})
+}
+
+// handleScheduleRunOutput serves a script run's scrubbed sidecar tail as
+// text/plain. It is history, like /history: read-only and attach-only
+// servers may read it. 404 when the schedule, the run, or the sidecar is
+// missing.
+func (s *Server) handleScheduleRunOutput(w http.ResponseWriter, r *http.Request) {
+	svc := s.requireSchedules(w)
+	if svc == nil {
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	runID := strings.TrimSpace(r.PathValue("runId"))
+	runs, err := svc.History(id)
+	if err != nil {
+		writeScheduleErr(w, err)
+		return
+	}
+	// Only ids the store generated reach the sidecar path.
+	known := false
+	for _, run := range runs {
+		if run.ID == runID {
+			known = true
+			break
+		}
+	}
+	if !known {
+		writeJSON(w, http.StatusNotFound, opErrorResponse{Error: "run not found"})
+		return
+	}
+	data, err := svc.RunOutput(id, runID)
+	switch {
+	case errors.Is(err, schedule.ErrNotFound), errors.Is(err, schedule.ErrNoOutput):
+		writeJSON(w, http.StatusNotFound, opErrorResponse{Error: "no run output"})
+		return
+	case err != nil:
+		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: "read run output failed"})
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
 }

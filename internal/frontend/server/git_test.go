@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -364,5 +365,409 @@ func TestGitAttachOnlyRejectsMutations(t *testing.T) {
 	bare.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/git/status", nil))
 	if res.Code != http.StatusNotImplemented {
 		t.Fatalf("attach-only status = %d %s", res.Code, res.Body.String())
+	}
+}
+
+func TestParseNumstatFilesZ(t *testing.T) {
+	got := parseNumstatFilesZ([]byte("\n3\t1\tsrc/a.go\x00-\t-\timg.png\x00"))
+	want := []gitBranchFileJSON{{Path: "src/a.go", Added: 3, Deleted: 1}, {Path: "img.png", Binary: true}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("files = %+v", got)
+	}
+	if files := parseNumstatFilesZ(nil); files == nil || len(files) != 0 {
+		t.Fatalf("empty = %#v", files)
+	}
+}
+
+func TestOptionalBaseName(t *testing.T) {
+	for _, bad := range []string{"-p", "--output=x", "main..x", "HEAD~1", "HEAD@{1}", "a b"} {
+		if _, err := optionalBaseName(bad); err == nil {
+			t.Errorf("base %q accepted", bad)
+		}
+	}
+	for in, want := range map[string]string{"": "", " main ": "main", "origin/main": "origin/main"} {
+		if got, err := optionalBaseName(in); err != nil || got != want {
+			t.Errorf("optionalBaseName(%q) = %q %v", in, got, err)
+		}
+	}
+}
+
+// TestGitBranchChangesRoute covers #1450 against real repos: a branch
+// ahead of base (three-dot files exclude base-side churn), the branch
+// equal to base, an explicit base override, no merge-base, detached
+// HEAD, no commits, no detectable default, and the per-file diff.
+func TestGitBranchChangesRoute(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	newRepo := func(initial string) (string, func(...string) string, func(string, string)) {
+		repo := t.TempDir()
+		git := func(args ...string) string {
+			t.Helper()
+			cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+			cmd.Env = append(os.Environ(),
+				"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+				"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+			)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+			return strings.TrimSpace(string(out))
+		}
+		write := func(name, body string) {
+			t.Helper()
+			p := filepath.Join(repo, filepath.FromSlash(name))
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		git("init", "-b", initial)
+		return repo, git, write
+	}
+	serve := func(repo string) func(string) (int, gitBranchChangesJSON, string) {
+		live := NewLive("s1", repo, nil, make(chan protocol.Op, 1))
+		srv, err := New(Options{SessionDir: t.TempDir(), Live: live})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return func(target string) (int, gitBranchChangesJSON, string) {
+			t.Helper()
+			res := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, target, nil))
+			var body gitBranchChangesJSON
+			if res.Code == http.StatusOK && strings.HasPrefix(target, "/v1/git/branch-changes") {
+				if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+					t.Fatalf("decode: %v\n%s", err, res.Body.String())
+				}
+			}
+			return res.Code, body, res.Body.String()
+		}
+	}
+
+	repo, git, write := newRepo("main")
+	call := serve(repo)
+	if code, got, raw := call("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateNoCommits {
+		t.Fatalf("no commits = %d %s", code, raw)
+	}
+	write("base.txt", "base\n")
+	git("add", ".")
+	git("commit", "-m", "base")
+	if code, got, raw := call("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateOnBase || got.Base != "main" || !got.BaseDetected {
+		t.Fatalf("on base = %d %s", code, raw)
+	}
+	git("checkout", "-b", "feature")
+	write("feat.txt", "one\ntwo\n")
+	git("add", ".")
+	git("commit", "-m", "feat one")
+	write("base.txt", "base\nfeature edit\n")
+	git("add", ".")
+	git("commit", "-m", "feat two")
+	// Base-side churn after the fork must not show as branch changes.
+	git("checkout", "main")
+	write("main-only.txt", "m\n")
+	git("add", ".")
+	git("commit", "-m", "main moves on")
+	git("checkout", "feature")
+
+	code, got, raw := call("/v1/git/branch-changes")
+	if code != http.StatusOK || got.State != branchStateOK || got.Branch != "feature" || got.Base != "main" || !got.BaseDetected {
+		t.Fatalf("feature = %d %s", code, raw)
+	}
+	if got.CommitsTotal != 2 || len(got.Commits) != 2 || got.Commits[0].Subject != "feat two" || got.MergeBase == "" {
+		t.Fatalf("commits = %+v total=%d mb=%q", got.Commits, got.CommitsTotal, got.MergeBase)
+	}
+	files := map[string]gitBranchFileJSON{}
+	for _, f := range got.Files {
+		files[f.Path] = f
+	}
+	if len(got.Files) != 2 || files["feat.txt"].Added != 2 || files["base.txt"].Added != 1 {
+		t.Fatalf("files = %+v", got.Files)
+	}
+	if _, ok := files["main-only.txt"]; ok {
+		t.Fatal("base-side churn listed as a branch change (two-dot, want three-dot)")
+	}
+	// The commit list honours limit; the total stays honest.
+	if code, got, raw := call("/v1/git/branch-changes?limit=1"); code != http.StatusOK || len(got.Commits) != 1 || got.CommitsTotal != 2 {
+		t.Fatalf("limit = %d %s", code, raw)
+	}
+
+	// Per-file cumulative diff.
+	code, _, raw = call("/v1/git/branch-diff?base=main&path=base.txt")
+	if code != http.StatusOK || !strings.Contains(raw, "+feature edit") {
+		t.Fatalf("branch diff = %d %s", code, raw)
+	}
+	for _, target := range []string{
+		"/v1/git/branch-diff?path=base.txt",
+		"/v1/git/branch-diff?base=main&path=../etc/passwd",
+		"/v1/git/branch-diff?base=--output%3Dx&path=base.txt",
+		"/v1/git/branch-changes?base=-p",
+		"/v1/git/branch-changes?base=nope",
+		"/v1/git/branch-changes?limit=0",
+	} {
+		if code, _, raw := call(target); code != http.StatusBadRequest {
+			t.Errorf("%s = %d %s, want 400", target, code, raw)
+		}
+	}
+
+	// Explicit base override: compared with feature itself is on-base.
+	if code, got, raw := call("/v1/git/branch-changes?base=feature"); code != http.StatusOK || got.State != branchStateOnBase || got.BaseDetected {
+		t.Fatalf("override = %d %s", code, raw)
+	}
+
+	// Unrelated history: no merge-base.
+	git("checkout", "--orphan", "island")
+	git("rm", "-rf", "--quiet", ".")
+	write("island.txt", "i\n")
+	git("add", ".")
+	git("commit", "-m", "island")
+	if code, got, raw := call("/v1/git/branch-changes?base=main"); code != http.StatusOK || got.State != branchStateNoMergeBase {
+		t.Fatalf("no merge-base = %d %s", code, raw)
+	}
+
+	// Detached HEAD.
+	git("checkout", "--detach", "main")
+	if code, got, raw := call("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateDetached {
+		t.Fatalf("detached = %d %s", code, raw)
+	}
+
+	// No main/master/origin HEAD: the panel must ask, never guess.
+	repo2, git2, write2 := newRepo("trunk")
+	write2("a.txt", "a\n")
+	git2("add", ".")
+	git2("commit", "-m", "a")
+	git2("checkout", "-b", "work")
+	call2 := serve(repo2)
+	if code, got, raw := call2("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateChooseBase || got.Base != "" {
+		t.Fatalf("choose base = %d %s", code, raw)
+	}
+	// Remote default: origin/HEAD -> origin/trunk is detected.
+	git2("update-ref", "refs/remotes/origin/trunk", "trunk")
+	git2("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+	write2("w.txt", "w\n")
+	git2("add", ".")
+	git2("commit", "-m", "work")
+	if code, got, raw := call2("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateOK || got.Base != "origin/trunk" || !got.BaseDetected || got.CommitsTotal != 1 {
+		t.Fatalf("origin/HEAD default = %d %s", code, raw)
+	}
+	// Dangling origin/HEAD (remote branch pruned): ask, do not 400.
+	git2("update-ref", "-d", "refs/remotes/origin/trunk")
+	if code, got, raw := call2("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateChooseBase {
+		t.Fatalf("dangling origin/HEAD = %d %s", code, raw)
+	}
+
+	// master is the fallback default when there is no main, and a tag
+	// named like the base never shadows the branch.
+	repo3, git3, write3 := newRepo("master")
+	write3("m.txt", "m\n")
+	git3("add", ".")
+	git3("commit", "-m", "m")
+	git3("checkout", "-b", "topic")
+	write3("t.txt", "t\n")
+	git3("add", ".")
+	git3("commit", "-m", "t")
+	git3("tag", "master", "HEAD")
+	if code, got, raw := serve(repo3)("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateOK || got.Base != "master" || !got.BaseDetected || got.CommitsTotal != 1 {
+		t.Fatalf("master default = %d %s", code, raw)
+	}
+
+	// Literal pathspec: a bracketed path is not a glob.
+	write("app/[id]/page.tsx", "bracket\n")
+	write("app/i/page.tsx", "glob-match\n")
+	git("checkout", "-q", "-B", "paths", "main")
+	git("add", ".")
+	git("commit", "-m", "paths")
+	code, _, raw = call("/v1/git/branch-diff?base=main&path=" + url.QueryEscape("app/[id]/page.tsx"))
+	if code != http.StatusOK || !strings.Contains(raw, "+bracket") || strings.Contains(raw, "glob-match") {
+		t.Fatalf("literal pathspec = %d %s", code, raw)
+	}
+}
+
+func TestSafeGitRef(t *testing.T) {
+	for _, bad := range []string{"", "-p", "--output=/tmp/x", "a..b", "HEAD@{1}", "HEAD~1", "HEAD^", "a b", "x:y", "a\nb", strings.Repeat("a", 201)} {
+		if _, err := safeGitRef(bad); err == nil {
+			t.Errorf("ref %q accepted", bad)
+		}
+	}
+	for _, good := range []string{"0123456789abcdef0123456789abcdef01234567", "main", "v1.2.3", "feature/x"} {
+		if got, err := safeGitRef(" " + good + " "); err != nil || got != good {
+			t.Errorf("safeGitRef(%q) = %q %v", good, got, err)
+		}
+	}
+}
+
+func TestParseShowNumstatZ(t *testing.T) {
+	out := []byte("\n3\t1\tsrc/a.go\x00-\t-\timg.png\x000\t2\tdocs/old.md\x00")
+	got := parseShowNumstatZ(out)
+	want := []gitShowFileJSON{
+		{Path: "src/a.go", Added: 3, Deleted: 1},
+		{Path: "img.png", Binary: true},
+		{Path: "docs/old.md", Deleted: 2},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("files = %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("file %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if files := parseShowNumstatZ(nil); files == nil || len(files) != 0 {
+		t.Fatalf("empty numstat = %#v, want empty non-nil slice", files)
+	}
+}
+
+// TestGitShowRoute inspects real commits (#1484): a multi-file commit
+// with a long body, a merge (diffed against its first parent), the patch
+// cap, and refused refs.
+func TestGitShowRoute(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(name, body string) {
+		t.Helper()
+		p := filepath.Join(repo, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init", "-b", "main")
+	write("alpha.txt", "one\n")
+	git("add", ".")
+	git("commit", "-m", "initial")
+	root := git("rev-parse", "HEAD")
+
+	write("alpha.txt", "one\ntwo\n")
+	write("src/beta.go", "package beta\n")
+	git("add", ".")
+	longBody := strings.Repeat("Explains the change in detail.\n", 40)
+	git("commit", "-m", "multi-file change", "-m", longBody)
+	multi := git("rev-parse", "HEAD")
+
+	git("checkout", "-b", "side")
+	write("side.txt", "side\n")
+	git("add", ".")
+	git("commit", "-m", "side work")
+	git("checkout", "main")
+	write("gamma.txt", "g\n")
+	git("add", ".")
+	git("commit", "-m", "main work")
+	git("merge", "--no-ff", "-m", "merge side", "side")
+	merge := git("rev-parse", "HEAD")
+
+	write("big.txt", strings.Repeat("0123456789abcdef0123456789abcdef\n", gitDiffCap/32+100))
+	git("add", ".")
+	git("commit", "-m", "big file")
+	big := git("rev-parse", "HEAD")
+
+	live := NewLive("s1", repo, nil, make(chan protocol.Op, 1))
+	srv, err := New(Options{SessionDir: t.TempDir(), Live: live})
+	if err != nil {
+		t.Fatal(err)
+	}
+	show := func(ref string) (int, gitShowJSON, string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/git/show?ref="+url.QueryEscape(ref), nil)
+		res := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(res, req)
+		var body gitShowJSON
+		if res.Code == http.StatusOK {
+			if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode: %v\n%s", err, res.Body.String())
+			}
+		}
+		return res.Code, body, res.Body.String()
+	}
+
+	code, got, raw := show(multi)
+	if code != http.StatusOK {
+		t.Fatalf("show multi = %d %s", code, raw)
+	}
+	if got.Hash != multi || got.Subject != "multi-file change" || got.Author != "Test" || got.Date == "" {
+		t.Fatalf("metadata = %+v", got)
+	}
+	if got.Body != strings.TrimRight(longBody, "\n") {
+		t.Fatalf("body = %q", got.Body)
+	}
+	if len(got.Parents) != 1 || got.Parents[0] != root {
+		t.Fatalf("parents = %v, want [%s]", got.Parents, root)
+	}
+	paths := map[string]gitShowFileJSON{}
+	for _, f := range got.Files {
+		paths[f.Path] = f
+	}
+	if len(got.Files) != 2 || got.FilesTotal != 2 || paths["alpha.txt"].Added != 1 || paths["src/beta.go"].Added != 1 {
+		t.Fatalf("files = %+v", got.Files)
+	}
+	if !strings.Contains(got.Patch, "+two") || !strings.Contains(got.Patch, "src/beta.go") || got.Truncated {
+		t.Fatalf("patch = %q truncated=%v", got.Patch, got.Truncated)
+	}
+
+	// Short hashes from the log resolve to the full hash.
+	if code, got, raw := show(multi[:7]); code != http.StatusOK || got.Hash != multi {
+		t.Fatalf("short hash = %d %s", code, raw)
+	}
+
+	code, got, raw = show(merge)
+	if code != http.StatusOK {
+		t.Fatalf("show merge = %d %s", code, raw)
+	}
+	if len(got.Parents) != 2 {
+		t.Fatalf("merge parents = %v", got.Parents)
+	}
+	if len(got.Files) != 1 || got.Files[0].Path != "side.txt" || !strings.Contains(got.Patch, "+side") {
+		t.Fatalf("merge vs first parent: files=%+v patch=%q", got.Files, got.Patch)
+	}
+
+	code, got, raw = show(root)
+	if code != http.StatusOK || len(got.Parents) != 0 || len(got.Files) != 1 || got.Files[0].Path != "alpha.txt" {
+		t.Fatalf("root commit = %d %+v %s", code, got, raw)
+	}
+
+	code, got, raw = show(big)
+	if code != http.StatusOK || !got.Truncated || len(got.Patch) != gitDiffCap {
+		t.Fatalf("big commit = %d truncated=%v len=%d %s", code, got.Truncated, len(got.Patch), raw[:min(len(raw), 200)])
+	}
+
+	pwned := filepath.Join(t.TempDir(), "pwned")
+	for _, bad := range []string{"", "--output=" + pwned, "-p", "HEAD~1", "main..side", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"} {
+		if code, _, raw := show(bad); code != http.StatusBadRequest {
+			t.Errorf("ref %q = %d %s, want 400", bad, code, raw)
+		}
+	}
+	if _, err := os.Stat(pwned); err == nil {
+		t.Fatal("option-looking ref was executed")
+	}
+
+	// A commit touching more paths than gitShowFilesMax lists the cap
+	// and reports the real total.
+	for i := 0; i < gitShowFilesMax+5; i++ {
+		write(fmt.Sprintf("many/f%03d.txt", i), "x\n")
+	}
+	git("add", ".")
+	git("commit", "-m", "many files")
+	code, got, raw = show(git("rev-parse", "HEAD"))
+	if code != http.StatusOK || len(got.Files) != gitShowFilesMax || got.FilesTotal != gitShowFilesMax+5 {
+		t.Fatalf("many files = %d files=%d total=%d %s", code, len(got.Files), got.FilesTotal, raw[:min(len(raw), 200)])
 	}
 }

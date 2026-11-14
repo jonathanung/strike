@@ -510,9 +510,12 @@ pub fn TranscriptPane(
                                 .collect();
                             let msg_current = fv.current.filter(|h| h.line == idx);
                             let msg_elapsed = snap.elapsed_for(msg.id).map(str::to_owned);
+                            let msg_usage = snap
+                                .usage_for(msg.id)
+                                .and_then(|u| u.label().map(|label| (label, u.detail())));
                             view! {
                                 {sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                {message_view(msg, idx, cursor, open_file, retry, fork, msg_hits, msg_current, msg_elapsed)}
+                                {message_view(msg, idx, cursor, open_file, retry, fork, msg_hits, msg_current, msg_elapsed, msg_usage)}
                             }
                         })
                         .collect_view()
@@ -720,11 +723,12 @@ fn message_view(
     idx: usize,
     cursor: RwSignal<Option<u32>>,
     open_file: Callback<(String, u32)>,
-    _retry: Callback<(String,)>,
+    retry: Callback<(String,)>,
     _fork: Callback<(i32,)>,
     find_hits: Vec<crate::transcript_find::TMatch>,
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
+    turn_usage: Option<(String, String)>,
 ) -> impl IntoView {
     let id = msg.id;
     let role = msg.role.class();
@@ -742,6 +746,12 @@ fn message_view(
     };
     let retry_text = msg.retry_text.clone();
     let keep = msg.keep_events;
+    // #1546: only the daemon's provider_auth code makes a notice
+    // actionable — never a match on the message text.
+    let auth_notice =
+        msg.role == Role::Notice && msg.badge == crate::transcript::PROVIDER_AUTH_CODE;
+    let reconnect = msg.reconnect.clone();
+    let auth_retry = retry_text.trim().to_string();
     let stamp = line_stamp(msg.at_ms);
     let stamp_full = line_full_time(msg.at_ms);
     let has_stamp = !stamp.is_empty();
@@ -805,13 +815,16 @@ fn message_view(
                     {match StatusKind::parse_known(&badge) {
                         Some(kind) => view! { <StatusMark kind=kind place=StatusSlot::Badge /> }.into_any(),
                         None => {
-                            let class = format!("sx-status sx-status-{badge}");
+                            // Badge text keeps its space ("no result"); the
+                            // class token cannot, so it is dashed (#1506).
+                            let class = format!("sx-status sx-status-{}", badge.replace(' ', "-"));
                             view! { <span class=class data-status=badge.clone()>{badge.clone()}</span> }.into_any()
                         }
                     }}
                 </Show>
                 {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
                 {turn_elapsed.clone().map(|label| view! { <span class="turn-elapsed" title="Turn elapsed time">{label}</span> })}
+                {turn_usage.clone().map(|(label, detail)| view! { <span class="turn-usage" title=detail>{label}</span> })}
                 {diff.clone().map(|d| view! {
                     <span class="sx-diff" aria-label=format!("+{} -{}", d.added, d.deleted)>
                         <span class="sx-add">{format!("+{}", d.added)}</span>
@@ -851,8 +864,41 @@ fn message_view(
             } else {
                 view! { <span></span> }.into_any()
             }}
+            {auth_notice.then(|| {
+                let target = reconnect.clone();
+                let resend = auth_retry.clone();
+                let can_retry = !resend.is_empty();
+                view! {
+                    <div class="sx-auth-actions">
+                        <button
+                            type="button"
+                            class="sx-auth-open"
+                            on:click=move |_| {
+                                // Same navigation as the empty state's
+                                // Add provider; then focus the named row.
+                                let _ = crate::shell::set_view("providers");
+                                crate::providers::focus_provider_row(target.clone());
+                            }
+                        >"Open Providers"</button>
+                        {can_retry.then(|| view! {
+                            <button
+                                type="button"
+                                class="sx-quiet"
+                                title="Re-send the failed message after fixing the credential"
+                                on:click=move |_| retry.run((resend.clone(),))
+                            >"Retry"</button>
+                        })}
+                    </div>
+                }
+            })}
             {if !detail.is_empty() {
-                let summary = if diff.is_some() { "Diff" } else { "Output" };
+                let summary = if diff.is_some() {
+                    "Diff"
+                } else if auth_notice {
+                    "Details"
+                } else {
+                    "Output"
+                };
                 // Detail hits highlight through MarkedText, exactly
                 // like body hits (#1576); without hits the fold is the
                 // plain <pre> it has always been.
@@ -917,6 +963,9 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                 }
                 Block::Code { lang, text } => {
                     let copy = text.clone();
+                    // #1575: known fence languages get the file viewer's
+                    // `ev-*` token spans; unknown/empty stay plain text.
+                    let code = crate::editor::highlighted_code(&lang, &text);
                     // Same honest per-button feedback as the message
                     // Copy button (#1582).
                     let copy_state = RwSignal::new(None::<bool>);
@@ -933,7 +982,7 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                                     });
                                 }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
                             </div>
-                            <pre class="sx-code">{text}</pre>
+                            <pre class="sx-code">{code}</pre>
                         </div>
                     }.into_any()
                 }
