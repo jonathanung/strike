@@ -18,6 +18,21 @@ import (
 	"github.com/jonathanung/strike/internal/product/version"
 )
 
+// launchConfigScope returns the config.Load scope for cwd under the workspace
+// trust store: cwd when the workspace root is trusted, "" (global + builtin
+// only) otherwise. Fails closed when the store cannot be opened.
+func launchConfigScope(cwd string) (string, error) {
+	store, err := openWorkspaceTrustStore()
+	if err != nil {
+		return "", fmt.Errorf("opening workspace trust: %w", err)
+	}
+	root := cwd
+	if id, err := project.Resolve(context.Background(), cwd); err == nil {
+		root = id.Root
+	}
+	return config.ProjectScope(cwd, store.Trusted(root)), nil
+}
+
 // maybeLaunchInsideContainer re-execs strike inside the managed container when
 // --launch-inside-container is set or container.execution is "container".
 // On successful handoff it exits the process with the inner strike exit code.
@@ -33,7 +48,14 @@ func maybeLaunchInsideContainer(opts cliOptions, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(cwd)
+	// Workspace trust gate (#1352): this runs before assemble, so it must make
+	// the same decision. An untrusted repo's container.jsonc / config must not
+	// pick the engine binary or flip execution to "container".
+	cfgScope, err := launchConfigScope(cwd)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(cfgScope)
 	if err != nil {
 		return err
 	}

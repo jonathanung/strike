@@ -75,6 +75,15 @@ func (s *Service) History(id string) ([]Run, error) {
 	return sch.Runs, nil
 }
 
+// RunOutput is the scrubbed sidecar tail of one script run. ErrNotFound
+// when the schedule is gone, ErrNoOutput when the run kept none.
+func (s *Service) RunOutput(id, runID string) ([]byte, error) {
+	if _, ok := s.store.Get(id); !ok {
+		return nil, ErrNotFound
+	}
+	return s.store.ReadRunOutput(id, runID)
+}
+
 func (s *Service) Create(spec Spec) (Schedule, error) {
 	if err := s.checkSource(spec); err != nil {
 		return Schedule{}, err
@@ -99,6 +108,11 @@ func (s *Service) Replace(id string, spec Spec) (Schedule, error) {
 	cur, ok := s.store.Get(id)
 	if !ok {
 		return Schedule{}, ErrNotFound
+	}
+	// A script schedule is an explicit opt-in: never convert a session
+	// schedule into one, or one into a session schedule. Delete and recreate.
+	if wantScript := strings.ToLower(strings.TrimSpace(spec.Source)) == SourceScript; wantScript != (cur.Source == SourceScript) {
+		return Schedule{}, invalid("source cannot change to or from script; delete and recreate the schedule")
 	}
 	if err := s.checkSource(spec); err != nil {
 		return Schedule{}, err
@@ -416,7 +430,13 @@ func (s *Service) end(id string) {
 	s.mu.Unlock()
 }
 
+// startedRun and noteIdle flip a session-backed run to finished once its
+// session is no longer busy. Script runs have no session: the script fire
+// path owns their lifecycle, so both are no-ops for script schedules.
 func startedRun(sch Schedule) bool {
+	if sch.Source == SourceScript {
+		return false
+	}
 	if sch.LastStatus == StatusStarted {
 		return true
 	}
@@ -429,6 +449,9 @@ func startedRun(sch Schedule) bool {
 }
 
 func noteIdle(sch *Schedule) {
+	if sch.Source == SourceScript {
+		return
+	}
 	if sch.LastStatus == StatusStarted {
 		sch.LastStatus = StatusFinished
 	}

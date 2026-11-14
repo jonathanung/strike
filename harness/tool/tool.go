@@ -15,6 +15,7 @@ import (
 
 	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/harness/scheduler"
+	"github.com/jonathanung/strike/harness/verify"
 )
 
 // Result separates what the model sees (Output) from what the UI renders
@@ -278,6 +279,8 @@ type VerificationCheck struct {
 	Output     string `json:"output,omitempty"`
 	Error      string `json:"error,omitempty"`
 	DurationMs int64  `json:"duration_ms,omitempty"`
+	// Triage is focused go test rerun triage for a failed cmd gate (#1178).
+	Triage *verify.TriageReport `json:"triage,omitempty"`
 }
 
 // VerificationEnv is audit metadata for a verification run.

@@ -5,23 +5,17 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/jonathanung/strike/internal/protocol"
+	"github.com/jonathanung/strike/pkg/loopspec"
 )
 
 // Session-scoped recurring LLM jobs (/loop). Distinct from /goal (criteria
 // harness): this only schedules UserInput on an interval until stop or quit.
 
-const (
-	maxScheduledLoops = 16
-	maxLoopInterval   = 168 * time.Hour // 7d
-)
-
-// minLoopInterval rejects sub-second spam.
-const minLoopInterval = time.Second
+const maxScheduledLoops = loopspec.MaxPerSession
 
 // scheduledLoop is one in-session recurring job. gen invalidates in-flight ticks.
 type scheduledLoop struct {
@@ -194,71 +188,15 @@ func parseLoopStart(text string, args []string) (time.Duration, string, error) {
 			job = strings.TrimSpace(strings.Join(f[1:], " "))
 		}
 	}
-	if job == "" {
-		return 0, "", fmt.Errorf("job text required after interval")
-	}
-	// Reject control characters in job (composer is usually clean; still guard).
-	for _, r := range job {
-		if r == 0 || (r < 0x20 && r != '\t' && r != '\n') {
-			return 0, "", fmt.Errorf("job contains control characters")
-		}
+	job, err = loopspec.ValidateJob(job)
+	if err != nil {
+		return 0, "", err
 	}
 	return interval, job, nil
 }
 
-// parseLoopInterval accepts Go durations (15m, 2h, 30s, 1h30m) and plain
-// integers as minutes (15 → 15m) for convenience.
-func parseLoopInterval(raw string) (time.Duration, error) {
-	s := strings.TrimSpace(raw)
-	if s == "" {
-		return 0, fmt.Errorf("empty interval")
-	}
-	// Bare positive integer → minutes.
-	if isAllDigits(s) {
-		n, err := strconv.Atoi(s)
-		if err != nil || n <= 0 {
-			return 0, fmt.Errorf("invalid interval %q — want e.g. 15m, 2h, 30s", raw)
-		}
-		s = strconv.Itoa(n) + "m"
-	}
-	d, err := time.ParseDuration(s)
-	if err != nil {
-		return 0, fmt.Errorf("invalid interval %q — want Go duration (15m, 2h, 30s, 1h30m)", raw)
-	}
-	if d < minLoopInterval {
-		return 0, fmt.Errorf("interval %s too short (min %s)", formatLoopInterval(d), formatLoopInterval(minLoopInterval))
-	}
-	if d > maxLoopInterval {
-		return 0, fmt.Errorf("interval %s too long (max %s)", formatLoopInterval(d), formatLoopInterval(maxLoopInterval))
-	}
-	return d, nil
-}
+// parseLoopInterval, formatLoopInterval: the shared /loop grammar (pkg/loopspec),
+// identical to the daemon's /v1/sessions/{id}/loops routes (#1588).
+func parseLoopInterval(raw string) (time.Duration, error) { return loopspec.ParseInterval(raw) }
 
-func isAllDigits(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, r := range s {
-		if !unicode.IsDigit(r) {
-			return false
-		}
-	}
-	return true
-}
-
-func formatLoopInterval(d time.Duration) string {
-	if d <= 0 {
-		return d.String()
-	}
-	// Prefer compact whole units when exact.
-	if d%time.Hour == 0 && d >= time.Hour {
-		return strconv.FormatInt(int64(d/time.Hour), 10) + "h"
-	}
-	if d%time.Minute == 0 && d >= time.Minute {
-		return strconv.FormatInt(int64(d/time.Minute), 10) + "m"
-	}
-	if d%time.Second == 0 && d >= time.Second {
-		return strconv.FormatInt(int64(d/time.Second), 10) + "s"
-	}
-	return d.String()
-}
+func formatLoopInterval(d time.Duration) string { return loopspec.FormatInterval(d) }
