@@ -956,6 +956,9 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                 }
                 Block::Code { lang, text } => {
                     let copy = text.clone();
+                    // #1575: known fence languages get the file viewer's
+                    // `ev-*` token spans; unknown/empty stay plain text.
+                    let code = crate::editor::highlighted_code(&lang, &text);
                     // Same honest per-button feedback as the message
                     // Copy button (#1582).
                     let copy_state = RwSignal::new(None::<bool>);
@@ -972,7 +975,7 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                                     });
                                 }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
                             </div>
-                            <pre class="sx-code">{text}</pre>
+                            <pre class="sx-code">{code}</pre>
                         </div>
                     }.into_any()
                 }

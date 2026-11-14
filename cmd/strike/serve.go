@@ -763,6 +763,8 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		Schedules:    schedules,
 		LiveHub:      liveHub,
 		Services:     services,
+		// /v1/init writes AGENTS.md in the browsing root's directory (#1581).
+		ProjectInitFor: local.NewProjectInit,
 		SyncWorkDir: func(dir string) {
 			if services != nil {
 				local.SetFilesWorkDir(services.Files, dir)

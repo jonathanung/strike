@@ -2667,6 +2667,59 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   .approvals-form button { flex: 1 1 140px; }
 }
 /* feature:approvals end */
+/* feature:permissions-explain begin */
+/* #1504: presets list, preset diff and explain result in the Permissions panel. */
+.perm-explain-presets,
+.perm-explain-diff ul,
+.perm-explain-trail { margin: var(--space-2) 0 0; }
+.perm-explain-preset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+.perm-explain-delta {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+.perm-explain-kind {
+  flex: 0 0 auto;
+  min-width: 64px;
+  color: var(--muted);
+}
+.perm-explain-delta.add .perm-explain-kind { color: var(--diff-add); }
+.perm-explain-delta.del .perm-explain-kind { color: var(--diff-del); }
+.perm-explain-delta.changed .perm-explain-kind { color: var(--warning); }
+.perm-explain-rule {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-display);
+}
+.perm-explain-result {
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.perm-explain-result[data-dry-run="true"] { border-style: dashed; }
+.perm-explain-summary {
+  margin: var(--space-2) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 200px;
+  overflow: auto;
+}
+/* feature:permissions-explain end */
+/* feature:rule-duplicate begin */
+/* #1433: Duplicate + Remove sit together at the row's end instead of
+   spreading across the space-between rule row. */
+.approvals-rule-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+/* feature:rule-duplicate end */
 /* feature:terminal begin */
 .side-tabs { flex-wrap: wrap; }
 .term {
