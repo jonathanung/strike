@@ -274,7 +274,7 @@ func loadDiskAgents(workDir string, col *loadCollector) ([]Agent, error) {
 		}
 	}
 	pres := DiscoverPlugins(workDir)
-	for _, d := range applyPluginAgentLayer(pres.Plugins, plugin.ScopeGlobal, byName, &order) {
+	for _, d := range applyPluginAgentLayer(pres.Plugins, plugin.ScopeGlobal, byName, &order, col) {
 		col.stderrf("plugin: %s\n", d.String())
 	}
 	for _, src := range projectRoots {
@@ -282,7 +282,7 @@ func loadDiskAgents(workDir string, col *loadCollector) ([]Agent, error) {
 			return nil, err
 		}
 	}
-	for _, d := range applyPluginAgentLayer(pres.Plugins, plugin.ScopeProject, byName, &order) {
+	for _, d := range applyPluginAgentLayer(pres.Plugins, plugin.ScopeProject, byName, &order, col) {
 		col.stderrf("plugin: %s\n", d.String())
 	}
 
@@ -499,7 +499,7 @@ func loadSkills(workDir string, col *loadCollector) ([]Skill, error) {
 		}
 	}
 	pres := DiscoverPlugins(workDir)
-	for _, d := range applyPluginSkillLayer(pres.Plugins, plugin.ScopeGlobal, byName, &order) {
+	for _, d := range applyPluginSkillLayer(pres.Plugins, plugin.ScopeGlobal, byName, &order, col) {
 		col.stderrf("plugin: %s\n", d.String())
 	}
 	for _, src := range projectRoots {
@@ -507,7 +507,7 @@ func loadSkills(workDir string, col *loadCollector) ([]Skill, error) {
 			return nil, err
 		}
 	}
-	for _, d := range applyPluginSkillLayer(pres.Plugins, plugin.ScopeProject, byName, &order) {
+	for _, d := range applyPluginSkillLayer(pres.Plugins, plugin.ScopeProject, byName, &order, col) {
 		col.stderrf("plugin: %s\n", d.String())
 	}
 
@@ -554,7 +554,8 @@ func parseSkillFileNotes(path string) (*Skill, []fileNote, error) {
 	if err := ValidateSkillName(name); err != nil {
 		return nil, notes, fmt.Errorf("load skill %s: %w", path, err)
 	}
-	if strings.TrimSpace(meta["description"]) == "" {
+	// Malformed frontmatter already explains the missing description.
+	if !hasNote(notes, DiagMalformedFrontmatter) && strings.TrimSpace(meta["description"]) == "" {
 		notes = append(notes, fileNote{code: DiagMissingDescription, msg: "no description in frontmatter; the skill loads with a blank description"})
 	}
 	abs := path

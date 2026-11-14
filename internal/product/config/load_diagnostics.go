@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/jonathanung/strike/harness/permission"
@@ -76,6 +77,11 @@ func (c *loadCollector) add(path, severity, code, msg string, fatal bool) {
 
 func (c *loadCollector) addNotes(path string, notes []fileNote) {
 	for _, n := range notes {
+		// Claude command files often have no frontmatter; a description
+		// is optional there.
+		if n.code == DiagMissingDescription && filepath.Base(filepath.Dir(path)) == "commands" {
+			continue
+		}
 		severity := "warning"
 		if n.code == DiagUnreadable {
 			severity = "error"
@@ -85,7 +91,7 @@ func (c *loadCollector) addNotes(path string, notes []fileNote) {
 }
 
 func (c *loadCollector) addFatal(path string, err error) {
-	c.add(path, "error", DiagInvalid, err.Error()+"; this error failed the whole "+c.kindLabel()+" load", true)
+	c.add(path, "error", DiagInvalid, err.Error()+"; this error fails the whole "+c.kindLabel()+" load at daemon start or reload", true)
 }
 
 func (c *loadCollector) addSkipped(path string, err error) {
@@ -93,8 +99,9 @@ func (c *loadCollector) addSkipped(path string, err error) {
 }
 
 // stderrf keeps the plain loaders' stderr warnings. A collecting load
-// (the cockpit's rescan) returns them as diagnostics instead, so a page
-// load does not repeat them on the daemon's stderr.
+// (the cockpit's rescan) returns load failures as diagnostics instead, so a
+// page load does not repeat them on the daemon's stderr. Plugin name
+// collisions are not load failures and are not reported there.
 func (c *loadCollector) stderrf(format string, args ...any) {
 	if c == nil {
 		fmt.Fprintf(os.Stderr, format, args...)
@@ -106,6 +113,15 @@ func (c *loadCollector) kindLabel() string {
 		return ""
 	}
 	return c.kind
+}
+
+func hasNote(notes []fileNote, code string) bool {
+	for _, n := range notes {
+		if n.code == code {
+			return true
+		}
+	}
+	return false
 }
 
 func fileFingerprint(path string) string {

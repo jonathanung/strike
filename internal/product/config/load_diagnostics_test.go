@@ -13,6 +13,7 @@ func isolateLoadHome(t *testing.T) (home, work string) {
 	home = t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	ResetPluginCache()
 	return home, t.TempDir()
 }
 
@@ -85,7 +86,7 @@ func TestLoadSkillsReportDiagnostics(t *testing.T) {
 			if d.Kind != "skill" || d.Severity != tc.severity || d.Fatal != tc.fatal || d.Fingerprint == "" || d.Message == "" {
 				t.Fatalf("diag = %+v", d)
 			}
-			if tc.fatal && !strings.Contains(d.Message, "failed the whole skill load") {
+			if tc.fatal && !strings.Contains(d.Message, "fails the whole skill load") {
 				t.Fatalf("fatal message = %q", d.Message)
 			}
 			if tc.wantErr && skills != nil {
@@ -218,5 +219,83 @@ func TestLoadDiagnosticFingerprintTracksFileChanges(t *testing.T) {
 	}
 	if changed := fp(); changed == first {
 		t.Fatal("edited file kept the same fingerprint")
+	}
+}
+
+func TestLoadSkillsReportPluginSkillFailure(t *testing.T) {
+	_, work := isolateLoadHome(t)
+	writeTree(t, filepath.Join(work, ".strike", "plugins", "acme.bad"), map[string]string{
+		"plugin.json": `{
+  "schemaVersion": 1,
+  "id": "acme.bad",
+  "version": "1.0.0",
+  "name": "Bad",
+  "strike": { "min": "0.1.0" },
+  "contributions": {
+    "skills": [{ "path": "skills/broken.md" }, { "path": "skills/hollow.md" }]
+  }
+}`,
+		"skills/broken.md": "---\nname: has space\ndescription: x\n---\nBody.\n",
+		"skills/hollow.md": "---\ndescription: x\n---\n",
+	})
+	_, diags, err := LoadSkillsReport(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, ok := diagFor(diags, "broken.md", DiagSkipped); !ok || !strings.Contains(d.Message, "acme.bad") || d.Fatal {
+		t.Fatalf("diags = %v", diags)
+	}
+	if _, ok := diagFor(diags, "hollow.md", DiagEmpty); !ok {
+		t.Fatalf("diags = %v", diags)
+	}
+}
+
+func TestLoadSkillsReportNoiseRules(t *testing.T) {
+	_, work := isolateLoadHome(t)
+	// Claude command files: description optional, no warning.
+	writeMD(t, filepath.Join(work, ".claude", "commands", "deploy.md"), "Deploy the app.\n")
+	// Malformed frontmatter reports once, not also missing_description.
+	writeMD(t, filepath.Join(work, ".strike", "skills", "open.md"), "---\nname: open\nBody.\n")
+	// No frontmatter at all in a skills root still warns.
+	writeMD(t, filepath.Join(work, ".strike", "skills", "plain.md"), "Just a body.\n")
+	_, diags, err := LoadSkillsReport(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range diags {
+		if filepath.Base(d.Path) == "deploy.md" {
+			t.Fatalf("command file warned: %s", d)
+		}
+	}
+	if _, ok := diagFor(diags, "open.md", DiagMissingDescription); ok {
+		t.Fatalf("malformed file also got missing_description: %v", diags)
+	}
+	if _, ok := diagFor(diags, "open.md", DiagMalformedFrontmatter); !ok {
+		t.Fatalf("diags = %v", diags)
+	}
+	if _, ok := diagFor(diags, "plain.md", DiagMissingDescription); !ok {
+		t.Fatalf("diags = %v", diags)
+	}
+}
+
+func TestLoadDiagnosticsInvalidPathsOmitBody(t *testing.T) {
+	home, work := isolateLoadHome(t)
+	const marker = "BODY-MARKER-do-not-echo"
+	// Global external root loads before the project strict root.
+	writeMD(t, filepath.Join(home, ".claude", "skills", "ext.md"), "---\nname: has space\ndescription: x\n---\n"+marker+"\n")
+	writeMD(t, filepath.Join(work, ".strike", "skills", "strict.md"), "---\nname: also bad\ndescription: x\n---\n"+marker+"\n")
+	_, diags, _ := LoadSkillsReport(work)
+	var codes []string
+	for _, d := range diags {
+		codes = append(codes, d.Code)
+		if strings.Contains(d.String(), marker) {
+			t.Fatalf("diagnostic leaked body: %s", d)
+		}
+	}
+	if _, ok := diagFor(diags, "strict.md", DiagInvalid); !ok {
+		t.Fatalf("codes = %v", codes)
+	}
+	if _, ok := diagFor(diags, "ext.md", DiagSkipped); !ok {
+		t.Fatalf("codes = %v", codes)
 	}
 }

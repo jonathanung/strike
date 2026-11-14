@@ -21,11 +21,15 @@ type loadWarning struct {
 	Fingerprint string `json:"fingerprint"`
 }
 
-// loadWarnings rescans the daemon workspace's skill and agent roots with the
-// real loaders. It reads disk on each call so a fixed file stops warning
-// without a daemon restart.
-func (s *Server) loadWarnings() []loadWarning {
-	dir := strings.TrimSpace(s.opts.WorkDir)
+// loadWarnings rescans a workspace's skill and agent roots with the real
+// loaders: the live root's cwd when known, else the daemon workspace. It
+// reads disk on each call so a fixed file stops warning without a restart;
+// it describes the files now, which is what the next start or reload loads.
+func (s *Server) loadWarnings(cwd string) []loadWarning {
+	dir := strings.TrimSpace(cwd)
+	if dir == "" {
+		dir = strings.TrimSpace(s.opts.WorkDir)
+	}
 	if dir == "" {
 		wd, err := os.Getwd()
 		if err != nil {
@@ -49,11 +53,21 @@ func toLoadWarnings(diags []config.LoadDiagnostic) []loadWarning {
 			Severity:    d.Severity,
 			Code:        d.Code,
 			Path:        d.Path,
-			File:        filepath.Base(d.Path),
+			File:        warningFile(d.Path),
 			Message:     d.Message,
 			Fatal:       d.Fatal,
 			Fingerprint: d.Fingerprint,
 		})
 	}
 	return out
+}
+
+// warningFile is a short display name: "<dir>/SKILL.md" for the directory
+// layout, so skills do not all read "SKILL.md".
+func warningFile(path string) string {
+	base := filepath.Base(path)
+	if strings.EqualFold(base, "skill.md") {
+		return filepath.Base(filepath.Dir(path)) + "/" + base
+	}
+	return base
 }

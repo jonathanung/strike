@@ -82,3 +82,38 @@ func TestBootstrapLoadWarningsReportStrictFailure(t *testing.T) {
 		t.Fatalf("warnings = %+v", got)
 	}
 }
+
+func TestWarningFileNamesDirectoryLayout(t *testing.T) {
+	cases := map[string]string{
+		"/w/.claude/skills/deploy/SKILL.md": "deploy/SKILL.md",
+		"/w/.strike/skills/note.md":         "note.md",
+		"/w/.opencode/skills/x/skill.md":    "x/skill.md",
+	}
+	for in, want := range cases {
+		if got := warningFile(in); got != want {
+			t.Errorf("warningFile(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestLoadWarningsPreferLiveCWD(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	daemonDir, rootDir := t.TempDir(), t.TempDir()
+	writeLoadFixture(t, filepath.Join(rootDir, ".strike", "skills", "nodesc.md"), "---\nname: nodesc\n---\nBody.\n")
+	srv, err := New(Options{WorkDir: daemonDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := srv.loadWarnings(""); len(got) != 0 {
+		t.Fatalf("daemon dir warnings = %+v", got)
+	}
+	got := srv.loadWarnings(rootDir)
+	if len(got) != 1 || got[0].File != "nodesc.md" {
+		t.Fatalf("root cwd warnings = %+v", got)
+	}
+	if statusCWD(nil) != "" || statusCWD(&StatusSnapshot{CWD: rootDir}) != rootDir {
+		t.Fatal("statusCWD")
+	}
+}
