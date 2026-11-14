@@ -344,6 +344,56 @@ type settingsResponse struct {
 	PruneMinimumTokens           int      `json:"pruneMinimumTokens,omitempty"`
 	PruneKeepUserTurns           int      `json:"pruneKeepUserTurns,omitempty"`
 	PruneProtectTools            []string `json:"pruneProtectTools,omitempty"`
+
+	// Session guardrail dials (#1577): effective values with product
+	// defaults resolved by the daemon. Zero caps mean unlimited;
+	// turnTimeoutS -1 means off.
+	TurnTimeoutS         int                  `json:"turnTimeoutS"`
+	MaxSessionCostUSD    float64              `json:"maxSessionCostUSD"`
+	MaxTurnTokens        int                  `json:"maxTurnTokens"`
+	AgentBudget          agentBudgetJSON      `json:"agentBudget"`
+	DelegationPolicy     delegationPolicyJSON `json:"delegationPolicy"`
+	ChildHandoffRequired bool                 `json:"childHandoffRequired"`
+	ChildIsolation       string               `json:"childIsolation,omitempty"`
+}
+
+// agentBudgetJSON is session.agentBudget on the settings wire (0 = unlimited).
+type agentBudgetJSON struct {
+	MaxWallClockS     int     `json:"maxWallClockS"`
+	MaxTokens         int     `json:"maxTokens"`
+	MaxCostUSD        float64 `json:"maxCostUsd"`
+	MaxToolCalls      int     `json:"maxToolCalls"`
+	MaxDangerousTools int     `json:"maxDangerousTools"`
+	StallAfterS       int     `json:"stallAfterS"`
+	LoopDetectN       int     `json:"loopDetectN"`
+}
+
+// delegationPolicyJSON is session.delegationPolicy on the settings wire.
+type delegationPolicyJSON struct {
+	Mode            string `json:"mode"`
+	TinyPromptRunes int    `json:"tinyPromptRunes"`
+	MaxPathsLocal   int    `json:"maxPathsLocal"`
+	MaxLiveChildren int    `json:"maxLiveChildren"`
+}
+
+// agentBudgetPatch is the PATCH form of session.agentBudget: string dials,
+// empty leaves the field unchanged (off|0|unlimited|default clears).
+type agentBudgetPatch struct {
+	MaxWallClockS     string `json:"maxWallClockS"`
+	MaxTokens         string `json:"maxTokens"`
+	MaxCostUSD        string `json:"maxCostUsd"`
+	MaxToolCalls      string `json:"maxToolCalls"`
+	MaxDangerousTools string `json:"maxDangerousTools"`
+	StallAfterS       string `json:"stallAfterS"`
+	LoopDetectN       string `json:"loopDetectN"`
+}
+
+// delegationPolicyPatch is the PATCH form of session.delegationPolicy.
+type delegationPolicyPatch struct {
+	Mode            string `json:"mode"`
+	TinyPromptRunes string `json:"tinyPromptRunes"`
+	MaxPathsLocal   string `json:"maxPathsLocal"`
+	MaxLiveChildren string `json:"maxLiveChildren"`
 }
 
 // settingsPatchBody is the PATCH /v1/settings payload. Empty scalars leave the
@@ -386,6 +436,44 @@ type settingsPatchBody struct {
 	PruneMinimumTokens  string `json:"pruneMinimumTokens"`
 	PruneKeepUserTurns  string `json:"pruneKeepUserTurns"`
 	PruneProtectTools   string `json:"pruneProtectTools"`
+
+	// Session guardrail dials (#1577), string vocabulary of
+	// host.GuardrailDials. Global-only gateway defaults; validated as one
+	// group (an invalid value writes none of them).
+	TurnTimeoutS         string                 `json:"turnTimeoutS"`
+	MaxSessionCostUSD    string                 `json:"maxSessionCostUSD"`
+	MaxTurnTokens        string                 `json:"maxTurnTokens"`
+	AgentBudget          *agentBudgetPatch      `json:"agentBudget"`
+	DelegationPolicy     *delegationPolicyPatch `json:"delegationPolicy"`
+	ChildHandoffRequired string                 `json:"childHandoffRequired"`
+	ChildIsolation       string                 `json:"childIsolation"`
+}
+
+// guardrailDials maps the PATCH body onto host.GuardrailDials.
+func (body settingsPatchBody) guardrailDials() host.GuardrailDials {
+	d := host.GuardrailDials{
+		TurnTimeout:          body.TurnTimeoutS,
+		MaxSessionCostUSD:    body.MaxSessionCostUSD,
+		MaxTurnTokens:        body.MaxTurnTokens,
+		ChildHandoffRequired: body.ChildHandoffRequired,
+		ChildIsolation:       body.ChildIsolation,
+	}
+	if b := body.AgentBudget; b != nil {
+		d.AgentBudgetMaxWallClockS = b.MaxWallClockS
+		d.AgentBudgetMaxTokens = b.MaxTokens
+		d.AgentBudgetMaxCostUSD = b.MaxCostUSD
+		d.AgentBudgetMaxToolCalls = b.MaxToolCalls
+		d.AgentBudgetMaxDangerousTools = b.MaxDangerousTools
+		d.AgentBudgetStallAfterS = b.StallAfterS
+		d.AgentBudgetLoopDetectN = b.LoopDetectN
+	}
+	if p := body.DelegationPolicy; p != nil {
+		d.DelegationMode = p.Mode
+		d.DelegationTinyPromptRunes = p.TinyPromptRunes
+		d.DelegationMaxPathsLocal = p.MaxPathsLocal
+		d.DelegationMaxLiveChildren = p.MaxLiveChildren
+	}
+	return d
 }
 
 func settingsFromDefaults(d host.UserDefaults) settingsResponse {
@@ -418,6 +506,26 @@ func settingsFromDefaults(d host.UserDefaults) settingsResponse {
 		PruneMinimumTokens:           d.PruneMinimumTokens,
 		PruneKeepUserTurns:           d.PruneKeepUserTurns,
 		PruneProtectTools:            append([]string(nil), d.PruneProtectTools...),
+		TurnTimeoutS:                 d.Guardrails.TurnTimeoutS,
+		MaxSessionCostUSD:            d.Guardrails.MaxSessionCostUSD,
+		MaxTurnTokens:                d.Guardrails.MaxTurnTokens,
+		AgentBudget: agentBudgetJSON{
+			MaxWallClockS:     d.Guardrails.AgentBudget.MaxWallClockS,
+			MaxTokens:         d.Guardrails.AgentBudget.MaxTokens,
+			MaxCostUSD:        d.Guardrails.AgentBudget.MaxCostUSD,
+			MaxToolCalls:      d.Guardrails.AgentBudget.MaxToolCalls,
+			MaxDangerousTools: d.Guardrails.AgentBudget.MaxDangerousTools,
+			StallAfterS:       d.Guardrails.AgentBudget.StallAfterS,
+			LoopDetectN:       d.Guardrails.AgentBudget.LoopDetectN,
+		},
+		DelegationPolicy: delegationPolicyJSON{
+			Mode:            d.Guardrails.DelegationPolicy.Mode,
+			TinyPromptRunes: d.Guardrails.DelegationPolicy.TinyPromptRunes,
+			MaxPathsLocal:   d.Guardrails.DelegationPolicy.MaxPathsLocal,
+			MaxLiveChildren: d.Guardrails.DelegationPolicy.MaxLiveChildren,
+		},
+		ChildHandoffRequired: d.Guardrails.ChildHandoffRequired,
+		ChildIsolation:       d.Guardrails.ChildIsolation,
 	}
 }
 
@@ -506,6 +614,11 @@ func applySettingsPatch(settings host.Settings, body settingsPatchBody) error {
 	}
 	if compaction != (host.CompactionDials{}) {
 		if err := settings.SaveCompactionDials(compaction); err != nil {
+			return err
+		}
+	}
+	if guardrails := body.guardrailDials(); guardrails != (host.GuardrailDials{}) {
+		if err := settings.SaveGuardrailDials(guardrails); err != nil {
 			return err
 		}
 	}

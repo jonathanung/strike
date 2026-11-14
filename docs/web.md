@@ -954,7 +954,21 @@ partial: omit or send empty string to leave a field unchanged.
 | Auto-approve | `permissionAutoApproveSeconds`, `permissionAutoApproveExclude`, `maxChildDepth` | Seconds/depth are **strings** on PATCH (`off`\|`0`\|`1-60`; `default`\|`0`\|`1-8`). Exclude: omit = unchanged; `[]` clears; non-empty replaces |
 | Compaction | `compactionStrategy`, `compactionModel`, `compactionThreshold`, `compactionBuffer`, `keepUserTurns`, `pruneProtectTokens`, `pruneMinimumTokens`, `pruneKeepUserTurns`, `pruneProtectTools` | String dials (`trim`\|`summarize`; threshold/buffer ints as strings; `default`/`0` resets; model/tools `-` clears) |
 
+| Guardrails (#1577) | `turnTimeoutS`, `maxSessionCostUSD`, `maxTurnTokens`, `agentBudget{maxWallClockS,maxTokens,maxCostUsd,maxToolCalls,maxDangerousTools,stallAfterS,loopDetectN}`, `delegationPolicy{mode,tinyPromptRunes,maxPathsLocal,maxLiveChildren}`, `childHandoffRequired`, `childIsolation` | **Strings** on PATCH, numbers/bools on GET. Timeout: `default` (1800s)\|`off`\|`0`\|seconds\|duration (`30m`). Caps/budget: `off`\|`0`\|`unlimited` or a positive number. Delegation mode: `off`\|`advise`\|`enforce`\|`default`; `tinyPromptRunes`/`maxPathsLocal`: `default`\|`off`\|positive int. Handoff: `on`\|`off`\|`default`. Isolation: `shared` (children run in the parent workdir — the default)\|`worktree`\|`default` |
+
 Successful `PATCH` returns the updated defaults snapshot (same shape as `GET`).
+
+Guardrail dials are global (`~/.strike/config` `session.*`) gateway defaults.
+`GET` reports effective values with product defaults resolved
+(`turnTimeoutS` 1800, `-1` = off; caps `0` = unlimited; delegation `mode`
+`enforce` when omitted; `childHandoffRequired` true when omitted;
+`childIsolation` `shared`|`worktree`). The group is validated as a whole: an
+invalid value returns **400** naming the field and writes none of them. They
+are read when a strike process assembles, so a running `strike serve` applies
+changes after restart; CLI `--turn-timeout` / `--max-cost` still override.
+A project `.strike/config` that sets the same `session.*` key wins over the
+global value at load.
+
 The cockpit Settings dialog loads `GET`, edits sections, and saves via `PATCH`.
 Browser color scheme (auto/dark/light) is local-only (`data-appearance` +
 `localStorage`), not a host config key.
