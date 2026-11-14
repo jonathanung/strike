@@ -119,10 +119,28 @@ pub fn TranscriptPane(
         }
     };
     // Find-in-transcript: the current match's row must be mounted
-    // before the shell scrolls to its `tf-line-<idx>` article.
+    // before the shell scrolls to its `tf-line-<idx>` article. The
+    // window (and follow state) from before find opened is put back when
+    // it closes, because the shell then restores the scroll offset it
+    // saved at open, which only means the same place over the same
+    // mounted rows.
+    let find_base = StoredValue::new(None::<(usize, bool)>);
     Effect::new(move |_| {
-        if let Some(line) = find.with(|f| f.current.map(|h| h.line)) {
-            reveal_row(line);
+        let (active, line) =
+            find.with(|f| (!f.hits.is_empty() || f.current.is_some(), f.current.map(|h| h.line)));
+        if active {
+            if find_base.get_value().is_none() {
+                let len = transcript.with_untracked(|t| t.messages.len());
+                let start = tw::follow(win_start.get_untracked(), len, false);
+                find_base.set_value(Some((start, pinned.get_untracked())));
+            }
+            if let Some(line) = line {
+                reveal_row(line);
+            }
+        } else if let Some((start, was_pinned)) = find_base.get_value() {
+            find_base.set_value(None);
+            pinned.set(was_pinned);
+            win_start.set(start);
         }
     });
     // Mounts one page of earlier rows, keeping the first row that was
