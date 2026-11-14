@@ -547,7 +547,16 @@ func TestRecordScriptRunMalformedPayloadErrors(t *testing.T) {
 	if !strings.Contains(err.Error(), "script_run") {
 		t.Fatalf("error = %v, want script_run context", err)
 	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
-		t.Fatalf("segment written despite decode error: %v", entries)
+	// Open pre-creates the active segment; a failed Record must leave it empty.
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("segments = %d, want 1 (Open pre-creates the active segment)", len(entries))
+	}
+	data, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("segment written despite decode error: %s", data)
 	}
 }
