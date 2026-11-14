@@ -1402,6 +1402,19 @@ try {
     );
   };
   await openView("Usage", ["Input tokens", "Daily budget (USD)"]);
+  // Audit window (#1440): seed a chain longer than the 100-row window
+  // before opening Audit, so the first render is already capped.
+  const auditSeed = 105;
+  let auditSeeded = 0;
+  for (let i = 0; i < auditSeed; i++) {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/audit`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "terminal", summary: `smoke audit window ${i}` }),
+    });
+    if (!res.ok) break;
+    auditSeeded++;
+  }
   await openView("Audit", ["Verify chain", "Append-only hash chain"]);
   const auditProbe = await waitFor(
     "audit chain state (Chain intact / No audit entries / Not configured)",
@@ -1418,6 +1431,35 @@ try {
     !auditText.includes("Not configured")
   ) {
     throw new Error(`audit chain state missing: ${auditText.slice(0, 500)}`);
+  }
+  if (auditSeeded === auditSeed) {
+    const auditRows = () => evaluate(`document.querySelectorAll(".ua-row.ua-audit").length`);
+    const windowAttr = () =>
+      evaluate(`(document.querySelector("[data-audit-window]") || {}).dataset?.auditWindow || ""`);
+    const first = await waitFor(
+      "audit window caps the first render at 100 rows",
+      async () => {
+        const rows = await auditRows();
+        const attr = await windowAttr();
+        return { ok: rows === 100 && attr.startsWith("100/"), rows, attr };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    const total = Number(String(first.attr || "").split("/")[1]);
+    if (!(total >= auditSeed)) throw new Error(`audit window total ${first.attr} < ${auditSeed}`);
+    const more = await evaluate(
+      `(() => { const b = document.querySelector("[data-audit-more]"); if (!b) return "missing"; b.click(); return "clicked"; })()`,
+    );
+    if (more !== "clicked") throw new Error(`audit Show more ${more}`);
+    const want = Math.min(total, 200);
+    await waitFor(
+      `audit rows beyond the window render after Show more (${want})`,
+      async () => {
+        const rows = await auditRows();
+        return { ok: rows === want, rows };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
   }
 
   // Memory panel (#1305): reload with the token set, open Memory, and

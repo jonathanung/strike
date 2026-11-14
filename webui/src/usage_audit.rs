@@ -235,6 +235,18 @@ async fn put_json(base: &str, token: &str, path: &str, body: Value) -> Result<Va
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
 
+/// Rows the Audit page renders before "Show more" (#1440). The chain is
+/// append-only, so rendering it whole gets heavier for the daemon's life.
+const AUDIT_WINDOW: usize = 100;
+
+/// (rows to render, rows still hidden) for a filtered total and the
+/// current window. Export and Verify never look at this: they stay
+/// full-chain.
+fn audit_window(filtered: usize, shown: usize) -> (usize, usize) {
+    let visible = filtered.min(shown);
+    (visible, filtered - visible)
+}
+
 fn download_text(filename: &str, text: &str) {
     let Some(win) = web_sys::window() else {
         return;
@@ -525,6 +537,7 @@ pub fn AuditPage(
     let list = RwSignal::new(AuditList::default());
     let error = RwSignal::new(String::new());
     let filter = RwSignal::new("all".to_string());
+    let shown = RwSignal::new(AUDIT_WINDOW);
     let loaded = RwSignal::new(false);
     let refresh = RwSignal::new(0u32);
     let audit_epoch = RwSignal::new(LoadEpoch::new());
@@ -655,7 +668,10 @@ pub fn AuditPage(
                         let label = name.to_string();
                         let id_class = id.clone();
                         view! {
-                            <button class=move || if filter.get() == id_class { "chip on" } else { "chip" } on:click=move |_| filter.set(id.clone())>{label}</button>
+                            <button class=move || if filter.get() == id_class { "chip on" } else { "chip" } on:click=move |_| {
+                                filter.set(id.clone());
+                                shown.set(AUDIT_WINDOW);
+                            }>{label}</button>
                         }
                     }).collect_view()}
                 </div>
@@ -665,10 +681,27 @@ pub fn AuditPage(
                         <p>"Approvals, permission changes, shell commands, config edits, and token rotation are appended here. POST /v1/audit records terminal and other actions that are not already a protocol event."</p>
                     </div>
                 </Show>
+                {move || {
+                    let want = filter.get();
+                    let filtered = list.with(|l| l.entries.iter().filter(|e| want == "all" || e.action == want).count());
+                    let (visible, hidden) = audit_window(filtered, shown.get());
+                    let window_attr = format!("{visible}/{filtered}");
+                    let count = format!("Showing {visible} of {filtered}");
+                    (filtered > 0).then(|| view! {
+                        <div class="ua-form" data-audit-window=window_attr>
+                            <span class="hint">{count}</span>
+                            {(hidden > 0).then(|| view! {
+                                <button type="button" data-audit-more="1" on:click=move |_| shown.update(|n| *n = n.saturating_add(AUDIT_WINDOW))>"Show more"</button>
+                                <button type="button" data-audit-all="1" on:click=move |_| shown.set(usize::MAX)>"Show all"</button>
+                            })}
+                        </div>
+                    })
+                }}
                 <div class="ua-table" role="table">
                     {move || {
                         let want = filter.get();
-                        list.get().entries.into_iter().rev().filter(|e| want == "all" || e.action == want).map(|e| {
+                        let limit = shown.get();
+                        list.get().entries.into_iter().rev().filter(|e| want == "all" || e.action == want).take(limit).map(|e| {
                             view! {
                                 <div class="ua-row ua-audit" role="row">
                                     <span class="hint">{format!("#{} {}", e.seq, e.time)}</span>
@@ -682,5 +715,22 @@ pub fn AuditPage(
                 </div>
             </div>
         </main>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audit_window_caps_rows_and_counts_the_rest() {
+        // Longer than the window: only the newest AUDIT_WINDOW render.
+        assert_eq!(audit_window(250, AUDIT_WINDOW), (100, 150));
+        // Show more raises the window by one step.
+        assert_eq!(audit_window(250, AUDIT_WINDOW * 2), (200, 50));
+        // Show all, or a window past the end, hides nothing.
+        assert_eq!(audit_window(250, usize::MAX), (250, 0));
+        assert_eq!(audit_window(40, AUDIT_WINDOW), (40, 0));
+        assert_eq!(audit_window(0, AUDIT_WINDOW), (0, 0));
     }
 }
