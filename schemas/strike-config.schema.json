@@ -114,6 +114,14 @@
         "auto"
       ]
     },
+    "keepAwake": {
+      "type": "string",
+      "description": "Opt-in gateway host sleep inhibition while strike serve runs (systemd-inhibit / caffeinate). Empty means off; never the default.",
+      "enum": [
+        "off",
+        "on"
+      ]
+    },
     "permissionAutoApproveSeconds": {
       "type": "integer",
       "description": "Auto-allow permission asks after N seconds (1\u201360). Zero disables.",

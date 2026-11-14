@@ -50,7 +50,7 @@ func PluginDiagnostics(workDir string) []plugin.Diagnostic {
 
 // applyPluginAgentLayer merges only plugins from the given scope, with
 // collision diagnostics when overwriting an existing name.
-func applyPluginAgentLayer(plugins []plugin.Plugin, scope plugin.Scope, byName map[string]Agent, order *[]string) []plugin.Diagnostic {
+func applyPluginAgentLayer(plugins []plugin.Plugin, scope plugin.Scope, byName map[string]Agent, order *[]string, col *loadCollector) []plugin.Diagnostic {
 	var diags []plugin.Diagnostic
 	for _, p := range plugins {
 		if p.Source != scope {
@@ -60,10 +60,12 @@ func applyPluginAgentLayer(plugins []plugin.Plugin, scope plugin.Scope, byName m
 			agent, err := parseAgentFile(ref.AbsPath)
 			if err != nil {
 				diags = append(diags, pluginDiag(ref, "malformed", err.Error()))
+				col.add(ref.AbsPath, "warning", DiagSkipped, "plugin "+ref.PluginID+": "+err.Error()+"; the file was skipped", false)
 				continue
 			}
 			if agent == nil {
 				diags = append(diags, pluginDiag(ref, "malformed", "empty or invalid agent document"))
+				col.add(ref.AbsPath, "warning", DiagEmpty, "plugin "+ref.PluginID+": empty, unreadable, or bodiless agent document; it was skipped", false)
 				continue
 			}
 			if _, exists := byName[agent.Name]; exists {
@@ -86,7 +88,7 @@ func applyPluginAgentLayer(plugins []plugin.Plugin, scope plugin.Scope, byName m
 	return diags
 }
 
-func applyPluginSkillLayer(plugins []plugin.Plugin, scope plugin.Scope, byName map[string]Skill, order *[]string) []plugin.Diagnostic {
+func applyPluginSkillLayer(plugins []plugin.Plugin, scope plugin.Scope, byName map[string]Skill, order *[]string, col *loadCollector) []plugin.Diagnostic {
 	var diags []plugin.Diagnostic
 	for _, p := range plugins {
 		if p.Source != scope {
@@ -96,10 +98,12 @@ func applyPluginSkillLayer(plugins []plugin.Plugin, scope plugin.Scope, byName m
 			skill, err := parseSkillFile(ref.AbsPath)
 			if err != nil {
 				diags = append(diags, pluginDiag(ref, "malformed", err.Error()))
+				col.add(ref.AbsPath, "warning", DiagSkipped, "plugin "+ref.PluginID+": "+err.Error()+"; the file was skipped", false)
 				continue
 			}
 			if skill == nil {
 				diags = append(diags, pluginDiag(ref, "malformed", "empty or invalid skill document"))
+				col.add(ref.AbsPath, "warning", DiagEmpty, "plugin "+ref.PluginID+": empty, unreadable, or bodiless skill document; it was skipped", false)
 				continue
 			}
 			if _, exists := byName[skill.Name]; exists {
