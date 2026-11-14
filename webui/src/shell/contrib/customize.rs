@@ -1,6 +1,6 @@
-//! Customize (#1281): a Menu row next to Settings, plus a palette command.
-//! The header stays three zones. Trailing slots render in the Menu and the
-//! phone sheet, not the bar.
+//! Customize (#1281): a palette command plus a trailing slot. There is no
+//! header Menu since #1590; trailing slots stay mounted (clipped) and the
+//! palette is the launcher. The phone sheet still lists the slot.
 
 use std::rc::Rc;
 

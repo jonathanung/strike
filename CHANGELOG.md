@@ -31,8 +31,8 @@ materially affect the shipped product.
 - **Customize** — the web client lists skills, agents, MCP servers, plugins,
   hooks, rules files, and the roster stall/handoff gate. A write is a redacted
   preview, then a confirm. MCP env, header, and URL secrets stay masked.
-  Permission rules are shown and preserved. Open it from Menu or the command
-  palette
+  Permission rules are shown and preserved. Open it from the command
+  palette (Ctrl/Cmd+K `customize`)
   ([#1281](https://github.com/jonathanung/strike/issues/1281)).
 
 - **"Allow in this folder" approval scope** — write/edit approval cards in the web cockpit offer a fourth grant scope between Allow once and Allow session/project: the daemon records a session-only grant for the folder the file lives in (covering its subfolders), derived server-side from the ask — never from a client-supplied pattern. The card names the exact folder before you commit, the grant is listed under Permissions → Rules and audit as a "session folder" rule, and removing it there revokes it in the live session. Hard and managed denies still win. Wire: `PermissionReply` decision `folder` (protocol 1.22.0); older daemons treat it as allow-once.

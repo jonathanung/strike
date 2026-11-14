@@ -4622,8 +4622,10 @@ try {
   await send("Page.reload", { ignoreCache: true });
   for (let i = 0; i < 40; i++) {
     const body = await evalJson(`document.body ? document.body.innerText : ""`);
-    const ready = await evalJson(`!!document.querySelector('[data-view="customize"]') && !!document.querySelector('[data-nav="more"]')`);
-    if (String(body).includes("Menu") && ready === true) break;
+    // No header Menu since #1590: the Customize slot stays mounted (clipped)
+    // and the palette is the launcher, so wait on "Run a command".
+    const ready = await evalJson(`!!document.querySelector('[data-view="customize"]')`);
+    if (String(body).includes("Run a command") && ready === true) break;
     if (i === 39) throw new Error(`reload did not show the cockpit: ${String(body).slice(0, 300)}`);
     await delay(250);
   }
