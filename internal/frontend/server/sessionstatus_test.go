@@ -207,6 +207,36 @@ func TestSessionStatusBoardSeenAndEvents(t *testing.T) {
 	}
 }
 
+func TestLiveTurnStateProviderAuthBlocked(t *testing.T) {
+	// #1546: an unretried provider credential failure is blocked-on-you,
+	// not a clean failed stop; the next turn clears it.
+	live := NewLive("s", t.TempDir(), nil, make(chan protocol.Op, 1))
+	defer live.Close()
+	live.Publish(protocol.TurnStarted{})
+	live.Publish(protocol.EngineError{Message: "openai: 401", Code: protocol.ErrorCodeProviderAuth, Provider: "openai"})
+	live.Publish(protocol.TurnCompleted{StopReason: "error"})
+	st := live.Status()
+	if !st.ProviderAuthFailed || st.TurnState != protocol.StatusBlocked {
+		t.Fatalf("status = %+v, want providerAuthFailed + blocked", st)
+	}
+	live.Publish(protocol.TurnStarted{})
+	st = live.Status()
+	if st.ProviderAuthFailed || st.TurnState != protocol.StatusRunning {
+		t.Fatalf("after retry status = %+v, want cleared + running", st)
+	}
+}
+
+func TestLiveTurnStateGenericErrorStaysFailed(t *testing.T) {
+	live := NewLive("s", t.TempDir(), nil, make(chan protocol.Op, 1))
+	defer live.Close()
+	live.Publish(protocol.TurnStarted{})
+	live.Publish(protocol.EngineError{Message: "boom"})
+	live.Publish(protocol.TurnCompleted{StopReason: "error"})
+	if st := live.Status(); st.ProviderAuthFailed || st.TurnState != protocol.StatusFailed {
+		t.Fatalf("status = %+v, want failed", st)
+	}
+}
+
 func TestLiveTurnStateFailed(t *testing.T) {
 	live := NewLive("s", t.TempDir(), nil, make(chan protocol.Op, 1))
 	defer live.Close()
