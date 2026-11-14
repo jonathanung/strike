@@ -21,6 +21,7 @@ import (
 	"github.com/jonathanung/strike/internal/composer/triggers"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/product/version"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/usageaudit"
@@ -126,6 +127,13 @@ type capabilities struct {
 	// SideChat is true when a read-only side-chat model is wired. The ops
 	// refusal does not depend on this flag.
 	SideChat bool `json:"sideChat"`
+	// Loops is true when session-scoped /loop jobs can be listed, started,
+	// and stopped via /v1/sessions/{id}/loops (#1588). Needs a live engine;
+	// false for attach-only and --read-only.
+	Loops bool `json:"loops"`
+	// UpdateCheck is true when GET /v1/update can run the release probe
+	// (settings readable + probe wired). Check-only; never installs (#1583).
+	UpdateCheck bool `json:"updateCheck"`
 }
 
 type bootstrapResponse struct {
@@ -138,6 +146,9 @@ type bootstrapResponse struct {
 	Skills           []map[string]any   `json:"skills"`
 	ProtocolOps      []string           `json:"protocolOps"`
 	ComposerCommands []triggers.Command `json:"composerCommands,omitempty"`
+	// LoadWarnings lists skill/agent files that failed to load or loaded
+	// with a problem (#1386). Omitted when there are none.
+	LoadWarnings []loadWarning `json:"loadWarnings,omitempty"`
 }
 
 var browserProtocolOps = []string{
@@ -158,7 +169,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	// Timeline is host-safe and derived from SessionDir JSONL (always available).
 	// TeamControl shares the live gate: Ops are handled by the same engine path.
 	live := s.hasLive()
-	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live, Attachments: s.opts.Attachments != nil, Notifications: true, SideChat: s.opts.SideChat != nil}
+	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live, Attachments: s.opts.Attachments != nil, Notifications: true, SideChat: s.opts.SideChat != nil, Loops: live && !s.opts.ReadOnly}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
@@ -184,6 +195,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		c.Scheduler = h.SchedulerPresets != nil
 		c.ConfigFiles = h.ConfigFiles != nil
 		c.Themes = h.Themes != nil
+		c.UpdateCheck = s.updateCheckEnabled()
 		// Capabilities describe browser surfaces, not merely host interfaces.
 		// Project init is exposed via /v1/init (#1581) and needs a mutable
 		// live daemon; telemetry remains false until exposed.
@@ -209,7 +221,14 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	if live {
 		protocolOps = browserProtocolOpsWithTeamControl()
 	}
-	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: !live, Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps, ComposerCommands: triggers.Commands()})
+	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: !live, Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps, ComposerCommands: triggers.Commands(), LoadWarnings: s.loadWarnings(statusCWD(status))})
+}
+
+func statusCWD(st *StatusSnapshot) string {
+	if st == nil {
+		return ""
+	}
+	return st.CWD
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -316,6 +335,7 @@ type settingsResponse struct {
 	Sandbox                      string   `json:"sandbox,omitempty"`
 	Notify                       string   `json:"notify,omitempty"`
 	Autoupdate                   string   `json:"autoupdate,omitempty"`
+	KeepAwake                    string   `json:"keepAwake,omitempty"`
 	LeanCode                     string   `json:"leanCode,omitempty"`
 	DeferTools                   string   `json:"deferTools,omitempty"`
 	SessionWorktree              string   `json:"sessionWorktree,omitempty"`
@@ -335,6 +355,63 @@ type settingsResponse struct {
 	PruneMinimumTokens           int      `json:"pruneMinimumTokens,omitempty"`
 	PruneKeepUserTurns           int      `json:"pruneKeepUserTurns,omitempty"`
 	PruneProtectTools            []string `json:"pruneProtectTools,omitempty"`
+
+	// AutoupdateEffective is config.EffectiveAutoupdate(autoupdate): the
+	// mode the probe honours (empty/unknown → notify).
+	AutoupdateEffective string `json:"autoupdateEffective,omitempty"`
+	// UpdateCheck is the last GET /v1/update result this daemon served
+	// (omitted until a check ran). Reading settings never probes.
+	UpdateCheck *updateCheckResponse `json:"updateCheck,omitempty"`
+
+	// Session guardrail dials (#1577): effective values with product
+	// defaults resolved by the daemon. Zero caps mean unlimited;
+	// turnTimeoutS -1 means off.
+	TurnTimeoutS         int                  `json:"turnTimeoutS"`
+	MaxSessionCostUSD    float64              `json:"maxSessionCostUSD"`
+	MaxTurnTokens        int                  `json:"maxTurnTokens"`
+	AgentBudget          agentBudgetJSON      `json:"agentBudget"`
+	DelegationPolicy     delegationPolicyJSON `json:"delegationPolicy"`
+	ChildHandoffRequired bool                 `json:"childHandoffRequired"`
+	ChildIsolation       string               `json:"childIsolation,omitempty"`
+}
+
+// agentBudgetJSON is session.agentBudget on the settings wire (0 = unlimited).
+type agentBudgetJSON struct {
+	MaxWallClockS     int     `json:"maxWallClockS"`
+	MaxTokens         int     `json:"maxTokens"`
+	MaxCostUSD        float64 `json:"maxCostUsd"`
+	MaxToolCalls      int     `json:"maxToolCalls"`
+	MaxDangerousTools int     `json:"maxDangerousTools"`
+	StallAfterS       int     `json:"stallAfterS"`
+	LoopDetectN       int     `json:"loopDetectN"`
+}
+
+// delegationPolicyJSON is session.delegationPolicy on the settings wire.
+type delegationPolicyJSON struct {
+	Mode            string `json:"mode"`
+	TinyPromptRunes int    `json:"tinyPromptRunes"`
+	MaxPathsLocal   int    `json:"maxPathsLocal"`
+	MaxLiveChildren int    `json:"maxLiveChildren"`
+}
+
+// agentBudgetPatch is the PATCH form of session.agentBudget: string dials,
+// empty leaves the field unchanged (off|0|unlimited|default clears).
+type agentBudgetPatch struct {
+	MaxWallClockS     string `json:"maxWallClockS"`
+	MaxTokens         string `json:"maxTokens"`
+	MaxCostUSD        string `json:"maxCostUsd"`
+	MaxToolCalls      string `json:"maxToolCalls"`
+	MaxDangerousTools string `json:"maxDangerousTools"`
+	StallAfterS       string `json:"stallAfterS"`
+	LoopDetectN       string `json:"loopDetectN"`
+}
+
+// delegationPolicyPatch is the PATCH form of session.delegationPolicy.
+type delegationPolicyPatch struct {
+	Mode            string `json:"mode"`
+	TinyPromptRunes string `json:"tinyPromptRunes"`
+	MaxPathsLocal   string `json:"maxPathsLocal"`
+	MaxLiveChildren string `json:"maxLiveChildren"`
 }
 
 // settingsPatchBody is the PATCH /v1/settings payload. Empty scalars leave the
@@ -357,6 +434,9 @@ type settingsPatchBody struct {
 	DeferTools      string `json:"deferTools"`
 	SessionWorktree string `json:"sessionWorktree"`
 	Autoupdate      string `json:"autoupdate"`
+	// KeepAwake is the gateway sleep-inhibition opt-in: on|off. Persisted
+	// through host.Settings and applied live to Options.KeepAwake (#1496).
+	KeepAwake string `json:"keepAwake"`
 
 	// permissionAutoApproveSeconds: off|0|1-60 (string dial, not int).
 	PermissionAutoApproveSeconds string `json:"permissionAutoApproveSeconds"`
@@ -374,6 +454,44 @@ type settingsPatchBody struct {
 	PruneMinimumTokens  string `json:"pruneMinimumTokens"`
 	PruneKeepUserTurns  string `json:"pruneKeepUserTurns"`
 	PruneProtectTools   string `json:"pruneProtectTools"`
+
+	// Session guardrail dials (#1577), string vocabulary of
+	// host.GuardrailDials. Global-only gateway defaults; validated as one
+	// group (an invalid value writes none of them).
+	TurnTimeoutS         string                 `json:"turnTimeoutS"`
+	MaxSessionCostUSD    string                 `json:"maxSessionCostUSD"`
+	MaxTurnTokens        string                 `json:"maxTurnTokens"`
+	AgentBudget          *agentBudgetPatch      `json:"agentBudget"`
+	DelegationPolicy     *delegationPolicyPatch `json:"delegationPolicy"`
+	ChildHandoffRequired string                 `json:"childHandoffRequired"`
+	ChildIsolation       string                 `json:"childIsolation"`
+}
+
+// guardrailDials maps the PATCH body onto host.GuardrailDials.
+func (body settingsPatchBody) guardrailDials() host.GuardrailDials {
+	d := host.GuardrailDials{
+		TurnTimeout:          body.TurnTimeoutS,
+		MaxSessionCostUSD:    body.MaxSessionCostUSD,
+		MaxTurnTokens:        body.MaxTurnTokens,
+		ChildHandoffRequired: body.ChildHandoffRequired,
+		ChildIsolation:       body.ChildIsolation,
+	}
+	if b := body.AgentBudget; b != nil {
+		d.AgentBudgetMaxWallClockS = b.MaxWallClockS
+		d.AgentBudgetMaxTokens = b.MaxTokens
+		d.AgentBudgetMaxCostUSD = b.MaxCostUSD
+		d.AgentBudgetMaxToolCalls = b.MaxToolCalls
+		d.AgentBudgetMaxDangerousTools = b.MaxDangerousTools
+		d.AgentBudgetStallAfterS = b.StallAfterS
+		d.AgentBudgetLoopDetectN = b.LoopDetectN
+	}
+	if p := body.DelegationPolicy; p != nil {
+		d.DelegationMode = p.Mode
+		d.DelegationTinyPromptRunes = p.TinyPromptRunes
+		d.DelegationMaxPathsLocal = p.MaxPathsLocal
+		d.DelegationMaxLiveChildren = p.MaxLiveChildren
+	}
+	return d
 }
 
 func settingsFromDefaults(d host.UserDefaults) settingsResponse {
@@ -386,6 +504,7 @@ func settingsFromDefaults(d host.UserDefaults) settingsResponse {
 		Sandbox:                      d.Sandbox,
 		Notify:                       d.Notify,
 		Autoupdate:                   d.Autoupdate,
+		KeepAwake:                    d.KeepAwake,
 		LeanCode:                     d.LeanCode,
 		DeferTools:                   d.DeferTools,
 		SessionWorktree:              d.SessionWorktree,
@@ -405,6 +524,27 @@ func settingsFromDefaults(d host.UserDefaults) settingsResponse {
 		PruneMinimumTokens:           d.PruneMinimumTokens,
 		PruneKeepUserTurns:           d.PruneKeepUserTurns,
 		PruneProtectTools:            append([]string(nil), d.PruneProtectTools...),
+		AutoupdateEffective:          config.EffectiveAutoupdate(d.Autoupdate),
+		TurnTimeoutS:                 d.Guardrails.TurnTimeoutS,
+		MaxSessionCostUSD:            d.Guardrails.MaxSessionCostUSD,
+		MaxTurnTokens:                d.Guardrails.MaxTurnTokens,
+		AgentBudget: agentBudgetJSON{
+			MaxWallClockS:     d.Guardrails.AgentBudget.MaxWallClockS,
+			MaxTokens:         d.Guardrails.AgentBudget.MaxTokens,
+			MaxCostUSD:        d.Guardrails.AgentBudget.MaxCostUSD,
+			MaxToolCalls:      d.Guardrails.AgentBudget.MaxToolCalls,
+			MaxDangerousTools: d.Guardrails.AgentBudget.MaxDangerousTools,
+			StallAfterS:       d.Guardrails.AgentBudget.StallAfterS,
+			LoopDetectN:       d.Guardrails.AgentBudget.LoopDetectN,
+		},
+		DelegationPolicy: delegationPolicyJSON{
+			Mode:            d.Guardrails.DelegationPolicy.Mode,
+			TinyPromptRunes: d.Guardrails.DelegationPolicy.TinyPromptRunes,
+			MaxPathsLocal:   d.Guardrails.DelegationPolicy.MaxPathsLocal,
+			MaxLiveChildren: d.Guardrails.DelegationPolicy.MaxLiveChildren,
+		},
+		ChildHandoffRequired: d.Guardrails.ChildHandoffRequired,
+		ChildIsolation:       d.Guardrails.ChildIsolation,
 	}
 }
 
@@ -415,7 +555,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	settings := s.opts.Services.Settings
 	if r.Method == http.MethodGet {
-		writeJSON(w, http.StatusOK, settingsFromDefaults(settings.Defaults()))
+		writeJSON(w, http.StatusOK, s.settingsSnapshot(settings.Defaults()))
 		return
 	}
 	if !s.requireMutable(w) {
@@ -440,6 +580,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	// The persisted keepAwake dial is applied to this daemon right away so the
+	// phone sees the effective state on its next GET /v1/gateway poll.
+	if body.KeepAwake != "" && s.opts.KeepAwake != nil {
+		s.opts.KeepAwake.SetEnabled(settings.Defaults().KeepAwake == "on")
+	}
 	fields := settingsPatchFields(body)
 	if sandboxMode != "" {
 		fields = append(fields, "sandbox")
@@ -447,7 +592,19 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if len(fields) > 0 {
 		s.noteAudit(usageaudit.ActionConfig, "", "settings updated", map[string]any{"fields": fields})
 	}
-	writeJSON(w, http.StatusOK, settingsFromDefaults(settings.Defaults()))
+	writeJSON(w, http.StatusOK, s.settingsSnapshot(settings.Defaults()))
+}
+
+// settingsSnapshot adds daemon-held state (last update check) to defaults.
+func (s *Server) settingsSnapshot(d host.UserDefaults) settingsResponse {
+	out := settingsFromDefaults(d)
+	// A result for a different dial (changed since the last check) is stale.
+	if s.updateCheckEnabled() {
+		if last := s.lastUpdateCheck(); last != nil && last.Mode == out.AutoupdateEffective {
+			out.UpdateCheck = last
+		}
+	}
+	return out
 }
 
 // applySettingsPatch writes non-empty dial groups through host.Settings.
@@ -488,6 +645,18 @@ func applySettingsPatch(settings host.Settings, body settingsPatchBody) error {
 	}
 	if compaction != (host.CompactionDials{}) {
 		if err := settings.SaveCompactionDials(compaction); err != nil {
+			return err
+		}
+	}
+	if guardrails := body.guardrailDials(); guardrails != (host.GuardrailDials{}) {
+		if err := settings.SaveGuardrailDials(guardrails); err != nil {
+			return err
+		}
+	}
+	// keepAwake goes last: it has live daemon state behind it, so it is only
+	// persisted when every other group succeeded and the handler will apply it.
+	if body.KeepAwake != "" {
+		if err := settings.SaveKeepAwake(body.KeepAwake); err != nil {
 			return err
 		}
 	}

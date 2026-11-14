@@ -17,6 +17,8 @@ import (
 
 	"github.com/jonathanung/strike/harness/engine"
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/daemon/deploywatch"
+	"github.com/jonathanung/strike/internal/daemon/keepawake"
 	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/host/local"
@@ -26,6 +28,7 @@ import (
 	"github.com/jonathanung/strike/internal/persist/taskrun"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/config"
+	"github.com/jonathanung/strike/internal/product/update"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/audit"
 	"github.com/jonathanung/strike/internal/trust/usageaudit"
@@ -68,6 +71,7 @@ Endpoints:
   GET  /v1/agents                   selectable agents
   GET  /v1/sessions                 session list (+ liveId)
   GET  /v1/sessions/{id}/events     SSE tail of a session JSONL log
+  GET  /v1/sessions/{id}/loops      session /loop jobs (POST start, DELETE stop)
   GET  /v1/triggers                 trigger registry
   POST /hooks/{id}                 inbound trigger (HMAC, not the daemon bearer)
   GET  /v1/workflows                workflow catalog
@@ -324,6 +328,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var services *host.Services
 	var sandboxSnap *server.SandboxSnapshot
 	var sideChat server.SideChatModel
+	var keepAwake *keepawake.Service
 	var taskRuns *taskrun.Store
 	var terminalSandbox sandbox.Policy
 	var terminalSandboxFor func(sessionID, workDir string) (sandbox.Policy, bool)
@@ -362,7 +367,15 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
+		if n := a.startupNotice(); n != "" {
+			fmt.Fprintln(stderr, n)
+		}
 		sharedAttachments = a.attachments
+		// Opt-in host sleep inhibition (#1496): default off; the persisted
+		// dial is applied at start and flipped live by PATCH /v1/settings.
+		keepAwake = keepawake.New(keepawake.Options{})
+		defer keepAwake.Close()
+		keepAwake.SetEnabled(a.cfg.KeepAwake == config.KeepAwakeOn)
 		sessionDir = a.sessions.Dir()
 		sideChat = newSideChatModel(a.sideProvider, a.sideModel, a.sideSelect)
 
@@ -726,6 +739,14 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	// server.NewRootLauncher); the landed scheduler uses internal/rootstart.
 	// Do not spawn a third way.
 	trigSvc := trigger.New(trigStore, server.NewRootLauncher(liveHub))
+	dwStore, err := deploywatch.Open("")
+	if err != nil {
+		return err
+	}
+	deployWatches := deploywatch.New(dwStore, deploywatch.Config{})
+	if !opts.readOnly {
+		go deployWatches.Run(ctx, deploywatch.DefaultTick)
+	}
 
 	workDir, _ := os.Getwd()
 	srv, err := server.New(server.Options{
@@ -753,6 +774,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		UsageAuditDir:         usageDir,
 		SideChat:              sideChat,
 		Triggers:              trigSvc,
+		DeployWatches:         deployWatches,
 		TaskRuns:              taskRuns,
 		WorkDir:               workDir,
 		TerminalRemote:        opts.terminalRemote,
@@ -760,6 +782,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		TerminalSandboxLoaded: terminalSandboxLoaded,
 		TerminalSandboxFor:    terminalSandboxFor,
 		Assembled:             assembled,
+		KeepAwake:             keepAwake,
+		// Check-only release probe for GET /v1/update (#1583); never installs.
+		UpdateProbe: server.NewUpdateProbe(update.ProbeOptions{}),
 	})
 	if err != nil {
 		return err
