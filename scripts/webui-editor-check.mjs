@@ -216,6 +216,29 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "search count",
     );
+    // Go-to-line wins over an active search (#1403): the query is
+    // cleared so neither the scroll effect nor the render window
+    // follows the search hit instead of the requested line.
+    await evalValue(
+      send,
+      `(() => {
+        const input = document.getElementById("ev-goto");
+        input.value = "4";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const n = document.querySelector("[data-ev-goto-note]");
+        const q = document.getElementById("ev-search");
+        if (!n || !n.textContent.includes("Line 4 of 5")) return n ? n.textContent : "no goto note";
+        return q && q.value === "" ? "ok" : "search not cleared: " + (q ? q.value : "no search");
+      })()`,
+      "goto clears an active search",
+    );
 
     await evalValue(
       send,
@@ -246,7 +269,7 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "cursor readout",
     );
-    const tabbed = await evalValue(
+    await evalValue(
       send,
       `(() => {
         const ta = document.querySelector(".ev-editor");
@@ -254,7 +277,7 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
         // Select lines 2-3 and Tab: both indent, focus stays in the editor.
         ta.setSelectionRange(11, 27);
         ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
-        return ta.value;
+        return "ok";
       })()`,
     );
     // The draft updates asynchronously through Leptos; poll for the value.
@@ -262,11 +285,36 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       send,
       `(() => {
         const ta = document.querySelector(".ev-editor");
-        return ta && ta.value.includes("  second line") && ta.value.includes("  third line") ? "ok" : (ta ? ta.value : "no editor");
+        if (!ta) return "no editor";
+        if (!(ta.value.includes("  second line") && ta.value.includes("  third line"))) return ta.value;
+        const id = document.activeElement && document.activeElement.id;
+        return id === "ev-editor" ? "ok" : "focus left the editor: " + id;
       })()`,
-      "tab indent selection",
+      "tab indent selection keeps focus",
     );
-    if (String(tabbed).length === 0) throw new Error("tab dispatch returned empty");
+    // Ctrl+G then Escape dismisses the go-to box only: the dirty draft
+    // and edit mode survive, and focus returns to the editor.
+    await evalValue(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        ta.dispatchEvent(new KeyboardEvent("keydown", { key: "g", ctrlKey: true, bubbles: true, cancelable: true }));
+        const input = document.getElementById("ev-goto");
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        if (!ta) return "edit mode closed by goto Escape";
+        if (!ta.value.includes("  second line")) return "draft lost: " + ta.value;
+        const id = document.activeElement && document.activeElement.id;
+        return id === "ev-editor" ? "ok" : "focus = " + id;
+      })()`,
+      "goto Escape keeps the draft",
+    );
     await evalValue(
       send,
       `(() => {
@@ -281,9 +329,55 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       send,
       `(() => {
         const ta = document.querySelector(".ev-editor");
-        return ta && ta.value.startsWith("alpha beta") && !ta.value.includes("  second line") ? "ok" : (ta ? ta.value : "no editor");
+        const want = "alpha beta\\nsecond line\\nthird line\\nfourth line\\nfifth line\\n";
+        return ta && ta.value === want ? "ok" : (ta ? JSON.stringify(ta.value) : "no editor");
       })()`,
       "shift+tab outdent",
+    );
+    // Edit-mode go-to-line moves the caret to the line start (#1403).
+    await evalValue(
+      send,
+      `(() => {
+        const input = document.getElementById("ev-goto");
+        input.value = "3";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        const n = document.querySelector("[data-ev-cursor]");
+        if (!ta || ta.selectionStart !== 23 || ta.selectionEnd !== 23) return "caret " + (ta ? ta.selectionStart + "-" + ta.selectionEnd : "no editor");
+        return n && n.textContent.includes("Ln 3, Col 1") ? "ok" : (n ? n.textContent : "no cursor readout");
+      })()`,
+      "edit-mode goto moves the caret",
+    );
+    // Escape still leaves edit mode after Tab use (#1408); the draft is
+    // clean again, so no guard prompt. Re-enter Edit for the guard case.
+    await evalValue(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector(".ev-editor") ? "still editing" : "ok")()`,
+      "Escape exits edit mode",
+    );
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-edit]"); if (!b || b.disabled) return "edit disabled"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector(".ev-editor") ? "ok" : "no editor")()`,
+      "editor textarea (re-entered)",
     );
 
     // Dirty guard (#1394): an unsaved draft must block navigation.

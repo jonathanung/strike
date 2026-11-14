@@ -239,27 +239,42 @@ pub fn caret_ln_col(text: &str, byte: usize) -> (u32, u32) {
     (line, col)
 }
 
-/// Indent unit detected from the file: a tab when indented lines use
-/// tabs, otherwise the smallest positive leading-space run (so a file
-/// nested four deep still yields its one-level unit). Fallback: two
-/// spaces (#1408 Q1 default).
+/// Indent unit detected from the file: a tab when most indented lines
+/// use tabs, otherwise the smallest leading-space run of two or more
+/// (so a file nested four deep still yields its one-level unit). Block
+/// comment continuations (` * text`) are ignored, and a 1-space run
+/// counts only when it is the only run. Fallback: two spaces (#1408 Q1
+/// default).
 pub fn detect_indent_unit(text: &str) -> String {
-    let mut best: Option<usize> = None;
+    let (mut tab_lines, mut space_lines) = (0usize, 0usize);
+    let (mut best_multi, mut saw_single) = (None::<usize>, false);
     for line in lines_of(text) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('*') {
+            continue;
+        }
         if line.starts_with('\t') {
-            return "\t".to_string();
+            tab_lines += 1;
+            continue;
         }
         let spaces = line.len() - line.trim_start_matches(' ').len();
-        if spaces > 0 && !line.trim().is_empty() {
-            best = Some(match best {
-                None => spaces,
-                Some(b) => b.min(spaces),
-            });
+        if spaces == 0 {
+            continue;
+        }
+        space_lines += 1;
+        if spaces == 1 {
+            saw_single = true;
+        } else {
+            best_multi = Some(best_multi.map_or(spaces, |b: usize| b.min(spaces)));
         }
     }
-    match best {
-        Some(n) => " ".repeat(n.clamp(1, 8)),
-        None => "  ".to_string(),
+    if tab_lines > space_lines {
+        return "\t".to_string();
+    }
+    match (best_multi, saw_single) {
+        (Some(n), _) => " ".repeat(n.min(8)),
+        (None, true) => " ".to_string(),
+        (None, false) => "  ".to_string(),
     }
 }
 
@@ -303,6 +318,7 @@ pub fn apply_tab(
     let mut new_end = end;
     let mut out = String::with_capacity(text.len() + unit.len() * 4);
     out.push_str(&text[..first]);
+    let mut line_off = first;
     for (idx, line) in text[first..spanned_end].split('\n').enumerate() {
         if idx > 0 {
             out.push('\n');
@@ -320,7 +336,14 @@ pub fn apply_tab(
             if idx == 0 {
                 new_start = new_start.saturating_sub(removed).max(first);
             }
-            new_end = new_end.saturating_sub(removed);
+            // An end inside the removed whitespace moves back only to
+            // its line start, never into the previous line.
+            let shift_end = if line_off == last {
+                removed.min(end.saturating_sub(line_off))
+            } else {
+                removed
+            };
+            new_end = new_end.saturating_sub(shift_end);
         } else {
             out.push_str(&unit);
             out.push_str(line);
@@ -329,6 +352,7 @@ pub fn apply_tab(
             }
             new_end += unit.len();
         }
+        line_off += line.len() + 1;
     }
     out.push_str(&text[spanned_end..]);
     if out == text {
@@ -1067,6 +1091,17 @@ fn focus_by_id(id: &str) {
     }
     if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
         input.select();
+    }
+}
+
+fn focus_doc() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    if let Ok(Some(el)) = doc.query_selector(".ev-doc") {
+        if let Some(html) = el.dyn_ref::<web_sys::HtmlElement>() {
+            let _ = html.focus();
+        }
     }
 }
 
@@ -1982,6 +2017,10 @@ pub fn DocumentPane(
         let is_editing = editing.get_untracked();
         let text = if is_editing { draft.get_untracked() } else { content.get_untracked() };
         let total = lines_of(&text).len();
+        if total == 0 {
+            goto_note.set("No lines loaded to go to.".into());
+            return;
+        }
         let Some((line, clamped)) = clamp_goto(&raw, total) else {
             goto_note.set("Enter a line number.".into());
             return;
@@ -1996,6 +2035,11 @@ pub fn DocumentPane(
         }
         // SourceView raises its render window past `jump_line` (#1431),
         // so a target beyond the first chunk still lands on a real row.
+        // An active search would win over `jump_line` in both the
+        // scroll effect and SourceView, and Markdown preview has no
+        // line rows, so the jump clears the query and shows source.
+        query.set(String::new());
+        preview.set(false);
         goto_note.set(format!("Line {line} of {total}{suffix}"));
         jump_line.set(line);
     };
@@ -2201,6 +2245,17 @@ pub fn DocumentPane(
                             ev.prevent_default();
                             ev.stop_propagation();
                             do_goto();
+                        } else if ev.key() == "Escape" {
+                            // Dismiss the box only: Escape must not reach
+                            // the pane's edit-cancel and drop a draft.
+                            ev.prevent_default();
+                            ev.stop_propagation();
+                            goto_text.set(String::new());
+                            if editing.get_untracked() {
+                                focus_by_id("ev-editor");
+                            } else {
+                                focus_doc();
+                            }
                         }
                     }
                 />
@@ -2688,6 +2743,24 @@ mod tests {
     }
 
     #[test]
+    fn indent_unit_ignores_comment_continuations_and_minority_tabs() {
+        let cases = [
+            ("a\n  b\n    c", "  "),
+            // JSDoc continuation lines (` * x`) do not make the unit 1.
+            ("/**\n * doc\n */\nf() {\n  x;\n}", "  "),
+            // One pasted tab line does not flip a space-indented file.
+            ("a\n    b\n    c\n\td", "    "),
+            ("a\n\tb\n\tc\n  d", "\t"),
+            // A lone 1-space run is honoured when it is the only run.
+            ("a\n b\n c", " "),
+            ("no indent", "  "),
+        ];
+        for (text, want) in cases {
+            assert_eq!(detect_indent_unit(text), want, "text {text:?}");
+        }
+    }
+
+    #[test]
     fn tab_indents_selection_and_shift_tab_outdents() {
         let text = "one\ntwo\nthree\n";
         // Select all of lines 2-3 ("two\nthree", bytes 4..13).
@@ -2699,6 +2772,11 @@ mod tests {
         // Selection ending at a line start does not indent that line.
         let (out, _, _) = apply_tab(text, 0, 4, false).unwrap();
         assert_eq!(out, "  one\ntwo\nthree\n");
+        // An end inside the last line's removed indent stops at that
+        // line's start instead of sliding into the previous line.
+        let (out, s, e) = apply_tab("  a\n  b", 0, 5, true).unwrap();
+        assert_eq!(out, "a\nb");
+        assert_eq!((s, e), (0, 2));
         // Shift+Tab with no selection outdents only the caret line.
         let (out, s, _) = apply_tab("  one\n  two\n", 8, 8, true).unwrap();
         assert_eq!(out, "  one\ntwo\n");
