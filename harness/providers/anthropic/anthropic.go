@@ -141,6 +141,8 @@ type apiSystemBlock struct {
 	Type         string           `json:"type"` // "text"
 	Text         string           `json:"text"`
 	CacheControl *apiCacheControl `json:"cache_control,omitempty"`
+	// dynamic marks per-turn churn (date/memory/ledger); never a breakpoint.
+	dynamic bool
 }
 
 // apiMessage content is held as raw blocks so thinking blocks can be replayed
@@ -251,9 +253,7 @@ func toAPIRequest(req provider.Request) (apiRequest, error) {
 		Model:     req.Model,
 		MaxTokens: req.MaxTokens,
 	}
-	if req.System != "" {
-		out.System = []apiSystemBlock{{Type: "text", Text: req.System}}
-	}
+	out.System = systemBlocks(req)
 	applyEffort(&out, req.Effort)
 	for _, t := range req.Tools {
 		out.Tools = append(out.Tools, apiTool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
@@ -307,11 +307,30 @@ func toAPIRequest(req provider.Request) (apiRequest, error) {
 	return out, nil
 }
 
+// systemBlocks maps the request system prompt to Messages API text blocks:
+// one per SystemBlock when the engine partitioned it (#1200), else a single
+// block carrying System.
+func systemBlocks(req provider.Request) []apiSystemBlock {
+	var out []apiSystemBlock
+	for _, b := range req.SystemBlocks {
+		if strings.TrimSpace(b.Text) == "" {
+			continue
+		}
+		out = append(out, apiSystemBlock{Type: "text", Text: b.Text, dynamic: b.Dynamic})
+	}
+	if len(out) == 0 && req.System != "" {
+		out = []apiSystemBlock{{Type: "text", Text: req.System}}
+	}
+	return out
+}
+
 // applyPromptCache places ephemeral cache_control breakpoints on the stable
 // Anthropic request prefix (OpenCode applyCaching / Claude Code patterns).
 //
 // Up to 3 of Anthropic's 4 allowed breakpoints:
-//  1. last system text block — agent/system prompt (stable across turns)
+//  1. last stable system text block — shared/persona/instructions; the dynamic
+//     tail (date, memory, ledger) stays after it so churn there does not miss
+//     the stable system cache
 //  2. last tool definition — tool schema prefix (stable when registry is)
 //  3. last eligible message content block — conversation prefix through the
 //     prior tail; moves each turn so the growing history remains cacheable
@@ -321,8 +340,11 @@ func toAPIRequest(req provider.Request) (apiRequest, error) {
 // tools correctly miss cache — that is intentional, not thrash.
 func applyPromptCache(req *apiRequest) {
 	ephemeral := &apiCacheControl{Type: "ephemeral"}
-	if n := len(req.System); n > 0 {
-		req.System[n-1].CacheControl = ephemeral
+	for i := len(req.System) - 1; i >= 0; i-- {
+		if !req.System[i].dynamic {
+			req.System[i].CacheControl = ephemeral
+			break
+		}
 	}
 	if n := len(req.Tools); n > 0 {
 		req.Tools[n-1].CacheControl = ephemeral
