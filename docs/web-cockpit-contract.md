@@ -441,7 +441,7 @@ touched; unresolved rows **must** keep the listed tier.
 | Permission mode | `/mode` | runtime + op | shipped | preserve | B | mutate-blocked |
 | Fast tier | `/fast` | FAST toggle + op | shipped | preserve | B | mutate-blocked |
 | Sandbox dial + explain | `/sandbox` | `/v1/sandbox` GET/PATCH | shipped | preserve | C | read explain; PATCH blocked |
-| Permission presets/explain | `/permission` | explain dialog + `/v1/permissions/*` | shipped | #1077 | B | read |
+| Permission presets/explain | `/permission` | Leptos Permissions panel Presets / Compare / Explain section + `/v1/permissions/*` | shipped | #1077, #1504 | B | read |
 | Scheduler presets | `scheduler_presets_modal.go` | Settings + `/v1/scheduler/presets` | shipped | #1077 | B | mutate-blocked |
 | Provider auth login | `auth.go` modal | key/OAuth/device flows in Settings | shipped | #1077 | **C** | mutate-blocked |
 | Provider logout | auth modal | Settings provider rows + DELETE | shipped | #1077 | **C** | mutate-blocked |
@@ -537,7 +537,7 @@ explicit deferred follow-up (no unknown/partial without owner):
 | FTUE/init | blocking FTUE **non-goal**; contextual tip **shipped** (#1078); `/init` **shipped** on serve (#1581: create-only `/v1/init`; overwrite stays TUI) |
 | Loop | `/loop` **non-goal**; goals/workflows **shipped** (#1079) |
 | Scheduler presets | **shipped** (#1077 Settings + API) |
-| Permission presets | **shipped** (explain UI + API) |
+| Permission presets | **shipped** (Leptos Permissions panel presets list, preset diff, explain + dry-run; read-only — #1504) |
 | Cost | **shipped** (#1075) |
 | Telemetry (host metrics) | **non-goal** |
 | Provider auth/logout | **shipped** (#1077, Tier C) |

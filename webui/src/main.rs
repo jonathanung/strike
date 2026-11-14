@@ -33,6 +33,7 @@ mod outcome;
 mod project_init;
 mod onboarding;
 mod park;
+mod permissions_explain;
 mod steer_queue;
 mod model_menu;
 mod model_menu_view;
