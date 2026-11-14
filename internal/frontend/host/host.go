@@ -197,6 +197,9 @@ type UserDefaults struct {
 	Notify string
 	// Autoupdate is startup release check: off|notify|auto.
 	Autoupdate string
+	// KeepAwake is the gateway host sleep-inhibition opt-in: on|off (empty
+	// means off).
+	KeepAwake string
 	// LeanCode is lean-code guidance intensity: off|lite|full.
 	LeanCode string
 	// DeferTools is toolsearch-backed schema deferral: on|off (empty means on).
@@ -273,6 +276,10 @@ type Settings interface {
 	// sessionWorktree (off|auto|always), and autoupdate (off|notify|auto).
 	// Empty leaves the stored value unchanged; unknown values are rejected.
 	SaveConfigDials(sandbox, notify, leanCode, deferTools, sessionWorktree, autoupdate string) error
+	// SaveKeepAwake persists the gateway host sleep-inhibition opt-in
+	// (on|off). Unknown values are rejected. Applying the preference to a
+	// running daemon is the daemon's job, not the store's.
+	SaveKeepAwake(mode string) error
 	// SaveAutoApproveDials persists permissionAutoApproveSeconds, optional
 	// exclude list, and maxChildDepth. Empty scalar strings leave the
 	// corresponding field unchanged. exclude nil leaves the list unchanged; a

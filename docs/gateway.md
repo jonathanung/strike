@@ -103,7 +103,7 @@ do not consume a code.
 
 | Request | Who | Result |
 |---|---|---|
-| `GET /v1/gateway` | daemon token | `{bind, auth, loopback, phoneReachable, lan, urls[], optIn, lanWarning, advertiseWarning, unbound}`. No code and no token. |
+| `GET /v1/gateway` | daemon token | `{bind, auth, loopback, phoneReachable, lan, urls[], optIn, lanWarning, advertiseWarning, unbound, keepAwake?}`. No code and no token. `keepAwake` is `{enabled, supported, state, backend, reason, since}` with `state` `off\|on\|unsupported\|blocked` (see [config.md → Keep awake](config.md#keep-awake-keepawake)); absent on attach-only serve. |
 | `POST /v1/pair` | daemon token | `201` `{code, expiresAt, ttlSeconds, url, gateway}`. A paired session gets `403` `daemon_token_required`. Without `--auth`, `400` `auth_disabled` plus `gateway` and no code. |
 | `POST /v1/pair/redeem` | public, rate limited | Body `{code, label, delivery}`. `delivery` is `cookie` (default) or `token`. |
 | `GET /v1/pair/devices` | daemon token | `{devices: [{id, label, createdAt, lastSeen, revoked}]}`. |

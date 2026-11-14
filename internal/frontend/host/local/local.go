@@ -655,6 +655,7 @@ func (settingsAdapter) Defaults() host.UserDefaults {
 		Sandbox:                      cfg.Sandbox,
 		Notify:                       cfg.Notify,
 		Autoupdate:                   cfg.Autoupdate,
+		KeepAwake:                    cfg.KeepAwake,
 		LeanCode:                     cfg.LeanCode,
 		DeferTools:                   cfg.DeferTools,
 		SessionWorktree:              cfg.Session.Worktree,
@@ -695,6 +696,10 @@ func (settingsAdapter) SavePresentation(vimMode, nanoMode, mdReadMode string) er
 
 func (settingsAdapter) SaveConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree, autoupdate string) error {
 	return config.SetGlobalConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree, autoupdate)
+}
+
+func (settingsAdapter) SaveKeepAwake(mode string) error {
+	return config.SetGlobalKeepAwake(mode)
 }
 
 func (settingsAdapter) SaveAutoApproveDials(seconds string, exclude *[]string, maxChildDepth string) error {

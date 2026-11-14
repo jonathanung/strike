@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/daemon/keepawake"
 	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/server/terminal"
@@ -117,6 +118,10 @@ type Options struct {
 	// Assembled is true when this process ran assemble (config load, project
 	// stores, auth.json, attachments). Attach-only serve leaves it false.
 	Assembled bool
+	// KeepAwake is the host sleep-inhibition service (#1496). GET /v1/gateway
+	// reports its Status and PATCH /v1/settings keepAwake applies the dial to
+	// it live. Nil omits the field (attach-only serve).
+	KeepAwake *keepawake.Service
 	// OpsRate is tokens/sec per client IP for ops (default 10). <=0 uses default.
 	OpsRate float64
 	// OpsBurst is the per-IP burst (default 20). <=0 uses default.

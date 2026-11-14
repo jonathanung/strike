@@ -138,6 +138,9 @@ type bootstrapResponse struct {
 	Skills           []map[string]any   `json:"skills"`
 	ProtocolOps      []string           `json:"protocolOps"`
 	ComposerCommands []triggers.Command `json:"composerCommands,omitempty"`
+	// LoadWarnings lists skill/agent files that failed to load or loaded
+	// with a problem (#1386). Omitted when there are none.
+	LoadWarnings []loadWarning `json:"loadWarnings,omitempty"`
 }
 
 var browserProtocolOps = []string{
@@ -207,7 +210,14 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	if live {
 		protocolOps = browserProtocolOpsWithTeamControl()
 	}
-	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: !live, Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps, ComposerCommands: triggers.Commands()})
+	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: !live, Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps, ComposerCommands: triggers.Commands(), LoadWarnings: s.loadWarnings(statusCWD(status))})
+}
+
+func statusCWD(st *StatusSnapshot) string {
+	if st == nil {
+		return ""
+	}
+	return st.CWD
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -314,6 +324,7 @@ type settingsResponse struct {
 	Sandbox                      string   `json:"sandbox,omitempty"`
 	Notify                       string   `json:"notify,omitempty"`
 	Autoupdate                   string   `json:"autoupdate,omitempty"`
+	KeepAwake                    string   `json:"keepAwake,omitempty"`
 	LeanCode                     string   `json:"leanCode,omitempty"`
 	DeferTools                   string   `json:"deferTools,omitempty"`
 	SessionWorktree              string   `json:"sessionWorktree,omitempty"`
@@ -355,6 +366,9 @@ type settingsPatchBody struct {
 	DeferTools      string `json:"deferTools"`
 	SessionWorktree string `json:"sessionWorktree"`
 	Autoupdate      string `json:"autoupdate"`
+	// KeepAwake is the gateway sleep-inhibition opt-in: on|off. Persisted
+	// through host.Settings and applied live to Options.KeepAwake (#1496).
+	KeepAwake string `json:"keepAwake"`
 
 	// permissionAutoApproveSeconds: off|0|1-60 (string dial, not int).
 	PermissionAutoApproveSeconds string `json:"permissionAutoApproveSeconds"`
@@ -384,6 +398,7 @@ func settingsFromDefaults(d host.UserDefaults) settingsResponse {
 		Sandbox:                      d.Sandbox,
 		Notify:                       d.Notify,
 		Autoupdate:                   d.Autoupdate,
+		KeepAwake:                    d.KeepAwake,
 		LeanCode:                     d.LeanCode,
 		DeferTools:                   d.DeferTools,
 		SessionWorktree:              d.SessionWorktree,
@@ -438,6 +453,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	// The persisted keepAwake dial is applied to this daemon right away so the
+	// phone sees the effective state on its next GET /v1/gateway poll.
+	if body.KeepAwake != "" && s.opts.KeepAwake != nil {
+		s.opts.KeepAwake.SetEnabled(settings.Defaults().KeepAwake == "on")
+	}
 	fields := settingsPatchFields(body)
 	if sandboxMode != "" {
 		fields = append(fields, "sandbox")
@@ -486,6 +506,13 @@ func applySettingsPatch(settings host.Settings, body settingsPatchBody) error {
 	}
 	if compaction != (host.CompactionDials{}) {
 		if err := settings.SaveCompactionDials(compaction); err != nil {
+			return err
+		}
+	}
+	// keepAwake goes last: it has live daemon state behind it, so it is only
+	// persisted when every other group succeeded and the handler will apply it.
+	if body.KeepAwake != "" {
+		if err := settings.SaveKeepAwake(body.KeepAwake); err != nil {
 			return err
 		}
 	}

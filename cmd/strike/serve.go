@@ -17,6 +17,7 @@ import (
 
 	"github.com/jonathanung/strike/harness/engine"
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/daemon/keepawake"
 	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/host/local"
@@ -324,6 +325,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var services *host.Services
 	var sandboxSnap *server.SandboxSnapshot
 	var sideChat server.SideChatModel
+	var keepAwake *keepawake.Service
 	var taskRuns *taskrun.Store
 	var terminalSandbox sandbox.Policy
 	var terminalSandboxFor func(sessionID, workDir string) (sandbox.Policy, bool)
@@ -362,7 +364,15 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
+		if n := a.startupNotice(); n != "" {
+			fmt.Fprintln(stderr, n)
+		}
 		sharedAttachments = a.attachments
+		// Opt-in host sleep inhibition (#1496): default off; the persisted
+		// dial is applied at start and flipped live by PATCH /v1/settings.
+		keepAwake = keepawake.New(keepawake.Options{})
+		defer keepAwake.Close()
+		keepAwake.SetEnabled(a.cfg.KeepAwake == config.KeepAwakeOn)
 		sessionDir = a.sessions.Dir()
 		sideChat = newSideChatModel(a.sideProvider, a.sideModel, a.sideSelect)
 
@@ -758,6 +768,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		TerminalSandboxLoaded: terminalSandboxLoaded,
 		TerminalSandboxFor:    terminalSandboxFor,
 		Assembled:             assembled,
+		KeepAwake:             keepAwake,
 	})
 	if err != nil {
 		return err
