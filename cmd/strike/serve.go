@@ -17,6 +17,7 @@ import (
 
 	"github.com/jonathanung/strike/harness/engine"
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/daemon/deploywatch"
 	"github.com/jonathanung/strike/internal/daemon/keepawake"
 	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
@@ -736,6 +737,14 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	// server.NewRootLauncher); the landed scheduler uses internal/rootstart.
 	// Do not spawn a third way.
 	trigSvc := trigger.New(trigStore, server.NewRootLauncher(liveHub))
+	dwStore, err := deploywatch.Open("")
+	if err != nil {
+		return err
+	}
+	deployWatches := deploywatch.New(dwStore, deploywatch.Config{})
+	if !opts.readOnly {
+		go deployWatches.Run(ctx, deploywatch.DefaultTick)
+	}
 
 	workDir, _ := os.Getwd()
 	srv, err := server.New(server.Options{
@@ -761,6 +770,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		UsageAuditDir:         usageDir,
 		SideChat:              sideChat,
 		Triggers:              trigSvc,
+		DeployWatches:         deployWatches,
 		TaskRuns:              taskRuns,
 		WorkDir:               workDir,
 		TerminalRemote:        opts.terminalRemote,
