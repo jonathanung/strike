@@ -427,6 +427,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.handleSessionFork)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork_at", s.handleSessionForkAt)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/rewind_points", s.handleSessionRewindPoints)
+	// Daemon-generated session report artifact (#1444).
+	s.mux.HandleFunc("POST /v1/sessions/{id}/report", s.handleSessionReport)
 	s.mux.HandleFunc("PATCH /v1/sessions/{id}", s.handleSessionRename)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.handleSessionDelete)
 	// Session list organisation (pins, archive, folders, search). Not filesystem dirs.

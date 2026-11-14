@@ -123,6 +123,7 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
 | `GET` | `/v1/sessions/{id}/children` | **yes** | Child/subagent sessions under a root |
 | `POST` | `/v1/sessions/{id}/fork` | **yes** | Fork durable session → new id |
+| `POST` | `/v1/sessions/{id}/report` | **yes** | Generate a `session_report` artifact from the session record (#1444) → **201** artifact. Facts only (turns, asks, tool counts, files, approvals, children, tokens, errors); tool args/output never copied; redacted. **404** unknown session; **501** without sessions or artifact store |
 | `PATCH` | `/v1/sessions/{id}` | **yes** | Rename (`{ "title" }`) |
 | `DELETE` | `/v1/sessions/{id}` | **yes** | Delete durable session (`?force=true` optional) |
 | `GET` | `/v1/roots` | **yes** | Active live roots + `activeId` (503 without LiveHub) |
@@ -1061,8 +1062,11 @@ Permission asks appear as `permission.asked` events; resolve with
 ### Artifacts & decision ledger (read-only, WEBUI.15 / #1082)
 
 Bootstrap advertises `capabilities.artifacts` / `capabilities.ledger` only when
-the host wires those stores. There are **no** browser write routes — artifact
-create/update and ledger append/invalidate/supersede stay agent/tool-owned.
+the host wires those stores. The only browser write route is
+`POST /v1/sessions/{id}/report`, which stores a daemon-generated
+`session_report` (agent tools may read that type but never write it); other
+artifact create/update and ledger append/invalidate/supersede stay
+agent/tool-owned.
 Attach-only may read authorized rows; missing capability returns **501**.
 
 | Method | Path | Auth | Description |

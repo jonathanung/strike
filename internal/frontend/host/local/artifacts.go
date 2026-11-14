@@ -77,6 +77,27 @@ func (a artifactsAdapter) GetVersion(id string, version int, actorSession, actor
 	return toHostArtifact(art), true, nil
 }
 
+// CreateSessionReport implements host.SessionReportWriter.
+func (a artifactsAdapter) CreateSessionReport(sessionID, ownerRoot, title, content string) (host.Artifact, error) {
+	if ownerRoot == "" {
+		ownerRoot = sessionID
+	}
+	art, err := a.store.Create(artifact.CreateInput{
+		Type:         artifact.TypeSessionReport,
+		Title:        title,
+		Content:      content,
+		Scope:        artifact.ScopeSession,
+		SessionID:    sessionID,
+		Access:       artifact.AccessTeam,
+		OwnerSession: sessionID,
+		OwnerRoot:    ownerRoot,
+	})
+	if err != nil {
+		return host.Artifact{}, err
+	}
+	return toHostArtifact(art), nil
+}
+
 func toHostArtifactMeta(m artifact.Meta) host.ArtifactMeta {
 	out := host.ArtifactMeta{
 		ID:           m.ID,
