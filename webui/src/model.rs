@@ -237,6 +237,10 @@ pub struct BootstrapCapabilities {
     /// the daemon sets it from the same live gate as `GET /v1/diag`.
     #[serde(default)]
     pub diag: bool,
+    /// True when the daemon serves the read-only decision ledger
+    /// (`GET /v1/ledger`, #1485); gates the Decisions storage tab.
+    #[serde(default)]
+    pub ledger: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1538,6 +1542,7 @@ mod tests {
         )
         .unwrap();
         assert!(boot.capabilities.diag);
+        assert!(!boot.capabilities.ledger);
         // Older daemons without a capabilities object read as off, so the
         // Download diagnostics control stays disabled rather than lying.
         let boot: Bootstrap = serde_json::from_str(r#"{"skills":[]}"#).unwrap();

@@ -142,7 +142,7 @@ WEBUI.3 (#1073) introduces a typed registry. Until then, this section is the
 | `team-attention` | team | same | `surface=attention` | needs-you | true | read | B | #1083 |
 | `handoffs` | team | same | `surface=review` | badge | true | read | B | shipped |
 | `artifacts` | team / project | future `artifacts` | `surface=artifacts` | badge | true | read | B | #1082/#1086 |
-| `decisions` | team / project | future `ledger` | `surface=decisions` | badge | true | read | B | #1082/#1086 |
+| `decisions` | team / project | `ledger` (bootstrap capability; Storage → Decisions tab, read-only) | `surface=decisions` | badge | true | read | B | #1082/#1086, #1485 |
 | `conflicts` | team | same | `surface=conflicts` | needs-you | true | read | B | #1086 |
 | `team-controls` | team | live + approved ops | — | none | true | mutate-blocked | **C** | #1085/#1088/#1089 |
 | `plans` | project | `plans` | `surface=plans` | none | true | read† | B | shipped; regroup #1079 |
