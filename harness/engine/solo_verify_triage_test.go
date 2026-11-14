@@ -17,8 +17,7 @@ import (
 
 // TestSoloVerifyTriageAcrossTurns: a failing go test gate is triaged with a
 // focused rerun, the engine keeps the history across turns, and the next
-// claim runs the focused target first (skipping the full gate while it
-// still fails). The fake `go` on PATH keeps the test offline and fast.
+// claim runs the focused target first, then the full gate. The fake `go` on PATH keeps the test offline and fast.
 func TestSoloVerifyTriageAcrossTurns(t *testing.T) {
 	work := t.TempDir()
 	if err := os.WriteFile(filepath.Join(work, "go.mod"), []byte("module example.com/mod\n"), 0o644); err != nil {
@@ -78,12 +77,14 @@ func TestSoloVerifyTriageAcrossTurns(t *testing.T) {
 		t.Fatalf("turn1 attempt = %#v", tr.Attempts[0])
 	}
 
+	// The gate is a wrapped script (not a plain go test), so the focused
+	// pre-check runs first but never stands in for the full gate.
 	c = turn("second")
 	tr = c.Triage
-	if tr == nil || !tr.FullGateSkipped || len(tr.Attempts) != 2 || !strings.Contains(tr.OriginalOutput, "a_test.go:7: boom") {
+	if tr == nil || tr.FullGateSkipped || len(tr.Attempts) != 2 || !strings.Contains(tr.OriginalOutput, "a_test.go:7: boom") {
 		t.Fatalf("turn2 triage = %#v", tr)
 	}
-	if !strings.Contains(c.Output, "fake go") || !strings.Contains(c.Error, "full gate skipped") {
+	if !strings.Contains(c.Output, "a_test.go:7: boom") || c.Error != "exit 1" {
 		t.Fatalf("turn2 check = %#v", c)
 	}
 }

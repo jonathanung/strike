@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 const goTestFailOutput = `--- FAIL: TestBroken (0.00s)
@@ -163,7 +164,7 @@ func TestTriageFlowFocusedFirstThenFullGate(t *testing.T) {
 	dir := goWorkspace(t)
 	sr := &scriptedRunner{full: []int{2, 0}, focused: []int{1, 1, 0}}
 	r := &Runner{WorkDir: dir, CmdRunner: sr.run, Triage: &Triage{}}
-	gates := []Gate{{Kind: KindCmd, Value: "make test"}}
+	gates := []Gate{{Kind: KindCmd, Value: "go test ./..."}}
 	in := Input{Claimed: true}
 
 	// Run 1: full gate fails → parsed → one focused reproduction.
@@ -172,7 +173,7 @@ func TestTriageFlowFocusedFirstThenFullGate(t *testing.T) {
 	if res.Passed || c.Triage == nil {
 		t.Fatalf("run1: %+v", c)
 	}
-	if c.Value != "make test" || !strings.Contains(c.Output, "a_test.go:9: broken") || c.ExitCode != 2 {
+	if c.Value != "go test ./..." || !strings.Contains(c.Output, "a_test.go:9: broken") || c.ExitCode != 2 {
 		t.Fatalf("run1 lost original command/output: %+v", c)
 	}
 	tr := c.Triage
@@ -182,7 +183,7 @@ func TestTriageFlowFocusedFirstThenFullGate(t *testing.T) {
 	if tr.Failures[0].Dir != "./pkg/a" || tr.Failures[0].Source != "a_test.go:9" {
 		t.Fatalf("run1 failures: %+v", tr.Failures)
 	}
-	if !reflect.DeepEqual(sr.calls, []string{"make test", focusedA}) {
+	if !reflect.DeepEqual(sr.calls, []string{"go test ./...", focusedA}) {
 		t.Fatalf("run1 calls: %q", sr.calls)
 	}
 
@@ -210,10 +211,10 @@ func TestTriageFlowFocusedFirstThenFullGate(t *testing.T) {
 	if !res.Passed || c.Triage == nil || len(c.Triage.Attempts) != 3 || !c.Triage.Attempts[2].Passed || c.Triage.FullGateSkipped {
 		t.Fatalf("run3: passed=%v triage=%+v", res.Passed, c.Triage)
 	}
-	if !reflect.DeepEqual(sr.calls, []string{focusedA, "make test"}) {
+	if !reflect.DeepEqual(sr.calls, []string{focusedA, "go test ./..."}) {
 		t.Fatalf("run3 calls: %q", sr.calls)
 	}
-	if _, ok := r.Triage.load(triageKey(dir, "make test")); ok {
+	if _, ok := r.Triage.load(triageKey(dir, "go test ./...")); ok {
 		t.Fatal("history must reset after the full gate passes")
 	}
 }
@@ -228,13 +229,14 @@ func TestTriageBudgetExhaustedFallsBackToFullGate(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		res = r.Run(context.Background(), gates, Input{Claimed: true})
 	}
-	// Run1: full+repro; run2: focused pass→full fail+repro; run3: budget
-	// spent → full only; run4: full only. Attempts never exceed the cap.
+	// Run1: full+repro; run2: focused pass→full fail (no second repro of the
+	// command that just ran); run3: focused fail→full skipped, budget spent;
+	// run4: full only. Attempts never exceed the cap.
 	tr := res.Checks[0].Triage
 	if tr == nil || len(tr.Attempts) != MaxFocusedAttempts || !tr.Exhausted {
 		t.Fatalf("triage: %+v", tr)
 	}
-	want := []string{"go test ./...", focusedA, focusedA, "go test ./...", focusedA, "go test ./...", "go test ./..."}
+	want := []string{"go test ./...", focusedA, focusedA, "go test ./...", focusedA, "go test ./..."}
 	if !reflect.DeepEqual(sr.calls, want) {
 		t.Fatalf("calls:\n got %q\nwant %q", sr.calls, want)
 	}
@@ -355,5 +357,97 @@ func TestTriageEnvironmentalFocusedFailureRunsFullGate(t *testing.T) {
 	}
 	if tr := res.Checks[0].Triage; tr == nil || len(tr.Attempts) != 2 || tr.Attempts[1].Passed || tr.FullGateSkipped {
 		t.Fatalf("triage=%+v", tr)
+	}
+}
+
+func TestIsPlainGoTest(t *testing.T) {
+	t.Parallel()
+	for cmd, want := range map[string]bool{
+		"go test ./...":                        true,
+		" go test -race -count=1 ./pkg/... ":   true,
+		"go test -run=^TestA$ ./a":             false,
+		"go test ./... | tee out":              false,
+		"TZ=UTC go test ./...":                 false,
+		"make test":                            false,
+		"go test ./... && go vet ./...":        false,
+		"go test -run '^TestA$' ./a":           false,
+		"go vet ./...":                         false,
+		"go test ./... > out.txt":              false,
+		"go test $(go list ./... | grep -v x)": false,
+	} {
+		if got := isPlainGoTest(cmd); got != want {
+			t.Errorf("isPlainGoTest(%q) = %v, want %v", cmd, got, want)
+		}
+	}
+}
+
+// A wrapped gate (make, scripts) may set env/flags the focused command
+// lacks, so a focused failure never stands in for it: the full gate runs.
+func TestTriageWrappedGateAlwaysRunsFullGate(t *testing.T) {
+	t.Parallel()
+	dir := goWorkspace(t)
+	sr := &scriptedRunner{full: []int{1, 0}, focused: []int{1, 1}}
+	r := &Runner{WorkDir: dir, CmdRunner: sr.run, Triage: &Triage{}}
+	gates := []Gate{{Kind: KindCmd, Value: "make test"}}
+	r.Run(context.Background(), gates, Input{Claimed: true})
+	sr.calls = nil
+	res := r.Run(context.Background(), gates, Input{Claimed: true})
+	if !res.Passed || !reflect.DeepEqual(sr.calls, []string{focusedA, "make test"}) {
+		t.Fatalf("passed=%v calls=%q", res.Passed, sr.calls)
+	}
+	tr := res.Checks[0].Triage
+	if tr == nil || tr.FullGateSkipped || len(tr.Attempts) != 2 || tr.Attempts[1].Passed {
+		t.Fatalf("triage=%+v", tr)
+	}
+}
+
+func TestTriageWaitHonorsContextCancel(t *testing.T) {
+	t.Parallel()
+	dir := goWorkspace(t)
+	tri := &Triage{}
+	release, err := tri.acquire(context.Background(), triageKey(dir, "make test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	// Not pre-canceled: Run must enter the gate and wait on the held key.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	calls := 0
+	r := &Runner{WorkDir: dir, Triage: tri, CmdRunner: func(context.Context, string, string) (int, string, error) {
+		calls++
+		return 0, "", nil
+	}}
+	done := make(chan Result, 1)
+	go func() { done <- r.Run(ctx, []Gate{{Kind: KindCmd, Value: "make test"}}, Input{Claimed: true}) }()
+	select {
+	case res := <-done:
+		if res.Passed || calls != 0 || !strings.Contains(res.Checks[0].Error, "deadline") {
+			t.Fatalf("calls=%d res=%+v", calls, res.Checks)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled run blocked on the held gate key")
+	}
+}
+
+func TestTriageInterruptDoesNotSpendBudget(t *testing.T) {
+	t.Parallel()
+	dir := goWorkspace(t)
+	tri := &Triage{}
+	key := triageKey(dir, "make test")
+	tri.store(key, TriageReport{FocusedCommand: focusedA, Attempts: []TriageAttempt{{Command: focusedA}}})
+	ctx, cancel := context.WithCancel(context.Background())
+	var calls []string
+	r := &Runner{WorkDir: dir, Triage: tri, CmdRunner: func(_ context.Context, _, command string) (int, string, error) {
+		calls = append(calls, command)
+		cancel() // interrupt lands while the focused rerun runs
+		return -1, "", nil
+	}}
+	res := r.Run(ctx, []Gate{{Kind: KindCmd, Value: "make test"}}, Input{Claimed: true})
+	if res.Passed || !reflect.DeepEqual(calls, []string{focusedA}) {
+		t.Fatalf("passed=%v calls=%q", res.Passed, calls)
+	}
+	if st, _ := tri.load(key); len(st.Attempts) != 1 {
+		t.Fatalf("interrupt spent budget: %+v", st.Attempts)
 	}
 }

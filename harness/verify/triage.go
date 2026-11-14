@@ -79,25 +79,31 @@ type TriageReport struct {
 type Triage struct {
 	mu    sync.Mutex
 	gates map[string]TriageReport
-	// keyMu serializes runs of the same gate key so concurrent child
-	// verifications cannot lose attempt-history updates.
-	keyMu map[string]*sync.Mutex
+	// keySem serializes runs of the same gate key so concurrent child
+	// verifications cannot lose attempt-history updates. A buffered
+	// channel (not a Mutex) so waiting honors ctx cancel.
+	keySem map[string]chan struct{}
 }
 
-// lockKey holds the per-key run lock; call the returned func to release.
-func (t *Triage) lockKey(key string) func() {
+// acquire takes the per-key run slot, or returns ctx.Err() if ctx ends
+// first (a turn interrupt must not block behind another verification).
+func (t *Triage) acquire(ctx context.Context, key string) (func(), error) {
 	t.mu.Lock()
-	if t.keyMu == nil {
-		t.keyMu = make(map[string]*sync.Mutex)
+	if t.keySem == nil {
+		t.keySem = make(map[string]chan struct{})
 	}
-	m := t.keyMu[key]
-	if m == nil {
-		m = &sync.Mutex{}
-		t.keyMu[key] = m
+	sem := t.keySem[key]
+	if sem == nil {
+		sem = make(chan struct{}, 1)
+		t.keySem[key] = sem
 	}
 	t.mu.Unlock()
-	m.Lock()
-	return m.Unlock
+	select {
+	case sem <- struct{}{}:
+		return func() { <-sem }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (t *Triage) load(key string) (TriageReport, bool) {
@@ -318,22 +324,52 @@ func triageKey(workDir, command string) string {
 	return workDir + "\x00" + command
 }
 
+// plainGoTestRE matches a gate that is a bare `go test` invocation (no env
+// assignments, wrappers, pipes, or command chaining). Only then does the
+// focused command share the gate's environment closely enough that a
+// focused failure may stand in for the full gate.
+var plainGoTestRE = regexp.MustCompile(`^go\s+test(\s+[A-Za-z0-9_./=:,^*+-]+)*\s*$`)
+
+func isPlainGoTest(command string) bool {
+	c := strings.TrimSpace(command)
+	if strings.ContainsAny(c, ";&<>`\n\"'\\") || strings.Contains(c, "$(") {
+		return false
+	}
+	return plainGoTestRE.MatchString(c)
+}
+
 // runTriagedCmd runs a cmd gate with focused-rerun triage. When a previous
 // run left a focused command and budget remains, that narrow target runs
-// first: still failing with a go test failure skips the broad gate; passing
-// (or an unrecognized failure) falls through to the full gate (the required
-// verification). A full-gate failure is parsed and
-// reproduced once with the focused command while budget remains.
+// first. For a plain `go test` gate, a focused go test failure skips the
+// broad gate; otherwise (wrapped gates, a passing focused run, or an
+// unrecognized failure) the full gate runs as the required verification.
+// A full-gate failure is parsed and reproduced once with the focused
+// command while budget remains (unless that command already ran this call).
+// Attempts cut short by ctx cancel are not recorded.
 func (r *Runner) runTriagedCmd(ctx context.Context, cr *CheckResult, command string) {
 	key := triageKey(r.WorkDir, command)
-	defer r.Triage.lockKey(key)()
+	release, err := r.Triage.acquire(ctx, key)
+	if err != nil {
+		cr.ExitCode = -1
+		cr.Error = err.Error()
+		return
+	}
+	defer release()
 	rep, had := r.Triage.load(key)
+	ranFocused := ""
 	if had && rep.FocusedCommand != "" && len(rep.Attempts) < MaxFocusedAttempts {
 		att, raw := r.focusedAttempt(ctx, rep.FocusedCommand)
+		if ctx.Err() != nil {
+			// Interrupted: no budget spent, no verdict from a killed run.
+			cr.ExitCode = -1
+			cr.Error = ctx.Err().Error()
+			return
+		}
 		rep.Attempts = append(rep.Attempts, att)
-		// Skip the broad gate only on a recognizable go test failure; an
-		// environmental failure (missing go, spawn error) falls through.
-		if !att.Passed && att.ExitCode > 0 && len(ParseGoTestFailures(raw)) > 0 {
+		ranFocused = rep.FocusedCommand
+		// Skip the broad gate only for a plain go test gate whose focused
+		// rerun produced a recognizable go test failure.
+		if !att.Passed && att.ExitCode > 0 && isPlainGoTest(command) && len(ParseGoTestFailures(raw)) > 0 {
 			rep.FullGateSkipped = true
 			rep.Exhausted = len(rep.Attempts) >= MaxFocusedAttempts
 			r.Triage.store(key, rep)
@@ -368,9 +404,9 @@ func (r *Runner) runTriagedCmd(ctx context.Context, cr *CheckResult, command str
 		}
 		return
 	}
-	if err != nil {
-		// Spawn/timeout failure: nothing to parse; keep any prior history
-		// (including this run's focused attempt, so it counts toward the cap).
+	if err != nil || ctx.Err() != nil {
+		// Spawn/timeout/interrupt: nothing trustworthy to parse; keep any
+		// prior history (including this run's focused attempt).
 		if had {
 			r.Triage.store(key, rep)
 			out := cloneTriage(rep)
@@ -389,9 +425,11 @@ func (r *Runner) runTriagedCmd(ctx context.Context, cr *CheckResult, command str
 		r.Triage.clear(key)
 		return
 	}
-	if rep.FocusedCommand != "" && len(rep.Attempts) < MaxFocusedAttempts {
+	if rep.FocusedCommand != "" && rep.FocusedCommand != ranFocused && len(rep.Attempts) < MaxFocusedAttempts {
 		att, _ := r.focusedAttempt(ctx, rep.FocusedCommand)
-		rep.Attempts = append(rep.Attempts, att)
+		if ctx.Err() == nil {
+			rep.Attempts = append(rep.Attempts, att)
+		}
 	}
 	rep.Exhausted = rep.FocusedCommand != "" && len(rep.Attempts) >= MaxFocusedAttempts
 	r.Triage.store(key, rep)
