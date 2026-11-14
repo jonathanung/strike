@@ -44,10 +44,11 @@ func (h testHistory) Enqueue(string) <-chan error {
 }
 
 type testSettings struct {
-	saved     chan [5]string
-	defaults  host.UserDefaults
-	savedDial chan string
-	dialErr   error
+	saved          chan [5]string
+	defaults       host.UserDefaults
+	savedDial      chan string
+	savedKeepAwake chan string
+	dialErr        error
 }
 
 func (s testSettings) Defaults() host.UserDefaults { return s.defaults }
@@ -69,6 +70,16 @@ func (s testSettings) SaveConfigDials(sandboxMode, notify, leanCode, deferTools,
 	}
 	return nil
 }
+func (s testSettings) SaveKeepAwake(mode string) error {
+	if s.dialErr != nil {
+		return s.dialErr
+	}
+	if s.savedKeepAwake != nil {
+		s.savedKeepAwake <- mode
+	}
+	return nil
+}
+func (testSettings) SaveGuardrailDials(host.GuardrailDials) error         { return nil }
 func (testSettings) SaveAutoApproveDials(string, *[]string, string) error { return nil }
 func (testSettings) SaveCompactionDials(host.CompactionDials) error       { return nil }
 func (testSettings) SaveKeybinds(map[string][]string) error               { return nil }

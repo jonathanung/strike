@@ -197,6 +197,9 @@ type UserDefaults struct {
 	Notify string
 	// Autoupdate is startup release check: off|notify|auto.
 	Autoupdate string
+	// KeepAwake is the gateway host sleep-inhibition opt-in: on|off (empty
+	// means off).
+	KeepAwake string
 	// LeanCode is lean-code guidance intensity: off|lite|full.
 	LeanCode string
 	// DeferTools is toolsearch-backed schema deferral: on|off (empty means on).
@@ -224,6 +227,87 @@ type UserDefaults struct {
 	PruneMinimumTokens  int
 	PruneKeepUserTurns  int
 	PruneProtectTools   []string
+	// Guardrails is the effective session guardrail dials (#1577), with
+	// product defaults resolved (e.g. turn timeout 1800s, delegation enforce,
+	// handoff required, shared child workdir).
+	Guardrails Guardrails
+}
+
+// Guardrails is the effective session guardrail snapshot. Zero caps mean
+// unlimited.
+type Guardrails struct {
+	// TurnTimeoutS is the root-turn deadline in seconds; -1 means off.
+	TurnTimeoutS int
+	// MaxSessionCostUSD is the session cost envelope (0 = unlimited).
+	MaxSessionCostUSD float64
+	// MaxTurnTokens caps stream tokens per turn (0 = unlimited).
+	MaxTurnTokens int
+	// AgentBudget is the default per-child limit set (0 = unlimited per field).
+	AgentBudget AgentBudget
+	// DelegationPolicy is the pre-spawn worthiness gate.
+	DelegationPolicy DelegationPolicy
+	// ChildHandoffRequired is the default schema:handoff gate on children.
+	ChildHandoffRequired bool
+	// ChildIsolation is shared (children run in the parent workdir) or
+	// worktree (per-child git worktree).
+	ChildIsolation string
+}
+
+// AgentBudget mirrors session.agentBudget.
+type AgentBudget struct {
+	MaxWallClockS     int
+	MaxTokens         int
+	MaxCostUSD        float64
+	MaxToolCalls      int
+	MaxDangerousTools int
+	StallAfterS       int
+	LoopDetectN       int
+}
+
+// DelegationPolicy mirrors session.delegationPolicy. Mode is effective
+// (omitted resolves to enforce). Threshold zero means engine default;
+// negative TinyPromptRunes / MaxPathsLocal disables that rule; zero
+// MaxLiveChildren means unlimited.
+type DelegationPolicy struct {
+	Mode            string
+	TinyPromptRunes int
+	MaxPathsLocal   int
+	MaxLiveChildren int
+}
+
+// GuardrailDials is a partial update for the session guardrail dials. Empty
+// strings leave the stored value unchanged; an invalid value rejects the
+// whole update without writing. Vocabulary:
+//
+//	TurnTimeout       — default (1800s) | off|0 | seconds | duration (30m)
+//	MaxSessionCostUSD — off|0|unlimited|default | positive USD
+//	MaxTurnTokens     — off|0|unlimited|default | positive int
+//	AgentBudget*      — off|0|unlimited|default | positive number
+//	DelegationMode    — off|advise|enforce|default (enforce)
+//	DelegationTinyPromptRunes / DelegationMaxPathsLocal — default|0|off|positive int
+//	DelegationMaxLiveChildren — off|0|unlimited|default | positive int
+//	ChildHandoffRequired — on|off|default (required)
+//	ChildIsolation    — shared|off|worktree|default (shared)
+type GuardrailDials struct {
+	TurnTimeout       string
+	MaxSessionCostUSD string
+	MaxTurnTokens     string
+
+	AgentBudgetMaxWallClockS     string
+	AgentBudgetMaxTokens         string
+	AgentBudgetMaxCostUSD        string
+	AgentBudgetMaxToolCalls      string
+	AgentBudgetMaxDangerousTools string
+	AgentBudgetStallAfterS       string
+	AgentBudgetLoopDetectN       string
+
+	DelegationMode            string
+	DelegationTinyPromptRunes string
+	DelegationMaxPathsLocal   string
+	DelegationMaxLiveChildren string
+
+	ChildHandoffRequired string
+	ChildIsolation       string
 }
 
 // CompactionDials is a partial update for history compaction and continuous
@@ -273,6 +357,15 @@ type Settings interface {
 	// sessionWorktree (off|auto|always), and autoupdate (off|notify|auto).
 	// Empty leaves the stored value unchanged; unknown values are rejected.
 	SaveConfigDials(sandbox, notify, leanCode, deferTools, sessionWorktree, autoupdate string) error
+	// SaveKeepAwake persists the gateway host sleep-inhibition opt-in
+	// (on|off). Unknown values are rejected. Applying the preference to a
+	// running daemon is the daemon's job, not the store's.
+	SaveKeepAwake(mode string) error
+	// SaveGuardrailDials persists non-empty session guardrail dials into the
+	// global config (#1577). See GuardrailDials for the vocabulary. They are
+	// gateway defaults read when a strike process assembles; a running
+	// process is not changed.
+	SaveGuardrailDials(d GuardrailDials) error
 	// SaveAutoApproveDials persists permissionAutoApproveSeconds, optional
 	// exclude list, and maxChildDepth. Empty scalar strings leave the
 	// corresponding field unchanged. exclude nil leaves the list unchanged; a
@@ -936,6 +1029,16 @@ type Artifacts interface {
 	Get(id, actorSession, actorRoot string) (Artifact, bool, error)
 	// GetVersion returns a specific version when the actor may read it.
 	GetVersion(id string, version int, actorSession, actorRoot string) (Artifact, bool, error)
+}
+
+// SessionReportWriter is the daemon-only write path for session_report
+// artifacts (#1444). Artifacts implementations may also satisfy it; frontends
+// type-assert and degrade when absent. Agent tools never reach this path, so
+// the generated facts stay uneditable by the model.
+type SessionReportWriter interface {
+	// CreateSessionReport stores content as a new team-access, session-scoped
+	// session_report artifact owned by sessionID under ownerRoot.
+	CreateSessionReport(sessionID, ownerRoot, title, content string) (Artifact, error)
 }
 
 // LedgerEntry is one durable decision/assumption/constraint record.

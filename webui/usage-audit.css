@@ -75,3 +75,21 @@
   .usage-audit .ua-row.ua-head { display: none; }
 }
 /* feature:usage-audit end */
+/* feature:usage-export begin */
+.usage-audit .usage-export { align-items: center; }
+.usage-audit .usage-export button { min-height: 36px; }
+/* feature:usage-export end */
+/* feature:usage-by-model begin */
+/* By model reuses .ua-table/.ua-row unchanged; no extra rules needed. */
+/* feature:usage-by-model end */
+/* feature:usage-by-session begin */
+.usage-audit .usage-session-sort { margin: var(--space-2) 0; }
+.usage-audit .usage-session-sort select {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  min-height: 36px;
+}
+.usage-audit .session-open { min-height: 24px; }
+/* feature:usage-by-session end */
