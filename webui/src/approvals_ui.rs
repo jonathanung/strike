@@ -14,12 +14,19 @@ use crate::api::{get_json, patch_json, post_json, post_op};
 use crate::approvals::{
     autonomy_confirm, begin_autonomy_change, begin_session_mode, countdown_seconds,
     decision_choices, global_confirm, hint_line, is_dangerous, notes_from_envelope,
-    rule_add_confirm, rule_remove_confirm, session_confirm, validate_rule_draft, workspace_confirm,
+    rule_add_confirm, rule_prefill, rule_remove_confirm, session_confirm, validate_rule_draft,
+    workspace_confirm,
     Ask, AuditDocument, AuditLine, ConfirmKind, ModeChange, PendingConfirm, PermNote, RuleRecord,
     RulesDocument, SettingsBits,
 };
+use crate::permissions_explain::PermissionsExplain;
 use crate::model::{autonomies, autonomy_label, mode_label, permission_modes, Workspace};
 use crate::outcome::{self, AUTO_SECONDS_UNKNOWN};
+use crate::rule_author::{
+    daemon_reason, pattern_hint, rule_sentence, scope_explainer, RuleFeedback, RuleMatchTester,
+    EXAMPLES,
+};
+use crate::sandbox_explain::SandboxSection;
 
 /// Initial audit fetch size (#1438): the panel starts at the daemon's
 /// default page and only fetches more when the user asks.
@@ -162,6 +169,7 @@ pub fn ApprovalHost(
     reply_n: RwSignal<u32>,
     reply_id: RwSignal<String>,
     reply_decision: RwSignal<String>,
+    open_session: impl Fn(String) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
     let audit_limit = RwSignal::new(AUDIT_INITIAL_LIMIT);
     let seen_reply = Rc::new(Cell::new(0u32));
@@ -206,6 +214,10 @@ pub fn ApprovalHost(
         }
     });
 
+    // Declared before the keyboard listener: Enter-to-accept reports
+    // rule-add outcomes through it as well (#1509).
+    let rule_feedback = RwSignal::new(RuleFeedback::None);
+
     {
         let listener = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
             let key = ev.key();
@@ -213,7 +225,7 @@ pub fn ApprovalHost(
                 if key == "Enter" {
                     ev.prevent_default();
                     ev.stop_propagation();
-                    accept_pending(confirm, base, token, root, perm_mode, status, panel_error, rules, stored_audit, auto_seconds, auto_exclude, audit_limit);
+                    accept_pending(confirm, base, token, root, perm_mode, status, panel_error, rules, stored_audit, auto_seconds, auto_exclude, audit_limit, rule_feedback);
                 } else if key == "Escape" {
                     ev.prevent_default();
                     ev.stop_propagation();
@@ -279,6 +291,7 @@ pub fn ApprovalHost(
     let perm_name = RwSignal::new("bash".to_string());
     let pattern = RwSignal::new(String::new());
     let action = RwSignal::new("deny".to_string());
+    let pattern_input = NodeRef::<leptos::html::Input>::new();
     let global_choice = RwSignal::new("default".to_string());
     let workspace_choice = RwSignal::new("default".to_string());
     Effect::new(move |_| {
@@ -303,19 +316,23 @@ pub fn ApprovalHost(
         let action = action.get_untracked();
         let scope = scope.get_untracked();
         if let Err(msg) = validate_rule_draft(&permission, &draft, &action) {
-            panel_error.set(msg.into());
+            rule_feedback.set(RuleFeedback::Failed(msg.into()));
             return;
         }
+        rule_feedback.set(RuleFeedback::None);
         if let Some(pending) = rule_add_confirm(&scope, &permission, &draft, &action) {
             confirm.set(Some(pending));
             return;
         }
+        let saved = RuleFeedback::Saved(rule_sentence(&scope, &permission, &draft, &action));
         post_rule(
             base,
             token,
             status,
             panel_error,
             rules,
+            rule_feedback,
+            saved,
             json!({
                 "scope": scope,
                 "permission": permission,
@@ -340,7 +357,7 @@ pub fn ApprovalHost(
                         <p class="approvals-copy">{body}</p>
                         <div class="approvals-actions">
                             <button type="button" class="secondary" on:click=move |_| confirm.set(None)>"Cancel"</button>
-                            <button type="button" class="danger" on:click=move |_| accept_pending(confirm, base, token, root, perm_mode, status, panel_error, rules, stored_audit, auto_seconds, auto_exclude, audit_limit)>{label}</button>
+                            <button type="button" class="danger" on:click=move |_| accept_pending(confirm, base, token, root, perm_mode, status, panel_error, rules, stored_audit, auto_seconds, auto_exclude, audit_limit, rule_feedback)>{label}</button>
                         </div>
                         <p class="hint">"Enter confirms. Escape cancels and leaves permissions unchanged."</p>
                     </div>
@@ -364,6 +381,7 @@ pub fn ApprovalHost(
                         <h3>"This session"</h3>
                         <p class="hint">{move || format!("Live mode: {}", mode_label(&perm_mode.get()))}</p>
                     </section>
+                    <SandboxSection base=base token=token/>
                     <section>
                         <h3>"Global default"</h3>
                         <p class="hint">{move || {
@@ -419,22 +437,58 @@ pub fn ApprovalHost(
                         }}</p>
                         <ul class="plain approvals-rules">
                             {move || rules.get().rules.into_iter().map(|rule| {
+                                let sentence = rule_sentence(&rule.scope, &rule.permission, &rule.pattern, &rule.action);
                                 let shown = format!("{} · {} · {} · {}", rule.scope, rule.permission, rule.pattern, rule.action);
                                 let remove = rule.clone();
+                                let dup = rule.clone();
                                 view! {
                                     <li class="approvals-rule">
-                                        <span>{shown}</span>
-                                        <button type="button" class="secondary" on:click=move |_| remove_rule(remove.clone(), confirm, base, token, status, panel_error, rules)>"Remove"</button>
+                                        <span class="rule-text">
+                                            <span class="rule-sentence" data-rule-sentence="true">{sentence}</span>
+                                            <span class="hint">{shown}</span>
+                                        </span>
+                                        <span class="approvals-rule-actions">
+                                            <button type="button" class="secondary" data-rule-duplicate="true" title="Copy this rule into the form below" on:click=move |_| {
+                                                // Prefill only (#1433): seed the four
+                                                // form signals verbatim and focus the
+                                                // pattern field. Nothing is submitted;
+                                                // the existing Add path (validation +
+                                                // dangerous-add confirm) creates the rule.
+                                                let draft = rule_prefill(&dup);
+                                                scope.set(draft.scope);
+                                                perm_name.set(draft.permission);
+                                                pattern.set(draft.pattern);
+                                                action.set(draft.action);
+                                                rule_feedback.set(RuleFeedback::None);
+                                                focus_pattern(pattern_input);
+                                            }>"Duplicate"</button>
+                                            <button type="button" class="secondary" on:click=move |_| remove_rule(remove.clone(), confirm, base, token, status, panel_error, rules, rule_feedback)>"Remove"</button>
+                                        </span>
                                     </li>
                                 }
                             }).collect_view()}
                         </ul>
+                        <div class="rule-examples" data-rule-examples="true">
+                            <span class="hint">"Start from an example:"</span>
+                            {EXAMPLES.iter().map(|ex| {
+                                let ex = *ex;
+                                view! {
+                                    <button type="button" class="secondary" data-rule-example=ex.label on:click=move |_| {
+                                        scope.set(ex.scope.into());
+                                        perm_name.set(ex.permission.into());
+                                        pattern.set(ex.pattern.into());
+                                        action.set(ex.action.into());
+                                        rule_feedback.set(RuleFeedback::None);
+                                    }>{ex.label}</button>
+                                }
+                            }).collect_view()}
+                        </div>
                         <div class="approvals-form">
-                            <select aria-label="Rule scope" on:change=move |ev| scope.set(event_target_value(&ev))>
+                            <select aria-label="Rule scope" prop:value=move || scope.get() on:change=move |ev| scope.set(event_target_value(&ev))>
                                 <option value="global">"Global"</option>
                                 <option value="project">"Project"</option>
                             </select>
-                            <select aria-label="Permission name" on:change=move |ev| perm_name.set(event_target_value(&ev))>
+                            <select aria-label="Permission name" prop:value=move || perm_name.get() on:change=move |ev| perm_name.set(event_target_value(&ev))>
                                 {move || {
                                     let mut names = rules.get().known;
                                     if names.is_empty() {
@@ -449,17 +503,28 @@ pub fn ApprovalHost(
                             <input
                                 aria-label="Pattern"
                                 placeholder="pattern, such as rm * or *.go"
+                                node_ref=pattern_input
                                 prop:value=move || pattern.get()
                                 on:input=move |ev| pattern.set(event_target_value(&ev))
                             />
-                            <select aria-label="Rule action" on:change=move |ev| action.set(event_target_value(&ev))>
-                                <option value="deny" selected>"Deny"</option>
+                            <select aria-label="Rule action" prop:value=move || action.get() on:change=move |ev| action.set(event_target_value(&ev))>
+                                <option value="deny">"Deny"</option>
                                 <option value="ask">"Ask"</option>
                                 <option value="allow">"Allow"</option>
                             </select>
                             <button type="button" class="primary" on:click=move |_| submit_rule()>"Add rule"</button>
                         </div>
+                        <p class="hint" data-rule-scope-hint="true">{move || scope_explainer(&scope.get())}</p>
+                        <p class="hint" data-rule-pattern-hint="true">{move || pattern_hint(&perm_name.get())}</p>
+                        <Show when=move || !pattern.get().trim().is_empty()>
+                            <p class="approvals-copy rule-draft" data-rule-draft="true">{move || format!("This rule will: {}", rule_sentence(&scope.get(), &perm_name.get(), &pattern.get(), &action.get()))}</p>
+                        </Show>
+                        <Show when=move || rule_feedback.get() != RuleFeedback::None>
+                            <p class=move || rule_feedback.get().class() data-rule-feedback="true" role="status">{move || rule_feedback.get().text()}</p>
+                        </Show>
+                        <RuleMatchTester base=base token=token perm_mode=perm_mode known=Signal::derive(move || rules.get().known) />
                     </section>
+                    <PermissionsExplain base=base token=token />
                     <section>
                         <h3>"Audit"</h3>
                         <p class="hint">{move || {
@@ -471,13 +536,40 @@ pub fn ApprovalHost(
                             }
                         }}</p>
                         <ul class="plain approvals-audit">
-                            {move || live_audit.get().into_iter().map(|row| audit_row(row.permission, row.action, row.decision, row.detail, "this session".into())).collect_view()}
+                            {move || live_audit.get().into_iter().map(|row| audit_row(row.permission, row.action, row.decision, row.detail, "this session".to_string())).collect_view()}
                             {move || stored_audit.get().records.into_iter().map(|row| {
                                 let mut detail = if row.patterns.is_empty() { row.layer.clone() } else { row.patterns.join(" ") };
                                 if !row.rule_action.is_empty() {
                                     detail = format!("{detail} rule {}", row.rule_action);
                                 }
-                                let when = if row.session_id.is_empty() { row.time.clone() } else { format!("{} · {}", row.time, row.session_id) };
+                                // #1540: a stored row's session id is a
+                                // link, not dead text. Truncated label,
+                                // full id in the title; activation goes
+                                // through the existing open_session path,
+                                // which reports a deleted session on the
+                                // status line. Live rows above stay plain
+                                // "this session" text — they are here.
+                                let sid = row.session_id.clone();
+                                let when = if sid.is_empty() {
+                                    view! { <span>{row.time.clone()}</span> }.into_any()
+                                } else {
+                                    let label = crate::usage_audit::short_id(&sid);
+                                    let title = sid.clone();
+                                    let aria = format!("Open session {sid}");
+                                    let time = row.time.clone();
+                                    view! {
+                                        <span>
+                                            {time}" · "
+                                            <button
+                                                type="button"
+                                                class="linkish session-link"
+                                                title=title
+                                                aria-label=aria
+                                                on:click=move |_| open_session(sid.clone())
+                                            >{label}</button>
+                                        </span>
+                                    }.into_any()
+                                };
                                 audit_row(row.permission, row.action, row.decision, detail, when)
                             }).collect_view()}
                         </ul>
@@ -502,6 +594,24 @@ pub fn ApprovalHost(
             </div>
         </Show>
     }
+}
+
+/// Move focus to the pattern field after a Duplicate prefill (#1433, Q2:
+/// the pattern is the field most often changed). Deferred a tick so the
+/// click's own focus change does not win.
+fn focus_pattern(pattern_input: NodeRef<leptos::html::Input>) {
+    let closure = Closure::once(move || {
+        if let Some(el) = pattern_input.get() {
+            let _ = el.focus();
+        }
+    });
+    if let Some(window) = web_sys::window() {
+        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            closure.as_ref().unchecked_ref(),
+            0,
+        );
+    }
+    closure.forget();
 }
 
 fn reload_panel(
@@ -563,6 +673,7 @@ fn accept_pending(
     auto_seconds: RwSignal<i32>,
     auto_exclude: RwSignal<Vec<String>>,
     audit_limit: RwSignal<usize>,
+    rule_feedback: RwSignal<RuleFeedback>,
 ) {
     let Some(pending) = confirm.get_untracked() else {
         return;
@@ -607,6 +718,8 @@ fn accept_pending(
             status,
             panel_error,
             rules,
+            rule_feedback,
+            RuleFeedback::Saved(rule_sentence(&scope, &permission, &pattern, &action)),
             json!({
                 "scope": scope,
                 "permission": permission,
@@ -628,6 +741,8 @@ fn accept_pending(
             status,
             panel_error,
             rules,
+            rule_feedback,
+            RuleFeedback::Removed(rule_sentence(&scope, &permission, &pattern, &action)),
             json!({
                 "scope": scope,
                 "index": index,
@@ -647,22 +762,31 @@ fn post_rule(
     status: RwSignal<String>,
     panel_error: RwSignal<String>,
     rules: RwSignal<RulesDocument>,
+    feedback: RwSignal<RuleFeedback>,
+    on_ok: RuleFeedback,
     body: serde_json::Value,
     path: &'static str,
 ) {
     let (b, t) = (base.get_untracked(), token.get_untracked());
     spawn_local(async move {
         match post_json(&b, &t, path, body).await {
-            Ok(()) => match get_json::<RulesDocument>(&b, &t, "/v1/permissions/rules").await {
-                Ok(doc) => {
-                    rules.set(doc);
-                    panel_error.set(String::new());
+            Ok(()) => {
+                // Restate what the rule now does (#1509) instead of a bare
+                // "Saved." — the write succeeded even if the reload fails.
+                feedback.set(on_ok);
+                match get_json::<RulesDocument>(&b, &t, "/v1/permissions/rules").await {
+                    Ok(doc) => {
+                        rules.set(doc);
+                        panel_error.set(String::new());
+                    }
+                    Err(e) => panel_error.set(format!("Saved, but the rules list did not reload: {}", daemon_reason(&e))),
                 }
-                Err(e) => panel_error.set(e),
-            },
+            }
             Err(e) => {
-                panel_error.set(e.clone());
-                status.set(format!("rule change failed: {e}"));
+                // The daemon's own reason, inline under the form (#1509).
+                let reason = daemon_reason(&e);
+                feedback.set(RuleFeedback::Failed(reason.clone()));
+                status.set(format!("rule change failed: {reason}"));
                 // A shifted list refuses the delete. Reload so the next
                 // click names a rule that is still there, and keep the error.
                 if path == "/v1/permissions/rules/remove" {
@@ -683,6 +807,7 @@ fn remove_rule(
     status: RwSignal<String>,
     panel_error: RwSignal<String>,
     rules: RwSignal<RulesDocument>,
+    feedback: RwSignal<RuleFeedback>,
 ) {
     if let Some(pending) = rule_remove_confirm(
         &rule.scope,
@@ -694,12 +819,15 @@ fn remove_rule(
         confirm.set(Some(pending));
         return;
     }
+    let removed = RuleFeedback::Removed(rule_sentence(&rule.scope, &rule.permission, &rule.pattern, &rule.action));
     post_rule(
         base,
         token,
         status,
         panel_error,
         rules,
+        feedback,
+        removed,
         crate::approvals::rule_remove_body(&rule, false),
         "/v1/permissions/rules/remove",
     );
@@ -766,7 +894,7 @@ fn workspace_block(
     }.into_any()
 }
 
-fn audit_row(permission: String, action: String, decision: String, detail: String, when: String) -> impl IntoView {
+fn audit_row(permission: String, action: String, decision: String, detail: String, when: impl IntoView) -> impl IntoView {
     let label = if permission.is_empty() { action.clone() } else { format!("{permission} · {action}") };
     let extra = if decision.is_empty() { detail } else { format!("{decision} {detail}") };
     view! {
@@ -1006,9 +1134,14 @@ fn ApprovalCard(
     let command = ask.preview.command.clone();
     let removed = ask.preview.removed.clone();
     let added = ask.preview.added.clone();
+    let full_removed = ask.preview.full_removed.clone();
+    let full_added = ask.preview.full_added.clone();
     let truncated = ask.preview.truncated;
     let show_command = !command.is_empty();
     let show_diff = !removed.is_empty() || !added.is_empty();
+    // Per-card diff expansion (#1430): collapsed by default, independent
+    // per card.
+    let diff_expanded = RwSignal::new(false);
     // Decision facts (#1507): the daemon-stamped working directory and one
     // consequence line per scope, computed from the ask payload only.
     let work_dir_line = if ask.work_dir.is_empty() {
@@ -1025,7 +1158,7 @@ fn ApprovalCard(
         .collect();
 
     view! {
-        <article class="approvals-card" aria-live="polite">
+        <article class="approvals-card" aria-live="polite" data-pending-ask="true" tabindex="-1">
             <header>
                 <span class="badge badge-blocked">"Needs you"</span>
                 <span class="who">{permission.clone()}</span>
@@ -1034,14 +1167,29 @@ fn ApprovalCard(
             <Show when=move || show_command>
                 <pre class="approvals-command">{command.clone()}</pre>
             </Show>
-            <Show when=move || show_diff>
+            <Show when=move || show_diff && !diff_expanded.get()>
                 <pre class="approvals-diff">
                     {removed.iter().map(|line| view! { <span class="del">{"- "}{line.clone()}{"\n"}</span> }).collect_view()}
                     {added.iter().map(|line| view! { <span class="add">{"+ "}{line.clone()}{"\n"}</span> }).collect_view()}
                 </pre>
             </Show>
+            <Show when=move || show_diff && diff_expanded.get()>
+                <pre class="approvals-diff approvals-diff-expanded">
+                    {full_removed.iter().map(|line| view! { <span class="del">{"- "}{line.clone()}{"\n"}</span> }).collect_view()}
+                    {full_added.iter().map(|line| view! { <span class="add">{"+ "}{line.clone()}{"\n"}</span> }).collect_view()}
+                </pre>
+            </Show>
             <Show when=move || truncated>
                 <p class="hint">"Diff preview is shortened."</p>
+                <button
+                    type="button"
+                    class="secondary"
+                    data-approval-diff-expand=""
+                    aria-expanded=move || if diff_expanded.get() { "true" } else { "false" }
+                    on:click=move |_| diff_expanded.update(|v| *v = !*v)
+                >
+                    {move || if diff_expanded.get() { "Show less" } else { "Show full diff" }}
+                </button>
             </Show>
             <Show when=move || show_work_dir>
                 <p class="approvals-fact">{work_dir_line.clone()}</p>

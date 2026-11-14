@@ -14,6 +14,8 @@ Go 1.26 agentic coding TUI. Engine emits protocol events; TUI consumes them. Ses
 
 CI (`.github/workflows/ci.yml`) always runs gofmt, TUI generate, web-check (when web present), build, vet, and `go test -race ./...`. Local race on every PR is redundant for tier A/B.
 
+WebUI (`webui/`): `make web-check` stays the local gate. Never commit `internal/frontend/server/static/**` in a PR; CI's `webui-smoke` builds the bundle from your sources and `webui-bundle-guard` fails PRs that touch it. `webui-bundle.yml` rebuilds main's committed bundle after merge (see `docs/webui-daemon.md`).
+
 ```sh
 make test          # go test ./...
 make vet           # go vet ./...

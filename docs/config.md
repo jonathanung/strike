@@ -764,6 +764,10 @@ remains unsupported (same as manual upgrade).
 Probe state is cached under `~/.strike/cache/update-check.json`. Editable under
 `/settings` → Defaults.
 
+`strike serve` exposes the same check read-only at `GET /v1/update` (cache
+`~/.strike/cache/update-check-web.json`); `off` makes no request and the web
+route never installs, even with `auto` (see `docs/web.md`).
+
 ## Keep awake (`keepAwake`)
 
 Opt-in sleep inhibition for the gateway host while `strike serve` runs, so a

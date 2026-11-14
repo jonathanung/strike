@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -34,12 +35,19 @@ const (
 	gitDiffCap      = 200_000
 	gitLogDefault   = 30
 	gitLogMax       = 100
+	// gitShowFilesMax caps the changed-file list of an inspected commit
+	// (#1484): a vendor import or shallow boundary commit can touch
+	// thousands of paths.
+	gitShowFilesMax = 500
 
 	confirmDiscard        = "discard"
 	confirmResetHard      = "reset-hard"
 	confirmDeleteBranch   = "delete-branch"
 	confirmRemoveWorktree = "remove-worktree"
 	confirmPruneStale     = "prune-stale"
+	confirmDropStash      = "drop-stash"
+
+	gitStashMessageMax = 500
 )
 
 type gitFileJSON struct {
@@ -70,6 +78,75 @@ type gitCommitJSON struct {
 	Subject string `json:"subject"`
 	Author  string `json:"author"`
 	Date    string `json:"date"`
+}
+
+// gitStashJSON is one `git stash list` entry (#1471). Hash pins the
+// entry: apply/pop/drop name both index and hash, so a stash created or
+// dropped in a terminal meanwhile can never shift the action onto the
+// wrong entry.
+type gitStashJSON struct {
+	Index   int    `json:"index"`
+	Ref     string `json:"ref"`
+	Hash    string `json:"hash"`
+	Message string `json:"message"`
+	Date    string `json:"date"`
+}
+
+// Branch-changes states (#1450). Anything but "ok" is an honest empty
+// state the panel names instead of showing a misleading list.
+const (
+	branchStateOK          = "ok"
+	branchStateOnBase      = "on-base"
+	branchStateNoMergeBase = "no-merge-base"
+	branchStateDetached    = "detached"
+	branchStateNoCommits   = "no-commits"
+	branchStateChooseBase  = "choose-base"
+)
+
+type gitBranchFileJSON struct {
+	Path    string `json:"path"`
+	Added   int    `json:"added"`
+	Deleted int    `json:"deleted"`
+	Binary  bool   `json:"binary"`
+}
+
+// gitBranchChangesJSON is what the current branch contains versus its
+// base: commits base..HEAD and the three-dot (merge-base...HEAD) files.
+type gitBranchChangesJSON struct {
+	State        string              `json:"state"`
+	Branch       string              `json:"branch"`
+	Base         string              `json:"base"`
+	BaseDetected bool                `json:"baseDetected"`
+	MergeBase    string              `json:"mergeBase"`
+	Commits      []gitCommitJSON     `json:"commits"`
+	CommitsTotal int                 `json:"commitsTotal"`
+	Files        []gitBranchFileJSON `json:"files"`
+}
+
+// gitShowFileJSON is one changed path in an inspected commit (#1484).
+// Binary files report Binary with zero counts.
+type gitShowFileJSON struct {
+	Path    string `json:"path"`
+	Added   int    `json:"added"`
+	Deleted int    `json:"deleted"`
+	Binary  bool   `json:"binary"`
+}
+
+// gitShowJSON is the read-only commit detail behind GET /v1/git/show.
+// Merge commits are diffed against their first parent.
+type gitShowJSON struct {
+	Hash    string            `json:"hash"`
+	Subject string            `json:"subject"`
+	Body    string            `json:"body"`
+	Author  string            `json:"author"`
+	Date    string            `json:"date"`
+	Parents []string          `json:"parents"`
+	Files   []gitShowFileJSON `json:"files"`
+	// FilesTotal counts every changed path; Files holds at most
+	// gitShowFilesMax of them.
+	FilesTotal int    `json:"filesTotal"`
+	Patch      string `json:"patch"`
+	Truncated  bool   `json:"truncated"`
 }
 
 type gitWorktreeJSON struct {
@@ -161,17 +238,10 @@ func (s *Server) handleGitLog(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit := gitLogDefault
-	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 {
-			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "limit must be a positive integer"})
-			return
-		}
-		if n > gitLogMax {
-			n = gitLogMax
-		}
-		limit = n
+	limit, err := parseGitLogLimit(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), gitReadTimeout)
 	defer cancel()
@@ -181,6 +251,290 @@ func (s *Server) handleGitLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"commits": commits})
+}
+
+func (s *Server) handleGitStashList(w http.ResponseWriter, r *http.Request) {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
+	cwd, ok := s.gitCWD(w, r)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), gitReadTimeout)
+	defer cancel()
+	stashes, err := gitStashList(ctx, cwd)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"stashes": stashes})
+}
+
+func (s *Server) handleGitStashDiff(w http.ResponseWriter, r *http.Request) {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
+	cwd, ok := s.gitCWD(w, r)
+	if !ok {
+		return
+	}
+	index, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("index")))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "index must be an integer"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), gitReadTimeout)
+	defer cancel()
+	ref, full, err := pinnedStash(ctx, cwd, index, r.URL.Query().Get("hash"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	// Show by the verified hash, untracked files included: a preview that
+	// hid -u files would invite dropping work the user never saw.
+	out, stderr, err := gitRun(ctx, cwd, "stash", "show", "--patch", "--no-color", "--include-untracked", full)
+	if err != nil && (strings.Contains(stderr, "include-untracked") || strings.Contains(stderr, "unknown option")) {
+		// git < 2.32: tracked part only.
+		out, stderr, err = gitRun(ctx, cwd, "stash", "show", "--patch", "--no-color", full)
+	}
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: gitErr("stash show", err, stderr)})
+		return
+	}
+	truncated := false
+	if len(out) > gitDiffCap {
+		out = out[:gitDiffCap]
+		truncated = true
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ref": ref, "diff": string(out), "truncated": truncated})
+}
+
+func (s *Server) handleGitStashPush(w http.ResponseWriter, r *http.Request) {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
+	if !s.requireMutable(w) {
+		return
+	}
+	cwd, ok := s.gitCWD(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Message          string `json:"message"`
+		IncludeUntracked bool   `json:"includeUntracked"`
+	}
+	if err := decodeBody(w, r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	msg := strings.TrimSpace(body.Message)
+	if len(msg) > gitStashMessageMax || strings.ContainsFunc(msg, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "stash message must be one line of at most 500 bytes"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), gitWriteTimeout)
+	defer cancel()
+	before := stashTop(ctx, cwd)
+	// --message= keeps a message starting with "-" a value, never an
+	// option. No message: git's own "WIP on <branch>: ..." (#1471 Q3).
+	args := []string{"stash", "push"}
+	if body.IncludeUntracked {
+		args = append(args, "--include-untracked")
+	}
+	if msg != "" {
+		args = append(args, "--message="+msg)
+	}
+	if _, stderr, err := gitRun(ctx, cwd, args...); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: gitErr("stash", err, stderr)})
+		return
+	}
+	// `git stash push` exits 0 on a clean tree without stashing.
+	if stashTop(ctx, cwd) == before {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "No local changes to stash."})
+		return
+	}
+	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
+}
+
+// stashBody names a stash by index and pins it by hash.
+type stashBody struct {
+	Index   int    `json:"index"`
+	Hash    string `json:"hash"`
+	Confirm string `json:"confirm"`
+}
+
+func (s *Server) handleGitStashApply(w http.ResponseWriter, r *http.Request) {
+	s.gitStashApplyOrPop(w, r, "apply")
+}
+
+func (s *Server) handleGitStashPop(w http.ResponseWriter, r *http.Request) {
+	s.gitStashApplyOrPop(w, r, "pop")
+}
+
+// gitStashApplyOrPop runs `git stash apply|pop`. A conflict is returned
+// as 409 with git's own output; git keeps the stash on a conflicting pop
+// and nothing here resolves or discards anything (#1471).
+func (s *Server) gitStashApplyOrPop(w http.ResponseWriter, r *http.Request, verb string) {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
+	if !s.requireMutable(w) {
+		return
+	}
+	cwd, ok := s.gitCWD(w, r)
+	if !ok {
+		return
+	}
+	var body stashBody
+	if err := decodeBody(w, r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), gitWriteTimeout)
+	defer cancel()
+	ref, full, err := pinnedStash(ctx, cwd, body.Index, body.Hash)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	// apply takes the verified commit itself, closing the check-then-act
+	// window; pop must name the reflog entry it drops.
+	target := full
+	if verb == "pop" {
+		target = ref
+	}
+	out, stderr, err := gitRun(ctx, cwd, "stash", verb, target)
+	if err != nil {
+		writeJSON(w, http.StatusConflict, opErrorResponse{Error: stashFailure(verb, err, string(out), stderr)})
+		return
+	}
+	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
+}
+
+func (s *Server) handleGitStashDrop(w http.ResponseWriter, r *http.Request) {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
+	if !s.requireMutable(w) {
+		return
+	}
+	cwd, ok := s.gitCWD(w, r)
+	if !ok {
+		return
+	}
+	var body stashBody
+	if err := decodeBody(w, r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if body.Confirm != confirmDropStash {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "confirm must be " + confirmDropStash})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), gitWriteTimeout)
+	defer cancel()
+	ref, _, err := pinnedStash(ctx, cwd, body.Index, body.Hash)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	if _, stderr, err := gitRun(ctx, cwd, "stash", "drop", ref); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: gitErr("stash drop", err, stderr)})
+		return
+	}
+	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
+}
+
+func (s *Server) handleGitBranchChanges(w http.ResponseWriter, r *http.Request) {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
+	cwd, ok := s.gitCWD(w, r)
+	if !ok {
+		return
+	}
+	base, err := optionalBaseName(r.URL.Query().Get("base"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	limit, err := parseGitLogLimit(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), gitReadTimeout)
+	defer cancel()
+	body, err := gitBranchChanges(ctx, cwd, base, limit)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+// parseGitLogLimit reads ?limit= for commit lists: default gitLogDefault,
+// clamped to gitLogMax, 400 on a non-positive or non-numeric value.
+func parseGitLogLimit(r *http.Request) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if raw == "" {
+		return gitLogDefault, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, errors.New("limit must be a positive integer")
+	}
+	return min(n, gitLogMax), nil
+}
+
+func (s *Server) handleGitBranchDiff(w http.ResponseWriter, r *http.Request) {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
+	cwd, ok := s.gitCWD(w, r)
+	if !ok {
+		return
+	}
+	base, err := optionalBaseName(r.URL.Query().Get("base"))
+	if err == nil && base == "" {
+		err = errors.New("base is required")
+	}
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	rel, err := safeRepoPath(r.URL.Query().Get("path"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), gitReadTimeout)
+	defer cancel()
+	diff, truncated, err := gitBranchDiff(ctx, cwd, base, rel)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"path": rel, "base": base, "diff": diff, "truncated": truncated,
+	})
+}
+
+func (s *Server) handleGitShow(w http.ResponseWriter, r *http.Request) {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
+	cwd, ok := s.gitCWD(w, r)
+	if !ok {
+		return
+	}
+	ref, err := safeGitRef(r.URL.Query().Get("ref"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), gitReadTimeout)
+	defer cancel()
+	body, err := gitShow(ctx, cwd, ref)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) handleGitStage(w http.ResponseWriter, r *http.Request) {
@@ -844,13 +1198,20 @@ func gitBranches(ctx context.Context, cwd string) (string, []gitBranchJSON, erro
 }
 
 func gitLog(ctx context.Context, cwd string, limit int) ([]gitCommitJSON, error) {
-	out, stderr, err := gitRun(ctx, cwd, "log", "-n", strconv.Itoa(limit), "--format=%H%x1f%an%x1f%aI%x1f%s")
+	out, stderr, err := gitRun(ctx, cwd, "log", "-n", strconv.Itoa(limit), "--format="+gitLogFormat)
 	if err != nil {
 		if strings.Contains(stderr, "does not have any commits") {
 			return []gitCommitJSON{}, nil
 		}
 		return nil, errors.New(gitErr("log", err, stderr))
 	}
+	return parseLogLines(out), nil
+}
+
+const gitLogFormat = "%H%x1f%an%x1f%aI%x1f%s"
+
+// parseLogLines reads gitLogFormat records, one per line.
+func parseLogLines(out []byte) []gitCommitJSON {
 	commits := []gitCommitJSON{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if strings.TrimSpace(line) == "" {
@@ -864,7 +1225,323 @@ func gitLog(ctx context.Context, cwd string, limit int) ([]gitCommitJSON, error)
 			Hash: parts[0], Author: parts[1], Date: parts[2], Subject: parts[3],
 		})
 	}
-	return commits, nil
+	return commits
+}
+
+// gitStashList reads `git stash list`, newest first (stash@{0}).
+func gitStashList(ctx context.Context, cwd string) ([]gitStashJSON, error) {
+	// Message last: SplitN keeps any separator inside it intact.
+	out, stderr, err := gitRun(ctx, cwd, "stash", "list", "--format=%H%x1f%cI%x1f%gs")
+	if err != nil {
+		if strings.Contains(stderr, "does not have any commits") {
+			return []gitStashJSON{}, nil
+		}
+		return nil, errors.New(gitErr("stash list", err, stderr))
+	}
+	return parseStashList(out), nil
+}
+
+func parseStashList(out []byte) []gitStashJSON {
+	stashes := []gitStashJSON{}
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\x1f", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		i := len(stashes)
+		stashes = append(stashes, gitStashJSON{
+			Index: i, Ref: "stash@{" + strconv.Itoa(i) + "}",
+			Hash: parts[0], Date: parts[1], Message: parts[2],
+		})
+	}
+	return stashes
+}
+
+// stashTop is the hash of stash@{0}, or "" when there are no stashes.
+func stashTop(ctx context.Context, cwd string) string {
+	out, _, err := gitRun(ctx, cwd, "rev-parse", "--verify", "--quiet", "refs/stash")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// pinnedStash returns "stash@{index}" and its full hash only when that
+// entry still has the given hash; otherwise the list changed under the
+// panel and the caller must refresh rather than act on another stash.
+func pinnedStash(ctx context.Context, cwd string, index int, hash string) (string, string, error) {
+	hash = strings.TrimSpace(hash)
+	if index < 0 || index > 10000 || len(hash) < 7 || len(hash) > 64 || strings.Trim(hash, "0123456789abcdef") != "" {
+		return "", "", errors.New("invalid stash reference")
+	}
+	ref := "stash@{" + strconv.Itoa(index) + "}"
+	out, _, err := gitRun(ctx, cwd, "rev-parse", "--verify", "--quiet", ref)
+	full := strings.TrimSpace(string(out))
+	if err != nil || !strings.HasPrefix(full, hash) {
+		return "", "", errors.New("the stash list changed — refresh and try again")
+	}
+	return ref, full, nil
+}
+
+// stashFailure names a failed apply/pop with git's own words, stdout
+// (CONFLICT lines) first. Pop on a conflict keeps the stash.
+func stashFailure(verb string, err error, stdout, stderr string) string {
+	msg := strings.TrimSpace(strings.TrimSpace(stdout) + "\n" + strings.TrimSpace(stderr))
+	if msg == "" {
+		msg = err.Error()
+	}
+	prefix := "git stash " + verb + " failed"
+	if verb == "pop" {
+		prefix += " (the stash was kept)"
+	}
+	return prefix + ": " + msg
+}
+
+// defaultBaseBranch picks the repo's default branch: local main, else
+// master, else the remote's HEAD (origin/HEAD). "" means no reliable
+// default; the panel then asks the user to choose (#1450 Q2).
+func defaultBaseBranch(ctx context.Context, cwd string) string {
+	for _, cand := range []string{"main", "master"} {
+		if resolveCommit(ctx, cwd, "refs/heads/"+cand) != "" {
+			return cand
+		}
+	}
+	out, _, err := gitRun(ctx, cwd, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return ""
+	}
+	// A dangling origin/HEAD (remote branch pruned) is no default: ask.
+	name := strings.TrimSpace(string(out))
+	if name == "" || resolveCommit(ctx, cwd, "refs/remotes/"+name) == "" {
+		return ""
+	}
+	return name
+}
+
+// resolveBase resolves a base branch name preferring branch refs over a
+// same-named tag: refs/heads/<name>, then refs/remotes/<name>, then the
+// plain name (any other validated ref).
+func resolveBase(ctx context.Context, cwd, name string) string {
+	for _, ref := range []string{"refs/heads/" + name, "refs/remotes/" + name, name} {
+		if rev := resolveCommit(ctx, cwd, ref); rev != "" {
+			return rev
+		}
+	}
+	return ""
+}
+
+// resolveCommit returns the full hash of rev or "" when it does not name
+// a commit. rev must already be validated (no leading "-").
+func resolveCommit(ctx context.Context, cwd, rev string) string {
+	out, _, err := gitRun(ctx, cwd, "rev-parse", "--verify", "--quiet", rev+"^{commit}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// gitBranchChanges answers "what is on this branch versus base" (#1450):
+// commits base..HEAD (newest first, up to limit, with the full count) and
+// files changed merge-base...HEAD (three-dot, Q1) with +/- counts. It is
+// read-only. base "" means detect the default branch.
+func gitBranchChanges(ctx context.Context, cwd, base string, limit int) (gitBranchChangesJSON, error) {
+	body := gitBranchChangesJSON{
+		State: branchStateOK, Base: base,
+		Commits: []gitCommitJSON{}, Files: []gitBranchFileJSON{},
+	}
+	head := resolveCommit(ctx, cwd, "HEAD")
+	if head == "" {
+		body.State = branchStateNoCommits
+		return body, nil
+	}
+	branch, _, err := gitRun(ctx, cwd, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		body.State = branchStateDetached
+		return body, nil
+	}
+	body.Branch = strings.TrimSpace(string(branch))
+	if body.Base == "" {
+		body.Base = defaultBaseBranch(ctx, cwd)
+		body.BaseDetected = body.Base != ""
+	}
+	if body.Base == "" {
+		body.State = branchStateChooseBase
+		return body, nil
+	}
+	if body.Base == body.Branch {
+		body.State = branchStateOnBase
+		return body, nil
+	}
+	baseRev := resolveBase(ctx, cwd, body.Base)
+	if baseRev == "" {
+		return gitBranchChangesJSON{}, errors.New("unknown base branch: " + body.Base)
+	}
+	mb, _, err := gitRun(ctx, cwd, "merge-base", baseRev, head)
+	if err != nil {
+		body.State = branchStateNoMergeBase
+		return body, nil
+	}
+	body.MergeBase = strings.TrimSpace(string(mb))
+	span := baseRev + ".." + head
+	out, stderr, err := gitRun(ctx, cwd, "log", "-n", strconv.Itoa(limit), "--format="+gitLogFormat, span)
+	if err != nil {
+		return gitBranchChangesJSON{}, errors.New(gitErr("log", err, stderr))
+	}
+	body.Commits = parseLogLines(out)
+	count, stderr, err := gitRun(ctx, cwd, "rev-list", "--count", span)
+	if err != nil {
+		return gitBranchChangesJSON{}, errors.New(gitErr("rev-list", err, stderr))
+	}
+	body.CommitsTotal, _ = strconv.Atoi(strings.TrimSpace(string(count)))
+	numstat, stderr, err := gitRun(ctx, cwd, "diff", "--numstat", "-z", "--no-renames", body.MergeBase, head)
+	if err != nil {
+		return gitBranchChangesJSON{}, errors.New(gitErr("diff", err, stderr))
+	}
+	body.Files = parseNumstatFilesZ(numstat)
+	return body, nil
+}
+
+// gitBranchDiff is one file's cumulative branch diff, merge-base...HEAD.
+func gitBranchDiff(ctx context.Context, cwd, base, rel string) (string, bool, error) {
+	head := resolveCommit(ctx, cwd, "HEAD")
+	baseRev := resolveBase(ctx, cwd, base)
+	if head == "" || baseRev == "" {
+		return "", false, errors.New("unknown base branch: " + base)
+	}
+	mb, _, err := gitRun(ctx, cwd, "merge-base", baseRev, head)
+	if err != nil {
+		return "", false, errors.New("no common history with " + base)
+	}
+	// --literal-pathspecs: "app/[id]/page.tsx" is a path, not a glob.
+	out, stderr, err := gitRun(ctx, cwd, "--literal-pathspecs", "diff", "--no-renames", strings.TrimSpace(string(mb)), head, "--", rel)
+	if err != nil {
+		return "", false, errors.New(gitErr("diff", err, stderr))
+	}
+	truncated := false
+	if len(out) > gitDiffCap {
+		out = out[:gitDiffCap]
+		truncated = true
+	}
+	return string(out), truncated, nil
+}
+
+// parseNumstatFilesZ reads `--numstat -z --no-renames` records
+// ("added\tdeleted\tpath\0"); binary files report "-" counts.
+func parseNumstatFilesZ(out []byte) []gitBranchFileJSON {
+	files := []gitBranchFileJSON{}
+	for _, rec := range bytes.Split(out, []byte{0}) {
+		rec = bytes.TrimLeft(rec, "\n")
+		if len(rec) == 0 {
+			continue
+		}
+		parts := bytes.SplitN(rec, []byte{'\t'}, 3)
+		if len(parts) != 3 || len(parts[2]) == 0 {
+			continue
+		}
+		f := gitBranchFileJSON{Path: string(parts[2])}
+		if string(parts[0]) == "-" && string(parts[1]) == "-" {
+			f.Binary = true
+		} else {
+			f.Added, _ = strconv.Atoi(string(parts[0]))
+			f.Deleted, _ = strconv.Atoi(string(parts[1]))
+		}
+		files = append(files, f)
+	}
+	return files
+}
+
+// optionalBaseName validates a base branch for read-only comparison:
+// local ("main") or remote-tracking ("origin/main") names, never an
+// option or revision expression. "" is allowed (detect the default).
+func optionalBaseName(base string) (string, error) {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return "", nil
+	}
+	name, err := safeBranchName(base)
+	if err != nil {
+		return "", errors.New("invalid base branch")
+	}
+	return name, nil
+}
+
+// gitShow resolves ref to one commit and returns its metadata, body,
+// changed files and (capped) patch. Merges diff against the first parent;
+// renames are reported as delete+add so the file list and patch agree.
+func gitShow(ctx context.Context, cwd, ref string) (gitShowJSON, error) {
+	rev, stderr, err := gitRun(ctx, cwd, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	if err != nil {
+		if stderr == "" {
+			return gitShowJSON{}, errors.New("unknown commit: " + ref)
+		}
+		return gitShowJSON{}, errors.New(gitErr("show", err, stderr))
+	}
+	hash := strings.TrimSpace(string(rev))
+	if hash == "" {
+		return gitShowJSON{}, errors.New("unknown commit: " + ref)
+	}
+	meta, stderr, err := gitRun(ctx, cwd, "show", "-s", "--format=%H%x00%an%x00%aI%x00%P%x00%s%x00%b", hash)
+	if err != nil {
+		return gitShowJSON{}, errors.New(gitErr("show", err, stderr))
+	}
+	parts := strings.SplitN(string(meta), "\x00", 6)
+	if len(parts) < 6 {
+		return gitShowJSON{}, errors.New("git show: unexpected output")
+	}
+	body := gitShowJSON{
+		Hash:    parts[0],
+		Author:  parts[1],
+		Date:    parts[2],
+		Parents: strings.Fields(parts[3]),
+		Subject: parts[4],
+		Body:    strings.TrimRight(parts[5], "\n"),
+		Files:   []gitShowFileJSON{},
+	}
+	diffArgs := []string{"show", "--format=", "--no-renames", "-m", "--first-parent"}
+	numstat, stderr, err := gitRun(ctx, cwd, append(diffArgs, "--numstat", "-z", hash)...)
+	if err != nil {
+		return gitShowJSON{}, errors.New(gitErr("show", err, stderr))
+	}
+	body.Files = parseShowNumstatZ(numstat)
+	body.FilesTotal = len(body.Files)
+	if len(body.Files) > gitShowFilesMax {
+		body.Files = body.Files[:gitShowFilesMax]
+	}
+	patch, truncated, stderr, err := gitRunCapped(ctx, cwd, gitDiffCap, append(diffArgs, "--patch", hash)...)
+	if err != nil {
+		return gitShowJSON{}, errors.New(gitErr("show", err, stderr))
+	}
+	body.Patch = string(patch)
+	body.Truncated = truncated
+	return body, nil
+}
+
+// parseShowNumstatZ reads `--numstat -z --no-renames` records
+// ("added\tdeleted\tpath\0"); binary files report "-" counts.
+func parseShowNumstatZ(out []byte) []gitShowFileJSON {
+	files := []gitShowFileJSON{}
+	for _, rec := range bytes.Split(out, []byte{0}) {
+		rec = bytes.TrimLeft(rec, "\n")
+		if len(rec) == 0 {
+			continue
+		}
+		parts := bytes.SplitN(rec, []byte{'\t'}, 3)
+		if len(parts) != 3 || len(parts[2]) == 0 {
+			continue
+		}
+		f := gitShowFileJSON{Path: string(parts[2])}
+		if string(parts[0]) == "-" && string(parts[1]) == "-" {
+			f.Binary = true
+		} else {
+			f.Added, _ = strconv.Atoi(string(parts[0]))
+			f.Deleted, _ = strconv.Atoi(string(parts[1]))
+		}
+		files = append(files, f)
+	}
+	return files
 }
 
 func gitDiscard(ctx context.Context, cwd, rel string, staged bool) error {
@@ -1101,6 +1778,37 @@ func gitRun(ctx context.Context, cwd string, args ...string) ([]byte, string, er
 	return stdout.Bytes(), strings.TrimSpace(stderr.String()), err
 }
 
+// gitRunCapped is gitRun for potentially huge output: it reads at most
+// limit bytes of stdout and kills git once more arrives, so a commit
+// adding a giant generated file is never buffered whole while gitMu is
+// held (#1484). truncated reports that output was cut.
+func gitRunCapped(ctx context.Context, cwd string, limit int, args ...string) ([]byte, bool, string, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", cwd}, args...)...)
+	cmd.Env = gitEnv()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, false, "", err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, false, "", err
+	}
+	out, readErr := io.ReadAll(io.LimitReader(stdout, int64(limit)+1))
+	if len(out) > limit {
+		cancel()
+		_ = cmd.Wait()
+		return out[:limit], true, "", nil
+	}
+	waitErr := cmd.Wait()
+	if readErr != nil {
+		return nil, false, strings.TrimSpace(stderr.String()), readErr
+	}
+	return out, false, strings.TrimSpace(stderr.String()), waitErr
+}
+
 func gitEnv() []string {
 	env := make([]string, 0, len(os.Environ())+1)
 	for _, e := range os.Environ() {
@@ -1159,6 +1867,26 @@ func safeRepoPathsOptional(paths []string) ([]string, error) {
 		out = append(out, clean)
 	}
 	return out, nil
+}
+
+// safeGitRef accepts a revision for read-only inspection: a hash from the
+// log, or any branch/tag name. It refuses option-looking, ranged,
+// reflog/at-sign and whitespace/control refs; the caller still resolves
+// it with rev-parse --verify inside the workspace repo.
+func safeGitRef(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || len(ref) > 200 {
+		return "", errors.New("invalid ref")
+	}
+	if strings.HasPrefix(ref, "-") || strings.Contains(ref, "..") || strings.Contains(ref, "@{") {
+		return "", errors.New("invalid ref")
+	}
+	for _, r := range ref {
+		if r <= ' ' || r == 0x7f || strings.ContainsRune("~^:?*[\\", r) {
+			return "", errors.New("invalid ref")
+		}
+	}
+	return ref, nil
 }
 
 func safeBranchName(name string) (string, error) {

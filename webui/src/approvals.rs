@@ -256,6 +256,30 @@ pub fn rule_remove_confirm(
     })
 }
 
+/// The four Add-form fields, copied verbatim from an existing rule
+/// (#1433). Duplicate/edit is prefill-only: this draft seeds the form and
+/// the existing submit path — validation and the dangerous-add confirm
+/// included — stays the single way a rule is created. Nothing here
+/// submits, and the source rule is untouched until the user removes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RuleDraft {
+    pub scope: String,
+    pub permission: String,
+    pub pattern: String,
+    pub action: String,
+}
+
+/// Prefill for the Duplicate affordance: every field copied as-is,
+/// including a project scope (changing scope is the user's edit, Q3).
+pub fn rule_prefill(rule: &RuleRecord) -> RuleDraft {
+    RuleDraft {
+        scope: rule.scope.clone(),
+        permission: rule.permission.clone(),
+        pattern: rule.pattern.clone(),
+        action: rule.action.clone(),
+    }
+}
+
 /// Body for POST /v1/permissions/rules/remove. Identity travels with the
 /// index so a shifted list cannot delete a different rule.
 pub fn rule_remove_body(rule: &RuleRecord, confirm: bool) -> serde_json::Value {
@@ -297,8 +321,14 @@ pub fn countdown_seconds(mode: &str, configured: i32, permission: &str, exclude:
 pub struct Preview {
     pub heading: String,
     pub command: String,
+    /// Collapsed preview: at most 8 removed / 8 added lines.
     pub removed: Vec<String>,
     pub added: Vec<String>,
+    /// Full line lists (#1430), carried so the card can expand the diff
+    /// without any new wire data. Equal to `removed`/`added` when not
+    /// truncated.
+    pub full_removed: Vec<String>,
+    pub full_added: Vec<String>,
     pub truncated: bool,
 }
 
@@ -555,12 +585,14 @@ fn parse_ask(data: &Value) -> Option<Ask> {
 
 pub fn preview_of(permission: &str, patterns: &[String], metadata: &Value) -> Preview {
     if let Some((old, new)) = diff_strings(metadata) {
-        let (removed, added, truncated) = diff_lines(&old, &new, 8);
+        let (removed, added, full_removed, full_added, truncated) = diff_lines(&old, &new, 8);
         return Preview {
             heading: patterns.first().cloned().unwrap_or_else(|| permission.into()),
             command: String::new(),
             removed,
             added,
+            full_removed,
+            full_added,
             truncated,
         };
     }
@@ -571,6 +603,8 @@ pub fn preview_of(permission: &str, patterns: &[String], metadata: &Value) -> Pr
             command: body,
             removed: Vec::new(),
             added: Vec::new(),
+            full_removed: Vec::new(),
+            full_added: Vec::new(),
             truncated: false,
         }
     } else {
@@ -583,6 +617,8 @@ pub fn preview_of(permission: &str, patterns: &[String], metadata: &Value) -> Pr
             command: String::new(),
             removed: Vec::new(),
             added: Vec::new(),
+            full_removed: Vec::new(),
+            full_added: Vec::new(),
             truncated: false,
         }
     }
@@ -594,17 +630,23 @@ fn diff_strings(metadata: &Value) -> Option<(String, String)> {
     Some((old.to_string(), new.to_string()))
 }
 
-fn diff_lines(old: &str, new: &str, cap: usize) -> (Vec<String>, Vec<String>, bool) {
-    let mut removed: Vec<String> = old.split('\n').map(|l| l.to_string()).collect();
-    let mut added: Vec<String> = new.split('\n').map(|l| l.to_string()).collect();
-    let truncated = removed.len() > cap || added.len() > cap;
-    if removed.len() > cap {
-        removed.truncate(cap);
-    }
-    if added.len() > cap {
-        added.truncate(cap);
-    }
-    (removed, added, truncated)
+/// Returns (capped removed, capped added, full removed, full added,
+/// truncated). The full lists are retained (#1430) so an expanded card
+/// can show every line; the capped lists keep the collapsed default at
+/// exactly `cap` lines per side.
+fn diff_lines(
+    old: &str,
+    new: &str,
+    cap: usize,
+) -> (Vec<String>, Vec<String>, Vec<String>, Vec<String>, bool) {
+    let full_removed: Vec<String> = old.split('\n').map(|l| l.to_string()).collect();
+    let full_added: Vec<String> = new.split('\n').map(|l| l.to_string()).collect();
+    let truncated = full_removed.len() > cap || full_added.len() > cap;
+    let mut removed = full_removed.clone();
+    let mut added = full_added.clone();
+    removed.truncate(cap);
+    added.truncate(cap);
+    (removed, added, full_removed, full_added, truncated)
 }
 
 fn audit_line(data: &Value) -> AuditLine {
@@ -860,6 +902,11 @@ mod tests {
         assert!(ask.preview.truncated);
         assert_eq!(ask.preview.removed.len(), 8);
         assert_eq!(ask.preview.added, vec!["z".to_string()]);
+        // Full lists are recoverable from the preview (#1430): the 9th
+        // removed line was previously discarded entirely.
+        assert_eq!(ask.preview.full_removed.len(), 9);
+        assert_eq!(ask.preview.full_removed[8], "i");
+        assert_eq!(ask.preview.full_added, vec!["z".to_string()]);
 
         let pending = r#"{"type":"permission.decided","data":{"requestId":"p1","permission":"bash","action":"ask","patterns":["echo hi"]}}"#;
         let notes = notes_from_envelope(pending);
@@ -874,6 +921,49 @@ mod tests {
         assert!(matches!(notes_from_envelope(mode).as_slice(), [PermNote::Mode(m)] if m == "yolo"));
         assert!(notes_from_envelope(r#"{"type":"permission.mode","data":{"mode":"trust"}}"#).is_empty());
         assert!(notes_from_envelope("not-json").is_empty());
+    }
+
+    #[test]
+    fn preview_carries_full_diff_beyond_the_eight_line_cap() {
+        // 30-line edit on both sides: collapsed preview stays 8+8, the
+        // full lists recover every line, and truncated is set (#1430).
+        let old: Vec<String> = (1..=30).map(|n| format!("old-{n}")).collect();
+        let new: Vec<String> = (1..=30).map(|n| format!("new-{n}")).collect();
+        let metadata = serde_json::json!({
+            "oldString": old.join("\n"),
+            "newString": new.join("\n"),
+        });
+        let preview = preview_of("edit", &["a.go".into()], &metadata);
+        assert!(preview.truncated);
+        assert_eq!(preview.removed.len(), 8);
+        assert_eq!(preview.added.len(), 8);
+        assert_eq!(preview.removed, old[..8]);
+        assert_eq!(preview.added, new[..8]);
+        assert_eq!(preview.full_removed, old);
+        assert_eq!(preview.full_added, new);
+
+        // Exactly at the cap: not truncated, full == collapsed.
+        let old8: Vec<String> = (1..=8).map(|n| format!("old-{n}")).collect();
+        let metadata = serde_json::json!({
+            "oldString": old8.join("\n"),
+            "newString": "only",
+        });
+        let preview = preview_of("edit", &["a.go".into()], &metadata);
+        assert!(!preview.truncated);
+        assert_eq!(preview.full_removed, old8);
+        assert_eq!(preview.removed, preview.full_removed);
+        assert_eq!(preview.full_added, preview.added);
+
+        // One side over the cap alone still truncates and recovers.
+        let metadata = serde_json::json!({
+            "oldString": "one",
+            "newString": (1..=12).map(|n| format!("n{n}")).collect::<Vec<_>>().join("\n"),
+        });
+        let preview = preview_of("edit", &["a.go".into()], &metadata);
+        assert!(preview.truncated);
+        assert_eq!(preview.added.len(), 8);
+        assert_eq!(preview.full_added.len(), 12);
+        assert_eq!(preview.full_added[11], "n12");
     }
 
     #[test]
@@ -909,6 +999,8 @@ mod tests {
                 command: String::new(),
                 removed: Vec::new(),
                 added: Vec::new(),
+                full_removed: Vec::new(),
+                full_added: Vec::new(),
                 truncated: false,
             },
             work_dir: "/work/project".into(),
@@ -934,6 +1026,8 @@ mod tests {
                 command: String::new(),
                 removed: Vec::new(),
                 added: Vec::new(),
+                full_removed: Vec::new(),
+                full_added: Vec::new(),
                 truncated: false,
             },
             work_dir: "/work/project".into(),
@@ -971,6 +1065,8 @@ mod tests {
                 command: String::new(),
                 removed: Vec::new(),
                 added: Vec::new(),
+                full_removed: Vec::new(),
+                full_added: Vec::new(),
                 truncated: false,
             },
             work_dir: "/work/project".into(),
@@ -993,6 +1089,8 @@ mod tests {
                 command: String::new(),
                 removed: Vec::new(),
                 added: Vec::new(),
+                full_removed: Vec::new(),
+                full_added: Vec::new(),
                 truncated: false,
             },
             work_dir: "/work/project".into(),
@@ -1051,6 +1149,42 @@ mod tests {
             hint_line(&decision_choices(&ask_with("bash", &["ls"]))),
             "1 allow once, 2 allow session, 3 allow project, 4 or Escape denies."
         );
+    }
+
+    #[test]
+    fn rule_prefill_copies_all_four_fields_verbatim() {
+        // Distinct values per field so a swapped copy fails loudly.
+        let rule = RuleRecord {
+            scope: "project".into(),
+            index: 3,
+            permission: "edit".into(),
+            pattern: "src/**/*.go".into(),
+            action: "ask".into(),
+        };
+        let draft = rule_prefill(&rule);
+        assert_eq!(draft.scope, "project");
+        assert_eq!(draft.permission, "edit");
+        assert_eq!(draft.pattern, "src/**/*.go");
+        assert_eq!(draft.action, "ask");
+        // A prefilled draft is an ordinary draft: it passes the same
+        // validation a hand-typed rule goes through, with no shortcut.
+        assert!(validate_rule_draft(&draft.permission, &draft.pattern, &draft.action).is_ok());
+        // Prefill never mutates the source record.
+        assert_eq!(rule.index, 3);
+        assert_eq!(rule.pattern, "src/**/*.go");
+
+        let global = RuleRecord {
+            scope: "global".into(),
+            index: 0,
+            permission: "bash".into(),
+            pattern: "rm *".into(),
+            action: "deny".into(),
+        };
+        let draft = rule_prefill(&global);
+        assert_eq!(draft.scope, "global");
+        assert_eq!(draft.permission, "bash");
+        assert_eq!(draft.pattern, "rm *");
+        assert_eq!(draft.action, "deny");
     }
 
     #[test]

@@ -874,6 +874,8 @@ pub struct EngineError {
     pub message: String,
     #[serde(default, rename = "code")]
     pub code: String,
+    #[serde(default, rename = "provider")]
+    pub provider: String,
 }
 
 /// Envelope wraps an Event with a type tag and timestamp for JSONL persistence and replay.

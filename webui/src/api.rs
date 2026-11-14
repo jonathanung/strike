@@ -194,6 +194,30 @@ pub async fn get_text(base: &str, token: &str, path: &str) -> Result<String, Str
     Ok(text)
 }
 
+/// POST a caller-built JSON body verbatim (no re-serialisation), so bytes
+/// the user supplied can reach the daemon untouched. Returns the response
+/// text on 2xx; otherwise `HTTP <status> <daemon body>`.
+pub async fn post_raw_json(
+    base: &str,
+    token: &str,
+    path: &str,
+    body: String,
+) -> Result<String, String> {
+    let resp = with_auth(Request::post(&api(base, path)), token)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !(200..300).contains(&status) {
+        return Err(format!("HTTP {status} {}", text.trim()));
+    }
+    Ok(text)
+}
+
 pub async fn patch_json(base: &str, token: &str, path: &str, body: Value) -> Result<(), String> {
     let resp = with_auth(Request::patch(&api(base, path)), token)
         .json(&body)
@@ -232,9 +256,26 @@ pub async fn post_op(
 }
 
 pub fn js_encode(s: &str) -> String {
-    js_sys::encode_uri_component(s)
-        .as_string()
-        .unwrap_or_else(|| s.to_string())
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::encode_uri_component(s)
+            .as_string()
+            .unwrap_or_else(|| s.to_string())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Host fallback (unit tests): js_sys panics off-wasm, so percent-
+        // encode exactly like encodeURIComponent (unreserved set below).
+        let mut out = String::with_capacity(s.len());
+        for b in s.bytes() {
+            match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'!'
+                | b'~' | b'*' | b'\'' | b'(' | b')' => out.push(b as char),
+                _ => out.push_str(&format!("%{b:02X}")),
+            }
+        }
+        out
+    }
 }
 
 pub fn now_ms() -> f64 {
