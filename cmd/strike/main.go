@@ -293,6 +293,9 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "audit" {
 		return runAuditCLI(args[1:], stdout, stderr)
 	}
+	if len(args) > 0 && args[0] == "trust" {
+		return runTrustCLI(args[1:], stdout, stderr)
+	}
 	if len(args) > 0 && (args[0] == "version" || args[0] == "--version" || args[0] == "-version") {
 		fmt.Fprintln(stdout, version.String())
 		return 0
@@ -506,6 +509,7 @@ func writeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  strike eval <command> [arguments]")
 	fmt.Fprintln(w, "  strike restore [options]")
 	fmt.Fprintln(w, "  strike workflow <command> [arguments]")
+	fmt.Fprintln(w, "  strike trust [grant|status|revoke|list] [--dir <path>]")
 	fmt.Fprintln(w, "  strike version")
 	fmt.Fprintln(w, "  strike upgrade")
 	fmt.Fprintln(w)

@@ -364,6 +364,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
+		if n := a.startupNotice(); n != "" {
+			fmt.Fprintln(stderr, n)
+		}
 		sharedAttachments = a.attachments
 		// Opt-in host sleep inhibition (#1496): default off; the persisted
 		// dial is applied at start and flipped live by PATCH /v1/settings.
