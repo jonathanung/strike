@@ -88,6 +88,11 @@ func (s *Server) handleCustomizePreview(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleCustomizeApply(w http.ResponseWriter, r *http.Request) {
 	// Config files, not protocol ops. Same gate as plugin enable: bearer auth
 	// when --auth is on. Tool permission rules are not consulted and not changed.
+	// --read-only refuses: a hook or MCP command written here runs later.
+	if s.opts.ReadOnly {
+		writeJSON(w, http.StatusForbidden, opErrorResponse{Error: "read-only attach mode does not allow mutations"})
+		return
+	}
 	var ch config.CustomizeChange
 	if err := decodeBody(w, r, &ch); err != nil {
 		customizeFail(w, err)

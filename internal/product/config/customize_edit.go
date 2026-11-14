@@ -418,6 +418,14 @@ func previewMCP(workDir string, ch CustomizeChange) (CustomizeResult, error) {
 	}
 	diff := mcpDiff(ch.Name, before, next)
 	res := resultFromDiff(displayPath(path, workDir), hash, diff, nil)
+	// The diff shows secrets as "(set)", so two different values give the
+	// same text. Bind the hash to the exact bytes Apply would write, so a
+	// value that was never previewed cannot be applied. The hash is opaque.
+	raw, err := marshalMCPFile(path, next)
+	if err != nil {
+		return CustomizeResult{}, err
+	}
+	res.DiffHash = hashBytes([]byte(res.Diff + "\x00" + hashBytes(raw)))
 	if commented, err := fileHasComments(path); err == nil && commented {
 		res.Warnings = append(res.Warnings, "Saving rewrites this file as JSON and drops comments.")
 	}
@@ -433,10 +441,16 @@ func writeMCP(workDir string, ch CustomizeChange) error {
 	if err != nil {
 		return err
 	}
+	// Secrets may live in this file. safefile keeps an existing file's mode,
+	// so tighten a looser pre-existing mode before the new bytes land.
+	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o077 != 0 {
+		if err := os.Chmod(path, 0o600); err != nil {
+			return err
+		}
+	}
 	if err := safefile.WriteFile(path, raw, 0o600); err != nil {
 		return err
 	}
-	// Secrets may live in this file. Tighten a pre-existing looser mode.
 	return os.Chmod(path, 0o600)
 }
 
@@ -547,8 +561,12 @@ func mergePairs(old map[string]string, pairs []CustomizePair, label string) (map
 		seen[key] = struct{}{}
 		val := p.Value
 		if val == SecretKeep || val == redact.Placeholder || val == "" {
+			// Keep the stored value, including a stored empty one (an
+			// empty value is sent back as ""). A mask with nothing stored
+			// would write dots, so it needs a real value; a new key may be
+			// set to "" on purpose (NO_COLOR="").
 			prev, ok := old[key]
-			if !ok || prev == "" {
+			if !ok && val != "" {
 				return nil, fmt.Errorf("%s %s needs a value", label, key)
 			}
 			out[key] = prev
@@ -731,6 +749,12 @@ func hookNext(workDir string, ch CustomizeChange) (string, []Hook, []Hook, strin
 		} else {
 			if hookHasSecret(next[*ch.Index]) {
 				return "", nil, nil, "", nil, fmt.Errorf("hook contains a credential-shaped value; edit it outside Customize")
+			}
+			// The editor does not show failClosed; an unset draft value keeps
+			// the stored one instead of resetting it to the event default.
+			if hook.FailClosed == nil && next[*ch.Index].FailClosed != nil {
+				v := *next[*ch.Index].FailClosed
+				hook.FailClosed = &v
 			}
 			next[*ch.Index] = hook
 		}

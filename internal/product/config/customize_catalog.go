@@ -182,12 +182,17 @@ func LoadCustomize(workDir string) (*CustomizeCatalog, error) {
 		Rules:      []CustomizeRule{},
 		HookEvents: append([]string(nil), tool.KnownLifecycleEvents...),
 	}
-	var err error
-	if cat.Skills, err = catalogSkills(workDir); err != nil {
-		return nil, err
+	// A strict-root load error must not take the whole page down: the page
+	// is where the user fixes it. List the error and keep the other sections.
+	if skills, err := catalogSkills(workDir); err != nil {
+		cat.Warnings = append(cat.Warnings, "Skills did not load: "+redact.String(err.Error()))
+	} else {
+		cat.Skills = skills
 	}
-	if cat.Agents, err = catalogAgents(workDir); err != nil {
-		return nil, err
+	if agents, err := catalogAgents(workDir); err != nil {
+		cat.Warnings = append(cat.Warnings, "Agents did not load: "+redact.String(err.Error()))
+	} else {
+		cat.Agents = agents
 	}
 	mcpRows, mcpWarn := catalogMCP(workDir)
 	cat.MCP = mcpRows
