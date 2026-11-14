@@ -33,6 +33,7 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := usageResponse{Report: report, PricingNote: note}
+	now := time.Now()
 	if log := s.usageLog(); log != nil {
 		usd, set, err := log.DailyBudget()
 		if err != nil {
@@ -42,20 +43,24 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		resp.BudgetSet = set
 		resp.DailyUSD = usd
 		today := usageaudit.DayUsage{}
-		day := time.Now().UTC().Format("2006-01-02")
+		day := now.UTC().Format("2006-01-02")
 		for _, d := range report.Days {
 			if d.Day == day {
 				today = d
 				break
 			}
 		}
-		resp.Alerts = append(resp.Alerts, usageaudit.DailyAlerts(today, usd, set, time.Now())...)
+		resp.Alerts = append(resp.Alerts, usageaudit.DailyAlerts(today, usd, set, now)...)
 	}
+	resp.Projection, resp.ProjectionNote = usageaudit.Project(report, resp.DailyUSD, resp.BudgetSet, now)
 	if resp.Sessions == nil {
 		resp.Sessions = []usageaudit.SessionUsage{}
 	}
 	if resp.Days == nil {
 		resp.Days = []usageaudit.DayUsage{}
+	}
+	if resp.Models == nil {
+		resp.Models = []usageaudit.ModelUsage{}
 	}
 	if resp.Alerts == nil {
 		resp.Alerts = []usageaudit.Alert{}
@@ -297,6 +302,20 @@ func settingsPatchFields(body settingsPatchBody) []string {
 	if body.PermissionAutoApproveExclude != nil {
 		out = append(out, "permissionAutoApproveExclude")
 	}
+	g := body.guardrailDials()
+	add("turnTimeoutS", g.TurnTimeout)
+	add("maxSessionCostUSD", g.MaxSessionCostUSD)
+	add("maxTurnTokens", g.MaxTurnTokens)
+	if g.AgentBudgetMaxWallClockS != "" || g.AgentBudgetMaxTokens != "" || g.AgentBudgetMaxCostUSD != "" ||
+		g.AgentBudgetMaxToolCalls != "" || g.AgentBudgetMaxDangerousTools != "" || g.AgentBudgetStallAfterS != "" ||
+		g.AgentBudgetLoopDetectN != "" {
+		out = append(out, "agentBudget")
+	}
+	if g.DelegationMode != "" || g.DelegationTinyPromptRunes != "" || g.DelegationMaxPathsLocal != "" || g.DelegationMaxLiveChildren != "" {
+		out = append(out, "delegationPolicy")
+	}
+	add("childHandoffRequired", g.ChildHandoffRequired)
+	add("childIsolation", g.ChildIsolation)
 	return out
 }
 

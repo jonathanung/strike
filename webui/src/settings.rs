@@ -45,6 +45,7 @@ pub fn SettingsPage(
     on_density: impl Fn(String) + Copy + Send + Sync + 'static,
     on_cleared: impl Fn() + Copy + Send + Sync + 'static,
     diag_capable: RwSignal<bool>,
+    project_init_capable: RwSignal<bool>,
     root: RwSignal<String>,
 ) -> impl IntoView {
     let _ = (gateway, mode, on_cleared);
@@ -163,6 +164,16 @@ pub fn SettingsPage(
                     options=vec![("comfortable", "Comfortable"), ("compact", "Compact")]
                     current=density
                     on_pick=on_density
+                />
+            </section>
+            <section class="card settings-section" id="settings-project">
+                <h2 class="panel-title">"Project"</h2>
+                <crate::project_init::ProjectInit
+                    base=base
+                    token=token
+                    root=root
+                    status=status
+                    capable=project_init_capable
                 />
             </section>
             <section class="card settings-section">

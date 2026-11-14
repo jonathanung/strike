@@ -394,6 +394,28 @@ pub fn context_view(used: i64, daemon_limit: i64, catalog_context: i64, fit: &st
     }
 }
 
+/// Why "Compact now" (#1567) cannot run, or `None` when it can. The
+/// daemon rejects compaction while a turn runs, and a second send while
+/// one is in flight would race the first — both states disable the
+/// action with the reason visible instead of letting the click fail.
+pub fn compact_disabled(busy: bool, in_flight: bool) -> Option<&'static str> {
+    if in_flight {
+        return Some("Compaction is already running.");
+    }
+    if busy {
+        return Some("Unavailable while a turn is running.");
+    }
+    None
+}
+
+/// Whether an `engine.error` message is the daemon refusing a manual
+/// compact (#1567). The op is accepted over HTTP and refused on the
+/// event stream with no `compaction.completed`, so the in-flight flag
+/// must clear here too or it latches until the session changes.
+pub fn is_compact_refusal(message: &str) -> bool {
+    message.contains("nothing to compact") || message.contains("cannot compact")
+}
+
 pub fn effort_section(info: Option<&ModelInfo>, current: &str) -> EffortSection {
     let current = current.trim();
     let reasoning = info.map(|i| i.reasoning).unwrap_or(false);
@@ -570,6 +592,61 @@ pub fn parse_freeform(raw: &str, fallback_provider: &str) -> (String, String) {
     (fallback_provider.trim().to_string(), raw.to_string())
 }
 
+/// Resolve what was submitted from the Switch model prompt to a catalog
+/// row (#1512). `raw` is either a picked choice id (`provider` + tab +
+/// model) or whatever the user typed when nothing matched. Only catalog
+/// rows are accepted: typed text used to go straight to `select.model`,
+/// so a provider with no key "worked" until the next turn failed.
+pub fn resolve_model_pick(
+    raw: &str,
+    catalog: &[(String, String)],
+) -> Result<(String, String), String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("Pick a model.".into());
+    }
+    let found = |provider: &str, id: &str| {
+        catalog
+            .iter()
+            .find(|(p, m)| p.eq_ignore_ascii_case(provider) && m.eq_ignore_ascii_case(id))
+            .cloned()
+    };
+    if let Some((provider, id)) = raw.split_once('\t') {
+        if let Some(row) = found(provider.trim(), id.trim()) {
+            return Ok(row);
+        }
+    } else {
+        if let Some((provider, id)) = raw.split_once('/') {
+            if let Some(row) = found(provider.trim(), id.trim()) {
+                return Ok(row);
+            }
+        }
+        let by_id: Vec<&(String, String)> = catalog
+            .iter()
+            .filter(|(_, m)| m.eq_ignore_ascii_case(raw))
+            .collect();
+        match by_id.as_slice() {
+            [row] => return Ok((*row).clone()),
+            [first, ..] => {
+                return Err(format!(
+                    "\"{raw}\" is offered by more than one provider. Type provider/model, for example {}/{}.",
+                    first.0, first.1
+                ))
+            }
+            [] => {}
+        }
+    }
+    let shown = raw.replace('\t', "/");
+    if catalog.is_empty() {
+        return Err(format!(
+            "The model catalog is empty (still loading, or no provider is configured), so \"{shown}\" can't be used. If no provider is set up, add a key: run \"Providers · API key\" from this palette."
+        ));
+    }
+    Err(format!(
+        "\"{shown}\" is not in the model catalog. Pick a listed model, or add its provider first: run \"Providers · API key\" from this palette."
+    ))
+}
+
 fn event_relevant(message: &str) -> bool {
     let m = message.to_ascii_lowercase();
     m.contains("model")
@@ -703,7 +780,7 @@ fn text(data: &Value, key: &str) -> Option<String> {
     data.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
 }
 
-fn known_tokens(v: Option<&Value>) -> Option<i64> {
+pub(crate) fn known_tokens(v: Option<&Value>) -> Option<i64> {
     let obj = v?.as_object()?;
     if obj.get("known").and_then(|k| k.as_bool()) != Some(true) {
         return None;
@@ -800,6 +877,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn resolve_model_pick_accepts_only_catalog_rows() {
+        let catalog = vec![
+            ("echo".to_string(), "echo".to_string()),
+            ("anthropic".to_string(), "claude-x".to_string()),
+            ("openai".to_string(), "shared".to_string()),
+            ("other".to_string(), "shared".to_string()),
+        ];
+        let ok = |p: &str, m: &str| Ok((p.to_string(), m.to_string()));
+        assert_eq!(resolve_model_pick("echo\techo", &catalog), ok("echo", "echo"));
+        assert_eq!(resolve_model_pick(" Claude-X ", &catalog), ok("anthropic", "claude-x"));
+        assert_eq!(resolve_model_pick("openai/shared", &catalog), ok("openai", "shared"));
+        assert!(resolve_model_pick("shared", &catalog)
+            .unwrap_err()
+            .contains("more than one provider"));
+        let miss = resolve_model_pick("anthropic", &catalog).unwrap_err();
+        assert!(miss.contains("\"anthropic\" is not in the model catalog"), "{miss}");
+        assert!(miss.contains("Providers · API key"), "{miss}");
+        assert!(resolve_model_pick("nope/missing", &catalog).is_err());
+        assert!(resolve_model_pick("echo\tmissing", &catalog).is_err());
+        assert_eq!(resolve_model_pick("  ", &catalog), Err("Pick a model.".into()));
+        assert!(resolve_model_pick("echo", &[])
+            .unwrap_err()
+            .contains("The model catalog is empty"));
+    }
+
+    #[test]
     fn chip_label_names_the_model() {
         assert_eq!(chip_label(""), "Model");
         assert_eq!(chip_label("  "), "Model");
@@ -878,6 +981,35 @@ mod tests {
             scope_label("echo", "echo", "echo", "echo", false),
             "Global default unknown"
         );
+    }
+
+    #[test]
+    fn compact_now_disabled_only_while_busy_or_in_flight() {
+        assert_eq!(compact_disabled(false, false), None);
+        assert_eq!(
+            compact_disabled(true, false),
+            Some("Unavailable while a turn is running.")
+        );
+        assert_eq!(
+            compact_disabled(false, true),
+            Some("Compaction is already running.")
+        );
+        // In flight wins: it is the more specific reason.
+        assert_eq!(
+            compact_disabled(true, true),
+            Some("Compaction is already running.")
+        );
+    }
+
+    #[test]
+    fn compact_refusals_are_recognised() {
+        assert!(is_compact_refusal("nothing to compact"));
+        assert!(is_compact_refusal("cannot compact while a turn is running"));
+        // The summarize fallback still ends in compaction.completed.
+        assert!(!is_compact_refusal(
+            "summarize compaction failed, fell back to trim: boom"
+        ));
+        assert!(!is_compact_refusal("no active turn"));
     }
 
     #[test]

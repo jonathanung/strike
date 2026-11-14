@@ -1,0 +1,8 @@
+[package]
+name = "transcript-window"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Window math for the cockpit transcript: which rows are mounted, and where the scroll goes when rows are added above."
+
+[dependencies]

@@ -237,6 +237,44 @@ pub struct BootstrapCapabilities {
     /// the daemon sets it from the same live gate as `GET /v1/diag`.
     #[serde(default)]
     pub diag: bool,
+    /// True when the daemon serves the read-only decision ledger
+    /// (`GET /v1/ledger`, #1485); gates the Decisions storage tab.
+    #[serde(default)]
+    pub ledger: bool,
+    /// True when `/v1/init` can write AGENTS.md (#1581): host init service
+    /// present, live engine, and not `--read-only`.
+    #[serde(default, rename = "projectInit")]
+    pub project_init: bool,
+}
+
+/// One `/v1/init` reply (#1581). `exists` with a non-empty `error` is the
+/// daemon's 409 refusal; the browser never overwrites AGENTS.md.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ProjectInitReply {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub exists: bool,
+    #[serde(default)]
+    pub created: bool,
+    #[serde(default)]
+    pub error: String,
+}
+
+/// Reads a `/v1/init` response. 2xx and the 409 already-exists refusal are
+/// both states to render; anything else is the daemon's error sentence.
+pub fn project_init_outcome(status: u16, body: &str) -> Result<ProjectInitReply, String> {
+    if (200..300).contains(&status) || status == 409 {
+        let mut reply: ProjectInitReply = serde_json::from_str(body).unwrap_or_default();
+        if status == 409 {
+            reply.exists = true;
+            if reply.error.trim().is_empty() {
+                reply.error = "AGENTS.md already exists".to_string();
+            }
+        }
+        return Ok(reply);
+    }
+    Err(diag_error_message(status, body))
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -520,6 +558,17 @@ pub fn budget_elapsed(m: &TeamMember) -> i64 {
 
 pub fn is_running(state: &str) -> bool {
     matches!(state, "running" | "stalled")
+}
+
+/// True only when the daemon has reported a status for `root` and that
+/// status is not busy: the evidence the orphan sweep (#1506) needs before
+/// settling a replayed log that ends mid-tool. An unknown root or a row
+/// without a status is not evidence of idleness.
+pub fn root_reported_idle(rows: &[RootSummary], root: &str) -> bool {
+    !root.is_empty()
+        && rows
+            .iter()
+            .any(|r| r.id == root && !r.busy && !r.status.is_empty())
 }
 
 pub fn can_retry(state: &str) -> bool {
@@ -1234,6 +1283,20 @@ fn one_line(text: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn root_reported_idle_needs_a_daemon_status() {
+        let mk = |id: &str, busy: bool, status: &str| -> RootSummary {
+            serde_json::from_value(serde_json::json!({"id": id, "busy": busy, "status": status}))
+                .unwrap()
+        };
+        let rows = vec![mk("a", false, "idle"), mk("b", true, "running"), mk("c", false, "")];
+        assert!(root_reported_idle(&rows, "a"));
+        assert!(!root_reported_idle(&rows, "b"), "busy root is not idle");
+        assert!(!root_reported_idle(&rows, "c"), "no status is not evidence");
+        assert!(!root_reported_idle(&rows, "missing"));
+        assert!(!root_reported_idle(&rows, ""));
+    }
+
     fn row(id: &str, mtime: i64, busy: bool, pinned: bool) -> SessionRow {
         SessionRow {
             id: id.into(),
@@ -1538,10 +1601,57 @@ mod tests {
         )
         .unwrap();
         assert!(boot.capabilities.diag);
+        assert!(!boot.capabilities.ledger);
         // Older daemons without a capabilities object read as off, so the
         // Download diagnostics control stays disabled rather than lying.
         let boot: Bootstrap = serde_json::from_str(r#"{"skills":[]}"#).unwrap();
         assert!(!boot.capabilities.diag);
+    }
+
+    #[test]
+    fn bootstrap_reads_the_project_init_capability() {
+        let boot: Bootstrap = serde_json::from_str(
+            r#"{"capabilities":{"projectInit":true},"skills":[],"composerCommands":[]}"#,
+        )
+        .unwrap();
+        assert!(boot.capabilities.project_init);
+        let boot: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
+        assert!(!boot.capabilities.project_init);
+    }
+
+    #[test]
+    fn project_init_outcome_reads_each_state() {
+        let ok = project_init_outcome(
+            201,
+            r#"{"path":"/w/AGENTS.md","exists":true,"created":true}"#,
+        )
+        .unwrap();
+        assert!(ok.created && ok.exists && ok.error.is_empty());
+        assert_eq!(ok.path, "/w/AGENTS.md");
+
+        let preview = project_init_outcome(200, r#"{"path":"/w/AGENTS.md","exists":false}"#).unwrap();
+        assert!(!preview.exists && !preview.created);
+
+        let refused = project_init_outcome(
+            409,
+            r#"{"path":"/w/AGENTS.md","exists":true,"error":"AGENTS.md already exists"}"#,
+        )
+        .unwrap();
+        assert!(refused.exists && !refused.created);
+        assert_eq!(refused.error, "AGENTS.md already exists");
+        // A 409 without a body still renders as the refusal state.
+        let bare = project_init_outcome(409, "").unwrap();
+        assert!(bare.exists && !bare.error.is_empty());
+
+        assert_eq!(
+            project_init_outcome(
+                501,
+                r#"{"error":"projectInit capability unavailable on this host"}"#
+            )
+            .unwrap_err(),
+            "projectInit capability unavailable on this host"
+        );
+        assert_eq!(project_init_outcome(403, "").unwrap_err(), "HTTP 403");
     }
 
     #[test]

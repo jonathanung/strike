@@ -1171,3 +1171,43 @@ func TestSaveKeepAwakeWritesGlobalConfig(t *testing.T) {
 		t.Fatalf("keepAwake = %q, want off", d.KeepAwake)
 	}
 }
+
+func TestSaveGuardrailDialsWritesGlobalConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
+
+	g := svc.Settings.Defaults().Guardrails
+	if g.TurnTimeoutS != 1800 || g.DelegationPolicy.Mode != "enforce" || !g.ChildHandoffRequired || g.ChildIsolation != "shared" {
+		t.Fatalf("default guardrails = %+v", g)
+	}
+	err := svc.Settings.SaveGuardrailDials(host.GuardrailDials{
+		TurnTimeout:           "off",
+		MaxSessionCostUSD:     "4",
+		MaxTurnTokens:         "90000",
+		AgentBudgetMaxCostUSD: "1.5",
+		DelegationMode:        "off",
+		ChildHandoffRequired:  "off",
+		ChildIsolation:        "worktree",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g = svc.Settings.Defaults().Guardrails
+	want := host.Guardrails{
+		TurnTimeoutS:      -1,
+		MaxSessionCostUSD: 4,
+		MaxTurnTokens:     90000,
+		AgentBudget:       host.AgentBudget{MaxCostUSD: 1.5},
+		DelegationPolicy:  host.DelegationPolicy{Mode: "off"},
+		ChildIsolation:    "worktree",
+	}
+	if g != want {
+		t.Fatalf("guardrails = %+v, want %+v", g, want)
+	}
+	if err := svc.Settings.SaveGuardrailDials(host.GuardrailDials{MaxSessionCostUSD: "-3"}); err == nil {
+		t.Fatal("negative cost accepted")
+	}
+	if got := svc.Settings.Defaults().Guardrails.MaxSessionCostUSD; got != 4 {
+		t.Fatalf("reject changed cost: %v", got)
+	}
+}

@@ -1119,6 +1119,27 @@ button.link { text-align: left; width: 100%; }
   margin: var(--space-2) 0;
 }
 .triggers .secret-once p { margin: 0 0 var(--space-2); }
+/* feature:triggers-copy begin */
+/* Copy buttons (#1486): inline beside the hook hint; on phone widths the
+   new buttons are real 44px tap targets. */
+.triggers-hook-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.triggers-hook-row .hint { margin: 0; }
+@media (max-width: 800px) {
+  .triggers button.triggers-copy-secret,
+  .triggers button.triggers-copy-hook { min-height: 44px; }
+}
+/* feature:triggers-copy end */
+/* feature:trigger-session-link begin */
+/* Delivery-log session links (#1492): linkish on desktop, a real touch
+   target on phone widths. */
+@media (max-width: 800px) {
+  .triggers-log button.session-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+/* feature:trigger-session-link end */
 .triggers-log .row { justify-content: space-between; }
 .triggers-list button.row, .triggers-list button.card {
   width: 100%;
@@ -1216,6 +1237,23 @@ select.mode, .daemon select {
   justify-content: center;
 }
 .gq-qr svg { width: 220px; height: 220px; display: block; }
+/* Unreachable (loopback) pairing: the QR area is replaced by the fix. */
+.gq-blocked {
+  border: 2px solid var(--warning);
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.gq-blocked-title { font-weight: 650; margin-top: 0; }
+.gq-cmd {
+  display: block;
+  font-family: var(--mono, monospace);
+  font-size: var(--type-sm);
+  word-break: break-all;
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  padding: var(--space-2);
+  margin: var(--space-2) 0;
+}
 .gq-video {
   width: 100%;
   max-height: 180px;
@@ -1503,6 +1541,8 @@ select.mode, .daemon select {
 .ss-bulk button,
 .ss-older button { height: 24px; padding: 0 8px; font-size: var(--type-sm); }
 .ss-bulk-count { font-size: var(--type-sm); color: var(--muted); margin-right: 4px; }
+.ss-folder-cleanup { margin: 0 0 8px; }
+.ss-folder-cleanup button { height: 24px; padding: 0 8px; font-size: var(--type-sm); }
 .ss-list { display: flex; flex-direction: column; gap: 2px; }
 .ss-older { margin: 6px 0; }
 .ss-folder-row {
@@ -1882,6 +1922,14 @@ select.mode, .daemon select {
 .session-row { grid-template-columns: auto minmax(0, 1fr) auto; }
 .session-row .session-main { grid-template-columns: minmax(0, 1fr); }
 /* feature:status end */
+/* feature:session-status-chip-action begin */
+.status-chip-action { cursor: pointer; }
+.approvals-card.ask-flash { outline: 2px solid var(--warning); outline-offset: 2px; }
+.approvals-card:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+@media (hover: none), (max-width: 720px) {
+  .status-chip-action { min-height: 44px; display: inline-flex; align-items: center; }
+}
+/* feature:session-status-chip-action end */
 /* feature:message-timestamps begin (#1349) */
 .bubble header .stamp {
   margin-left: auto;
@@ -2077,6 +2125,24 @@ select.mode, .daemon select {
   font-size: var(--type-sm);
 }
 .sx-quiet:hover { color: var(--ink); border-color: var(--border-focus); }
+/* feature:provider-auth-notice begin */
+/* #1546: a provider_auth notice carries its fix path — Open Providers
+   plus Retry — under the headline; the vendor text stays in Details. */
+.sx-auth-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.sx-auth-open {
+  height: 24px;
+  padding: 0 8px;
+  font-size: var(--type-sm);
+}
+@media (max-width: 800px) {
+  .sx-auth-actions button { min-height: 44px; }
+}
+/* feature:provider-auth-notice end */
 .sx-keys, .sx-note {
   margin: 0;
   color: var(--muted);
@@ -2176,6 +2242,13 @@ select.mode, .daemon select {
   font-size: var(--type-sm);
   font-weight: 650;
 }
+/* feature:transcript-expand-all begin */
+.sx-fold-toolbar { margin-top: 2px; }
+.sx-fold-count {
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+/* feature:transcript-expand-all end */
 .sx-actions {
   margin-left: auto;
   display: flex;
@@ -2227,6 +2300,9 @@ select.mode, .daemon select {
 .sx-status-done, .sx-status-completed { color: var(--success); }
 .sx-status-failed { color: var(--signal); }
 .sx-status-blocked, .sx-status-stalled { color: var(--warning); }
+/* feature:tool-terminal-state begin */
+.sx-status-no-result { color: var(--warning); }
+/* feature:tool-terminal-state end */
 .sx-map {
   width: 14px;
   flex: 0 0 14px;
@@ -2482,6 +2558,31 @@ select.mode, .daemon select {
   border-top: 1px solid var(--border-muted);
 }
 .sched-history h3 { margin: 0 0 var(--space-2); font-size: var(--type-md); }
+/* feature:scheduler-presets begin */
+/* Scheduler presets (#1495): one checkbox row per catalog preset under the
+   schedule layout; rows stay full-width tap targets on phones. */
+.sched-presets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.sched-presets h3 { margin: 0; font-size: var(--type-md); }
+.sched-preset {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border-muted);
+}
+.sched-preset label { display: flex; flex-direction: column; gap: var(--space-1); cursor: pointer; }
+.sched-preset .name { font-weight: 600; }
+.sched-preset .meta { color: var(--muted); font-size: var(--type-sm); }
+.sched-preset input:disabled + label { cursor: default; opacity: 0.7; }
+@media (max-width: 800px) {
+  .sched-preset { min-height: 44px; }
+}
+/* feature:scheduler-presets end */
 button.linkish {
   background: none;
   border: none;
@@ -2493,6 +2594,18 @@ button.linkish {
   text-decoration: underline;
 }
 button.linkish:disabled { color: var(--muted); cursor: default; text-decoration: none; }
+/* feature:session-links begin */
+/* Session-id links (#1530 audit, #1540 permissions, #1548 task runner):
+   quiet linkish buttons on desktop, a real touch target on phone widths
+   per #1524's row-action findings. */
+@media (max-width: 800px) {
+  button.session-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+/* feature:session-links end */
 @media (max-width: 800px) {
   .sched { padding: var(--space-3); }
   .sched-layout, .sched-form { grid-template-columns: 1fr; }
@@ -2539,6 +2652,12 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .approvals-diff .add { color: var(--diff-add); }
 .approvals-diff .del { color: var(--diff-del); }
+/* feature:approval-diff-expand begin */
+.approvals-diff-expanded {
+  max-height: 320px;
+  overflow: auto;
+}
+/* feature:approval-diff-expand end */
 .approvals-count { color: var(--warning); margin: var(--space-2) 0 0; }
 .approvals-fact {
   margin: var(--space-2) 0 0;
@@ -2630,6 +2749,93 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   .approvals-form button { flex: 1 1 140px; }
 }
 /* feature:approvals end */
+/* feature:rule-authoring begin */
+.rule-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rule-sentence { color: var(--ink); overflow-wrap: anywhere; }
+.rule-examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.rule-draft { margin: var(--space-2) 0 0; }
+.rule-feedback { margin: var(--space-2) 0 0; overflow-wrap: anywhere; }
+.rule-tester {
+  margin-top: var(--space-4);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--rule);
+}
+.rule-tester h4 { margin: 0; }
+.rule-tester-result { margin-top: var(--space-2); }
+@media (max-width: 960px) {
+  .rule-examples button { flex: 1 1 140px; }
+}
+/* feature:rule-authoring end */
+/* feature:sandbox-explain begin */
+.sandbox-summary { margin: var(--space-2) 0 0; display: grid; gap: var(--space-1); }
+.sandbox-row { display: grid; grid-template-columns: minmax(120px, 30%) 1fr; gap: var(--space-2); }
+.sandbox-row dt { color: var(--muted); }
+.sandbox-row dd { margin: 0; overflow-wrap: anywhere; }
+.sandbox-profile { margin-top: var(--space-2); }
+.sandbox-profile pre { margin-top: var(--space-2); max-height: 320px; overflow: auto; }
+@media (max-width: 600px) {
+  .sandbox-row { grid-template-columns: 1fr; gap: 0; }
+}
+/* feature:sandbox-explain end */
+/* feature:permissions-explain begin */
+/* #1504: presets list, preset diff and explain result in the Permissions panel. */
+.perm-explain-presets,
+.perm-explain-diff ul,
+.perm-explain-trail { margin: var(--space-2) 0 0; }
+.perm-explain-preset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+.perm-explain-delta {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+.perm-explain-kind {
+  flex: 0 0 auto;
+  min-width: 64px;
+  color: var(--muted);
+}
+.perm-explain-delta.add .perm-explain-kind { color: var(--diff-add); }
+.perm-explain-delta.del .perm-explain-kind { color: var(--diff-del); }
+.perm-explain-delta.changed .perm-explain-kind { color: var(--warning); }
+.perm-explain-rule {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--font-display);
+}
+.perm-explain-result {
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.perm-explain-result[data-dry-run="true"] { border-style: dashed; }
+.perm-explain-summary {
+  margin: var(--space-2) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 200px;
+  overflow: auto;
+}
+/* feature:permissions-explain end */
+/* feature:rule-duplicate begin */
+/* #1433: Duplicate + Remove sit together at the row's end instead of
+   spreading across the space-between rule row. */
+.approvals-rule-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+/* feature:rule-duplicate end */
 /* feature:terminal begin */
 .side-tabs { flex-wrap: wrap; }
 .term {
@@ -2915,12 +3121,33 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 .eyebrow { margin: 0; color: var(--sharp); font-size: var(--type-sm); font-weight: 650; }
 .onboarding-body { padding: 16px; min-width: 0; }
 .telemetry { margin: 0 0 8px; }
-.onboarding-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.onboarding-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px -16px -16px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border-top: var(--border-width) solid var(--rule);
+}
+.onboarding-spacer { flex: 1 1 auto; }
+.onboarding-steps { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; counter-reset: onboarding-step; }
+.onboarding-steps li { counter-increment: onboarding-step; color: var(--muted); font-size: var(--type-sm); }
+.onboarding-steps li::before { content: counter(onboarding-step) ". "; }
+.onboarding-steps li.on { color: var(--ink); font-weight: 650; }
+.onboarding-step h3 { margin: 0 0 8px; color: var(--ink); font-size: 16px; }
+.onboarding-step[hidden] { display: none; }
+.onboarding-files { margin: 8px 0; }
+.onboarding-files > summary { cursor: pointer; color: var(--muted); font-size: var(--type-sm); }
+.onboarding-note { margin: 12px 0 0; font-size: var(--type-sm); }
 .onboarding-body .file-groups { max-height: 220px; overflow: auto; margin: 8px 0; padding-right: 4px; }
 .onboarding-body [data-providers-root] { margin: 8px 0 12px; }
 @media (max-width: 800px) {
   .onboarding-card { grid-template-columns: 1fr; }
   .onboarding-lead { border-right: 0; border-bottom: var(--border-width) solid var(--rule); }
+  .onboarding-steps { flex-direction: row; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; }
   .onboarding-body .file-groups { max-height: 160px; }
   .theme-grid { grid-template-columns: 1fr; }
   .settings-page { padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }

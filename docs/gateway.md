@@ -417,3 +417,51 @@ forward the port yourself. Strike does not open a public listener for hooks.
 Unattended triggers start in plan mode unless the trigger names another
 posture. The signing secret is stored in `~/.strike/triggers.json` (mode
 0600) and is not written to the delivery log.
+
+## Deploy watches
+
+A deploy watch observes a merged commit after it ships and settles one
+verdict: `healthy`, `regression`, or `inconclusive` (#1602; this is the
+daemon core from #1782). All routes need the bearer. A read-only server
+refuses create, poll, and cancel, and does not run the poll loop.
+
+| Route | Purpose |
+|---|---|
+| `GET /v1/deploy-watches` | List watches, newest first |
+| `POST /v1/deploy-watches` | Create a watch (body below) |
+| `GET /v1/deploy-watches/{id}` | One watch with per-check evidence |
+| `POST /v1/deploy-watches/{id}/poll` | Run every check now |
+| `POST /v1/deploy-watches/{id}/cancel` | Stop; the verdict becomes `inconclusive` |
+
+```json
+{
+  "repo": "owner/name",
+  "sha": "<merged commit>",
+  "pr": 42,
+  "environment": "prod",
+  "windowSeconds": 1800,
+  "intervalSeconds": 60,
+  "checks": [
+    {"kind": "github_checks"},
+    {"kind": "http", "name": "api", "url": "https://example.com/health", "expectStatus": 200}
+  ]
+}
+```
+
+Check kinds:
+
+- `github_checks` reads check runs and commit statuses on `sha` through the
+  GitHub REST API. The token comes from `GH_TOKEN`, then `GITHUB_TOKEN`, then
+  `gh auth token`, and stays on the daemon.
+- `http` GETs `url` and compares the status (default 200). Evidence never
+  echoes the URL.
+
+Each check is `healthy`, `failing`, `pending`, or `unreachable` on every
+poll. A failing check is a regression and settles the watch at once.
+Otherwise the watch keeps polling until the window closes (default 30
+minutes). It is healthy only if every check was last seen healthy. Anything
+else is `inconclusive`: pending, unreachable, or never observed. Cancelled,
+stale, and `action_required` check runs count as pending, not as a pass.
+Watches persist in `~/.strike/deploy-watches.json` (mode 0600). After a
+daemon restart they resume, and a watch whose window closed while the daemon
+was down settles on its next poll.

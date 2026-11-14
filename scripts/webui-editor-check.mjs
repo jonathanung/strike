@@ -27,7 +27,55 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
   const sample = join(repoDir, "editor-smoke.txt");
   const other = join(repoDir, "editor-other.txt");
   const long = join(repoDir, "editor-long.txt");
-  await writeFile(sample, "alpha beta\n");
+  const outlineMd = join(repoDir, "editor-outline.md");
+  const md = join(repoDir, "editor-md.md");
+  await writeFile(sample, "alpha beta\nsecond line\nthird line\nfourth line\nfifth line\n");
+  await writeFile(
+    md,
+    "# Notes\n\n```rust\nfn greet() { println!(\"hi\"); }\n```\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n",
+  );
+  // Capture the next Blob download the page triggers (#1420):
+  // save_download builds an object URL and clicks a transient anchor,
+  // so record the blob and the anchor's download filename, then read
+  // the blob text back for an exact-content assertion.
+  const captureDownload = async (expectedName) => {
+    const started = await evalValue(
+      send,
+      `(() => {
+        window.__dlName = "";
+        window.__dlText = null;
+        const orig = URL.createObjectURL.bind(URL);
+        URL.createObjectURL = (blob) => {
+          blob.text().then((t) => { window.__dlText = t; });
+          return orig(blob);
+        };
+        window.__dlMo = new MutationObserver((recs) => {
+          for (const r of recs) for (const n of r.addedNodes) {
+            if (n.tagName === "A" && n.getAttribute("download")) window.__dlName = n.getAttribute("download");
+          }
+        });
+        window.__dlMo.observe(document.body, { childList: true });
+        const b = document.querySelector("[data-ev-download]");
+        if (!b || b.disabled) return "no download chip";
+        b.click();
+        return "ok";
+      })()`,
+    );
+    if (started !== "ok") {
+      throw new Error(`download start: ${started}`);
+    }
+    await waitFor(
+      send,
+      `(() => (window.__dlName === ${JSON.stringify(expectedName)} && typeof window.__dlText === "string" ? "ok" : "name=" + window.__dlName))()`,
+      `download of ${expectedName}`,
+    );
+    const text = await evalValue(send, `window.__dlText`);
+    await evalValue(
+      send,
+      `(() => { window.__dlMo && window.__dlMo.disconnect(); return "ok"; })()`,
+    );
+    return text;
+  };
   await writeFile(other, "other content\n");
   try {
     const trav = await fetch(
@@ -134,6 +182,59 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       throw new Error(`name click polluted the composer: ${composerAfterOpen}`);
     }
 
+    // Go-to-line (#1403): Enter in the line input jumps and reports the
+    // clamped position; an out-of-range entry clamps to the last line.
+    await evalValue(
+      send,
+      `(() => {
+        const input = document.getElementById("ev-goto");
+        if (!input) return "no goto";
+        input.value = "3";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const n = document.querySelector("[data-ev-goto-note]");
+        return n && n.textContent.includes("Line 3 of 5") ? "ok" : (n ? n.textContent : "no goto note");
+      })()`,
+      "goto line 3",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const input = document.getElementById("ev-goto");
+        input.value = "999";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const n = document.querySelector("[data-ev-goto-note]");
+        return n && n.textContent.includes("Line 5 of 5") && n.textContent.includes("clamped") ? "ok" : (n ? n.textContent : "no goto note");
+      })()`,
+      "goto clamp",
+    );
+    // Ctrl+G focuses the go-to-line input, like Ctrl+F focuses search.
+    const gotoFocused = await evalValue(
+      send,
+      `(() => {
+        const pane = document.querySelector(".ev-doc");
+        pane.focus();
+        pane.dispatchEvent(new KeyboardEvent("keydown", { key: "g", ctrlKey: true, bubbles: true, cancelable: true }));
+        return document.activeElement && document.activeElement.id;
+      })()`,
+    );
+    if (gotoFocused !== "ev-goto") {
+      throw new Error(`ctrl+g focus = ${gotoFocused}`);
+    }
+
     const focused = await evalValue(
       send,
       `(() => {
@@ -163,10 +264,231 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "search count",
     );
+    // Go-to-line wins over an active search (#1403): the query is
+    // cleared so neither the scroll effect nor the render window
+    // follows the search hit instead of the requested line.
+    await evalValue(
+      send,
+      `(() => {
+        const input = document.getElementById("ev-goto");
+        input.value = "4";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const n = document.querySelector("[data-ev-goto-note]");
+        const q = document.getElementById("ev-search");
+        if (!n || !n.textContent.includes("Line 4 of 5")) return n ? n.textContent : "no goto note";
+        return q && q.value === "" ? "ok" : "search not cleared: " + (q ? q.value : "no search");
+      })()`,
+      "goto clears an active search",
+    );
+
+    // Wrap toggle (#1412): default on; off flips the pane-root
+    // attribute and code lines stop wrapping; toggled back on so the
+    // persisted preference does not leak into later steps.
+    const wrapState = await evalValue(
+      send,
+      `(() => document.querySelector("[data-ev-root]").getAttribute("data-ev-wrap"))()`,
+    );
+    if (wrapState !== "on") {
+      throw new Error(`wrap default = ${JSON.stringify(wrapState)}, want on`);
+    }
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-wrap-toggle]"); if (!b) return "no wrap toggle"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const root = document.querySelector("[data-ev-root]");
+        const line = document.querySelector(".ev-codeview .ev-line");
+        if (!root || root.getAttribute("data-ev-wrap") !== "off") return "attr not off";
+        if (localStorage.getItem("strike.editorWrap") !== "off") return "pref not stored";
+        return line && getComputedStyle(line).whiteSpace === "pre" ? "ok" : "white-space " + (line ? getComputedStyle(line).whiteSpace : "no line");
+      })()`,
+      "wrap off",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector("[data-ev-wrap-toggle]").click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("[data-ev-root]").getAttribute("data-ev-wrap") === "on" ? "ok" : "attr not back on")()`,
+      "wrap back on",
+    );
+
+    // Reload (#1407): a disk change stays stale until Reload, then
+    // renders; restored to the original content for later steps.
+    await writeFile(sample, "alpha beta reloaded\n");
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-reload-bar]"); if (!b || b.disabled) return "no reload"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("[data-ev-root]").innerText.includes("alpha beta reloaded") ? "ok" : "not reloaded")()`,
+      "reload shows disk change",
+    );
+    // Restore the exact original (the 5-line sample the cursor/Tab
+    // steps below depend on), not just its first line.
+    await writeFile(sample, "alpha beta\nsecond line\nthird line\nfourth line\nfifth line\n");
+    await evalValue(
+      send,
+      `(() => { document.querySelector("[data-ev-reload-bar]").click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const t = document.querySelector("[data-ev-root]").innerText;
+        return t.includes("alpha beta") && !t.includes("reloaded") ? "ok" : "not restored";
+      })()`,
+      "reload restores original",
+    );
 
     await evalValue(
       send,
       `(() => { const b = document.querySelector("[data-ev-edit]"); if (!b || b.disabled) return "edit disabled"; b.click(); return "ok"; })()`,
+    );
+    // Cursor readout (#1416) + Tab indent / Shift+Tab outdent (#1408).
+    await waitFor(
+      send,
+      `(() => document.querySelector(".ev-editor") ? "ok" : "no editor")()`,
+      "editor textarea",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        ta.focus();
+        // Caret at line 2, column 3 ("se|cond line").
+        ta.setSelectionRange(13, 13);
+        ta.dispatchEvent(new KeyboardEvent("keyup", { key: "ArrowRight", bubbles: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const n = document.querySelector("[data-ev-cursor]");
+        return n && n.textContent.includes("Ln 2, Col 3") ? "ok" : (n ? n.textContent : "no cursor readout");
+      })()`,
+      "cursor readout",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        ta.focus();
+        // Select lines 2-3 and Tab: both indent, focus stays in the editor.
+        ta.setSelectionRange(11, 27);
+        ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    // The draft updates asynchronously through Leptos; poll for the value.
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        if (!ta) return "no editor";
+        if (!(ta.value.includes("  second line") && ta.value.includes("  third line"))) return ta.value;
+        const id = document.activeElement && document.activeElement.id;
+        return id === "ev-editor" ? "ok" : "focus left the editor: " + id;
+      })()`,
+      "tab indent selection keeps focus",
+    );
+    // Ctrl+G then Escape dismisses the go-to box only: the dirty draft
+    // and edit mode survive, and focus returns to the editor.
+    await evalValue(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        ta.dispatchEvent(new KeyboardEvent("keydown", { key: "g", ctrlKey: true, bubbles: true, cancelable: true }));
+        const input = document.getElementById("ev-goto");
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        if (!ta) return "edit mode closed by goto Escape";
+        if (!ta.value.includes("  second line")) return "draft lost: " + ta.value;
+        const id = document.activeElement && document.activeElement.id;
+        return id === "ev-editor" ? "ok" : "focus = " + id;
+      })()`,
+      "goto Escape keeps the draft",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        ta.focus();
+        ta.setSelectionRange(0, ta.value.length);
+        ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        const want = "alpha beta\\nsecond line\\nthird line\\nfourth line\\nfifth line\\n";
+        return ta && ta.value === want ? "ok" : (ta ? JSON.stringify(ta.value) : "no editor");
+      })()`,
+      "shift+tab outdent",
+    );
+    // Edit-mode go-to-line moves the caret to the line start (#1403).
+    await evalValue(
+      send,
+      `(() => {
+        const input = document.getElementById("ev-goto");
+        input.value = "3";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        const n = document.querySelector("[data-ev-cursor]");
+        if (!ta || ta.selectionStart !== 23 || ta.selectionEnd !== 23) return "caret " + (ta ? ta.selectionStart + "-" + ta.selectionEnd : "no editor");
+        return n && n.textContent.includes("Ln 3, Col 1") ? "ok" : (n ? n.textContent : "no cursor readout");
+      })()`,
+      "edit-mode goto moves the caret",
+    );
+    // Escape still leaves edit mode after Tab use (#1408); the draft is
+    // clean again, so no guard prompt. Re-enter Edit for the guard case.
+    await evalValue(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector(".ev-editor") ? "still editing" : "ok")()`,
+      "Escape exits edit mode",
+    );
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-edit]"); if (!b || b.disabled) return "edit disabled"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector(".ev-editor") ? "ok" : "no editor")()`,
+      "editor textarea (re-entered)",
     );
 
     // Dirty guard (#1394): an unsaved draft must block navigation.
@@ -186,6 +508,12 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       );
     };
     await setDraft("alpha edited\n");
+    // Reload is disabled while the draft is dirty (#1407).
+    await waitFor(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-reload-bar]"); return b && b.disabled ? "ok" : "reload not disabled while dirty"; })()`,
+      "reload disabled while dirty",
+    );
     await waitFor(
       send,
       `(() => document.querySelector('[data-ev-open="editor-other.txt"]') ? "ok" : "no other file row")()`,
@@ -400,6 +728,88 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "conflict notice",
     );
+    // Copy path (#1410): the chip must surface its outcome in the
+    // status line — "Path copied." only when the write resolved, the
+    // generic failure line otherwise, never silence. Every load clears
+    // the find, so set one here ("alpha" hits line 1 of the draft):
+    // the copied text then takes path:line form.
+    await evalValue(
+      send,
+      `(() => {
+        const input = document.getElementById("ev-search");
+        if (!input) return "no search";
+        input.value = "alpha";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const n = document.querySelector(".ev-count");
+        return n && n.textContent.trim() === "1/1" ? "ok" : (n ? n.textContent : "no count");
+      })()`,
+      "copy path find count",
+    );
+    try {
+      await send("Browser.grantPermissions", {
+        permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
+        origin: `http://127.0.0.1:${port}`,
+      });
+    } catch {
+      // Older Chrome: the status-line assertion below still holds.
+    }
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-copy-path]"); if (!b || b.disabled) return "no copy path chip"; b.click(); return "ok"; })()`,
+    );
+    const copyStatus = await waitFor(
+      send,
+      `(() => {
+        const s = document.querySelector("[data-ev-status]");
+        const t = s ? s.innerText : "";
+        return t.includes("Path copied.") || t.includes("Copy didn't work") ? "ok" : t.slice(0, 120);
+      })()`,
+      "copy path status",
+    );
+    if (copyStatus === "ok") {
+      const st = await evalValue(
+        send,
+        `(() => document.querySelector("[data-ev-status]").innerText)()`,
+      );
+      if (st.includes("Path copied.")) {
+        await evalValue(
+          send,
+          `(() => { window.__clip = "pending"; navigator.clipboard.readText().then((t) => { window.__clip = t; }).catch(() => { window.__clip = "unreadable"; }); return "ok"; })()`,
+        );
+        let clip = "pending";
+        for (let i = 0; i < 10 && clip === "pending"; i++) {
+          await delay(200);
+          clip = await evalValue(send, `window.__clip`);
+        }
+        // readText needs a focused document; assert only when it works.
+        if (typeof clip === "string" && clip !== "pending" && clip !== "unreadable" && clip !== "" && clip !== "editor-smoke.txt:1") {
+          throw new Error(`clipboard holds ${JSON.stringify(clip)}, want editor-smoke.txt:1`);
+        }
+      }
+    }
+
+    // Download in Edit mode (#1420 Q1): the saved copy is the current
+    // buffer ("alpha edited"), not the on-disk "agent" version, and
+    // the status line says unsaved changes were included.
+    const editDl = await captureDownload("editor-smoke.txt");
+    if (editDl !== "alpha edited\n") {
+      throw new Error(`edit-mode download = ${JSON.stringify(editDl)}`);
+    }
+    await waitFor(
+      send,
+      `(() => {
+        const s = document.querySelector("[data-ev-status]");
+        return s && s.innerText.includes("unsaved changes") ? "ok" : (s ? s.innerText.slice(0, 120) : "no status");
+      })()`,
+      "download unsaved note",
+    );
+
     const disk = await fetch(
       `http://127.0.0.1:${port}/v1/file/view?path=editor-smoke.txt`,
       { headers: { Authorization: `Bearer ${token}` } },
@@ -510,6 +920,151 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       `(() => document.querySelector("#ev-line-4500") ? "ok" : "hit row beyond the window")()`,
       "long file hit row auto-raised",
     );
+    // A plain-text file shows no outline (#1446).
+    const plainOutline = await evalValue(
+      send,
+      `(() => document.querySelector("[data-ev-outline]") ? "outline on plain text" : "ok")()`,
+    );
+    if (plainOutline !== "ok") {
+      throw new Error(plainOutline);
+    }
+
+    // Download (#1420): the saved copy is the whole file, past the
+    // 2,000-line render cap — select-all on the read view cannot do
+    // this, the Blob download must.
+    const longDl = await captureDownload("editor-long.txt");
+    if (longDl !== `${longLines.join("\n")}\n`) {
+      throw new Error(
+        `long download has ${longDl.split("\n").length} lines, want 5001 segments (5000 lines + trailing newline)`,
+      );
+    }
+
+    // Markdown view (#1421): a fenced block renders with the fence bar
+    // — language label plus a Copy button whose label reports the
+    // outcome — instead of the old bare <pre>.
+    await writeFile(md, "# Notes\n\n```rust\nfn greet() { println!(\"hi\"); }\n```\n");
+    await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("textarea") ? "ok" : "no composer")()`,
+      "composer before md file",
+    );
+    const mdTab = await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Files"); if (!b) return "no files tab"; b.click(); return "ok"; })()`,
+    );
+    if (mdTab !== "ok") {
+      throw new Error(`files tab click (md): ${mdTab}`);
+    }
+    await waitFor(
+      send,
+      `(() => document.querySelector('[data-ev-open="editor-md.md"]') ? "ok" : "no md file row")()`,
+      "open button for editor-md.md",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-open="editor-md.md"]').click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const b = document.querySelector("[data-ev-copy-code]");
+        if (!b) return "no copy-code button";
+        const bar = b.closest(".sx-fence-bar");
+        return bar && bar.innerText.includes("rust") ? "ok" : "no lang label: " + (bar ? bar.innerText : "no bar");
+      })()`,
+      "md fence bar with lang and copy",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector("[data-ev-copy-code]").click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const b = document.querySelector("[data-ev-copy-code]");
+        const t = b ? b.textContent.trim() : "gone";
+        return t === "Copied" || t === "Copy failed" ? "ok" : "label=" + t;
+      })()`,
+      "md fence copy feedback",
+    );
+
+    // Markdown outline (#1446): nested headings listed in document
+    // order with unique ids, and clicking the last entry scrolls the
+    // rendered pane to that heading.
+    const filler = Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1} of filler text.`).join("\n\n");
+    await writeFile(
+      outlineMd,
+      `# Design\n\n${filler}\n\n## Goals\n\n${filler}\n\n### Non-goals\n\n${filler}\n\n## Goals\n\n${filler}\n\n## Open questions\n\n${filler}\n`,
+    );
+    await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("textarea") ? "ok" : "no composer")()`,
+      "composer before outline file",
+    );
+    const outlineTab = await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Files"); if (!b) return "no files tab"; b.click(); return "ok"; })()`,
+    );
+    if (outlineTab !== "ok") {
+      throw new Error(`files tab click (outline): ${outlineTab}`);
+    }
+    await waitFor(
+      send,
+      `(() => document.querySelector('[data-ev-open="editor-outline.md"]') ? "ok" : "no outline file row")()`,
+      "open button for editor-outline.md",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-open="editor-outline.md"]').click(); return "ok"; })()`,
+    );
+    const wantOutline = [
+      "Design|ev-h-design",
+      "Goals|ev-h-goals",
+      "Non-goals|ev-h-non-goals",
+      "Goals|ev-h-goals-2",
+      "Open questions|ev-h-open-questions",
+    ].join(";");
+    await waitFor(
+      send,
+      `(() => {
+        const nav = document.querySelector("[data-ev-outline]");
+        if (!nav) return "no outline";
+        const got = [...nav.querySelectorAll("[data-ev-outline-target]")]
+          .map((b) => b.textContent.trim() + "|" + b.getAttribute("data-ev-outline-target"))
+          .join(";");
+        return got === ${JSON.stringify(wantOutline)} ? "ok" : got;
+      })()`,
+      "outline entries in order",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const nav = document.querySelector("[data-ev-outline]");
+        nav.open = true;
+        const links = nav.querySelectorAll("[data-ev-outline-target]");
+        links[links.length - 1].click();
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const pane = document.querySelector("[data-ev-md-scroll]");
+        const h = document.getElementById("ev-h-open-questions");
+        if (!pane || !h) return "no pane or heading";
+        const top = h.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+        return pane.scrollTop > 0 && top >= -2 && top < pane.clientHeight ? "ok" : "scrollTop=" + pane.scrollTop + " top=" + top;
+      })()`,
+      "outline click scrolled to heading",
+    );
 
     await evalValue(
       send,
@@ -556,5 +1111,7 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
     await rm(sample, { force: true });
     await rm(other, { force: true });
     await rm(long, { force: true });
+    await rm(outlineMd, { force: true });
+    await rm(md, { force: true });
   }
 }

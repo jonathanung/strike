@@ -1672,6 +1672,9 @@ type EngineError struct {
 	// Code is an optional stable machine code (e.g. queue_full). Empty when
 	// the error is free-text only.
 	Code string `json:"code,omitempty"`
+	// Provider names the provider whose credential was rejected when Code is
+	// provider_auth (#1546). Empty otherwise. Never carries key material.
+	Provider string `json:"provider,omitempty"`
 }
 
 // Usage source labels on UsageReported.
