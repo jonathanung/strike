@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -119,7 +120,19 @@ func TestMouseClickOpensOSC8HTTPLink(t *testing.T) {
 }
 
 func TestMouseClickFileTitleOpensEditor(t *testing.T) {
+	// Pin a stub terminal editor so the route does not depend on the host
+	// having vim/nvim on PATH or a GUI $VISUAL/$EDITOR (#1253).
+	bin := t.TempDir()
+	stub := filepath.Join(bin, "stubvim")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nsleep 5\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("VISUAL", stub)
+	t.Setenv("EDITOR", "")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
 	m, _ := newAppTestModel(nil, nil)
+	t.Cleanup(func() { m.closeEmbeddedSessions() })
 	base := t.TempDir()
 	m.workDir = base
 	m.vimMode = VimModePane
@@ -151,9 +164,11 @@ func TestMouseClickFileTitleOpensEditor(t *testing.T) {
 		t.Fatal("file title click should not expand tool")
 	}
 	if m.focus != focusRight {
-		t.Fatalf("focus = %v, want right (vim pane)", m.focus)
+		t.Fatalf("focus = %v, want right (vim pane); notice=%q", m.focus, m.notice)
 	}
-	_ = filepath.Join(base, rel) // keep import used if path asserted later
+	if tw, _, ok := findTerminalWindow(m.windows); !ok || tw.label != "stubvim" {
+		t.Fatalf("vim pane not attached to stub editor (ok=%v)", ok)
+	}
 }
 
 func TestToolTitleEmitsOSC8FileLink(t *testing.T) {
