@@ -255,6 +255,62 @@ pub fn save_profiles(list: &[Profile]) {
     }
 }
 
+/// A validated name/URL/SSH form, shared by add and edit (#1466) so an
+/// edited URL gets exactly the `classify_base` check a fresh add gets.
+#[derive(Clone, Debug, PartialEq)]
+struct ProfileForm {
+    name: String,
+    base: String,
+    ssh: String,
+    warn: bool,
+}
+
+fn validate_profile_form(name: &str, base: &str, ssh: &str) -> Result<ProfileForm, String> {
+    if name.trim().is_empty() {
+        return Err("Name the gateway.".into());
+    }
+    if ssh.to_ascii_lowercase().contains("token=") {
+        return Err("The SSH target must not contain a token.".into());
+    }
+    let warn = classify_base(base)?;
+    Ok(ProfileForm {
+        name: name.trim().to_string(),
+        base: base.trim().to_string(),
+        ssh: ssh.trim().to_string(),
+        warn,
+    })
+}
+
+/// Edits the profile with `id` in place: same ID, same list position, so
+/// the per-ID token association and selection ride through (#1466).
+/// Returns false when the profile is gone (removed meanwhile).
+fn apply_profile_edit(list: &mut [Profile], id: &str, form: ProfileForm) -> bool {
+    let Some(row) = list.iter_mut().find(|p| p.id == id) else {
+        return false;
+    };
+    row.name = form.name;
+    row.base = form.base;
+    row.ssh = form.ssh;
+    row.warn = form.warn;
+    true
+}
+
+/// Whether saving an edit should re-point the tab at the profile's new URL.
+/// Only the selected profile whose URL moved re-points, and never to a
+/// warned (non-literal) hostname: that would send the bearer there on
+/// Save, while a fresh add only sends it once the user selects it.
+fn edit_repoints(is_selected: bool, url_changed: bool, warn: bool) -> bool {
+    is_selected && url_changed && !warn
+}
+
+fn saved_note(warn: bool) -> String {
+    if warn {
+        "Saved. This hostname is not a literal private address. The bearer is sent there only when you select it.".into()
+    } else {
+        "Saved. The token is kept for this tab only.".into()
+    }
+}
+
 /// Ok(true) means a hostname that is not a literal private address.
 /// The bearer would leave the machine, so the switcher warns.
 pub fn classify_base(raw: &str) -> Result<bool, String> {
@@ -505,6 +561,18 @@ fn forget_gateway(id: &str) -> Result<(), String> {
 
 thread_local! {
     static FORGET: RefCell<Option<Rc<dyn Fn(String)>>> = const { RefCell::new(None) };
+    static EDIT: RefCell<Option<Rc<dyn Fn(String)>>> = const { RefCell::new(None) };
+}
+
+fn edit_gateway(id: &str) -> Result<(), String> {
+    if id == "this" || id.is_empty() {
+        return Err("This gateway cannot be renamed.".into());
+    }
+    let Some(run) = EDIT.with(|slot| slot.borrow().clone()) else {
+        return Err("Gateways are not ready.".into());
+    };
+    run(id.to_string());
+    Ok(())
 }
 
 fn sync_gateway_rows() {
@@ -540,6 +608,7 @@ fn sync_gateway_rows() {
     rows.extend(profiles);
     let mut switch = Vec::new();
     let mut forget = Vec::new();
+    let mut edit = Vec::new();
     for row in rows {
         let id = row.id.clone();
         let name = row.name.clone();
@@ -559,6 +628,21 @@ fn sync_gateway_rows() {
             .order(60),
         );
         if id != "this" {
+            let edit_id = leak_str(format!("gw.edit.{id}"));
+            let label = leak_str(format!("Gateways: Edit {name}"));
+            let words = leak_words(&["edit", "rename", "profile", "url"], &name);
+            let picked = id.clone();
+            edit.push(
+                crate::shell::Command::new(
+                    edit_id,
+                    crate::shell::Group::Gateway,
+                    label,
+                    "Rename this saved gateway or change its URL or SSH target",
+                    Rc::new(move |_| edit_gateway(&picked)),
+                )
+                .keywords(words)
+                .order(65),
+            );
             let forget_id = leak_str(format!("gw.remove.{id}"));
             let label = leak_str(format!("Gateways: Remove {name}"));
             let words = leak_words(&["remove", "delete", "profile", "forget"], &name);
@@ -595,6 +679,7 @@ fn sync_gateway_rows() {
     }
     crate::shell::replace_prefixed("gw.switch.", switch);
     crate::shell::replace_prefixed("gw.remove.", forget);
+    crate::shell::replace_prefixed("gw.edit.", edit);
 }
 
 #[component]
@@ -614,6 +699,8 @@ pub fn GatewaySwitcher(
     let url = RwSignal::new(String::new());
     let ssh = RwSignal::new(String::new());
     let form_note = RwSignal::new(String::new());
+    // Some(id) while the form edits that saved profile in place (#1466).
+    let editing = RwSignal::new(None::<String>);
     let cursor = RwSignal::new(0usize);
     // Bumps on every probe so a slow response cannot overwrite a newer one.
     let probe_gen = RwSignal::new(0u64);
@@ -894,48 +981,91 @@ pub fn GatewaySwitcher(
             Ok(())
         }),
     );
+    let clear_form = move || {
+        editing.set(None);
+        name.set(String::new());
+        url.set(String::new());
+        ssh.set(String::new());
+    };
+
     crate::shell::bind(
         "gateway.add",
         Rc::new(move |_| {
+            // Adding always starts in add mode: a closed-but-unfinished
+            // edit must not turn this into an overwrite of that profile.
+            clear_form();
             open.set(true);
             Ok(())
         }),
     );
 
-    let add_profile = move |_| {
-        let (n, u, s) = (name.get(), url.get(), ssh.get());
-        if n.trim().is_empty() {
-            form_note.set("Name the gateway.".into());
-            return;
-        }
-        if s.to_ascii_lowercase().contains("token=") {
-            form_note.set("The SSH target must not contain a token.".into());
-            return;
-        }
-        match classify_base(&u) {
-            Err(e) => form_note.set(e),
-            Ok(warn) => {
-                let id = format!("g{}", js_sys::Date::now() as u64);
-                profiles.update(|list| {
-                    list.push(Profile {
-                        id,
-                        name: n.trim().to_string(),
-                        base: u.trim().to_string(),
-                        ssh: s.trim().to_string(),
-                        warn,
-                    });
-                });
-                save_profiles(&profiles.get());
-                name.set(String::new());
-                url.set(String::new());
-                ssh.set(String::new());
-                form_note.set(if warn {
-                    "Saved. This hostname is not a literal private address. The bearer is sent there only when you select it.".into()
-                } else {
-                    "Saved. The token is kept for this tab only.".into()
-                });
+    let save_profile = move |_| {
+        let form = match validate_profile_form(&name.get(), &url.get(), &ssh.get()) {
+            Err(e) => {
+                form_note.set(e);
+                return;
             }
+            Ok(form) => form,
+        };
+        let warn = form.warn;
+        if let Some(id) = editing.get_untracked() {
+            let new_base = form.base.clone();
+            let mut found = false;
+            profiles.update(|list| found = apply_profile_edit(list, &id, form));
+            if !found {
+                clear_form();
+                form_note.set("That gateway was removed, so there is nothing to save.".into());
+                return;
+            }
+            save_profiles(&profiles.get());
+            clear_form();
+            // The edited profile stays selected (identity is the ID). If
+            // its URL moved, re-point the tab through the normal pick path
+            // unless the new host is a warned hostname.
+            let is_selected = selected.get_untracked() == id;
+            let url_changed = base.get_untracked() != new_base;
+            if edit_repoints(is_selected, url_changed, warn) {
+                form_note.set(saved_note(warn));
+                choose(id, new_base);
+            } else if is_selected && url_changed {
+                form_note.set(
+                    "Saved. This hostname is not a literal private address, so the tab stays on the old URL and the bearer is not sent there yet. Select the gateway again to use the new URL.".into(),
+                );
+            } else {
+                form_note.set(saved_note(warn));
+            }
+            return;
         }
+        let id = format!("g{}", js_sys::Date::now() as u64);
+        profiles.update(|list| {
+            list.push(Profile {
+                id,
+                name: form.name,
+                base: form.base,
+                ssh: form.ssh,
+                warn,
+            });
+        });
+        save_profiles(&profiles.get());
+        clear_form();
+        form_note.set(saved_note(warn));
+    };
+
+    let start_edit = move |id: String| {
+        let Some(p) = profiles.get_untracked().into_iter().find(|p| p.id == id) else {
+            return;
+        };
+        name.set(p.name);
+        url.set(p.base);
+        ssh.set(p.ssh);
+        editing.set(Some(id));
+        form_note.set(String::new());
+        open.set(true);
+    };
+
+    let cancel_edit = move |_| {
+        clear_form();
+        form_note.set("Edit cancelled. Nothing changed.".into());
     };
 
     let remove_profile = move |id: String| {
@@ -946,6 +1076,9 @@ pub fn GatewaySwitcher(
         persist_token(&id, "");
         profiles.update(|list| list.retain(|p| p.id != id));
         save_profiles(&profiles.get());
+        if editing.get_untracked().as_deref() == Some(id.as_str()) {
+            clear_form();
+        }
         if selected.get_untracked() == id {
             selected.set("this".into());
             base.set(String::new());
@@ -963,6 +1096,7 @@ pub fn GatewaySwitcher(
             }));
         });
         FORGET.with(|slot| *slot.borrow_mut() = Some(Rc::new(remove_profile)));
+        EDIT.with(|slot| *slot.borrow_mut() = Some(Rc::new(start_edit)));
     }
     Effect::new(move |_| {
         SAVED.with(|slot| *slot.borrow_mut() = profiles.get());
@@ -993,6 +1127,20 @@ pub fn GatewaySwitcher(
                 prop:value=move || token.get()
                 on:input=on_token />
             <p class="hint">"The token stays in this tab. strike connect injects a short-lived grant on the machine with the browser, so the address bar never contains it."</p>
+            <Show when=move || editing.get().is_some()>
+                <p class="hint gw-editing">{move || {
+                    let id = editing.get().unwrap_or_default();
+                    let label = profiles
+                        .get()
+                        .into_iter()
+                        .find(|p| p.id == id)
+                        .map(|p| p.name)
+                        .unwrap_or_default();
+                    format!(
+                        "Editing {label}. Save changes updates it in place; Cancel leaves it as it was."
+                    )
+                }}</p>
+            </Show>
             <div class="row">
                 <input placeholder="name" aria-label="Gateway name" prop:value=move || name.get()
                     on:input=move |ev| name.set(event_target_value(&ev)) />
@@ -1002,7 +1150,12 @@ pub fn GatewaySwitcher(
             <div class="row">
                 <input placeholder="user@host" aria-label="SSH destination" prop:value=move || ssh.get()
                     on:input=move |ev| ssh.set(event_target_value(&ev)) />
-                <button class="secondary" on:click=add_profile>"Save"</button>
+                <button class="secondary" on:click=save_profile>
+                    {move || if editing.get().is_some() { "Save changes" } else { "Save" }}
+                </button>
+                <Show when=move || editing.get().is_some()>
+                    <button class="secondary gw-edit-cancel" on:click=cancel_edit>"Cancel"</button>
+                </Show>
             </div>
             <p class="hint">{move || form_note.get()}</p>
         }
@@ -1093,5 +1246,95 @@ mod tests {
     fn deleting_a_token_that_was_never_stored_is_a_no_op() {
         let map = updated_token_map(HashMap::new(), "gone", "");
         assert!(map.is_empty());
+    }
+
+    fn profile(id: &str, name: &str, base: &str) -> Profile {
+        Profile {
+            id: id.into(),
+            name: name.into(),
+            base: base.into(),
+            ssh: String::new(),
+            warn: false,
+        }
+    }
+
+    #[test]
+    fn edit_updates_in_place_keeping_id_and_position() {
+        let mut list = vec![
+            profile("g1", "desktop", "http://127.0.0.1:8787"),
+            profile("g2", "laptop", "http://100.64.0.2:8787"),
+            profile("g3", "cabin", "http://192.168.1.9:8787"),
+        ];
+        let form =
+            validate_profile_form(" laptop-2 ", "http://100.64.0.7:9000", "me@laptop").unwrap();
+        assert!(apply_profile_edit(&mut list, "g2", form));
+        let ids: Vec<&str> = list.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["g1", "g2", "g3"]);
+        assert_eq!(list[1].name, "laptop-2");
+        assert_eq!(list[1].base, "http://100.64.0.7:9000");
+        assert_eq!(list[1].ssh, "me@laptop");
+        assert_eq!(list[0].name, "desktop");
+        assert_eq!(list[2].name, "cabin");
+    }
+
+    #[test]
+    fn edit_of_a_removed_profile_changes_nothing() {
+        let mut list = vec![profile("g1", "desktop", "http://127.0.0.1:8787")];
+        let form = validate_profile_form("x", "http://127.0.0.1:1", "").unwrap();
+        assert!(!apply_profile_edit(&mut list, "gone", form));
+        assert_eq!(list[0].name, "desktop");
+        assert_eq!(list[0].base, "http://127.0.0.1:8787");
+    }
+
+    #[test]
+    fn edited_url_reruns_classify_base() {
+        // An edited URL gets the same verdict a fresh add would (#1466):
+        // a non-literal hostname warns, a public IP is refused.
+        let mut list = vec![profile("g1", "box", "http://127.0.0.1:8787")];
+        let form =
+            validate_profile_form("box", "http://gateway.example:8787", "").unwrap();
+        assert!(form.warn);
+        assert!(apply_profile_edit(&mut list, "g1", form));
+        assert!(list[0].warn);
+        let form = validate_profile_form("box", "http://127.0.0.1:9000", "").unwrap();
+        assert!(apply_profile_edit(&mut list, "g1", form));
+        assert!(!list[0].warn, "editing back to a private address clears the warning");
+        assert_eq!(
+            validate_profile_form("box", "http://8.8.8.8:8787", ""),
+            Err(classify_base("http://8.8.8.8:8787").unwrap_err())
+        );
+    }
+
+    #[test]
+    fn edit_repoints_only_selected_moved_private_targets() {
+        // (selected, url_changed, warn) -> re-point now?
+        let cases = [
+            (true, true, false, true),
+            (true, true, true, false),
+            (true, false, false, false),
+            (true, false, true, false),
+            (false, true, false, false),
+            (false, true, true, false),
+            (false, false, false, false),
+        ];
+        for (sel, moved, warn, want) in cases {
+            assert_eq!(edit_repoints(sel, moved, warn), want, "{sel} {moved} {warn}");
+        }
+    }
+
+    #[test]
+    fn profile_form_validation_matches_add_rules() {
+        assert_eq!(
+            validate_profile_form("  ", "http://127.0.0.1:8787", ""),
+            Err("Name the gateway.".to_string())
+        );
+        assert_eq!(
+            validate_profile_form("box", "http://127.0.0.1:8787", "me@host?TOKEN=x"),
+            Err("The SSH target must not contain a token.".to_string())
+        );
+        assert_eq!(
+            validate_profile_form("box", "", "").map(|_| ()),
+            classify_base("").map(|_| ())
+        );
     }
 }

@@ -565,8 +565,11 @@ try {
           acid: cs.getPropertyValue("--acid").trim(),
           ground: cs.getPropertyValue("--ground").trim(),
           title: document.title,
+          // #1590 A6/A7: the header prints no version/gateway text; the
+          // connection state ("Connected · v…") is the brand mark's title.
+          version: document.querySelector(".brand-mark")?.getAttribute("title") || "",
           status: mark ? mark.getAttribute("data-status") : "",
-          chip: !!document.querySelector(".status-chip-hit"),
+          chip: !!document.querySelector(".status-chip"),
         });
       })()`,
       returnByValue: true,
@@ -583,9 +586,9 @@ try {
       const text = parsed.body || "";
       return {
         ok:
-          text.includes("Menu") &&
+          text.includes("Run a command") &&
           text.includes("Activity") &&
-          text.includes("Connected") &&
+          (parsed.version || "").includes("Connected") &&
           parsed.acid === "#7c3aed" &&
           !!parsed.chip &&
           statusIds.includes(parsed.status || "") &&
@@ -601,11 +604,13 @@ try {
   const title = boot.title || "";
   const statusId = boot.status || "";
   const chip = !!boot.chip;
-  const want = ["Menu", "Strike", "Activity", "Files", "Changes", "Git", "Terminal", "Approval", "Connected"];
+  const version = boot.version || "";
+  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Git", "Terminal", "Approval"];
   const missingText = want.filter((s) => !text.includes(s));
+  if (!version.includes("Connected")) missingText.push("Connected (brand-mark title)");
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c" || !chip || !statusIds.includes(statusId) || !title.includes("Strike")) {
     throw new Error(
-      `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} text=${text.slice(0, 400)}\n${await diagnostics()}`,
+      `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} version=${version} text=${text.slice(0, 400)}\n${await diagnostics()}`,
     );
   }
   // Approvals (#1266): mode menu, Yolo confirm + Escape, and the
@@ -668,6 +673,81 @@ try {
     },
     { timeout: STEP_MS, interval: 250 },
   );
+
+  // Permissions presets / diff / explain (#1504): read-only section in the
+  // rules panel. A host without the Permissions service answers 501 and
+  // the section must be absent; otherwise it lists the daemon's presets,
+  // diffs the default pair, and labels a dry-run explain.
+  const peRes = await fetch(`http://127.0.0.1:${port}/v1/permissions/presets`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const peText = await peRes.text();
+  await apprOpenPalette();
+  await waitFor(
+    "permissions panel open for presets",
+    async () => {
+      const open = await apprEval(`!!document.querySelector('.approvals-panel')`);
+      if (open === true) return { ok: true };
+      await apprOpenPalette();
+      await apprEval(`document.querySelector('[data-command-id="approvals.rules"]')?.click()`);
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  if (peRes.status === 501) {
+    // The section renders only after the presets request settles with a
+    // non-501, so it must never appear here; give the fetch time to land.
+    await new Promise((r) => setTimeout(r, 1000));
+    const shown = await apprEval(`!!document.querySelector('[data-permissions-explain]')`);
+    if (shown === true) throw new Error("presets section must hide when permissions capability is unavailable");
+  } else {
+    if (peRes.status !== 200) throw new Error(`presets: ${peRes.status} ${peText.slice(0, 300)}`);
+    const peIds = (JSON.parse(peText).presets || []).map((p) => p.ID).filter(Boolean);
+    if (peIds.length < 2) throw new Error(`presets: expected at least two shipped presets: ${peText.slice(0, 300)}`);
+    await waitFor(
+      "presets section lists the daemon presets",
+      async () => {
+        const ids = JSON.parse(
+          await apprEval(`JSON.stringify([...document.querySelectorAll('[data-permission-presets] [data-preset-id]')].map((li) => li.getAttribute("data-preset-id")))`),
+        );
+        return { ok: peIds.every((id) => ids.includes(id)) };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await waitFor(
+      "preset diff renders",
+      async () => {
+        const hit = await apprEval(`!!document.querySelector('[data-preset-diff]')`);
+        if (hit === true) return { ok: true };
+        const notice = await apprEval(`[...document.querySelectorAll('[data-permissions-explain] .notice')].map((n) => n.innerText).join(" | ")`);
+        if (notice) throw new Error(`preset diff error: ${notice}`);
+        await apprEval(`document.querySelector('[data-preset-diff-run]')?.click()`);
+        return { ok: false };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await apprEval(`(() => {
+      const sel = document.querySelector('select[aria-label="Dry-run preset"]');
+      if (sel) { sel.value = ${JSON.stringify(peIds[0])}; sel.dispatchEvent(new Event("change", { bubbles: true })); }
+      return "ok";
+    })()`);
+    await waitFor(
+      "dry-run explain result is labelled",
+      async () => {
+        const state = JSON.parse(
+          await apprEval(`JSON.stringify((() => {
+            const r = document.querySelector('[data-permission-explain-result]');
+            return r ? { dry: r.getAttribute("data-dry-run"), text: r.innerText || "" } : null;
+          })())`),
+        );
+        if (state && state.dry === "true" && state.text.includes(`Dry run under ${peIds[0]}`)) return { ok: true };
+        await apprEval(`document.querySelector('[data-permission-explain-run]')?.click()`);
+        return { ok: false };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  }
+  await apprEval(`[...document.querySelectorAll(".approvals-panel-head button")].find((b) => (b.textContent || "").trim() === "Close")?.click()`);
 
   const apprAuth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const apprRuleCall = async (path, body) => {
@@ -733,6 +813,95 @@ try {
   if (apprRemoved.status !== 200 || apprRemoved.text.includes("smoke-deny")) {
     throw new Error(`remove deny: ${apprRemoved.status} ${apprRemoved.text.slice(0, 300)}`);
   }
+
+  // Rule duplicate (#1433): the surviving smoke-allow row's Duplicate
+  // button prefills the Add form verbatim and focuses Pattern. Prefill
+  // alone creates nothing; the copy is stored only through the existing
+  // Add path, dangerous-add confirm included.
+  await apprOpenPalette();
+  await waitFor(
+    "rule duplicate button in the rules panel",
+    async () => {
+      const hit = await apprEval(`!!document.querySelector('[data-rule-duplicate]')`);
+      if (hit === true) return { ok: true };
+      await apprEval(`document.querySelector('[data-command-id="approvals.rules"]')?.click()`);
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const dupClicked = await apprEval(`(() => {
+    const row = [...document.querySelectorAll(".approvals-rule")].find((li) => (li.textContent || "").includes("smoke-allow"));
+    const btn = row ? row.querySelector("[data-rule-duplicate]") : null;
+    if (!btn) return "missing";
+    btn.click();
+    return "clicked";
+  })()`);
+  if (dupClicked !== "clicked") {
+    throw new Error(`rule duplicate click: ${dupClicked}`);
+  }
+  await waitFor(
+    "duplicate prefill (all four fields, pattern focused)",
+    async () => {
+      const state = JSON.parse(
+        await apprEval(`JSON.stringify((() => {
+          const pattern = document.querySelector('input[aria-label="Pattern"]');
+          return {
+            scope: document.querySelector('select[aria-label="Rule scope"]')?.value || "",
+            permission: document.querySelector('select[aria-label="Permission name"]')?.value || "",
+            pattern: pattern?.value || "",
+            action: document.querySelector('select[aria-label="Rule action"]')?.value || "",
+            focused: document.activeElement === pattern,
+          };
+        })())`),
+      );
+      return {
+        ok:
+          state.scope === "global" &&
+          state.permission === "bash" &&
+          state.pattern === "smoke-allow" &&
+          state.action === "allow" &&
+          state.focused,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const prefillListed = await fetch(`http://127.0.0.1:${port}/v1/permissions/rules`, { headers: apprAuth });
+  const prefillDoc = JSON.parse(await prefillListed.text());
+  if ((prefillDoc.rules || []).filter((row) => row.pattern === "smoke-allow").length !== 1) {
+    throw new Error(`prefill must not create a rule: ${JSON.stringify(prefillDoc.rules)}`);
+  }
+  await apprEval(`(() => {
+    const input = document.querySelector('input[aria-label="Pattern"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "smoke-allow-copy");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    [...document.querySelectorAll(".approvals-form button")]
+      .find((b) => (b.textContent || "").trim() === "Add rule")?.click();
+    return "ok";
+  })()`);
+  await waitFor(
+    "duplicated add hits the dangerous-add confirm",
+    async () => {
+      const t = await apprText();
+      if (t.includes("Add allow rule?")) {
+        await apprEval(`[...document.querySelectorAll(".approvals-dialog button")].find((b) => (b.textContent || "").trim() === "Add rule")?.click()`);
+        return { ok: true };
+      }
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await waitFor(
+    "duplicated rule stored beside the original",
+    async () => {
+      const res = await fetch(`http://127.0.0.1:${port}/v1/permissions/rules`, { headers: apprAuth });
+      const doc = JSON.parse(await res.text());
+      const pats = (doc.rules || []).map((row) => row.pattern);
+      return { ok: pats.includes("smoke-allow") && pats.includes("smoke-allow-copy") };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await apprEval(`[...document.querySelectorAll(".approvals-panel-head button")].find((b) => (b.textContent || "").trim() === "Close")?.click()`);
 
   const evalValue = async (expression) => {
     const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
@@ -809,6 +978,7 @@ try {
           open: !!pop,
           pop: pop ? pop.innerText : "",
           body: document.body ? document.body.innerText : "",
+          version: document.querySelector(".brand-mark")?.getAttribute("title") || "",
           tokenField: !!pop?.querySelector('input[type="password"]'),
           visibleInputs,
         });
@@ -817,7 +987,7 @@ try {
         ok:
           !!parsed.open &&
           parsed.tokenField &&
-          (parsed.body || "").includes("Connected") &&
+          (parsed.version || "").includes("Connected") &&
           (parsed.pop || "").includes("Token for this gateway"),
         ...parsed,
       };
@@ -1357,7 +1527,18 @@ try {
   })()`, "bad gateway command");
   await evaluate(`[...document.querySelectorAll("[data-command-id]")].find((el) => (el.textContent || "").includes("Switch to gateway: bad"))?.click()`);
   await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
-  await waitUntil(`document.body.innerText.includes("Unreachable")`, "bad gateway is unreachable");
+  // The gateway status chip is no longer rendered in the header (#1590 A6):
+  // gateway health lives in the Gateways panel, so read "Unreachable" there.
+  await waitUntil(`(() => {
+    if (document.querySelector(".gw-pop")) return true;
+    if (!document.querySelector('[data-nav="palette-dialog"]')) {
+      document.querySelector('[data-nav="palette"]')?.click();
+      return false;
+    }
+    document.querySelector('[data-command-id="gateways.open"]')?.click();
+    return false;
+  })()`, "gateways panel for bad gateway status");
+  await waitUntil(`document.body.innerText.includes("Could not reach this daemon")`, "bad gateway is unreachable");
   await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
   await runPalette("Data locations");
   await waitUntil(
@@ -1378,7 +1559,18 @@ try {
   })()`, "this gateway command");
   await evaluate(`[...document.querySelectorAll("[data-command-id]")].find((el) => (el.textContent || "").includes("Switch to gateway: This gateway"))?.click()`);
   await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
-  await waitUntil(`document.body.innerText.includes("Connected")`, "this gateway is connected");
+  // "Connected" was the header gateway chip / version text, both removed by
+  // #1590 (A6/A7): read it from the Gateways panel detail instead.
+  await waitUntil(`(() => {
+    if (document.querySelector(".gw-pop")) return true;
+    if (!document.querySelector('[data-nav="palette-dialog"]')) {
+      document.querySelector('[data-nav="palette"]')?.click();
+      return false;
+    }
+    document.querySelector('[data-command-id="gateways.open"]')?.click();
+    return false;
+  })()`, "gateways panel for reconnected status");
+  await waitUntil(`(() => { const pop = document.querySelector(".gw-pop"); return !!pop && pop.innerText.includes("loopback") && !pop.innerText.includes("Could not reach this daemon"); })()`, "this gateway is connected");
   await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
   await runPalette("Data locations");
   await waitUntil(
@@ -1521,8 +1713,8 @@ try {
   });
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
-    "cockpit reload after attachment checks (Menu, Memory)",
-    textProbe((t) => t.includes("Menu") && t.includes("Terminal")),
+    "cockpit reload after attachment checks (Run a command, Terminal)",
+    textProbe((t) => t.includes("Run a command") && t.includes("Terminal")),
     { timeout: WAIT_MS, interval: 250 },
   );
 
@@ -1539,7 +1731,22 @@ try {
       { timeout: WAIT_MS, interval: 250 },
     );
   };
-  await openView("Usage", ["Input tokens", "Daily budget (USD)"]);
+  // Usage export (#1481): the client-side Export controls render beside
+  // the report even before any usage is seeded.
+  await openView("Usage", ["Input tokens", "Daily budget (USD)", "Export JSON", "Export CSV (by day)"]);
+  // Audit window (#1440): seed a chain longer than the 100-row window
+  // before opening Audit, so the first render is already capped.
+  const auditSeed = 105;
+  let auditSeeded = 0;
+  for (let i = 0; i < auditSeed; i++) {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/audit`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "terminal", summary: `smoke audit window ${i}` }),
+    });
+    if (!res.ok) break;
+    auditSeeded++;
+  }
   await openView("Audit", ["Verify chain", "Append-only hash chain"]);
   const auditProbe = await waitFor(
     "audit chain state (Chain intact / No audit entries / Not configured)",
@@ -1557,6 +1764,35 @@ try {
   ) {
     throw new Error(`audit chain state missing: ${auditText.slice(0, 500)}`);
   }
+  if (auditSeeded === auditSeed) {
+    const auditRows = () => evaluate(`document.querySelectorAll(".ua-row.ua-audit").length`);
+    const windowAttr = () =>
+      evaluate(`(document.querySelector("[data-audit-window]") || {}).dataset?.auditWindow || ""`);
+    const first = await waitFor(
+      "audit window caps the first render at 100 rows",
+      async () => {
+        const rows = await auditRows();
+        const attr = await windowAttr();
+        return { ok: rows === 100 && attr.startsWith("100/"), rows, attr };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    const total = Number(String(first.attr || "").split("/")[1]);
+    if (!(total >= auditSeed)) throw new Error(`audit window total ${first.attr} < ${auditSeed}`);
+    const more = await evaluate(
+      `(() => { const b = document.querySelector("[data-audit-more]"); if (!b) return "missing"; b.click(); return "clicked"; })()`,
+    );
+    if (more !== "clicked") throw new Error(`audit Show more ${more}`);
+    const want = Math.min(total, 200);
+    await waitFor(
+      `audit rows beyond the window render after Show more (${want})`,
+      async () => {
+        const rows = await auditRows();
+        return { ok: rows === want, rows };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  }
 
   // Memory panel (#1305): reload with the token set, open Memory, and
   // confirm the seeded entry renders — redacted, with a readable key cell.
@@ -1568,7 +1804,7 @@ try {
       const parsed = await readCockpit();
       const body = parsed.body || "";
       return {
-        ok: body.includes("Menu") && body.includes("Terminal"),
+        ok: body.includes("Run a command") && body.includes("Terminal"),
         body: body.slice(0, 300),
       };
     },
@@ -1904,8 +2140,6 @@ try {
 
   const clicked = await send("Runtime.evaluate", {
     expression: `(() => {
-      const more = document.querySelector('[data-nav="more"]');
-      if (more && more.getAttribute("aria-expanded") !== "true") more.click();
       const btn = document.querySelector('[data-feature="notifications"]');
       if (!btn) return "missing-bell";
       btn.click();
@@ -2635,7 +2869,7 @@ try {
   });
   await waitFor(
     "cockpit re-boot for session delete",
-    textProbe((t) => t.includes("Menu")),
+    textProbe((t) => t.includes("Run a command")),
     { timeout: WAIT_MS, interval: 250 },
   );
   await waitFor(
@@ -2799,7 +3033,7 @@ try {
     await send("Page.navigate", {
       url: "http://127.0.0.1:" + port + "/?token=" + token,
     });
-    await waitFor(label, textProbe((t) => t.includes("Menu")), {
+    await waitFor(label, textProbe((t) => t.includes("Run a command")), {
       timeout: WAIT_MS,
       interval: 250,
     });
@@ -2966,7 +3200,7 @@ try {
     });
     await waitFor(
       "cockpit after task restart",
-      textProbe((body) => body.includes("Menu") && body.includes("Terminal")),
+      textProbe((body) => body.includes("Run a command") && body.includes("Terminal")),
       { timeout: WAIT_MS, interval: 250 },
     );
     await runPalette("Task runner");
@@ -2995,7 +3229,7 @@ try {
     );
     await waitFor(
       "chat view after the task runner check",
-      textProbe((body) => body.includes("Menu")),
+      textProbe((body) => body.includes("Run a command")),
       { timeout: WAIT_MS, interval: 250 },
     );
   } catch (err) {
@@ -3113,7 +3347,7 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
     "app after reload for schedule duplicate check",
-    textProbe((body) => body.includes("Menu")),
+    textProbe((body) => body.includes("Run a command")),
     { timeout: WAIT_MS, interval: 250 },
   );
   await runPalette("Schedule");
@@ -3274,7 +3508,7 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
     "apps palette entry",
-    textProbe((body) => body.includes("Menu")),
+    textProbe((body) => body.includes("Run a command")),
     { timeout: WAIT_MS, interval: 250 },
   );
   await runPalette("Apps");
