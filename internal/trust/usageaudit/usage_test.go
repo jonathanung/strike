@@ -130,6 +130,85 @@ func TestAggregatePricesCacheAndLeavesUnknownModelsUnpriced(t *testing.T) {
 	}
 }
 
+func TestAggregateByModelSplitsMultiModelSession(t *testing.T) {
+	dir := t.TempDir()
+	// One session that switched models mid-session: its spend must split
+	// across both model rows, never all land on the latest label (#1470).
+	writeSession(t, dir, "mix", session.Meta{Title: "Mix"}, []timed{
+		at("2026-10-25T01:00:00Z", protocol.ModelSelected{Correlation: protocol.Correlation{SessionID: "mix"}, Provider: "anthropic", Model: "opus"}),
+		at("2026-10-25T01:00:01Z", protocol.UsageReported{Input: protocol.KnownTokens(1_000_000), Output: protocol.KnownTokens(0), Source: protocol.UsageSourceActual}),
+		at("2026-10-26T01:00:02Z", protocol.ModelSelected{Correlation: protocol.Correlation{SessionID: "mix"}, Provider: "anthropic", Model: "haiku"}),
+		at("2026-10-26T01:00:03Z", protocol.UsageReported{Input: protocol.KnownTokens(1_000_000), Output: protocol.KnownTokens(0), CacheRead: protocol.KnownTokens(7), Source: protocol.UsageSourceActual}),
+	})
+	writeSession(t, dir, "cheap", session.Meta{Title: "Cheap"}, []timed{
+		at("2026-10-26T02:00:00Z", protocol.ModelSelected{Correlation: protocol.Correlation{SessionID: "cheap"}, Provider: "echo", Model: "echo"}),
+		at("2026-10-26T02:00:01Z", protocol.UsageReported{Input: protocol.KnownTokens(40), Output: protocol.KnownTokens(5), Source: protocol.UsageSourceEstimated}),
+	})
+	price := func(provider, model string) (Rates, bool) {
+		switch provider + "/" + model {
+		case "anthropic/opus":
+			return Rates{Input: 15, Output: 75}, true
+		case "anthropic/haiku":
+			return Rates{Input: 1, Output: 5}, true
+		default:
+			return Rates{}, false
+		}
+	}
+	report, err := Aggregate(dir, price)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Models) != 3 {
+		t.Fatalf("models = %+v, want 3 rows", report.Models)
+	}
+	// Cost descending: opus ($15) first, haiku ($1) second, unpriced last.
+	if report.Models[0].Model != "opus" || report.Models[1].Model != "haiku" || report.Models[2].Model != "echo" {
+		t.Fatalf("model order = %q/%q/%q, want opus/haiku/echo", report.Models[0].Model, report.Models[1].Model, report.Models[2].Model)
+	}
+	opus, haiku, echo := report.Models[0], report.Models[1], report.Models[2]
+	if !opus.CostKnown || !near(opus.CostUSD, 15) || opus.Input != 1_000_000 || opus.Reports != 1 || opus.Sessions != 1 {
+		t.Fatalf("opus = %+v, want $15 / 1 report / 1 session", opus)
+	}
+	if opus.FirstDay != "2026-10-25" || opus.LastDay != "2026-10-25" {
+		t.Fatalf("opus days = %q-%q", opus.FirstDay, opus.LastDay)
+	}
+	if !haiku.CostKnown || !near(haiku.CostUSD, 1) || haiku.CacheRead != 7 || haiku.FirstDay != "2026-10-26" {
+		t.Fatalf("haiku = %+v, want $1 with the second event only", haiku)
+	}
+	// Unpriced model: listed with tokens, no dollars, never estimated.
+	if echo.CostKnown || echo.Input != 40 || echo.Output != 5 || echo.UnpricedEvents != 1 {
+		t.Fatalf("echo = %+v, want tokens and no priced cost", echo)
+	}
+	// Rows sum to the page totals.
+	var inSum, reportsSum int
+	var costSum float64
+	for _, m := range report.Models {
+		inSum += m.Input
+		reportsSum += m.Reports
+		if m.CostKnown {
+			costSum += m.CostUSD
+		}
+	}
+	if inSum != report.Totals.Input || reportsSum != report.Totals.Reports || !near(costSum, report.CostUSD) {
+		t.Fatalf("model sums in=%d reports=%d cost=%v, totals in=%d reports=%d cost=%v", inSum, reportsSum, costSum, report.Totals.Input, report.Totals.Reports, report.CostUSD)
+	}
+	// Same model name on two providers is two rows (Q1: provider+model).
+	dir2 := t.TempDir()
+	for _, prov := range []string{"openai", "azure"} {
+		writeSession(t, dir2, "s-"+prov, session.Meta{Title: prov}, []timed{
+			at("2026-10-26T01:00:00Z", protocol.ModelSelected{Correlation: protocol.Correlation{SessionID: "s-" + prov}, Provider: prov, Model: "shared"}),
+			at("2026-10-26T01:00:01Z", protocol.UsageReported{Input: protocol.KnownTokens(10), Output: protocol.KnownTokens(1), Source: protocol.UsageSourceActual}),
+		})
+	}
+	report2, err := Aggregate(dir2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report2.Models) != 2 || report2.Models[0].Model != "shared" || report2.Models[1].Model != "shared" || report2.Models[0].Provider == report2.Models[1].Provider {
+		t.Fatalf("provider split = %+v, want two shared rows on different providers", report2.Models)
+	}
+}
+
 func TestAggregateIgnoresChildBudgetWarningOnParentLog(t *testing.T) {
 	dir := t.TempDir()
 	writeSession(t, dir, "root", session.Meta{Title: "Root"}, []timed{

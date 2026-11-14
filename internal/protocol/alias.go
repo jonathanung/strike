@@ -113,6 +113,9 @@ type (
 	DelegationState         = pub.DelegationState
 	VerificationReport      = pub.VerificationReport
 	VerificationCheck       = pub.VerificationCheck
+	VerificationFailure     = pub.VerificationFailure
+	VerificationAttempt     = pub.VerificationAttempt
+	VerificationTriage      = pub.VerificationTriage
 	VerificationEnv         = pub.VerificationEnv
 	TeamMemberState         = pub.TeamMemberState
 	TeamRosterMember        = pub.TeamRosterMember
@@ -408,6 +411,7 @@ const (
 	ErrorCodeNetworkDenied      = pub.ErrorCodeNetworkDenied
 	ErrorCodeQueueFull          = pub.ErrorCodeQueueFull
 	ErrorCodeBudgetExhausted    = pub.ErrorCodeBudgetExhausted
+	ErrorCodeProviderAuth       = pub.ErrorCodeProviderAuth
 
 	// Human orchestration Ops (WEBUI.18).
 	OpTeamSpawn          = pub.OpTeamSpawn

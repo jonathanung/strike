@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jonathanung/strike/internal/daemon/keepawake"
 	"github.com/jonathanung/strike/internal/product/version"
 )
 
@@ -185,6 +186,9 @@ type gatewayInfoBody struct {
 	LanWarning       string       `json:"lanWarning,omitempty"`
 	AdvertiseWarning string       `json:"advertiseWarning,omitempty"`
 	Unbound          []string     `json:"unbound,omitempty"`
+	// KeepAwake is the host sleep-inhibition state (#1496). Absent when the
+	// daemon has no keep-awake service (attach-only serve).
+	KeepAwake *keepawake.Status `json:"keepAwake,omitempty"`
 }
 
 func (s *Server) gatewayInfo(r *http.Request) gatewayInfoBody {
@@ -204,7 +208,13 @@ func (s *Server) gatewayInfo(r *http.Request) gatewayInfoBody {
 	if bind == "" {
 		bind = s.opts.Addr
 	}
+	var keep *keepawake.Status
+	if s.opts.KeepAwake != nil {
+		st := s.opts.KeepAwake.Status()
+		keep = &st
+	}
 	return gatewayInfoBody{
+		KeepAwake:        keep,
 		OK:               true,
 		Auth:             s.opts.Auth,
 		Bind:             bind,

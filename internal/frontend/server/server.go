@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/daemon/deploywatch"
+	"github.com/jonathanung/strike/internal/daemon/keepawake"
 	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/server/terminal"
@@ -90,6 +92,10 @@ type Options struct {
 	SyncWorkDir func(dir string)
 	// Schedules is the persisted clock (/v1/schedules). Nil returns 501.
 	Schedules *schedule.Service
+	// ProjectInitFor builds the host ProjectInit for a live root's working
+	// directory so /v1/init writes AGENTS.md where the browser is looking
+	// (#1581). Nil uses Services.Init (the daemon's directory) for every root.
+	ProjectInitFor func(workDir string) host.ProjectInit
 	// Services exposes optional frontend host capabilities.
 	Services *host.Services
 	// TaskRuns is the durable plan-run board (GET/POST /v1/plans/{id}/run).
@@ -114,9 +120,19 @@ type Options struct {
 	// Nil makes /v1/triggers and POST /hooks 503. The launcher inside the
 	// service is NewRootLauncher (authored for #1282).
 	Triggers *trigger.Service
+	// DeployWatches is the post-merge deploy watch registry (#1782). Nil
+	// makes /v1/deploy-watches 503.
+	DeployWatches *deploywatch.Service
 	// Assembled is true when this process ran assemble (config load, project
 	// stores, auth.json, attachments). Attach-only serve leaves it false.
 	Assembled bool
+	// KeepAwake is the host sleep-inhibition service (#1496). GET /v1/gateway
+	// reports its Status and PATCH /v1/settings keepAwake applies the dial to
+	// it live. Nil omits the field (attach-only serve).
+	KeepAwake *keepawake.Service
+	// UpdateProbe runs the release check behind GET /v1/update (#1583). Nil
+	// leaves the update-check capability off. Wire NewUpdateProbe in serve.
+	UpdateProbe UpdateProbe
 	// OpsRate is tokens/sec per client IP for ops (default 10). <=0 uses default.
 	OpsRate float64
 	// OpsBurst is the per-IP burst (default 20). <=0 uses default.
@@ -161,6 +177,12 @@ type Server struct {
 	static fs.FS
 	// gzip memoizes gzip encodings of static bundle files (#1514).
 	gzip gzipAssets
+
+	// probeMu serialises release probes; updateMu guards updateLast only, so
+	// GET /v1/settings never waits on the network (#1583).
+	probeMu    sync.Mutex
+	updateMu   sync.Mutex
+	updateLast *updateCheckResponse
 
 	authFlowOnce   sync.Once
 	authFlowsStore *authFlowStore
@@ -412,6 +434,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/onboarding", s.handleOnboarding)
 	s.mux.HandleFunc("POST /v1/onboarding/acknowledge", s.handleOnboardingAcknowledge)
 	s.mux.HandleFunc("GET /v1/settings", s.handleSettings)
+	s.mux.HandleFunc("GET /v1/update", s.handleUpdateCheck)
 	s.mux.HandleFunc("GET /v1/themes", s.handleThemesList)
 	s.mux.HandleFunc("GET /v1/themes/{id}", s.handleThemeGet)
 	s.mux.HandleFunc("PATCH /v1/settings", s.handleSettings)
@@ -422,8 +445,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.handleSessionFork)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork_at", s.handleSessionForkAt)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/rewind_points", s.handleSessionRewindPoints)
+	// Daemon-generated session report artifact (#1444).
+	s.mux.HandleFunc("POST /v1/sessions/{id}/report", s.handleSessionReport)
 	s.mux.HandleFunc("PATCH /v1/sessions/{id}", s.handleSessionRename)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.handleSessionDelete)
+	// Session-scoped /loop jobs (#1588): ephemeral, die with the session.
+	s.mux.HandleFunc("GET /v1/sessions/{id}/loops", s.handleSessionLoopsList)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/loops", s.handleSessionLoopStart)
+	s.mux.HandleFunc("DELETE /v1/sessions/{id}/loops", s.handleSessionLoopsStopAll)
+	s.mux.HandleFunc("DELETE /v1/sessions/{id}/loops/{loopID}", s.handleSessionLoopStop)
 	// Session list organisation (pins, archive, folders, search). Not filesystem dirs.
 	s.mux.HandleFunc("GET /v1/session-list/search", s.handleSessionListSearch)
 	s.mux.HandleFunc("POST /v1/session-list/bulk", s.handleSessionListBulk)
@@ -439,6 +469,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/git/diff", s.handleGitDiff)
 	s.mux.HandleFunc("GET /v1/git/branches", s.handleGitBranches)
 	s.mux.HandleFunc("GET /v1/git/log", s.handleGitLog)
+	s.mux.HandleFunc("GET /v1/git/show", s.handleGitShow)
 	s.mux.HandleFunc("POST /v1/git/stage", s.handleGitStage)
 	s.mux.HandleFunc("POST /v1/git/unstage", s.handleGitUnstage)
 	s.mux.HandleFunc("POST /v1/git/commit", s.handleGitCommit)
@@ -551,6 +582,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/schedules", s.handleSchedulesList)
 	s.mux.HandleFunc("POST /v1/schedules", s.handleScheduleCreate)
 	s.mux.HandleFunc("GET /v1/schedules/{id}/history", s.handleScheduleHistory)
+	s.mux.HandleFunc("GET /v1/schedules/{id}/runs/{runId}/output", s.handleScheduleRunOutput)
 	s.mux.HandleFunc("POST /v1/schedules/{id}/pause", s.handleSchedulePause)
 	s.mux.HandleFunc("POST /v1/schedules/{id}/resume", s.handleScheduleResume)
 	s.mux.HandleFunc("POST /v1/schedules/{id}/run", s.handleScheduleRun)
@@ -572,6 +604,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /v1/triggers/{id}", s.handleTriggerUpdate)
 	s.mux.HandleFunc("DELETE /v1/triggers/{id}", s.handleTriggerDelete)
 	s.mux.HandleFunc("POST /hooks/{id}", s.handleHook)
+	s.mux.HandleFunc("GET /v1/deploy-watches", s.handleDeployWatchesList)
+	s.mux.HandleFunc("POST /v1/deploy-watches", s.handleDeployWatchCreate)
+	s.mux.HandleFunc("GET /v1/deploy-watches/{id}", s.handleDeployWatchGet)
+	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/poll", s.handleDeployWatchPoll)
+	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/cancel", s.handleDeployWatchCancel)
 	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
 	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/activate", s.handleRootActivate)
@@ -590,6 +627,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/agents", s.handleAgents)
 	s.mux.HandleFunc("GET /v1/diag", s.handleDiag)
 	s.mux.HandleFunc("POST /v1/diag", s.handleDiag)
+	// Project init (#1581): AGENTS.md bootstrap via host.ProjectInit.
+	s.mux.HandleFunc("GET /v1/init", s.handleProjectInitGet)
+	s.mux.HandleFunc("POST /v1/init", s.handleProjectInitPost)
 	s.mux.HandleFunc("POST /v1/attachments", s.handleAttachmentIngest)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)
 	s.mux.HandleFunc("GET /v1/sidechat", s.handleSideChatList)

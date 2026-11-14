@@ -1540,6 +1540,9 @@
         "parentSessionId": {
           "type": "string"
         },
+        "provider": {
+          "type": "string"
+        },
         "providerRequestId": {
           "type": "string"
         },
@@ -6665,6 +6668,32 @@
       ],
       "type": "object"
     },
+    "VerificationAttempt": {
+      "additionalProperties": true,
+      "description": "VerificationAttempt is one focused rerun in a gate's triage history.",
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "exitCode": {
+          "type": "integer"
+        },
+        "output": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "command",
+        "passed"
+      ],
+      "type": "object"
+    },
     "VerificationCheck": {
       "additionalProperties": true,
       "description": "VerificationCheck is one independent gate outcome inside a VerificationReport.",
@@ -6689,6 +6718,17 @@
         },
         "passed": {
           "type": "boolean"
+        },
+        "triage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VerificationTriage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
         },
         "value": {
           "type": "string"
@@ -6759,6 +6799,31 @@
       },
       "type": "object"
     },
+    "VerificationFailure": {
+      "additionalProperties": true,
+      "description": "VerificationFailure is one failing Go package parsed from gate output.",
+      "properties": {
+        "dir": {
+          "type": "string"
+        },
+        "package": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "tests": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "package"
+      ],
+      "type": "object"
+    },
     "VerificationReport": {
       "additionalProperties": true,
       "description": "VerificationReport is the harness-owned outcome of independent completion gates. Distinct from CompletionHandoff.Verification (model self-report text): implementer-done is Claimed; harness-verified is Verified/Passed. Present on ChildCompleted when gates were configured at spawn (or when a solo/harness path attaches verification — shared schema with #806).",
@@ -6823,6 +6888,37 @@
           "type": "string"
         },
         "turnId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "VerificationTriage": {
+      "additionalProperties": true,
+      "description": "VerificationTriage reports focused reruns for a failed cmd gate (#1178). OriginalOutput keeps the last full-gate failure output even when a later run skipped the full gate because the focused rerun still failed.",
+      "properties": {
+        "attempts": {
+          "items": {
+            "$ref": "#/$defs/VerificationAttempt"
+          },
+          "type": "array"
+        },
+        "exhausted": {
+          "type": "boolean"
+        },
+        "failures": {
+          "items": {
+            "$ref": "#/$defs/VerificationFailure"
+          },
+          "type": "array"
+        },
+        "focusedCommand": {
+          "type": "string"
+        },
+        "fullGateSkipped": {
+          "type": "boolean"
+        },
+        "originalOutput": {
           "type": "string"
         }
       },
@@ -6937,7 +7033,7 @@
   "x-strike-event-count": 63,
   "x-strike-legacy-version": "1.0.0",
   "x-strike-op-count": 31,
-  "x-strike-protocol-version": "1.22.0",
+  "x-strike-protocol-version": "1.23.0",
   "x-strike-unknown-event": "valid",
   "x-strike-unknown-field": "ignore",
   "x-strike-unknown-op": "reject"
