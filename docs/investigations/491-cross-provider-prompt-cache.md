@@ -8,11 +8,28 @@ today, what landed for non-Anthropic paths, and when cache misses are expected.
 
 | Adapter | Request-side control | Wire fields | Usage breakout mapped? |
 | --- | --- | --- | --- |
-| **anthropic** | Yes — engineered breakpoints | `cache_control: { "type": "ephemeral" }` on last system block, last tool, last eligible message content block (max 3 of Anthropic’s 4) | Yes — `cache_read_input_tokens` → `CacheReadTokens`, `cache_creation_input_tokens` → `CacheCreationTokens` |
+| **anthropic** | Yes — engineered breakpoints | `cache_control: { "type": "ephemeral" }` on last **stable** system block, last tool, last eligible message content block (max 3 of Anthropic’s 4) | Yes — `cache_read_input_tokens` → `CacheReadTokens`, `cache_creation_input_tokens` → `CacheCreationTokens` |
 | **openaicompat** (OpenAI platform, xAI, custom OpenAI-compat hosts) | Yes — stable session cache key | `prompt_cache_key` on chat-completions and Responses bodies | Yes — `prompt_tokens_details.cached_tokens` / `cache_write_tokens` (chat) and `input_tokens_details.*` (Responses) → `CacheReadTokens` / `CacheCreationTokens` |
 | **chatgpt** (subscription Responses at chatgpt.com) | Yes — stable session cache key (Codex-shaped) | `prompt_cache_key` on body; `include: ["reasoning.encrypted_content"]`; **never** `prompt_cache_retention` (backend 400s) | Yes — `input_tokens_details.cached_tokens` / `cache_write_tokens` when present |
 | **google** (Gemini `generateContent`) | No | Google’s explicit context-cache API is a different product (create/cachedContents + `cachedContent` name); not the same as per-request breakpoints | `usageMetadata` has no cache breakout in our wire types |
 | **echo** | N/A | Offline test double | Synthetic usage only |
+
+### Stable vs dynamic system blocks (#1200)
+
+The engine partitions system layers into a **stable** prefix (shared, tools
+guidance, persona/config/provider, phase/plan, lean, instructions) and a
+**dynamic** tail (`environment` with today's date, `project_memory`
+auto-load, `decision_ledger` active slice). `provider.Request.System` stays the
+full joined text (stable first, then dynamic); `Request.SystemBlocks` carries
+the same text as `[stable, dynamic]`. The Anthropic adapter sends one system
+text block per segment and puts the system breakpoint on the last **stable**
+block, so a date rollover, tagged `memory_write`, or `ledger_write` misses only
+the conversation breakpoint, not the shared + persona system cache. Adapters
+without multi-block system support (openaicompat, chatgpt, google, echo,
+external fn) read `System`; moving `environment` after `instruction` also
+lengthens their stable wire prefix. Fit-pressure shed of `lean_code` /
+`instruction` still rewrites the stable block (rare; memory shed only touches
+the dynamic tail).
 
 ### Why openaicompat uses `prompt_cache_key` (not Anthropic-style `cache_control`)
 
@@ -59,6 +76,7 @@ still surface cache hits via existing `UsageReported.cacheRead` /
 | Change | Effect |
 | --- | --- |
 | System / agent rewrite | Prefix hash changes → miss (intentional) |
+| Date / tagged memory / ledger change | Dynamic system tail only → stable system block (+ tools) still hits; message breakpoint re-writes (#1200) |
 | Tool registry change (add/remove/rename tools, schema edit, `toolsearch` defer load) | Tools participate in the cached prefix → miss |
 | Compaction / prune that rewrites earlier history | Shared prefix shortens or changes → partial or full miss until the new prefix is rewritten |
 | New session id | New `prompt_cache_key` → no cross-session sticky routing (by design) |
