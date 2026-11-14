@@ -139,8 +139,8 @@ pub fn goal_filter_label(filter: &str) -> &'static str {
 /// status text is deliberately not searched — status has its own control.
 pub fn goal_matches_filter(goal: &GoalView, filter: &str, search: &str) -> bool {
     let status_ok = filter == GOAL_FILTER_ALL || goal.status == filter;
-    let query = search.trim().to_ascii_lowercase();
-    let search_ok = query.is_empty() || goal.description.to_ascii_lowercase().contains(&query);
+    let query = search.trim().to_lowercase();
+    let search_ok = query.is_empty() || goal.description.to_lowercase().contains(&query);
     status_ok && search_ok
 }
 
@@ -608,11 +608,11 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                     }>"New"</button>
                 </div>
                 <p class="goals-aside-note">"A goal loops until its check passes or a guard stops it."</p>
-                <div class="ss-chips goals-filter-chips" role="tablist" aria-label="Goal status filter">
+                <div class="ss-chips goals-filter-chips" role="group" aria-label="Goal status filter">
                     {std::iter::once(GOAL_FILTER_ALL).chain(GOAL_STATUS_FILTERS.iter().copied()).map(|f| {
                         let label = goal_filter_label(f);
                         view! {
-                            <button type="button" data-goal-filter=f class=move || if status_filter.get() == f { "chip on" } else { "chip" } on:click=move |_| status_filter.set(f.to_string())>{label}</button>
+                            <button type="button" data-goal-filter=f aria-pressed=move || (status_filter.get() == f).to_string() class=move || if status_filter.get() == f { "chip on" } else { "chip" } on:click=move |_| status_filter.set(f.to_string())>{label}</button>
                         }
                     }).collect_view()}
                 </div>
@@ -624,13 +624,15 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                     prop:value=move || goal_search.get()
                     on:input=move |ev| goal_search.set(event_target_value(&ev))
                 />
-                <p class="hint goals-count" data-goals-count="true">
-                    {move || {
-                        let all = goals.get();
-                        let visible = visible_goals(&all, &status_filter.get(), &goal_search.get()).len();
-                        format!("Showing {visible} of {} goals", all.len())
-                    }}
-                </p>
+                <Show when=move || !goals.get().is_empty()>
+                    <p class="hint goals-count" data-goals-count="true">
+                        {move || {
+                            let all = goals.get();
+                            let visible = visible_goals(&all, &status_filter.get(), &goal_search.get()).len();
+                            format!("Showing {visible} of {} goals", all.len())
+                        }}
+                    </p>
+                </Show>
                 {move || {
                     let all = goals.get();
                     if all.is_empty() {
@@ -1038,6 +1040,9 @@ mod tests {
         // description, even though a paused goal exists.
         assert!(names("all", "paused").is_empty());
         assert!(names("all", "no-such-goal").is_empty());
+        // Case folding is Unicode-aware, not ASCII-only.
+        let accented = vec![goal("active", "Réparer l'ÉCRAN")];
+        assert_eq!(visible_goals(&accented, "all", "écran").len(), 1);
     }
 
     #[test]
