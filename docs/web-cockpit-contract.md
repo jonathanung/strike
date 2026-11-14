@@ -440,7 +440,7 @@ touched; unresolved rows **must** keep the listed tier.
 | Autonomy | `/autonomy` | runtime + op | shipped | preserve | B | mutate-blocked |
 | Permission mode | `/mode` | runtime + op | shipped | preserve | B | mutate-blocked |
 | Fast tier | `/fast` | FAST toggle + op | shipped | preserve | B | mutate-blocked |
-| Sandbox dial + explain | `/sandbox` | `/v1/sandbox` GET/PATCH | shipped | preserve | C | read explain; PATCH blocked |
+| Sandbox dial + explain | `/sandbox` | `/v1/sandbox` GET/PATCH | explain shipped (Leptos: read-only section in Permissions, #1532); dial not shipped | preserve | C | read explain; PATCH blocked |
 | Permission presets/explain | `/permission` | explain dialog + `/v1/permissions/*` | shipped | #1077 | B | read |
 | Scheduler presets | `scheduler_presets_modal.go` | Settings + `/v1/scheduler/presets` | shipped | #1077 | B | mutate-blocked |
 | Provider auth login | `auth.go` modal | key/OAuth/device flows in Settings | shipped | #1077 | **C** | mutate-blocked |

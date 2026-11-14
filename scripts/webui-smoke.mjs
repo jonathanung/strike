@@ -669,6 +669,61 @@ try {
     { timeout: STEP_MS, interval: 250 },
   );
 
+  // Sandbox explain (#1532): the Permissions panel shows the daemon's real
+  // GET /v1/sandbox snapshot (or the honest unavailable state on 501).
+  const sbRes = await fetch(`http://127.0.0.1:${port}/v1/sandbox`, { headers: { Authorization: `Bearer ${token}` } });
+  const sbSnap = sbRes.status === 200 ? await sbRes.json() : null;
+  if (sbRes.status !== 200 && sbRes.status !== 501) {
+    throw new Error(`GET /v1/sandbox: ${sbRes.status}`);
+  }
+  const sbModeLabel = { off: "Off", "read-only": "Read-only", "workspace-write": "Workspace write" };
+  await waitFor(
+    "sandbox section in the Permissions panel",
+    async () => {
+      const probe = await apprEval(`(() => {
+        const sec = document.querySelector('[data-section="sandbox"]');
+        if (!sec) return null;
+        const state = sec.querySelector('[data-sandbox-state]');
+        return {
+          text: sec.innerText || "",
+          state: state ? state.getAttribute('data-sandbox-state') : "",
+          profile: !!sec.querySelector('details.sandbox-profile pre'),
+        };
+      })()`);
+      if (!probe) {
+        await apprOpenPalette();
+        await apprEval(`document.querySelector('[data-command-id="approvals.rules"]')?.click()`);
+        return { ok: false };
+      }
+      if (!probe.text.includes("OS sandbox")) return { ok: false, probe };
+      if (!sbSnap) {
+        return { ok: probe.state === "unavailable" && !probe.text.includes("This session"), probe };
+      }
+      const label = sbModeLabel[sbSnap.mode] || sbSnap.mode;
+      const want = sbSnap.available ? "ready" : "no-backend";
+      return {
+        ok:
+          probe.state === want &&
+          probe.text.includes(label) &&
+          probe.profile === !!sbSnap.explain &&
+          (sbSnap.networkAllow || []).every((h) => probe.text.includes(h)),
+        probe,
+        snap: sbSnap,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await waitFor(
+    "close the Permissions panel",
+    async () => {
+      const open = await apprEval(`!!document.querySelector('.approvals-panel')`);
+      if (!open) return { ok: true };
+      await apprEval(`[...document.querySelectorAll('.approvals-panel-head button')].find((b) => (b.innerText || '').trim() === 'Close')?.click()`);
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+
   const apprAuth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const apprRuleCall = async (path, body) => {
     const res = await fetch(`http://127.0.0.1:${port}${path}`, {

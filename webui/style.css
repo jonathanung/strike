@@ -2616,6 +2616,17 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   .approvals-form button { flex: 1 1 140px; }
 }
 /* feature:approvals end */
+/* feature:sandbox-explain begin */
+.sandbox-summary { margin: var(--space-2) 0 0; display: grid; gap: var(--space-1); }
+.sandbox-row { display: grid; grid-template-columns: minmax(120px, 30%) 1fr; gap: var(--space-2); }
+.sandbox-row dt { color: var(--muted); }
+.sandbox-row dd { margin: 0; overflow-wrap: anywhere; }
+.sandbox-profile { margin-top: var(--space-2); }
+.sandbox-profile pre { margin-top: var(--space-2); max-height: 320px; overflow: auto; }
+@media (max-width: 600px) {
+  .sandbox-row { grid-template-columns: 1fr; gap: 0; }
+}
+/* feature:sandbox-explain end */
 /* feature:terminal begin */
 .side-tabs { flex-wrap: wrap; }
 .term {
