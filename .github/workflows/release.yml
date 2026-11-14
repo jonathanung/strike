@@ -84,6 +84,22 @@ jobs:
           )
           ls -la dist
 
+      # Homebrew formula + AUR PKGBUILD filled with this tag's checksums.
+      # Uploaded as a workflow artifact, not a release asset. Publishing to
+      # the tap / AUR is manual (packaging/README.md).
+      - name: Render package manifests
+        env:
+          TAG: ${{ github.ref_name }}
+        run: scripts/render-packaging.sh "${TAG}" dist/checksums.txt dist/packaging
+
+      - name: Upload package manifests
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: packaging-${{ github.ref_name }}
+          path: dist/packaging/
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Build release notes from changelog
         env:
           TAG: ${{ github.ref_name }}

@@ -1,0 +1,39 @@
+# Homebrew formula template for strike. scripts/render-packaging.sh fills
+# the @PLACEHOLDERS@ from a release tag and its checksums.txt. Do not edit
+# the rendered copy in the tap by hand; re-render from the release instead.
+class Strike < Formula
+  desc "Agentic coding harness with a web UI and terminal client"
+  homepage "https://strike.jonathanung.ca/"
+  version "@VERSION@"
+  license "Apache-2.0"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/jonathanung/strike/releases/download/@TAG@/strike_@TAG@_darwin_arm64.tar.gz"
+      sha256 "@SHA256_DARWIN_ARM64@"
+    end
+    on_intel do
+      url "https://github.com/jonathanung/strike/releases/download/@TAG@/strike_@TAG@_darwin_amd64.tar.gz"
+      sha256 "@SHA256_DARWIN_AMD64@"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "https://github.com/jonathanung/strike/releases/download/@TAG@/strike_@TAG@_linux_arm64.tar.gz"
+      sha256 "@SHA256_LINUX_ARM64@"
+    end
+    on_intel do
+      url "https://github.com/jonathanung/strike/releases/download/@TAG@/strike_@TAG@_linux_amd64.tar.gz"
+      sha256 "@SHA256_LINUX_AMD64@"
+    end
+  end
+
+  def install
+    bin.install "strike"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/strike --version")
+  end
+end
