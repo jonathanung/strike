@@ -73,6 +73,7 @@ func seededSessionRecord(t *testing.T, sid string) []byte {
 		protocol.ChildStarted{Correlation: child, Name: "scribe", Agent: "general"},
 		protocol.ToolCallBegin{Correlation: child, CallID: "c1", Name: "grep"},
 		protocol.TurnStarted{Correlation: child},
+		protocol.ChildStarted{Correlation: protocol.Correlation{SessionID: "grand-1", ParentSessionID: "child-1", Depth: 2}, Name: "nested"},
 		protocol.ChildCompleted{Correlation: child, Status: protocol.ChildStatusCompleted, Name: "scribe"},
 		protocol.UsageReported{Correlation: c, Input: protocol.TokenCount{N: 100, Known: true}, Output: protocol.TokenCount{N: 40, Known: true}},
 		protocol.TurnCompleted{Correlation: c, StopReason: "end_turn", Files: []protocol.TurnFileChange{
@@ -212,7 +213,7 @@ func TestSessionReportRouteStoresRedactedArtifact(t *testing.T) {
 			t.Errorf("report missing %q\n%s", want, dto.Content)
 		}
 	}
-	for _, leak := range []string{reportSecret, "SUPERSECRETARG", "grep"} {
+	for _, leak := range []string{reportSecret, "SUPERSECRETARG", "grep", "grand-1"} {
 		if strings.Contains(dto.Content, leak) {
 			t.Errorf("report leaked %q\n%s", leak, dto.Content)
 		}
@@ -241,6 +242,29 @@ func TestSessionReportRouteRedactsSecretInAsk(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), reportSecret) || !strings.Contains(rec.Body.String(), "deploy with") {
 		t.Fatalf("ask not redacted: %s", rec.Body.String())
+	}
+}
+
+func TestSessionReportRouteLongTitleFitsStore(t *testing.T) {
+	arts := &fakeArtifacts{arts: map[string]host.Artifact{}}
+	srv, err := New(Options{Services: &host.Services{
+		Artifacts: arts,
+		Sessions:  reportSessions{sess: host.Session{ID: "s", Title: strings.Repeat("界", 400)}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/sessions/s/report", nil))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("report: %d %s", rec.Code, rec.Body.String())
+	}
+	var dto artifactDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &dto); err != nil {
+		t.Fatal(err)
+	}
+	if len(dto.Title) > 512 {
+		t.Fatalf("title %d bytes exceeds store cap", len(dto.Title))
 	}
 }
 

@@ -125,10 +125,11 @@ func buildSessionReportFacts(sessionID string, raw []byte) (sessionReportFacts, 
 			}
 		}
 
-		// Child lifecycle events carry the child's correlation.
+		// Child lifecycle events carry the child's correlation. Only direct
+		// children count; grandchildren belong to their own parent's report.
 		switch e := ev.(type) {
 		case protocol.ChildStarted:
-			if e.SessionID != "" && e.SessionID != sessionID {
+			if e.SessionID != "" && e.SessionID != sessionID && directChild(e.Correlation, sessionID) {
 				if _, ok := childIdx[e.SessionID]; !ok {
 					childIdx[e.SessionID] = len(f.Children)
 					f.Children = append(f.Children, reportChild{SessionID: e.SessionID, Name: e.Name, Agent: e.Agent, Status: "running"})
@@ -138,7 +139,7 @@ func buildSessionReportFacts(sessionID string, raw []byte) (sessionReportFacts, 
 		case protocol.ChildCompleted:
 			if i, ok := childIdx[e.SessionID]; ok {
 				f.Children[i].Status = string(e.Status)
-			} else if e.SessionID != "" && e.SessionID != sessionID {
+			} else if e.SessionID != "" && e.SessionID != sessionID && directChild(e.Correlation, sessionID) {
 				childIdx[e.SessionID] = len(f.Children)
 				f.Children = append(f.Children, reportChild{SessionID: e.SessionID, Name: e.Name, Status: string(e.Status)})
 			}
@@ -271,6 +272,12 @@ func addTokens(m map[string]int, key string, c protocol.TokenCount, unknown *int
 		return
 	}
 	m[key] += c.N
+}
+
+// directChild reports whether c is a child event whose parent is sessionID
+// (legacy records without a parent id are treated as direct).
+func directChild(c protocol.Correlation, sessionID string) bool {
+	return c.ParentSessionID == "" || c.ParentSessionID == sessionID
 }
 
 // envelopeSessionID reads the flattened Correlation.sessionId from an
@@ -493,7 +500,8 @@ func (s *Server) handleSessionReport(w http.ResponseWriter, r *http.Request) {
 	content := redact.String(renderSessionReport(facts, time.Now()))
 	title := "Session report"
 	if facts.Title != "" {
-		title = briefLine("Session report: "+facts.Title, 200)
+		// ≤120 runes keeps the title under the store's 512-byte cap.
+		title = briefLine("Session report: "+facts.Title, 120)
 	}
 	_, actorRoot := s.actorFromRequest(r)
 	if actorRoot == "" {
