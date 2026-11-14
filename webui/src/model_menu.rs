@@ -617,7 +617,7 @@ pub fn resolve_model_pick(
     let shown = raw.replace('\t', "/");
     if catalog.is_empty() {
         return Err(format!(
-            "No models are configured, so \"{shown}\" can't be used. Add a provider key first: run \"Providers · API key\" from this palette."
+            "The model catalog is empty (still loading, or no provider is configured), so \"{shown}\" can't be used. If no provider is set up, add a key: run \"Providers · API key\" from this palette."
         ));
     }
     Err(format!(
@@ -877,7 +877,7 @@ mod tests {
         assert_eq!(resolve_model_pick("  ", &catalog), Err("Pick a model.".into()));
         assert!(resolve_model_pick("echo", &[])
             .unwrap_err()
-            .contains("No models are configured"));
+            .contains("The model catalog is empty"));
     }
 
     #[test]
