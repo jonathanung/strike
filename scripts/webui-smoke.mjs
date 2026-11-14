@@ -2730,6 +2730,71 @@ try {
     textProbe((body) => !body.includes("No workspaces match")),
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Shared filtered list (#1437, load-bearing): seed two workspaces, filter
+  // to one, press Enter in the filter, and assert the daemon activated the
+  // intended workspace — not unfiltered row 0.
+  const wsAuth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const wsBefore = await (await fetch(`http://127.0.0.1:${port}/v1/workspaces`, { headers: wsAuth })).json();
+  const seededWs = {};
+  for (const name of ["smoke-ws-alpha", "smoke-ws-beta"]) {
+    const dir = join(home, name);
+    await mkdir(dir, { recursive: true });
+    const res = await fetch(`http://127.0.0.1:${port}/v1/workspaces`, {
+      method: "POST",
+      headers: wsAuth,
+      body: JSON.stringify({ path: dir, name }),
+    });
+    if (!res.ok) throw new Error(`seed workspace ${name}: HTTP ${res.status}`);
+    seededWs[name] = (await res.json()).id;
+  }
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await waitFor(
+    "app after reload for workspace filter activation",
+    textProbe((body) => body.includes("Menu")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector(".ws-open").click()`);
+  await waitFor(
+    "workspace picker lists both seeded workspaces",
+    textProbe((body) => body.includes("smoke-ws-alpha") && body.includes("smoke-ws-beta")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    const el = document.querySelector("[data-workspace-filter]");
+    el.focus();
+    el.value = "ws-BETA";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+  await waitFor(
+    "workspace filter narrows to the beta workspace",
+    async () => {
+      const r = await evaluate(`(() => {
+        // The Recent/All column only — Browse may list the seeded folders.
+        const col = document.querySelector(".ws-dialog .ws-cols > section");
+        const t = col ? col.innerText : "";
+        return { alpha: t.includes("smoke-ws-alpha"), beta: t.includes("smoke-ws-beta") };
+      })()`);
+      return { ok: r && !r.alpha && r.beta, body: JSON.stringify(r) };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector("[data-workspace-filter]").dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }))`);
+  await waitFor(
+    "Enter in the filter activates the filtered workspace",
+    async () => {
+      const v = await (await fetch(`http://127.0.0.1:${port}/v1/workspaces`, { headers: wsAuth })).json();
+      return { ok: v.activeId === seededWs["smoke-ws-beta"], body: JSON.stringify({ activeId: v.activeId, want: seededWs["smoke-ws-beta"] }) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  if (wsBefore.activeId && wsBefore.activeId !== seededWs["smoke-ws-beta"]) {
+    await fetch(`http://127.0.0.1:${port}/v1/workspaces/${wsBefore.activeId}/activate`, {
+      method: "POST",
+      headers: wsAuth,
+      body: "{}",
+    });
+  }
   // Schedule page (#1276): the top-bar switch (data-view="schedule",
   // registered by src/shell/contrib/scheduler.rs) opens the page and the
   // empty state shows; the daemon token is already in localStorage from
