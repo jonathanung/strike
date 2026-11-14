@@ -84,6 +84,7 @@ func (m Model) handleMouseLeftRelease(mouse tea.Mouse) (tea.Model, tea.Cmd) {
 		frame := m.renderFrame()
 		if text := extractTextSelection(frame, m.textSel); text != "" {
 			m.cellClip.stage(text)
+			return m, m.showCopyToast()
 		}
 		return m, nil
 	}

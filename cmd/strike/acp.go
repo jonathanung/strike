@@ -97,8 +97,8 @@ func runACP(opts cliOptions, stdin io.Reader, stdout, stderr io.Writer) (runErr 
 	if err != nil {
 		return err
 	}
-	if a.worktreeNotice != "" {
-		fmt.Fprintln(stderr, a.worktreeNotice)
+	if a.startupNotice() != "" {
+		fmt.Fprintln(stderr, a.startupNotice())
 	}
 	defer func() {
 		if a.mcpClose != nil {

@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/daemon/deploywatch"
+	"github.com/jonathanung/strike/internal/daemon/keepawake"
 	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/server/terminal"
@@ -114,9 +116,19 @@ type Options struct {
 	// Nil makes /v1/triggers and POST /hooks 503. The launcher inside the
 	// service is NewRootLauncher (authored for #1282).
 	Triggers *trigger.Service
+	// DeployWatches is the post-merge deploy watch registry (#1782). Nil
+	// makes /v1/deploy-watches 503.
+	DeployWatches *deploywatch.Service
 	// Assembled is true when this process ran assemble (config load, project
 	// stores, auth.json, attachments). Attach-only serve leaves it false.
 	Assembled bool
+	// KeepAwake is the host sleep-inhibition service (#1496). GET /v1/gateway
+	// reports its Status and PATCH /v1/settings keepAwake applies the dial to
+	// it live. Nil omits the field (attach-only serve).
+	KeepAwake *keepawake.Service
+	// UpdateProbe runs the release check behind GET /v1/update (#1583). Nil
+	// leaves the update-check capability off. Wire NewUpdateProbe in serve.
+	UpdateProbe UpdateProbe
 	// OpsRate is tokens/sec per client IP for ops (default 10). <=0 uses default.
 	OpsRate float64
 	// OpsBurst is the per-IP burst (default 20). <=0 uses default.
@@ -159,6 +171,14 @@ type Server struct {
 	mux    *http.ServeMux
 	http   *http.Server
 	static fs.FS
+	// gzip memoizes gzip encodings of static bundle files (#1514).
+	gzip gzipAssets
+
+	// probeMu serialises release probes; updateMu guards updateLast only, so
+	// GET /v1/settings never waits on the network (#1583).
+	probeMu    sync.Mutex
+	updateMu   sync.Mutex
+	updateLast *updateCheckResponse
 
 	authFlowOnce   sync.Once
 	authFlowsStore *authFlowStore
@@ -288,12 +308,14 @@ func (s *Server) Handler() http.Handler { return s.http.Handler }
 
 // ListenAndServe binds and serves until the server is closed.
 func (s *Server) ListenAndServe() error {
+	go s.warmStaticGzip()
 	return s.http.ListenAndServe()
 }
 
 // Serve serves on ln until closed.
 func (s *Server) Serve(ln net.Listener) error {
 	s.http.Addr = ln.Addr().String()
+	go s.warmStaticGzip()
 	return s.http.Serve(ln)
 }
 
@@ -408,6 +430,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/onboarding", s.handleOnboarding)
 	s.mux.HandleFunc("POST /v1/onboarding/acknowledge", s.handleOnboardingAcknowledge)
 	s.mux.HandleFunc("GET /v1/settings", s.handleSettings)
+	s.mux.HandleFunc("GET /v1/update", s.handleUpdateCheck)
 	s.mux.HandleFunc("GET /v1/themes", s.handleThemesList)
 	s.mux.HandleFunc("GET /v1/themes/{id}", s.handleThemeGet)
 	s.mux.HandleFunc("PATCH /v1/settings", s.handleSettings)
@@ -418,8 +441,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.handleSessionFork)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork_at", s.handleSessionForkAt)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/rewind_points", s.handleSessionRewindPoints)
+	// Daemon-generated session report artifact (#1444).
+	s.mux.HandleFunc("POST /v1/sessions/{id}/report", s.handleSessionReport)
 	s.mux.HandleFunc("PATCH /v1/sessions/{id}", s.handleSessionRename)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.handleSessionDelete)
+	// Session-scoped /loop jobs (#1588): ephemeral, die with the session.
+	s.mux.HandleFunc("GET /v1/sessions/{id}/loops", s.handleSessionLoopsList)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/loops", s.handleSessionLoopStart)
+	s.mux.HandleFunc("DELETE /v1/sessions/{id}/loops", s.handleSessionLoopsStopAll)
+	s.mux.HandleFunc("DELETE /v1/sessions/{id}/loops/{loopID}", s.handleSessionLoopStop)
 	// Session list organisation (pins, archive, folders, search). Not filesystem dirs.
 	s.mux.HandleFunc("GET /v1/session-list/search", s.handleSessionListSearch)
 	s.mux.HandleFunc("POST /v1/session-list/bulk", s.handleSessionListBulk)
@@ -568,6 +598,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /v1/triggers/{id}", s.handleTriggerUpdate)
 	s.mux.HandleFunc("DELETE /v1/triggers/{id}", s.handleTriggerDelete)
 	s.mux.HandleFunc("POST /hooks/{id}", s.handleHook)
+	s.mux.HandleFunc("GET /v1/deploy-watches", s.handleDeployWatchesList)
+	s.mux.HandleFunc("POST /v1/deploy-watches", s.handleDeployWatchCreate)
+	s.mux.HandleFunc("GET /v1/deploy-watches/{id}", s.handleDeployWatchGet)
+	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/poll", s.handleDeployWatchPoll)
+	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/cancel", s.handleDeployWatchCancel)
 	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
 	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/activate", s.handleRootActivate)
@@ -990,7 +1025,7 @@ func (s *Server) handleAttach(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(data)
+	s.writeStatic(w, r, "index.html", data)
 }
 
 func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
@@ -1015,7 +1050,7 @@ func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/manifest+json")
 	}
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	_, _ = w.Write(data)
+	s.writeStatic(w, r, path, data)
 }
 
 // handleStaticRoot serves one file from the static root (PWA service worker
@@ -1029,7 +1064,7 @@ func (s *Server) handleStaticRoot(name, contentType string) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write(data)
+		s.writeStatic(w, r, name, data)
 	}
 }
 

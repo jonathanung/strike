@@ -50,7 +50,7 @@ Usage notes:
   - Format options: "markdown" (default), "text", or "html"
   - Optional timeout in seconds (default 30, max 120)
   - This tool is read-only and does not modify any files
-  - Results may be truncated (~30k characters) if the content is very large
+  - Results may be truncated (~30k characters) if the content is very large; the truncation note then names a saved file you can page with read offset/limit
   - Prefer this tool over curl/wget in bash for ordinary page fetches`
 }
 
@@ -194,7 +194,13 @@ func (webFetchTool) Execute(ctx context.Context, args json.RawMessage, tc *Conte
 			output = htmlToMarkdown(content)
 		}
 	}
-	output = truncateRunes(output, webfetchMaxOutputRunes)
+	if utf8.RuneCountInString(output) > webfetchMaxOutputRunes {
+		full := output
+		output = truncateRunes(output, webfetchMaxOutputRunes)
+		if hint := spillOverflow(tc, "webfetch", full); hint != "" {
+			output += "\n" + hint
+		}
+	}
 
 	meta, _ := json.Marshal(map[string]any{
 		"url":    resp.Request.URL.String(),

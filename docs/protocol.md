@@ -82,7 +82,7 @@ additive fields on all of them.
 |---|---|---|
 | `harness.progress` | `HarnessProgress` | Custom function-harness intermediate progress (`name` + JSON `payload`). Subprocess ABI: [harnesses.md](harnesses.md) |
 | `verification.started` | `VerificationStarted` | Independent completion gates beginning (`scope`: `turn` \| `child`, `gateCount`) |
-| `verification.completed` | `VerificationCompleted` | Gate outcome (`Report`: claimed vs verified, checks, env) |
+| `verification.completed` | `VerificationCompleted` | Gate outcome (`Report`: claimed vs verified, checks, env). A failed `cmd` check may carry `triage` (parsed go test failures, `focusedCommand`, `originalOutput`, bounded `attempts`, `fullGateSkipped`, `exhausted`) (#1178, wire 1.23+) |
 | `turn.completed` | `TurnCompleted` | Optional `verification` report when solo/harness gates ran |
 | `child.completed` | `ChildCompleted` | Optional `verification` when child spawn configured gates |
 | `permission.decided` | `PermissionDecided` | Permission audit (effective action + matched rule layer); optional tool-chain fields `chainId` / `chainRule` / `chainSummary` (#891, wire 1.13+) |
