@@ -121,7 +121,9 @@ func TestSessionLoopStartRejects(t *testing.T) {
 	ops := make(chan protocol.Op, 1)
 	live := NewLive("s1", "/cwd", nil, ops)
 	defer live.Close()
-	srv := mustServer(t, Options{SessionDir: t.TempDir(), Live: live})
+	// Loop CRUD shares the per-IP /v1/ops limiter (burst 20); this test sends
+	// 23 mutating requests, so give it headroom rather than exempt the routes.
+	srv := mustServer(t, Options{SessionDir: t.TempDir(), Live: live, OpsBurst: 100})
 
 	for _, tc := range []struct {
 		body string
