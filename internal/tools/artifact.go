@@ -186,7 +186,9 @@ func (t *artifactWriteTool) Description() string {
 	return `Create or CAS-update a shared typed artifact (versioned multi-agent work product).
 
 Types: findings, patch, test_report, contract, plan (lightweight blob — use
-plan_write for structured multi-section plans with lifecycle).
+plan_write for structured multi-section plans with lifecycle). session_report
+is daemon-generated from the session record: readable via artifact_read, never
+writable here.
 
 Artifacts are addressable by id+version. Updates require expected_version and
 reject stale writers (conflict=true + current artifact). Access is owner
@@ -216,7 +218,7 @@ func (t *artifactWriteTool) Schema() json.RawMessage {
 			},
 			"type": {
 				"type": "string",
-				"description": "Artifact type on create: findings|patch|test_report|contract|plan"
+				"description": "Artifact type on create: findings|patch|test_report|contract|plan (session_report is daemon-generated and read-only)"
 			},
 			"id": {"type": "string", "description": "Artifact id (update)"},
 			"expected_version": {
@@ -301,6 +303,9 @@ func (t *artifactWriteTool) create(typ string, title, content *string, scope, ac
 	if typ == "" {
 		return tool.Result{}, errors.New("type is required for create")
 	}
+	if artifact.DaemonOnlyType(typ) {
+		return artifactSoftError("artifact denied", fmt.Sprintf("type %s is daemon-generated; agents may read it but not write it", typ), nil)
+	}
 	if content == nil {
 		return tool.Result{}, errors.New("content is required for create")
 	}
@@ -342,6 +347,9 @@ func (t *artifactWriteTool) update(id string, expected *int, title, content, acc
 	}
 	if title == nil && content == nil && access == nil && ttlSec == nil {
 		return tool.Result{}, errors.New("update requires title, content, access, and/or ttl_seconds")
+	}
+	if cur, ok, err := t.store.Get(id, sessionID, rootID); err == nil && ok && artifact.DaemonOnlyType(cur.Type) {
+		return artifactSoftError("artifact denied", fmt.Sprintf("type %s is daemon-generated; agents may read it but not write it", cur.Type), map[string]any{"id": id})
 	}
 	up := artifact.UpdateInput{
 		Title:   title,

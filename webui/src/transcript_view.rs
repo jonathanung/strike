@@ -805,7 +805,9 @@ fn message_view(
                     {match StatusKind::parse_known(&badge) {
                         Some(kind) => view! { <StatusMark kind=kind place=StatusSlot::Badge /> }.into_any(),
                         None => {
-                            let class = format!("sx-status sx-status-{badge}");
+                            // Badge text keeps its space ("no result"); the
+                            // class token cannot, so it is dashed (#1506).
+                            let class = format!("sx-status sx-status-{}", badge.replace(' ', "-"));
                             view! { <span class=class data-status=badge.clone()>{badge.clone()}</span> }.into_any()
                         }
                     }}
@@ -917,6 +919,9 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                 }
                 Block::Code { lang, text } => {
                     let copy = text.clone();
+                    // #1575: known fence languages get the file viewer's
+                    // `ev-*` token spans; unknown/empty stay plain text.
+                    let code = crate::editor::highlighted_code(&lang, &text);
                     // Same honest per-button feedback as the message
                     // Copy button (#1582).
                     let copy_state = RwSignal::new(None::<bool>);
@@ -933,7 +938,7 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                                     });
                                 }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
                             </div>
-                            <pre class="sx-code">{text}</pre>
+                            <pre class="sx-code">{code}</pre>
                         </div>
                     }.into_any()
                 }
