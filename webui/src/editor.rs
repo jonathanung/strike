@@ -105,6 +105,7 @@ pub fn fence_language(info: &str) -> &'static str {
     match word.as_str() {
         "" => "text",
         "golang" => "go",
+        "rust" => "rust",
         "javascript" => "js",
         "typescript" => "ts",
         "python" => "py",
