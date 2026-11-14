@@ -88,9 +88,9 @@
     padding: 6px;
   }
 
-  /* The sheet stays mounted like the desktop menu (.nav-pop);
-     data-open decides visibility so open/close never remounts a
-     slot (#1527). */
+  /* The sheet stays mounted (the desktop Menu it mirrored is gone,
+     #1590); data-open decides visibility so open/close never remounts
+     a slot (#1527). */
   body[data-phone="1"] .phone-menu[data-open="0"] {
     display: none;
   }

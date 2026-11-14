@@ -278,9 +278,14 @@ const BOOT_EXPR = `(() => {
 
 // The shell fixture requires "Connected". The chip stays "Checking" until
 // /health returns, and the shell can paint before that fetch finishes.
+// Since #1590 the header prints no version/gateway text (A6/A7): the
+// connection state ("Connected · v…" / "Unreachable") is the brand
+// mark's title, so read it there instead of the body text.
+const BRAND_TITLE_EXPR = `(document.querySelector(".brand-mark")?.getAttribute("title") || "")`;
 const CONNECTED_EXPR = `(() => {
   const text = document.body ? document.body.innerText : "";
-  return text.includes("Connected") && !text.includes("Unreachable") && !text.includes("Could not reach the daemon");
+  const link = ${BRAND_TITLE_EXPR};
+  return link.includes("Connected") && !link.includes("Unreachable") && !text.includes("Unreachable") && !text.includes("Could not reach the daemon");
 })()`;
 
 export async function runScenario({ page, baseURL, outDir, video, goldens, updateGoldens, controls, suite = "full" }) {
@@ -319,7 +324,11 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     // the race. Deadline is env-tunable like webui-smoke's waits.
     const shellWaitRaw = Number(process.env.STRIKE_SMOKE_WAIT_MS || 30000);
     const shellWaitMs = Number.isFinite(shellWaitRaw) && shellWaitRaw > 0 ? shellWaitRaw : 30000;
-    const { text, missing } = await waitForLabels(bodyText, fixture.mustInclude, {
+    // "Connected" is the brand mark's title since #1590, not body text;
+    // append it so that fixture label still has to be genuinely painted.
+    const shellText = async () =>
+      `${await bodyText()}\n${await page.evaluate(BRAND_TITLE_EXPR)}`;
+    const { text, missing } = await waitForLabels(shellText, fixture.mustInclude, {
       timeoutMs: shellWaitMs,
       intervalMs: 200,
     });
@@ -497,7 +506,7 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       }
     }
 
-    await click("[data-nav='palette']", "Commands");
+    await click("[data-nav='palette']", "Run a command");
     await waitUntil(
       `Boolean(document.querySelector('[data-command-id="mode-yolo"]'))`,
       4000,

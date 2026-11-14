@@ -565,6 +565,9 @@ try {
           acid: cs.getPropertyValue("--acid").trim(),
           ground: cs.getPropertyValue("--ground").trim(),
           title: document.title,
+          // #1590 A6/A7: the header prints no version/gateway text; the
+          // connection state ("Connected · v…") is the brand mark's title.
+          version: document.querySelector(".brand-mark")?.getAttribute("title") || "",
           status: mark ? mark.getAttribute("data-status") : "",
           chip: !!document.querySelector(".status-chip"),
         });
@@ -585,7 +588,7 @@ try {
         ok:
           text.includes("Run a command") &&
           text.includes("Activity") &&
-          text.includes("Connected") &&
+          (parsed.version || "").includes("Connected") &&
           parsed.acid === "#7c3aed" &&
           !!parsed.chip &&
           statusIds.includes(parsed.status || "") &&
@@ -601,11 +604,13 @@ try {
   const title = boot.title || "";
   const statusId = boot.status || "";
   const chip = !!boot.chip;
-  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Git", "Terminal", "Approval", "Connected"];
+  const version = boot.version || "";
+  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Git", "Terminal", "Approval"];
   const missingText = want.filter((s) => !text.includes(s));
+  if (!version.includes("Connected")) missingText.push("Connected (brand-mark title)");
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c" || !chip || !statusIds.includes(statusId) || !title.includes("Strike")) {
     throw new Error(
-      `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} text=${text.slice(0, 400)}\n${await diagnostics()}`,
+      `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} version=${version} text=${text.slice(0, 400)}\n${await diagnostics()}`,
     );
   }
   // Approvals (#1266): mode menu, Yolo confirm + Escape, and the
@@ -809,6 +814,7 @@ try {
           open: !!pop,
           pop: pop ? pop.innerText : "",
           body: document.body ? document.body.innerText : "",
+          version: document.querySelector(".brand-mark")?.getAttribute("title") || "",
           tokenField: !!pop?.querySelector('input[type="password"]'),
           visibleInputs,
         });
@@ -817,7 +823,7 @@ try {
         ok:
           !!parsed.open &&
           parsed.tokenField &&
-          (parsed.body || "").includes("Connected") &&
+          (parsed.version || "").includes("Connected") &&
           (parsed.pop || "").includes("Token for this gateway"),
         ...parsed,
       };

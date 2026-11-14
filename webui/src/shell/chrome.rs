@@ -341,6 +341,7 @@ pub fn Chrome() -> impl IntoView {
                     type="button"
                     class="nav-menu-btn nav-palette-btn"
                     data-nav="palette"
+                    aria-haspopup="dialog"
                     aria-keyshortcuts="Control+K Meta+K"
                     title="Run a command (Ctrl+K)"
                     on:click=move |_| open_palette()
