@@ -116,6 +116,9 @@ func (e *Engine) runVerification(parent context.Context, corr protocol.Correlati
 	defer cancel()
 
 	runner := &verify.Runner{WorkDir: workDir}
+	if e != nil {
+		runner.Triage = &e.verifyTriage
+	}
 	if in.Env.WorkDir == "" {
 		in.Env.WorkDir = workDir
 	}
@@ -160,6 +163,7 @@ func verifyResultToProtocol(res verify.Result) protocol.VerificationReport {
 			Output:     c.Output,
 			Error:      c.Error,
 			DurationMs: c.DurationMs,
+			Triage:     triageToProtocol(c.Triage),
 		})
 	}
 	if checks == nil {
@@ -198,6 +202,7 @@ func protocolReportToVerifyResult(rep *protocol.VerificationReport) verify.Resul
 			Output:     c.Output,
 			Error:      c.Error,
 			DurationMs: c.DurationMs,
+			Triage:     triageFromProtocol(c.Triage),
 		})
 	}
 	return verify.Result{
@@ -216,4 +221,50 @@ func protocolReportToVerifyResult(rep *protocol.VerificationReport) verify.Resul
 		Summary:    rep.Summary,
 		DurationMs: rep.DurationMs,
 	}
+}
+
+func triageToProtocol(t *verify.TriageReport) *protocol.VerificationTriage {
+	if t == nil {
+		return nil
+	}
+	out := &protocol.VerificationTriage{
+		FocusedCommand:  t.FocusedCommand,
+		OriginalOutput:  t.OriginalOutput,
+		FullGateSkipped: t.FullGateSkipped,
+		Exhausted:       t.Exhausted,
+	}
+	for _, f := range t.Failures {
+		out.Failures = append(out.Failures, protocol.VerificationFailure{
+			Package: f.Package, Dir: f.Dir, Tests: append([]string(nil), f.Tests...), Source: f.Source,
+		})
+	}
+	for _, a := range t.Attempts {
+		out.Attempts = append(out.Attempts, protocol.VerificationAttempt{
+			Command: a.Command, Passed: a.Passed, ExitCode: a.ExitCode, Output: a.Output, Error: a.Error,
+		})
+	}
+	return out
+}
+
+func triageFromProtocol(t *protocol.VerificationTriage) *verify.TriageReport {
+	if t == nil {
+		return nil
+	}
+	out := &verify.TriageReport{
+		FocusedCommand:  t.FocusedCommand,
+		OriginalOutput:  t.OriginalOutput,
+		FullGateSkipped: t.FullGateSkipped,
+		Exhausted:       t.Exhausted,
+	}
+	for _, f := range t.Failures {
+		out.Failures = append(out.Failures, verify.Failure{
+			Package: f.Package, Dir: f.Dir, Tests: append([]string(nil), f.Tests...), Source: f.Source,
+		})
+	}
+	for _, a := range t.Attempts {
+		out.Attempts = append(out.Attempts, verify.TriageAttempt{
+			Command: a.Command, Passed: a.Passed, ExitCode: a.ExitCode, Output: a.Output, Error: a.Error,
+		})
+	}
+	return out
 }

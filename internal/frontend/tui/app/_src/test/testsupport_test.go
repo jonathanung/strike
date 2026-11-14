@@ -464,6 +464,17 @@ func (s *fakeSettings) SavePresentation(vimMode, nanoMode, mdReadMode string) er
 	return s.err
 }
 
+func (s *fakeSettings) SaveGuardrailDials(host.GuardrailDials) error {
+	return s.err
+}
+
+func (s *fakeSettings) SaveKeepAwake(mode string) error {
+	if mode != "" {
+		s.defaults.KeepAwake = mode
+	}
+	return s.err
+}
+
 func (s *fakeSettings) SaveConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWorktree, autoupdate string) error {
 	s.savedDials = append(s.savedDials, savedConfigDials{
 		sandbox: sandboxMode, notify: notify, leanCode: leanCode,
