@@ -218,7 +218,7 @@ Summarized from the security note; it stays the normative source.
   exfiltration through host-side tools (MCP, `webfetch`), and anything the
   user pastes into a terminal. The cockpit text says this plainly.
 - **`yolo`** does not widen mounts, turn on networking, or change the
-  backend.
+  runtime.
 
 ## Performance budget
 
@@ -231,7 +231,7 @@ baseline.
 | Metric | Target (p50) | Kill threshold | Baseline today |
 |---|---|---|---|
 | Cold boot, `Boot` → `ready` (incl. probe) | ≤ 10 s | > 30 s | n/a |
-| Warm exec overhead, `true` through shim vs bwrap | ≤ 50 ms | > 200 ms | bwrap ~35 ms to probe (Phase 0) |
+| Warm exec overhead, `true` through shim vs bwrap | ≤ 50 ms | > 200 ms | measure (Phase 0's 35 ms was a probe script under bwrap, not exec overhead) |
 | VMM host RSS at idle, guest configured 2048 MiB | ≤ configured + 128 MiB | > 2× configured | bwrap tree ~37 MiB |
 | `go test ./...` on this repo, guest vs bwrap | ≤ 1.3× | > 2× | measure |
 | Stop → process gone | ≤ 5 s | > 45 s (Phase 0 TCG shutdown hung) | n/a |
@@ -248,7 +248,7 @@ isolation story, and P1-b onward are closed with a pointer.
 
 **Go**, scoped to Phase 1 below, behind the opt-in. Effort: **L** total
 (one M probe/config slice, two M driver/bridge slices, S/M surface slices).
-P1-a is the gate: everything after it waits on its numbers.
+P1-a is the gate: P1-c onward wait on its numbers. P1-b boots no VM (setting, probe, fail-closed) and may land in parallel; until P1-d lands, `microvm` is always reported `unavailable`.
 
 Not a go for: an in-guest engine, a credential proxy, per-child VMs,
 snapshots, macOS/WSL microVMs, host Nix store sharing, agent-driven
