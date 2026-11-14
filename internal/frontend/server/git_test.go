@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -364,5 +366,199 @@ func TestGitAttachOnlyRejectsMutations(t *testing.T) {
 	bare.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/git/status", nil))
 	if res.Code != http.StatusNotImplemented {
 		t.Fatalf("attach-only status = %d %s", res.Code, res.Body.String())
+	}
+}
+
+func TestParseStashList(t *testing.T) {
+	out := []byte("aaaa111\x1fOn main: one\x1f2026-01-02T00:00:00Z\nbbbb222\x1fWIP on main: 123 subj\x1f2026-01-01T00:00:00Z\n")
+	got := parseStashList(out)
+	if len(got) != 2 || got[0].Ref != "stash@{0}" || got[1].Index != 1 || got[1].Hash != "bbbb222" || got[0].Message != "On main: one" {
+		t.Fatalf("stashes = %+v", got)
+	}
+	if empty := parseStashList(nil); empty == nil || len(empty) != 0 {
+		t.Fatalf("empty = %#v", empty)
+	}
+}
+
+func TestStashFailureKeepsGitWords(t *testing.T) {
+	msg := stashFailure("pop", errors.New("exit status 1"), "CONFLICT (content): Merge conflict in a.txt\n", "")
+	if !strings.Contains(msg, "CONFLICT") || !strings.Contains(msg, "kept") {
+		t.Fatalf("pop failure = %q", msg)
+	}
+	if msg := stashFailure("apply", errors.New("exit status 1"), "", ""); !strings.Contains(msg, "exit status 1") || strings.Contains(msg, "kept") {
+		t.Fatalf("apply failure = %q", msg)
+	}
+}
+
+// TestGitStashRoutes drives #1471 against a real repo: zero, one and
+// several stashes (including a terminal-created one), push on a clean
+// tree, untracked opt-in, diff preview, the hash pin, a conflicting pop
+// that keeps the stash, apply, confirm-gated drop, and attach-only.
+func TestGitStashRoutes(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init", "-b", "main")
+	git("config", "user.email", "test@example.com")
+	git("config", "user.name", "Test")
+	write("a.txt", "one\n")
+	git("add", ".")
+	git("commit", "-m", "initial")
+
+	live := NewLive("s1", repo, nil, make(chan protocol.Op, 1))
+	srv, err := New(Options{SessionDir: t.TempDir(), Live: live})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(method, target, body string) (int, string) {
+		t.Helper()
+		res := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(res, httptest.NewRequest(method, target, strings.NewReader(body)))
+		return res.Code, res.Body.String()
+	}
+	list := func() []gitStashJSON {
+		t.Helper()
+		code, raw := call(http.MethodGet, "/v1/git/stash", "")
+		if code != http.StatusOK {
+			t.Fatalf("list = %d %s", code, raw)
+		}
+		var body struct {
+			Stashes []gitStashJSON `json:"stashes"`
+		}
+		if err := json.Unmarshal([]byte(raw), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Stashes
+	}
+	ref := func(s gitStashJSON) string {
+		return fmt.Sprintf(`{"index":%d,"hash":%q`, s.Index, s.Hash)
+	}
+
+	if got := list(); len(got) != 0 {
+		t.Fatalf("zero stashes = %+v", got)
+	}
+	// Clean tree: honest error, nothing stashed.
+	if code, raw := call(http.MethodPost, "/v1/git/stash", `{}`); code != http.StatusBadRequest || !strings.Contains(raw, "No local changes") {
+		t.Fatalf("clean push = %d %s", code, raw)
+	}
+	// One stash with a message (a leading "-" stays a message).
+	write("a.txt", "one\ntwo\n")
+	if code, raw := call(http.MethodPost, "/v1/git/stash", `{"message":"-p not an option"}`); code != http.StatusOK {
+		t.Fatalf("push = %d %s", code, raw)
+	}
+	if st := git("status", "--porcelain"); st != "" {
+		t.Fatalf("tree not clean after stash: %q", st)
+	}
+	got := list()
+	if len(got) != 1 || !strings.Contains(got[0].Message, "-p not an option") || got[0].Date == "" {
+		t.Fatalf("one stash = %+v", got)
+	}
+	// Untracked files stay unless opted in (Q1).
+	write("new.txt", "n\n")
+	if code, raw := call(http.MethodPost, "/v1/git/stash", `{}`); code != http.StatusBadRequest {
+		t.Fatalf("untracked-only push without opt-in = %d %s", code, raw)
+	}
+	if code, raw := call(http.MethodPost, "/v1/git/stash", `{"includeUntracked":true}`); code != http.StatusOK {
+		t.Fatalf("push -u = %d %s", code, raw)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "new.txt")); !os.IsNotExist(err) {
+		t.Fatalf("untracked file not stashed: %v", err)
+	}
+	// A terminal-created stash shows up too (default WIP message, Q3).
+	write("a.txt", "one\nterminal\n")
+	git("stash", "push")
+	got = list()
+	if len(got) != 3 || !strings.HasPrefix(got[0].Message, "WIP on main") || !strings.Contains(got[2].Message, "-p not an option") {
+		t.Fatalf("several stashes = %+v", got)
+	}
+	for _, bad := range []string{`{"message":"two\nlines"}`, `{"message":"` + strings.Repeat("x", gitStashMessageMax+1) + `"}`} {
+		write("a.txt", "dirty\n")
+		if code, raw := call(http.MethodPost, "/v1/git/stash", bad); code != http.StatusBadRequest {
+			t.Errorf("bad message = %d %s", code, raw)
+		}
+		git("checkout", "--", "a.txt")
+	}
+
+	// Diff preview of the oldest stash.
+	oldest := got[2]
+	code, raw := call(http.MethodGet, fmt.Sprintf("/v1/git/stash/diff?index=%d&hash=%s", oldest.Index, oldest.Hash), "")
+	if code != http.StatusOK || !strings.Contains(raw, "+two") {
+		t.Fatalf("stash diff = %d %s", code, raw)
+	}
+	// The hash pin refuses a shifted index.
+	if code, raw := call(http.MethodPost, "/v1/git/stash/apply", fmt.Sprintf(`{"index":0,"hash":%q}`, oldest.Hash)); code != http.StatusBadRequest || !strings.Contains(raw, "changed") {
+		t.Fatalf("shifted index = %d %s", code, raw)
+	}
+	for _, body := range []string{`{"index":-1,"hash":"abcdef1"}`, `{"index":0,"hash":"zz"}`, `{"index":0,"hash":"--all"}`} {
+		if code, raw := call(http.MethodPost, "/v1/git/stash/pop", body); code != http.StatusBadRequest {
+			t.Errorf("bad ref %s = %d %s", body, code, raw)
+		}
+	}
+
+	// Conflicting pop: 409 with git's words, and the stash is kept.
+	write("a.txt", "one\nconflict\n")
+	git("commit", "-am", "conflicting change")
+	code, raw = call(http.MethodPost, "/v1/git/stash/pop", ref(oldest)+"}")
+	if code != http.StatusConflict || !strings.Contains(raw, "kept") {
+		t.Fatalf("conflicting pop = %d %s", code, raw)
+	}
+	if got := list(); len(got) != 3 {
+		t.Fatalf("pop conflict dropped a stash: %+v", got)
+	}
+	git("reset", "--hard", "HEAD")
+
+	// Clean apply of the untracked stash keeps it listed.
+	got = list()
+	untracked := got[1]
+	if code, raw := call(http.MethodPost, "/v1/git/stash/apply", ref(untracked)+"}"); code != http.StatusOK {
+		t.Fatalf("apply = %d %s", code, raw)
+	}
+	if _, err := os.Stat(filepath.Join(repo, "new.txt")); err != nil {
+		t.Fatalf("apply did not restore new.txt: %v", err)
+	}
+	if got := list(); len(got) != 3 {
+		t.Fatalf("apply removed the stash: %+v", got)
+	}
+
+	// Drop is confirm-gated.
+	if code, raw := call(http.MethodPost, "/v1/git/stash/drop", ref(untracked)+"}"); code != http.StatusBadRequest {
+		t.Fatalf("drop without confirm = %d %s", code, raw)
+	}
+	if code, raw := call(http.MethodPost, "/v1/git/stash/drop", ref(untracked)+`,"confirm":"drop-stash"}`); code != http.StatusOK {
+		t.Fatalf("drop = %d %s", code, raw)
+	}
+	if got := list(); len(got) != 2 {
+		t.Fatalf("after drop = %+v", got)
+	}
+
+	// Attach-only daemons refuse stash mutations.
+	bare, err := New(Options{SessionDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := httptest.NewRecorder()
+	bare.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodPost, "/v1/git/stash", strings.NewReader(`{}`)))
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("attach-only stash = %d %s", res.Code, res.Body.String())
 	}
 }

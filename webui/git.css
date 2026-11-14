@@ -114,3 +114,19 @@
 .git-diff-bar { display: flex; justify-content: flex-end; }
 .git-copy-diff { min-height: 44px; padding: 4px 12px; }
 /* feature:git-copy-diff end */
+/* feature:git-stash begin */
+.git-stash {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.git-stash-untracked {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+.git-stash-row .git-actions button { min-height: 44px; }
+/* feature:git-stash end */

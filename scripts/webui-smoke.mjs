@@ -2112,6 +2112,108 @@ try {
       }
     }
   }
+  // Stash (#1471): the list always comes from the daemon; on a clean
+  // repo, seed one untracked file, stash it from the panel (with the
+  // include-untracked opt-in and a message), see the row, Apply it back,
+  // then drop it via the API and delete the seed.
+  const stashFile = "smoke-stash-1471.txt";
+  const stashMsg = "smoke-stash-1471";
+  const stashListApi = async () => {
+    const r = await fetch(`http://127.0.0.1:${port}/v1/git/stash`, { headers: auth });
+    if (!r.ok) throw new Error(`git stash list HTTP ${r.status}`);
+    return (await r.json()).stashes || [];
+  };
+  const stashBefore = await stashListApi();
+  const stashStatus = await gitStatusPaths();
+  const stashClean =
+    stashStatus.staged.length === 0 &&
+    stashStatus.unstaged.length === 0 &&
+    stashStatus.untracked.length === 0;
+  if (!stashClean) {
+    console.log("webui-smoke: repo not clean; stash create/apply check skipped");
+  } else {
+    let created = null;
+    try {
+      await writeFile(join(process.cwd(), stashFile), "stash smoke\n");
+      await waitUntil(`(() => {
+        const cmd = document.querySelector('[data-command-id="git.refresh"]');
+        if (cmd) { cmd.click(); return true; }
+        if (!document.querySelector('[data-nav="palette-dialog"]')) {
+          document.querySelector('[data-nav="palette"]')?.click();
+        }
+        return false;
+      })()`, "git.refresh via palette");
+      await evaluate(`(() => {
+        const msg = document.querySelector("[data-git-stash-message]");
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        setter.call(msg, ${JSON.stringify(stashMsg)});
+        msg.dispatchEvent(new Event("input", { bubbles: true }));
+        const box = document.querySelector("[data-git-stash-untracked]");
+        if (!box.checked) { box.checked = true; box.dispatchEvent(new Event("change", { bubbles: true })); }
+        return true;
+      })()`);
+      await waitFor(
+        "Stash changes enabled for an untracked-only tree with the opt-in",
+        async () => {
+          const v = await evaluate(`(() => {
+            const b = document.querySelector("[data-git-stash-push]");
+            if (!b) return "missing";
+            if (b.disabled) return "disabled";
+            b.click();
+            return "clicked";
+          })()`);
+          return { ok: v === "clicked", v };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await waitFor(
+        "panel stash appears in the daemon list and the panel",
+        async () => {
+          const list = await stashListApi();
+          const top = list[0];
+          if (list.length === stashBefore.length + 1 && top && top.message.includes(stashMsg)) {
+            created = top;
+          }
+          const shown = created
+            ? await evaluate(`!!document.querySelector('[data-git-stash-row="${created.hash}"]')`)
+            : false;
+          return { ok: !!created && shown === true, count: list.length };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      const stashedAway = await gitStatusPaths();
+      if (stashedAway.untracked.includes(stashFile)) {
+        throw new Error("stash smoke: seeded file still present after Stash changes");
+      }
+      await evaluate(`(() => { document.querySelector('[data-git-stash-row="${created.hash}"] [data-git-stash-apply]').click(); return true; })()`);
+      await waitFor(
+        "Apply restores the stashed file and keeps the stash",
+        async () => {
+          const s = await gitStatusPaths();
+          const list = await stashListApi();
+          return { ok: s.untracked.includes(stashFile) && list.some((x) => x.hash === created.hash) };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+    } finally {
+      try {
+        if (created) {
+          const list = await stashListApi();
+          const cur = list.find((x) => x.hash === created.hash);
+          if (cur) {
+            await fetch(`http://127.0.0.1:${port}/v1/git/stash/drop`, {
+              method: "POST",
+              headers: auth,
+              body: JSON.stringify({ index: cur.index, hash: cur.hash, confirm: "drop-stash" }),
+            });
+          }
+        }
+      } catch {
+        // best-effort cleanup only
+      }
+      await rm(join(process.cwd(), stashFile), { force: true });
+    }
+  }
   await waitUntil(`(() => {
     if ((document.body.innerText || "").includes("session.childIsolation")) return true;
     const cmd = document.querySelector('[data-command-id="panel-worktrees"]');

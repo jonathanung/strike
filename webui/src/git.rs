@@ -197,6 +197,56 @@ fn diff_kind(line: &str) -> &'static str {
     }
 }
 
+/// One `git stash list` entry from GET /v1/git/stash (#1471). The hash
+/// pins the entry for apply/pop/drop.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct GitStash {
+    index: usize,
+    #[serde(default)]
+    r#ref: String,
+    hash: String,
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    date: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct GitStashes {
+    #[serde(default)]
+    stashes: Vec<GitStash>,
+}
+
+/// "Stash changes" is enabled only when there is something git would
+/// stash: tracked changes, or untracked files when opted in (#1471 Q1).
+fn stash_enabled(rows: &[GitRow], include_untracked: bool) -> bool {
+    rows.iter()
+        .any(|row| row.section != "Untracked" || include_untracked)
+}
+
+/// Relative age for a stash row ("just now", "5m ago", "3h ago", "2d ago").
+fn relative_age(then_ms: f64, now_ms: f64) -> String {
+    if !then_ms.is_finite() || !now_ms.is_finite() {
+        return String::new();
+    }
+    let secs = ((now_ms - then_ms) / 1000.0).max(0.0) as u64;
+    match secs {
+        0..=59 => "just now".into(),
+        60..=3599 => format!("{}m ago", secs / 60),
+        3600..=86_399 => format!("{}h ago", secs / 3600),
+        _ => format!("{}d ago", secs / 86_400),
+    }
+}
+
+/// Body for apply/pop/drop: index plus the pinning hash.
+fn stash_body(stash: &GitStash, confirm: Option<&str>) -> serde_json::Value {
+    let mut body = serde_json::json!({"index": stash.index, "hash": stash.hash});
+    if let Some(c) = confirm {
+        body["confirm"] = serde_json::Value::String(c.to_string());
+    }
+    body
+}
+
 fn short_hash(hash: &str) -> String {
     hash.chars().take(7).collect()
 }
@@ -274,6 +324,15 @@ pub fn GitPanel(
     let rows = RwSignal::new(Vec::<GitRow>::new());
     let branches = RwSignal::new(Vec::<GitBranch>::new());
     let commits = RwSignal::new(Vec::<GitCommit>::new());
+    // #1471: stashes come from the daemon on every load, so terminal-
+    // created stashes appear too.
+    let stashes = RwSignal::new(Vec::<GitStash>::new());
+    let stash_msg = RwSignal::new(String::new());
+    let stash_untracked = RwSignal::new(false);
+    let stash_open = RwSignal::new(String::new());
+    let stash_diff = RwSignal::new(String::new());
+    let stash_diff_truncated = RwSignal::new(false);
+    let stash_epoch = RwSignal::new(LoadEpoch::new());
     let cursor = RwSignal::new(0usize);
     let open_diff = RwSignal::new(false);
     let diff_text = RwSignal::new(String::new());
@@ -420,6 +479,24 @@ pub fn GitPanel(
                 get_json::<GitLog>(&b, &t, "/v1/git/log?limit=30").await,
             ) {
                 commits.set(body.commits);
+            }
+            if !live() {
+                return;
+            }
+            if let Some(body) = outcome::take_ok(
+                &mut err,
+                "Stashes",
+                get_json::<GitStashes>(&b, &t, "/v1/git/stash").await,
+            ) {
+                // A preview whose stash is gone (popped/dropped here or in
+                // a terminal) closes rather than showing a dead diff.
+                let open = stash_open.get_untracked();
+                if !open.is_empty() && !body.stashes.iter().any(|s| s.hash == open) {
+                    let _ = begin(stash_epoch);
+                    stash_open.set(String::new());
+                    stash_diff.set(String::new());
+                }
+                stashes.set(body.stashes);
             }
             if live() {
                 error.set(err);
@@ -581,6 +658,77 @@ pub fn GitPanel(
         };
     let mutate = move |path: String, body: serde_json::Value, ok: String| {
         mutate_with(path, body, ok, Rc::new(|| {}));
+    };
+
+    // #1471: stash actions. Pop/apply conflicts come back as the daemon's
+    // 409 with git's own words; nothing here resolves or discards.
+    let do_stash = move || {
+        let msg = stash_msg.get_untracked().trim().to_string();
+        let mut body = serde_json::json!({"includeUntracked": stash_untracked.get_untracked()});
+        if !msg.is_empty() {
+            body["message"] = serde_json::Value::String(msg);
+        }
+        mutate_with(
+            "/v1/git/stash".into(),
+            body,
+            "Stashed changes.".into(),
+            Rc::new(move || stash_msg.set(String::new())),
+        );
+    };
+    let do_stash_apply = move |stash: GitStash, pop: bool| {
+        let (path, ok) = if pop {
+            ("/v1/git/stash/pop", format!("Popped {}.", stash.r#ref))
+        } else {
+            ("/v1/git/stash/apply", format!("Applied {}.", stash.r#ref))
+        };
+        mutate(path.into(), stash_body(&stash, None), ok);
+    };
+    let do_stash_drop = move |stash: GitStash| {
+        let label = stash.r#ref.clone();
+        let run = stash.clone();
+        let asked = crate::confirm::ask(
+            crate::confirm::ConfirmRequest {
+                title: format!("Drop {label}?"),
+                body: format!("“{}” is deleted from the stash list. This cannot be undone from the panel.", stash.message),
+                confirm_label: "Drop stash".into(),
+            },
+            Rc::new(move || {
+                mutate(
+                    "/v1/git/stash/drop".into(),
+                    stash_body(&run, Some("drop-stash")),
+                    format!("Dropped {}.", run.r#ref),
+                );
+            }),
+        );
+        if !asked {
+            error.set(crate::confirm::BUSY.into());
+        }
+    };
+    let toggle_stash_preview = move |stash: GitStash| {
+        let gen = begin(stash_epoch);
+        if stash_open.get_untracked() == stash.hash {
+            stash_open.set(String::new());
+            stash_diff.set(String::new());
+            return;
+        }
+        stash_open.set(stash.hash.clone());
+        stash_diff.set(String::new());
+        stash_diff_truncated.set(false);
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = format!("/v1/git/stash/diff?index={}&hash={}", stash.index, stash.hash);
+            let res = get_json::<GitDiff>(&b, &t, &path).await;
+            if !stash_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
+            }
+            match res {
+                Ok(body) => {
+                    stash_diff_truncated.set(body.truncated);
+                    stash_diff.set(body.diff);
+                }
+                Err(e) => error.set(http_message(&e)),
+            }
+        });
     };
 
     let do_switch = move |branch: String| {
@@ -975,6 +1123,85 @@ pub fn GitPanel(
                 <button type="button" class="secondary" data-git-stage-all=true disabled=move || paths_where(&rows.get(), false).is_empty() on:click=stage_all>"Stage all"</button>
                 <button type="button" class="secondary" data-git-unstage-all=true disabled=move || paths_where(&rows.get(), true).is_empty() on:click=unstage_all>"Unstage all"</button>
             </div>
+            <section class="git-stash" data-git-stash="true" aria-label="Stashes">
+                <h3 class="git-section">"Stashes"</h3>
+                <input
+                    class="git-field"
+                    type="text"
+                    data-git-stash-message="true"
+                    aria-label="Stash message (optional)"
+                    placeholder="Stash message (optional)"
+                    prop:value=move || stash_msg.get()
+                    on:input=move |ev| stash_msg.set(event_target_value(&ev))
+                />
+                <div class="git-actions">
+                    <label class="git-stash-untracked">
+                        <input
+                            type="checkbox"
+                            data-git-stash-untracked="true"
+                            prop:checked=move || stash_untracked.get()
+                            on:change=move |ev| stash_untracked.set(event_target_checked(&ev))
+                        />
+                        "Include untracked"
+                    </label>
+                    <button
+                        type="button"
+                        class="secondary"
+                        data-git-stash-push="true"
+                        disabled=move || !stash_enabled(&rows.get(), stash_untracked.get())
+                        on:click=move |_| do_stash()
+                    >"Stash changes"</button>
+                </div>
+                <Show when=move || stashes.get().is_empty()>
+                    <p class="hint">"No stashes."</p>
+                </Show>
+                <ul class="plain">
+                    {move || {
+                        let now = js_sys::Date::now();
+                        stashes.get().into_iter().map(|stash| {
+                            let age = relative_age(js_sys::Date::parse(&stash.date), now);
+                            let meta = format!("{} · {}", stash.r#ref, age);
+                            let message = stash.message.clone();
+                            let open_hash = stash.hash.clone();
+                            let row_hash = stash.hash.clone();
+                            let (s1, s2, s3, s4) = (stash.clone(), stash.clone(), stash.clone(), stash);
+                            view! {
+                                <li class="wt-card git-stash-row" data-git-stash-row=row_hash>
+                                    <span class="name">{message}</span>
+                                    <span class="path">{meta}</span>
+                                    <div class="git-actions">
+                                        <button
+                                            type="button"
+                                            class="secondary"
+                                            aria-pressed=move || (stash_open.get() == open_hash).to_string()
+                                            on:click=move |_| toggle_stash_preview(s1.clone())
+                                        >"Preview"</button>
+                                        <button type="button" class="secondary" data-git-stash-apply="true" on:click=move |_| do_stash_apply(s2.clone(), false)>"Apply"</button>
+                                        <button type="button" class="secondary" title="Apply, then drop the stash if it applied cleanly" on:click=move |_| do_stash_apply(s3.clone(), true)>"Pop (apply + drop)"</button>
+                                        <button type="button" class="secondary" on:click=move |_| do_stash_drop(s4.clone())>"Drop…"</button>
+                                    </div>
+                                </li>
+                            }
+                        }).collect_view()
+                    }}
+                </ul>
+                <Show when=move || !stash_diff.get().is_empty()>
+                    <pre class="git-diff" aria-label="Stash diff" data-git-stash-diff="true">{move || {
+                        stash_diff.get().lines().take(400).map(|line| {
+                            let kind = diff_kind(line);
+                            let text = line.to_string();
+                            view! { <div class=kind>{text}</div> }.into_any()
+                        }).collect_view()
+                    }}</pre>
+                    {move || {
+                        let total = stash_diff.get().lines().count();
+                        (total > 400).then(|| view! { <p class="hint">{format!("Showing the first 400 of {total} lines.")}</p> })
+                    }}
+                    <Show when=move || stash_diff_truncated.get()>
+                        <p class="hint">"Diff truncated by the daemon — showing the first 200 KB."</p>
+                    </Show>
+                </Show>
+            </section>
         </div>
     }
 }
@@ -1209,6 +1436,65 @@ pub fn WorktreePanel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn stash_row(section: &str) -> GitRow {
+        GitRow {
+            section: section.into(),
+            path: "p".into(),
+            status: String::new(),
+            added: 0,
+            deleted: 0,
+            staged: section == "Staged",
+            inline_diff: String::new(),
+        }
+    }
+
+    #[test]
+    fn stash_enabled_only_when_git_would_stash_something() {
+        assert!(!stash_enabled(&[], false));
+        assert!(!stash_enabled(&[], true));
+        assert!(stash_enabled(&[stash_row("Unstaged")], false));
+        assert!(stash_enabled(&[stash_row("Staged")], false));
+        // Untracked-only trees need the opt-in (#1471 Q1).
+        assert!(!stash_enabled(&[stash_row("Untracked")], false));
+        assert!(stash_enabled(&[stash_row("Untracked")], true));
+    }
+
+    #[test]
+    fn relative_age_buckets() {
+        let now = 1_000_000_000_000.0;
+        assert_eq!(relative_age(now - 5_000.0, now), "just now");
+        assert_eq!(relative_age(now - 5.0 * 60_000.0, now), "5m ago");
+        assert_eq!(relative_age(now - 3.0 * 3_600_000.0, now), "3h ago");
+        assert_eq!(relative_age(now - 2.0 * 86_400_000.0, now), "2d ago");
+        // Clock skew never shows a negative age; unparseable dates are blank.
+        assert_eq!(relative_age(now + 60_000.0, now), "just now");
+        assert_eq!(relative_age(f64::NAN, now), "");
+    }
+
+    #[test]
+    fn stash_body_pins_hash_and_confirms_only_drop() {
+        let stash = GitStash {
+            index: 2,
+            r#ref: "stash@{2}".into(),
+            hash: "abcdef1234567".into(),
+            message: "m".into(),
+            date: String::new(),
+        };
+        let apply = stash_body(&stash, None);
+        assert_eq!(apply["index"], 2);
+        assert_eq!(apply["hash"], "abcdef1234567");
+        assert!(apply.get("confirm").is_none());
+        assert_eq!(stash_body(&stash, Some("drop-stash"))["confirm"], "drop-stash");
+    }
+
+    #[test]
+    fn stash_list_payload_decodes_daemon_shape() {
+        let raw = r#"{"stashes":[{"index":0,"ref":"stash@{0}","hash":"h1","message":"WIP on main: x","date":"2026-01-01T00:00:00Z"}]}"#;
+        let got: GitStashes = serde_json::from_str(raw).expect("decode");
+        assert_eq!(got.stashes[0].r#ref, "stash@{0}");
+        assert_eq!(got.stashes[0].message, "WIP on main: x");
+    }
 
     fn row(section: &str, path: &str, staged: bool) -> GitRow {
         GitRow {
