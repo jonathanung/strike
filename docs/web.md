@@ -955,6 +955,26 @@ partial: omit or send empty string to leave a field unchanged.
 | Compaction | `compactionStrategy`, `compactionModel`, `compactionThreshold`, `compactionBuffer`, `keepUserTurns`, `pruneProtectTokens`, `pruneMinimumTokens`, `pruneKeepUserTurns`, `pruneProtectTools` | String dials (`trim`\|`summarize`; threshold/buffer ints as strings; `default`/`0` resets; model/tools `-` clears) |
 
 Successful `PATCH` returns the updated defaults snapshot (same shape as `GET`).
+`GET` also carries `autoupdateEffective` (the dial after
+`config.EffectiveAutoupdate`: empty/unknown → `notify`) and, once a check has
+run, `updateCheck` (the last `GET /v1/update` result). Reading settings never
+probes the network.
+
+### Update check (`GET /v1/update`)
+
+Bootstrap capability `updateCheck` is true when settings are readable and
+`strike serve` wired the probe. The route reuses the TUI startup probe
+(`internal/product/update.StartupProbe`) with its 24h cache, kept in
+`~/.strike/cache/update-check-web.json` so a web check does not consume the
+TUI's once-per-release notice. It is **check-only**: the probe runs in notify
+mode even when the dial is `auto`; installing stays a host-side action
+(`strike upgrade`).
+
+Response: `{ mode, state, current?, latest?, available, message?, error?, checkedAt?, canReplace }`.
+`state` is `off` (dial off — no network request is made), `available`,
+`current` (only after a successful check), `failed` (offline, rate limit, API
+error — never reported as up to date), or `unknown`. Missing capability returns
+501.
 The cockpit Settings dialog loads `GET`, edits sections, and saves via `PATCH`.
 Browser color scheme (auto/dark/light) is local-only (`data-appearance` +
 `localStorage`), not a host config key.

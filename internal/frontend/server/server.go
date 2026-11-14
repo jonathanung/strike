@@ -122,6 +122,9 @@ type Options struct {
 	// reports its Status and PATCH /v1/settings keepAwake applies the dial to
 	// it live. Nil omits the field (attach-only serve).
 	KeepAwake *keepawake.Service
+	// UpdateProbe runs the release check behind GET /v1/update (#1583). Nil
+	// leaves the update-check capability off. Wire NewUpdateProbe in serve.
+	UpdateProbe UpdateProbe
 	// OpsRate is tokens/sec per client IP for ops (default 10). <=0 uses default.
 	OpsRate float64
 	// OpsBurst is the per-IP burst (default 20). <=0 uses default.
@@ -166,6 +169,10 @@ type Server struct {
 	static fs.FS
 	// gzip memoizes gzip encodings of static bundle files (#1514).
 	gzip gzipAssets
+
+	// updateMu serialises release probes and guards updateLast (#1583).
+	updateMu   sync.Mutex
+	updateLast *updateCheckResponse
 
 	authFlowOnce   sync.Once
 	authFlowsStore *authFlowStore
@@ -417,6 +424,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/onboarding", s.handleOnboarding)
 	s.mux.HandleFunc("POST /v1/onboarding/acknowledge", s.handleOnboardingAcknowledge)
 	s.mux.HandleFunc("GET /v1/settings", s.handleSettings)
+	s.mux.HandleFunc("GET /v1/update", s.handleUpdateCheck)
 	s.mux.HandleFunc("GET /v1/themes", s.handleThemesList)
 	s.mux.HandleFunc("GET /v1/themes/{id}", s.handleThemeGet)
 	s.mux.HandleFunc("PATCH /v1/settings", s.handleSettings)
