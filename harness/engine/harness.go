@@ -141,10 +141,11 @@ func (e *Engine) harnessEnvironment(ctx context.Context, corr protocol.Correlati
 		return *msg.ToolResult, nil
 	}
 
+	_, system, systemBlocks := requestSystem(e.systemLayers())
 	input := fn.Input{
 		Context: ctx,
 		Request: provider.Request{
-			Model: e.model, System: joinPromptLayerTexts(e.systemLayers()),
+			Model: e.model, System: system, SystemBlocks: systemBlocks,
 			Messages:  append([]provider.Message(nil), e.messages...),
 			Tools:     func() []provider.ToolSchema { tools, _ := e.effectiveToolSchemas(); return tools }(),
 			MaxTokens: e.opts.MaxTokens, Effort: providerEffort(e.effort), Priority: e.priority,

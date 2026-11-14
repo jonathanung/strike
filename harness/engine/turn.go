@@ -961,18 +961,19 @@ func (e *Engine) streamRetryDelay(nextAttempt int) time.Duration {
 func (e *Engine) consumeStream(ctx context.Context, reqCorr protocol.Correlation) (streamOutcome, error) {
 	e.fireProviderAttempt(reqCorr)
 	layers, shed := e.systemLayersWithMeta()
-	system := joinPromptLayerTexts(layers)
+	layers, system, systemBlocks := requestSystem(layers)
 	tools, _ := e.effectiveToolSchemas()
 	e.recordStreamEffective(layers, system, tools, shed)
 	stream, err := e.admitModelStream(ctx, reqCorr, provider.Request{
-		Model:     e.model,
-		System:    system,
-		Messages:  e.messages,
-		Tools:     tools,
-		MaxTokens: e.opts.MaxTokens,
-		Effort:    providerEffort(e.effort),
-		Priority:  e.priority,
-		CacheKey:  e.opts.SessionID,
+		Model:        e.model,
+		System:       system,
+		SystemBlocks: systemBlocks,
+		Messages:     e.messages,
+		Tools:        tools,
+		MaxTokens:    e.opts.MaxTokens,
+		Effort:       providerEffort(e.effort),
+		Priority:     e.priority,
+		CacheKey:     e.opts.SessionID,
 	})
 	if err != nil {
 		return streamOutcome{}, err
