@@ -887,6 +887,7 @@ Go `EngineError`.
 | `depth` | number | yes |
 | `message` | string |  |
 | `code` | string | yes |
+| `provider` | string | yes |
 
 #### `child.started`
 
