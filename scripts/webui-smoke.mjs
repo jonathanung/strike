@@ -579,8 +579,11 @@ try {
           acid: cs.getPropertyValue("--acid").trim(),
           ground: cs.getPropertyValue("--ground").trim(),
           title: document.title,
+          // #1590 A6/A7: the header prints no version/gateway text; the
+          // connection state ("Connected · v…") is the brand mark's title.
+          version: document.querySelector(".brand-mark")?.getAttribute("title") || "",
           status: mark ? mark.getAttribute("data-status") : "",
-          chip: !!document.querySelector(".status-chip-hit"),
+          chip: !!document.querySelector(".status-chip"),
         });
       })()`,
       returnByValue: true,
@@ -597,9 +600,9 @@ try {
       const text = parsed.body || "";
       return {
         ok:
-          text.includes("Menu") &&
+          text.includes("Run a command") &&
           text.includes("Activity") &&
-          text.includes("Connected") &&
+          (parsed.version || "").includes("Connected") &&
           parsed.acid === "#7c3aed" &&
           !!parsed.chip &&
           statusIds.includes(parsed.status || "") &&
@@ -615,11 +618,13 @@ try {
   const title = boot.title || "";
   const statusId = boot.status || "";
   const chip = !!boot.chip;
-  const want = ["Menu", "Strike", "Activity", "Files", "Changes", "Git", "Terminal", "Approval", "Connected"];
+  const version = boot.version || "";
+  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Git", "Terminal", "Approval"];
   const missingText = want.filter((s) => !text.includes(s));
+  if (!version.includes("Connected")) missingText.push("Connected (brand-mark title)");
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c" || !chip || !statusIds.includes(statusId) || !title.includes("Strike")) {
     throw new Error(
-      `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} text=${text.slice(0, 400)}\n${await diagnostics()}`,
+      `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} version=${version} text=${text.slice(0, 400)}\n${await diagnostics()}`,
     );
   }
   // Approvals (#1266): mode menu, Yolo confirm + Escape, and the
@@ -912,6 +917,7 @@ try {
           open: !!pop,
           pop: pop ? pop.innerText : "",
           body: document.body ? document.body.innerText : "",
+          version: document.querySelector(".brand-mark")?.getAttribute("title") || "",
           tokenField: !!pop?.querySelector('input[type="password"]'),
           visibleInputs,
         });
@@ -920,7 +926,7 @@ try {
         ok:
           !!parsed.open &&
           parsed.tokenField &&
-          (parsed.body || "").includes("Connected") &&
+          (parsed.version || "").includes("Connected") &&
           (parsed.pop || "").includes("Token for this gateway"),
         ...parsed,
       };
@@ -1460,7 +1466,18 @@ try {
   })()`, "bad gateway command");
   await evaluate(`[...document.querySelectorAll("[data-command-id]")].find((el) => (el.textContent || "").includes("Switch to gateway: bad"))?.click()`);
   await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
-  await waitUntil(`document.body.innerText.includes("Unreachable")`, "bad gateway is unreachable");
+  // The gateway status chip is no longer rendered in the header (#1590 A6):
+  // gateway health lives in the Gateways panel, so read "Unreachable" there.
+  await waitUntil(`(() => {
+    if (document.querySelector(".gw-pop")) return true;
+    if (!document.querySelector('[data-nav="palette-dialog"]')) {
+      document.querySelector('[data-nav="palette"]')?.click();
+      return false;
+    }
+    document.querySelector('[data-command-id="gateways.open"]')?.click();
+    return false;
+  })()`, "gateways panel for bad gateway status");
+  await waitUntil(`document.body.innerText.includes("Could not reach this daemon")`, "bad gateway is unreachable");
   await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
   await runPalette("Data locations");
   await waitUntil(
@@ -1481,7 +1498,18 @@ try {
   })()`, "this gateway command");
   await evaluate(`[...document.querySelectorAll("[data-command-id]")].find((el) => (el.textContent || "").includes("Switch to gateway: This gateway"))?.click()`);
   await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
-  await waitUntil(`document.body.innerText.includes("Connected")`, "this gateway is connected");
+  // "Connected" was the header gateway chip / version text, both removed by
+  // #1590 (A6/A7): read it from the Gateways panel detail instead.
+  await waitUntil(`(() => {
+    if (document.querySelector(".gw-pop")) return true;
+    if (!document.querySelector('[data-nav="palette-dialog"]')) {
+      document.querySelector('[data-nav="palette"]')?.click();
+      return false;
+    }
+    document.querySelector('[data-command-id="gateways.open"]')?.click();
+    return false;
+  })()`, "gateways panel for reconnected status");
+  await waitUntil(`(() => { const pop = document.querySelector(".gw-pop"); return !!pop && pop.innerText.includes("loopback") && !pop.innerText.includes("Could not reach this daemon"); })()`, "this gateway is connected");
   await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
   await runPalette("Data locations");
   await waitUntil(
@@ -1624,8 +1652,8 @@ try {
   });
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
-    "cockpit reload after attachment checks (Menu, Memory)",
-    textProbe((t) => t.includes("Menu") && t.includes("Terminal")),
+    "cockpit reload after attachment checks (Run a command, Terminal)",
+    textProbe((t) => t.includes("Run a command") && t.includes("Terminal")),
     { timeout: WAIT_MS, interval: 250 },
   );
 
@@ -1673,7 +1701,7 @@ try {
       const parsed = await readCockpit();
       const body = parsed.body || "";
       return {
-        ok: body.includes("Menu") && body.includes("Terminal"),
+        ok: body.includes("Run a command") && body.includes("Terminal"),
         body: body.slice(0, 300),
       };
     },
@@ -2081,8 +2109,6 @@ try {
 
   const clicked = await send("Runtime.evaluate", {
     expression: `(() => {
-      const more = document.querySelector('[data-nav="more"]');
-      if (more && more.getAttribute("aria-expanded") !== "true") more.click();
       const btn = document.querySelector('[data-feature="notifications"]');
       if (!btn) return "missing-bell";
       btn.click();
@@ -2737,7 +2763,7 @@ try {
   });
   await waitFor(
     "cockpit re-boot for session delete",
-    textProbe((t) => t.includes("Menu")),
+    textProbe((t) => t.includes("Run a command")),
     { timeout: WAIT_MS, interval: 250 },
   );
   await waitFor(
@@ -2901,7 +2927,7 @@ try {
     await send("Page.navigate", {
       url: "http://127.0.0.1:" + port + "/?token=" + token,
     });
-    await waitFor(label, textProbe((t) => t.includes("Menu")), {
+    await waitFor(label, textProbe((t) => t.includes("Run a command")), {
       timeout: WAIT_MS,
       interval: 250,
     });
@@ -3068,7 +3094,7 @@ try {
     });
     await waitFor(
       "cockpit after task restart",
-      textProbe((body) => body.includes("Menu") && body.includes("Terminal")),
+      textProbe((body) => body.includes("Run a command") && body.includes("Terminal")),
       { timeout: WAIT_MS, interval: 250 },
     );
     await runPalette("Task runner");
@@ -3097,7 +3123,7 @@ try {
     );
     await waitFor(
       "chat view after the task runner check",
-      textProbe((body) => body.includes("Menu")),
+      textProbe((body) => body.includes("Run a command")),
       { timeout: WAIT_MS, interval: 250 },
     );
   } catch (err) {
@@ -3215,7 +3241,7 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
     "app after reload for schedule duplicate check",
-    textProbe((body) => body.includes("Menu")),
+    textProbe((body) => body.includes("Run a command")),
     { timeout: WAIT_MS, interval: 250 },
   );
   await runPalette("Schedule");
@@ -3376,7 +3402,7 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
     "apps palette entry",
-    textProbe((body) => body.includes("Menu")),
+    textProbe((body) => body.includes("Run a command")),
     { timeout: WAIT_MS, interval: 250 },
   );
   await runPalette("Apps");
