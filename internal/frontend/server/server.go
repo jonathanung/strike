@@ -429,6 +429,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sessions/{id}/rewind_points", s.handleSessionRewindPoints)
 	s.mux.HandleFunc("PATCH /v1/sessions/{id}", s.handleSessionRename)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.handleSessionDelete)
+	// Session-scoped /loop jobs (#1588): ephemeral, die with the session.
+	s.mux.HandleFunc("GET /v1/sessions/{id}/loops", s.handleSessionLoopsList)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/loops", s.handleSessionLoopStart)
+	s.mux.HandleFunc("DELETE /v1/sessions/{id}/loops", s.handleSessionLoopsStopAll)
+	s.mux.HandleFunc("DELETE /v1/sessions/{id}/loops/{loopID}", s.handleSessionLoopStop)
 	// Session list organisation (pins, archive, folders, search). Not filesystem dirs.
 	s.mux.HandleFunc("GET /v1/session-list/search", s.handleSessionListSearch)
 	s.mux.HandleFunc("POST /v1/session-list/bulk", s.handleSessionListBulk)

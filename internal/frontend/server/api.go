@@ -126,6 +126,10 @@ type capabilities struct {
 	// SideChat is true when a read-only side-chat model is wired. The ops
 	// refusal does not depend on this flag.
 	SideChat bool `json:"sideChat"`
+	// Loops is true when session-scoped /loop jobs can be listed, started,
+	// and stopped via /v1/sessions/{id}/loops (#1588). Needs a live engine;
+	// false for attach-only and --read-only.
+	Loops bool `json:"loops"`
 }
 
 type bootstrapResponse struct {
@@ -161,7 +165,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	// Timeline is host-safe and derived from SessionDir JSONL (always available).
 	// TeamControl shares the live gate: Ops are handled by the same engine path.
 	live := s.hasLive()
-	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live, Attachments: s.opts.Attachments != nil, Notifications: true, SideChat: s.opts.SideChat != nil}
+	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live, Attachments: s.opts.Attachments != nil, Notifications: true, SideChat: s.opts.SideChat != nil, Loops: live && !s.opts.ReadOnly}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
