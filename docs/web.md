@@ -126,6 +126,9 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `POST` | `/v1/sessions/{id}/report` | **yes** | Generate a `session_report` artifact from the session record (#1444) → **201** artifact. Facts only (turns, asks, tool counts, files, approvals, children, tokens, errors); tool args/output never copied; redacted. **404** unknown session; **501** without sessions or artifact store |
 | `PATCH` | `/v1/sessions/{id}` | **yes** | Rename (`{ "title" }`) |
 | `DELETE` | `/v1/sessions/{id}` | **yes** | Delete durable session (`?force=true` optional) |
+| `GET` | `/v1/sessions/{id}/loops` | **yes** | Session `/loop` jobs (see [Session loops](#session-loops)) |
+| `POST` | `/v1/sessions/{id}/loops` | **yes** | Start a loop (`{ "interval", "job" }`) |
+| `DELETE` | `/v1/sessions/{id}/loops[/{loopID}]` | **yes** | Stop one loop, or all |
 | `GET` | `/v1/roots` | **yes** | Active live roots + `activeId` (503 without LiveHub) |
 | `POST` | `/v1/roots` | **yes** | Create empty live workspace; becomes active |
 | `POST` | `/v1/roots/{id}/activate` | **yes** | Set hub active root (must already be live) |
@@ -1023,6 +1026,36 @@ budgets). **Run / pause / resume / abort** require a live session
 
 Default host run path is evaluate-only (empty tool allowlist) — same safety
 default as `/goal run` in the TUI. Wire JSON is camelCase host-safe DTOs only.
+
+### Session loops
+
+`/loop` from the TUI, served by the daemon (#1588). A loop re-injects a
+prompt into **one live session** on an interval until it is stopped or the
+session closes. Loops are ephemeral: they do not survive a daemon restart,
+a session close, or root removal. Anything that must persist or start new
+sessions is a [Schedule](#schedules). Bootstrap capability `loops` is true
+when a live engine is attached and the gateway is not `--read-only`.
+
+| Method | Path | Body / response |
+|---|---|---|
+| `GET` | `/v1/sessions/{id}/loops` | `{loops:[...], max, minIntervalMs, maxIntervalMs}` |
+| `POST` | `/v1/sessions/{id}/loops` | `{interval, job}`; `201 {loop}` |
+| `DELETE` | `/v1/sessions/{id}/loops/{loopID}` | `{ok, stopped:1}`; `404` unknown id |
+| `DELETE` | `/v1/sessions/{id}/loops` | stop all; `{ok, stopped:n}` |
+
+Grammar matches the TUI exactly (`pkg/loopspec`): `interval` is a Go
+duration (`30s`, `15m`, `2h`, `1h30m`) or bare minutes (`15`), between 1s
+and 168h. At most 16 loops per session; ids are `l1`, `l2`, … and never
+reused. Errors: `400` bad interval/job, `404` session not live
+(`code: session_not_live`) or unknown loop, `409` the 17th loop, `410`
+session already closed, `403` `--read-only`. Start and stop share the
+`POST /v1/ops` rate limit and are audited as `loop.start` / `loop.stop`.
+
+A loop object carries `id`, `interval`, `intervalMs`, `job`, `runs`,
+`createdAt`, `nextAt`, and when set `lastRunAt` and `lastError`. A firing is
+an ordinary `user.input`: while a turn is busy it waits on the same input
+queue as a queued send, and it counts as a normal turn for usage, budgets,
+and guardrails. `GET /v1/status` carries `loops`, the active count.
 
 ### Schedules
 
