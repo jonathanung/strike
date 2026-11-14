@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/product/goal"
@@ -204,22 +203,18 @@ func (a *goalsAdapter) Run(ctx context.Context, id string) (host.Goal, error) {
 
 // finishRun records a loop error on a goal that is still active. Pause and
 // abort set their own status before cancelling the check, so those returns
-// are not rewritten into a failure.
+// are not rewritten into a failure. The fail transition is atomic
+// (MarkFailedIfActive): a pause landing between a status read and the
+// write cannot be overwritten back into Failed (#1417).
 func (a *goalsAdapter) finishRun(id string, g goal.Goal, err error) (host.Goal, error) {
 	if err == nil {
 		return toHostGoal(g), nil
 	}
-	cur, ok, getErr := a.store.Get(id)
-	if getErr != nil || !ok {
+	cur, applied, ferr := a.store.MarkFailedIfActive(id, err.Error())
+	if ferr != nil {
 		return host.Goal{}, err
 	}
-	if cur.Status == goal.StatusActive {
-		cur.Status = goal.StatusFailed
-		cur.FailReason = err.Error()
-		cur.FreezeWallClock(time.Now().UTC())
-		if uerr := a.store.UpdateGoal(cur); uerr != nil {
-			return host.Goal{}, err
-		}
+	if applied {
 		return toHostGoal(cur), err
 	}
 	return toHostGoal(cur), nil

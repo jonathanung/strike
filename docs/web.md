@@ -928,7 +928,8 @@ Fixed chrome uses `safe-area-inset-*`. Phone composer uses a sticky row and 44px
 |---|---|---|
 | `GET` | `/v1/providers` | Provider rows with authed state + methods (`apiKey`/`device`/`oauth`); no secrets |
 | `GET` | `/v1/models` | Catalog models (`?provider=`). Echo returns **200** `{ "models": [{ "id": "echo", "provider": "echo", … }] }`; genuine catalog failures stay **502** |
-| `POST` | `/v1/auth/key` | Set API key (live only; attach-only 403) |
+| `POST` | `/v1/auth/key` | Set API key (live only; attach-only 403). Storing a key does not verify it — the row reports `keyState: "stored"` until probed (#1531) |
+| `POST` | `/v1/auth/probe` | Real credential probe: presents the stored key to the provider's models endpoint → `status` `valid`/`invalid`/`unreachable`/`no-key`/`unsupported`; decisive outcomes update the row's `keyState` (`verified`/`rejected`) |
 | `DELETE` | `/v1/auth/{provider}` | Logout |
 | `POST` | `/v1/auth/device` | Start device login → code + verification URL |
 | `GET`/`DELETE` | `/v1/auth/device/{id}` | Poll status / cancel |

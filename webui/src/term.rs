@@ -30,6 +30,88 @@ enum State {
     Osc,
 }
 
+/// Scrollback retained per terminal screen, in lines (#1520).
+///
+/// Was 400, which lost the first — usually causal — error of any long
+/// build or test run. 5,000 lines of plain strings is in line with real
+/// terminals (VS Code defaults to 1,000; xterm.js examples commonly use
+/// 5,000–10,000) and costs one short `String` per line; `render_html`
+/// walks the buffer once per frame, so the cost is linear in lines kept.
+pub const SCROLLBACK_LIMIT: usize = 5_000;
+
+/// Distance from the bottom, in CSS pixels, that still counts as "at the
+/// bottom" for autoscroll purposes. Exact equality is too strict: wheel
+/// and touch scrolling rarely land on the precise final pixel.
+pub const AT_BOTTOM_THRESHOLD_PX: i32 = 32;
+
+/// True when a scroll position is at (or within the threshold of) the
+/// bottom of a scrollable element.
+pub fn is_at_bottom(scroll_top: i32, scroll_height: i32, client_height: i32) -> bool {
+    scroll_height - client_height - scroll_top <= AT_BOTTOM_THRESHOLD_PX
+}
+
+/// Whether the terminal view should follow new output (#1520).
+///
+/// Starts following. A scroll event away from the bottom pins the view:
+/// `paint_target` then returns the saved reading position instead of the
+/// tail, so repaint frames cannot yank the user back down. Scrolling back
+/// within [`AT_BOTTOM_THRESHOLD_PX`] of the bottom — or an explicit
+/// `jump_to_bottom` — resumes following. The state is plain panel state:
+/// nothing in attach/replay resets it, so a re-attach mid-investigation
+/// keeps the reading position instead of silently snapping to the tail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScrollFollow {
+    following: bool,
+    saved_top: i32,
+}
+
+impl Default for ScrollFollow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ScrollFollow {
+    pub fn new() -> Self {
+        Self {
+            following: true,
+            saved_top: 0,
+        }
+    }
+
+    pub fn following(&self) -> bool {
+        self.following
+    }
+
+    /// Record a user scroll: following iff the new position is at the
+    /// bottom; otherwise remember the position as the reading position.
+    pub fn on_scroll(&mut self, scroll_top: i32, scroll_height: i32, client_height: i32) {
+        if is_at_bottom(scroll_top, scroll_height, client_height) {
+            self.following = true;
+        } else {
+            self.following = false;
+            self.saved_top = scroll_top.max(0);
+        }
+    }
+
+    /// The `scrollTop` a paint should apply, if any: the tail while
+    /// following, otherwise the saved reading position (restoring it
+    /// undoes any reset the DOM update itself caused).
+    pub fn paint_target(&self, scroll_height: i32) -> i32 {
+        if self.following {
+            scroll_height
+        } else {
+            self.saved_top
+        }
+    }
+
+    /// Jump-to-bottom control: resume following; the next paint lands on
+    /// the tail.
+    pub fn jump_to_bottom(&mut self) {
+        self.following = true;
+    }
+}
+
 pub struct Screen {
     cols: usize,
     rows: usize,
@@ -59,7 +141,7 @@ impl Screen {
             fg: 0,
             bold: false,
             scrollback: Vec::new(),
-            scroll_limit: 400,
+            scroll_limit: SCROLLBACK_LIMIT,
             state: State::Ground,
             params: Vec::new(),
             private: false,
@@ -96,6 +178,12 @@ impl Screen {
         for &b in data {
             self.byte(b);
         }
+    }
+
+    // Used by the screen tests. Release builds of the page do not call it.
+    #[allow(dead_code)]
+    pub fn scrollback_len(&self) -> usize {
+        self.scrollback.len()
     }
 
     // Used by the screen tests. Release builds of the page do not call it.
@@ -543,6 +631,73 @@ mod tests {
         assert_eq!(super::key_bytes("a", false, false, false).as_deref(), Some("a"));
         assert!(super::key_bytes("c", true, true, false).is_none());
         assert!(super::key_bytes("Shift", false, false, false).is_none());
+    }
+
+    #[test]
+    fn scrollback_keeps_far_more_than_the_old_400_lines() {
+        // Regression for #1520: a `seq 1 500`-scale burst used to evict
+        // its own first lines at the old 400-line cap.
+        let mut s = Screen::new(20, 2);
+        let mut data = String::new();
+        for i in 1..=1_000 {
+            data.push_str(&format!("line{i}\r\n"));
+        }
+        s.feed(data.as_bytes());
+        assert_eq!(s.scrollback_len(), 999);
+        let text = s.text();
+        assert!(text.contains("line1\n"), "first line kept: {text:.80}");
+        assert!(text.contains("line999"), "{text:.80}");
+    }
+
+    #[test]
+    fn scrollback_is_capped_at_the_named_limit() {
+        let mut s = Screen::new(20, 2);
+        let mut data = String::new();
+        for i in 1..=(super::SCROLLBACK_LIMIT + 100) {
+            data.push_str(&format!("line{i}\r\n"));
+        }
+        s.feed(data.as_bytes());
+        assert_eq!(s.scrollback_len(), super::SCROLLBACK_LIMIT);
+        let text = s.text();
+        assert!(!text.contains("line50\n"), "oldest lines evicted");
+        assert!(text.contains(&format!("line{}", super::SCROLLBACK_LIMIT + 99)));
+    }
+
+    #[test]
+    fn at_bottom_threshold_is_forgiving_but_not_generous() {
+        // scroll_height 1000, viewport 200: bottom scrollTop is 800.
+        assert!(super::is_at_bottom(800, 1000, 200));
+        assert!(super::is_at_bottom(800 - super::AT_BOTTOM_THRESHOLD_PX, 1000, 200));
+        assert!(!super::is_at_bottom(800 - super::AT_BOTTOM_THRESHOLD_PX - 1, 1000, 200));
+        assert!(!super::is_at_bottom(0, 1000, 200));
+        // Content shorter than the viewport is always at the bottom.
+        assert!(super::is_at_bottom(0, 100, 200));
+    }
+
+    #[test]
+    fn scroll_follow_pins_on_scroll_up_and_resumes_at_bottom_or_on_jump() {
+        let mut follow = super::ScrollFollow::new();
+        assert!(follow.following());
+        // Paint while following targets the tail.
+        assert_eq!(follow.paint_target(1000), 1000);
+        // User scrolls up to read: paint must restore the reading
+        // position, never the tail (#1520 defect 1).
+        follow.on_scroll(120, 1000, 200);
+        assert!(!follow.following());
+        assert_eq!(follow.paint_target(1400), 120);
+        // More output arrives while pinned: still the reading position.
+        follow.on_scroll(120, 1400, 200);
+        assert_eq!(follow.paint_target(1800), 120);
+        // Scrolling back near the bottom resumes following.
+        follow.on_scroll(1600 - super::AT_BOTTOM_THRESHOLD_PX, 1800, 200);
+        assert!(follow.following());
+        assert_eq!(follow.paint_target(1800), 1800);
+        // Pin again, then the jump-to-bottom control resumes following.
+        follow.on_scroll(40, 1800, 200);
+        assert!(!follow.following());
+        follow.jump_to_bottom();
+        assert!(follow.following());
+        assert_eq!(follow.paint_target(1800), 1800);
     }
 
     #[test]

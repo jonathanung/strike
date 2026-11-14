@@ -310,13 +310,22 @@ func (s *Store) RequestAbort(id string) error {
 }
 
 // CommitIteration atomically appends an iteration and updates the goal.
+//
+// The caller's goal is a snapshot taken before the iteration ran. If a
+// concurrent control (pause, abort, …) moved the stored goal out of
+// Active while the snapshot still says Active, the stored status wins:
+// a commit must never resurrect a goal a user already stopped (#1417).
+// A snapshot carrying a non-Active status of its own (the loop's guard
+// transition, or a pause it already observed on reload) still applies,
+// because the stored goal is Active in that case or already agrees.
 func (s *Store) CommitIteration(g Goal, rec IterationRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return errClosed
 	}
-	if _, ok := s.goals[g.ID]; !ok {
+	cur, ok := s.goals[g.ID]
+	if !ok {
 		return ErrNotFound
 	}
 	rec.CommittedAt = time.Now().UTC()
@@ -330,6 +339,18 @@ func (s *Store) CommitIteration(g Goal, rec IterationRecord) error {
 	}
 	if err := s.persistIntentsLocked(); err != nil {
 		return err
+	}
+	if g.Status == StatusActive && cur.Status != StatusActive {
+		// Preserve the concurrent transition's status and the fields
+		// that transition owns (stop reason, wall-clock freeze, abort
+		// flag); the iteration's own results still commit below.
+		g.Status = cur.Status
+		g.FailReason = cur.FailReason
+		g.Escalation = cur.Escalation
+		g.AbortRequested = cur.AbortRequested
+		g.ActiveStartedAt = cur.ActiveStartedAt
+		g.ActiveElapsed = cur.ActiveElapsed
+		g.GuardFloor = cur.GuardFloor
 	}
 	g.LastIteration = rec.N
 	g.UpdatedAt = rec.CommittedAt
@@ -349,6 +370,46 @@ func (s *Store) CommitIteration(g Goal, rec IterationRecord) error {
 		}),
 	})
 	return nil
+}
+
+// MarkFailedIfActive atomically transitions an active goal to failed
+// and reports whether it applied. A goal a concurrent control already
+// moved out of Active (pause, abort, a terminal guard) is returned
+// unchanged with applied=false: the check and the write happen under
+// one lock, so a stop that lands first can never be overwritten by a
+// failure recorded second (#1417).
+func (s *Store) MarkFailedIfActive(id, reason string) (Goal, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return Goal{}, false, errClosed
+	}
+	g, ok := s.goals[id]
+	if !ok {
+		return Goal{}, false, ErrNotFound
+	}
+	if g.Status != StatusActive {
+		return CloneGoal(g), false, nil
+	}
+	now := time.Now().UTC()
+	g.FreezeWallClock(now)
+	g.Status = StatusFailed
+	g.FailReason = reason
+	g.UpdatedAt = now
+	s.goals[id] = g
+	if err := s.persistLocked(); err != nil {
+		return Goal{}, false, err
+	}
+	_ = s.appendEventLocked(Event{
+		At:     now,
+		GoalID: id,
+		Type:   "goal.status",
+		Payload: mustJSON(map[string]string{
+			"status": string(StatusFailed),
+			"reason": reason,
+		}),
+	})
+	return CloneGoal(g), true, nil
 }
 
 // IntentDone reports whether an action intent was already completed.
