@@ -334,7 +334,9 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       `(() => document.querySelector("[data-ev-root]").innerText.includes("alpha beta reloaded") ? "ok" : "not reloaded")()`,
       "reload shows disk change",
     );
-    await writeFile(sample, "alpha beta\n");
+    // Restore the exact original (the 5-line sample the cursor/Tab
+    // steps below depend on), not just its first line.
+    await writeFile(sample, "alpha beta\nsecond line\nthird line\nfourth line\nfifth line\n");
     await evalValue(
       send,
       `(() => { document.querySelector("[data-ev-reload-bar]").click(); return "ok"; })()`,
