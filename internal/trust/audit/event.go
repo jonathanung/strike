@@ -2,6 +2,7 @@ package audit
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/jonathanung/strike/pkg/telemetry"
@@ -159,9 +160,16 @@ func redactPayload(family string, payload any) (json.RawMessage, error) {
 		}
 		return json.Marshal(v)
 	case FamilyScriptRun:
+		// Decode errors are fatal here (unlike the older cases): a malformed
+		// field would otherwise truncate the record silently.
 		var v ScriptRunPayload
-		b, _ := json.Marshal(payload)
-		_ = json.Unmarshal(b, &v)
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("audit: script_run payload: %w", err)
+		}
+		if err := json.Unmarshal(b, &v); err != nil {
+			return nil, fmt.Errorf("audit: script_run payload: %w", err)
+		}
 		if err := telemetry.RedactRecord(&v); err != nil {
 			return nil, err
 		}

@@ -525,3 +525,29 @@ func TestRecordScriptRunLifecycleOmitsZero(t *testing.T) {
 		}
 	}
 }
+
+// TestRecordScriptRunMalformedPayloadErrors: a payload that does not decode
+// into ScriptRunPayload is rejected rather than written truncated.
+func TestRecordScriptRunMalformedPayloadErrors(t *testing.T) {
+	dir := t.TempDir()
+	s, err := audit.Open(audit.Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	err = s.Record(audit.FamilyScriptRun, "", "", "", "", map[string]any{
+		"scheduleId": "sched-3",
+		"status":     "finished",
+		"startedAt":  1763100000, // unix int, not RFC 3339
+		"exitCode":   0,
+	})
+	if err == nil {
+		t.Fatal("Record accepted a payload with a non-RFC3339 startedAt")
+	}
+	if !strings.Contains(err.Error(), "script_run") {
+		t.Fatalf("error = %v, want script_run context", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatalf("segment written despite decode error: %v", entries)
+	}
+}
