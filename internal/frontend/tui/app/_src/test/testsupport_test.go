@@ -464,6 +464,10 @@ func (s *fakeSettings) SavePresentation(vimMode, nanoMode, mdReadMode string) er
 	return s.err
 }
 
+func (s *fakeSettings) SaveGuardrailDials(host.GuardrailDials) error {
+	return s.err
+}
+
 func (s *fakeSettings) SaveKeepAwake(mode string) error {
 	if mode != "" {
 		s.defaults.KeepAwake = mode
