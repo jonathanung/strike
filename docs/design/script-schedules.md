@@ -138,11 +138,16 @@ recommendation is therefore:
   `SpillMax` bytes (`processStreamWriter.Write` appends until full, then
   drops); that is right for a model reading a tool result and wrong for a
   nightly `make test` whose failing assertion is on the last page. The
-  runner therefore keeps its own bounded ring buffer (64 KiB) fed from
-  `ProcessObserver.Output`, and gives `RunProcess` a small `MaxOutput` with
-  `SpillMax: 0` so the head copy is not retained a second time. This is a
-  runner-side accumulator in S3, not a change to `RunProcess`; if a later
-  caller needs the same, promote it to a `ProcessSpec.TailMax` option then.
+  observer cannot help either: `Write` returns before calling `report` once
+  `max` is reached, so `ProcessObserver.Output` also sees only the head.
+  S3 therefore adds `ProcessSpec.TailMax int` to `harness/tool`: when set,
+  `processStreamWriter` keeps a ring of the last `TailMax` bytes alongside
+  the head buffer and `ProcessResult.Tail` returns it. The bash tool leaves
+  it zero and is unchanged. The runner sets `TailMax: 64 KiB`,
+  `MaxOutput: 4 KiB` (the head is still useful as the first line of the
+  preview when the output is short), `SpillMax: 0`. A unit test on
+  `processStreamWriter` with a 1 MiB write asserts `Tail` ends with the
+  last byte written.
 - **Lifecycle:** the sidecar is deleted when its run falls off the 50-run
   cap, when the schedule is deleted, and by `OpenStore`'s reconcile pass for
   runs that no longer exist (crash between the two writes).
@@ -224,8 +229,8 @@ For a due script schedule the runner (`cmd/strike/schedule_wire.go` wiring,
    and the wiring passes the daemon's `schedEff`. The schedule's `timeout`
    starts after admission (same as `RunProcess` `Timeout`).
 6. **Run.** `tool.RunProcess(ctx, ProcessSpec{Argv: ["bash","-c",cmd], Dir,
-   Env, Timeout, Combine: true, Sandbox: policy}, obs)` with the tail ring
-   buffer on `obs.Output`. The run is recorded `started` before exec (so a
+   Env, Timeout, MaxOutput: 4 KiB, TailMax: 64 KiB, Combine: true,
+   Sandbox: policy}, obs)`. The run is recorded `started` before exec (so a
    crash shows as `interrupted` on restart via the existing reconcile), then
    `finished` (exit 0) or `failed` (non-zero, timeout, sandbox denial).
    `ctx` is the daemon's run context; shutdown cancels the process.
@@ -245,8 +250,8 @@ for a session fire.
 ### The one deviation: `Ask` is pre-answered
 
 Step 3 is where a script schedule differs from an agent's bash call. An
-unattended agent's `Ask` blocks until a human answers (or is denied by the
-engine's unattended handling); a script schedule's `Ask` is answered by the
+unattended agent's `Ask` blocks until a cockpit reply or the context is
+cancelled; a script schedule's `Ask` is answered by the
 arming confirmation for that exact command string. The alternative reading
 of constraint 3 is `Ask → denied`: only a command the user's rules already
 `allow` may run, and arming grants nothing. That is stricter but makes the
@@ -284,8 +289,11 @@ What changes in the daemon's posture, and what answers it:
   host-mode machine is reading the `--token-file` the daemon minted or was
   given (`cmd/strike/serve.go`, `loadOrMintTokenFile`) with the `read` tool
   or `cat`; that is the same exposure every cockpit write has today, not one
-  this feature adds. S4 should add a default `deny read` / `deny bash` for
-  that file's path, as the engine already does for other sensitive paths.
+  this feature adds. S4 should add a managed `deny read` / `deny bash` rule
+  for the configured token file path at serve start; the path is
+  user-chosen, so the basename list in `permission.ClassifyPath` (a
+  correlator classification, not a deny) cannot cover it, and `Defaults()`
+  has no path denies today.
   The residual path specific to this feature is social engineering of the
   person at the cockpit (below). Agent *proposals* are out of scope for v1 and gated on #1445's
   proposal pattern; when they arrive they create entries with zero
@@ -449,7 +457,7 @@ Each is small enough for one PR. Headers follow the repo's
 |---|---|---|---|---|---|
 | S1 | `internal/schedule`: `source: script` model, validation, run fields, sidecar store | 1 | — | S3 | C |
 | S2 | `internal/trust/audit`: `script_run` family + payload + `redactPayload` case + docs row | 1 | — | — | C |
-| S3 | Script fire path: `Hooks.Script` seam, in-flight set + detach in `service.go`, permission/hook/sandbox/admission, `RunProcess` + tail buffer, retention-bounded sink wiring, no session | 2 | S1, S2 | S1 | C |
+| S3 | Script fire path: `Hooks.Script` seam, in-flight set + detach in `service.go`, permission/hook/sandbox/admission, `ProcessSpec.TailMax` in `harness/tool`, retention-bounded sink wiring, no session | 2 | S1, S2 | S1 | C |
 | S4 | `/v1/schedules` script fields, `confirm` gate, lifecycle audit records, run output route, token-file deny, `docs/web.md` | 2 | S1, S2 | — | C |
 | S5 | Daemon notifications for script runs (generic title/body) | 3 | S3 | — | B |
 | S6 | Schedule page: explicit Script type, run history exit code + output, evidence | 3 | S4 | — | B (webui; bundle rebuild by orchestrator) |
