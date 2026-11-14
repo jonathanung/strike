@@ -43,6 +43,7 @@ select,
 .bubble,
 .notice,
 .row,
+.nav-pop,
 .providers-card,
 kbd {
   border-radius: var(--radius-sm) !important;
@@ -68,6 +69,7 @@ button.send {
 .palette,
 .composer,
 .menu,
+.nav-pop,
 .providers-card,
 .daemon section,
 .gw-pop,
