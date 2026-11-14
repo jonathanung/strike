@@ -1,5 +1,5 @@
-# Homebrew formula template for strike. scripts/render-packaging.sh fills
-# the @PLACEHOLDERS@ from a release tag and its checksums.txt. Do not edit
+# Homebrew formula template for strike. scripts/render-packaging.sh fills the
+# placeholders from a release tag and its checksums.txt. Do not edit
 # the rendered copy in the tap by hand; re-render from the release instead.
 class Strike < Formula
   desc "Agentic coding harness with a web UI and terminal client"

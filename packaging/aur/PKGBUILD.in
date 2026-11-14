@@ -1,6 +1,6 @@
 # Maintainer: Jonathan Ung
-# AUR PKGBUILD template for strike-bin. scripts/render-packaging.sh fills
-# the @PLACEHOLDERS@ from a release tag and its checksums.txt.
+# AUR PKGBUILD template for strike-bin. scripts/render-packaging.sh fills the
+# placeholders from a release tag and its checksums.txt.
 pkgname=strike-bin
 _tag=@TAG@
 pkgver=@PKGVER@
