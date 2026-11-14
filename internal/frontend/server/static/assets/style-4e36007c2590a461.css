@@ -1202,6 +1202,23 @@ select.mode, .daemon select {
   justify-content: center;
 }
 .gq-qr svg { width: 220px; height: 220px; display: block; }
+/* Unreachable (loopback) pairing: the QR area is replaced by the fix. */
+.gq-blocked {
+  border: 2px solid var(--warning);
+  padding: var(--space-3);
+  margin: var(--space-3) 0;
+}
+.gq-blocked-title { font-weight: 650; margin-top: 0; }
+.gq-cmd {
+  display: block;
+  font-family: var(--mono, monospace);
+  font-size: var(--type-sm);
+  word-break: break-all;
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  padding: var(--space-2);
+  margin: var(--space-2) 0;
+}
 .gq-video {
   width: 100%;
   max-height: 180px;
@@ -2525,12 +2542,6 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .approvals-diff .add { color: var(--diff-add); }
 .approvals-diff .del { color: var(--diff-del); }
-/* feature:approval-diff-expand begin */
-.approvals-diff-expanded {
-  max-height: 320px;
-  overflow: auto;
-}
-/* feature:approval-diff-expand end */
 .approvals-count { color: var(--warning); margin: var(--space-2) 0 0; }
 .approvals-fact {
   margin: var(--space-2) 0 0;
