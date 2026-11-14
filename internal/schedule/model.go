@@ -7,13 +7,17 @@ package schedule
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/jonathanung/strike/harness/secretref"
 	"github.com/jonathanung/strike/internal/rootstart"
 )
 
@@ -33,6 +37,10 @@ const (
 	SourcePrompt   = "prompt"
 	SourceGoal     = "goal"
 	SourceWorkflow = "workflow"
+	// SourceScript runs a shell command with no agent session. It is an
+	// explicit opt-in: Replace never converts to or from it, and the fire
+	// path refuses an entry that was not armed (see docs/design/script-schedules.md).
+	SourceScript = "script"
 
 	StatusStarted     = "started"
 	StatusFinished    = "finished"
@@ -42,13 +50,28 @@ const (
 	StatusError       = "error"
 	StatusInterrupted = "interrupted"
 	StatusQueued      = "queued"
+	// StatusFailed is a script run that exited non-zero or timed out.
+	StatusFailed = "failed"
+	// StatusDenied is a script run the permission layer or a hook refused.
+	StatusDenied = "denied"
+
+	// Decision values record what the permission layer said about a script run.
+	DecisionAllow     = "allow"
+	DecisionArmed     = "armed"
+	DecisionDeny      = "deny"
+	DecisionHookBlock = "hook_block"
 
 	maxSchedules = 100
 	maxRuns      = 50
 	maxName      = 80
 	maxPrompt    = 16 << 10
+	maxCommand   = 16 << 10
 	minEvery     = time.Minute
 	maxEvery     = 366 * 24 * time.Hour
+
+	defaultScriptTimeout = "30m"
+	minScriptTimeout     = 10 * time.Second
+	maxScriptTimeout     = 6 * time.Hour
 )
 
 var (
@@ -78,15 +101,26 @@ type Schedule struct {
 	PermissionMode string    `json:"permissionMode,omitempty"`
 	Overlap        string    `json:"overlap"`
 	Missed         string    `json:"missed"`
-	NextFire       time.Time `json:"nextFire,omitempty"`
-	LastFire       time.Time `json:"lastFire,omitempty"`
-	LastStatus     string    `json:"lastStatus,omitempty"`
-	LastSessionID  string    `json:"lastSessionId,omitempty"`
-	LastError      string    `json:"lastError,omitempty"`
-	Fingerprint    string    `json:"fingerprint,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
-	Runs           []Run     `json:"runs,omitempty"`
+	// Script-only payload. Command is stored verbatim (scrubbing happens on
+	// read-side projections); Timeout is a Go duration string; SecretRefs
+	// are canonical secret://env/NAME refs resolved only at exec. ArmedAt is
+	// set by the cockpit's confirm step and CommandHash pins the command it
+	// confirmed; a script schedule with a zero ArmedAt or a stale hash never fires.
+	Command       string    `json:"command,omitempty"`
+	Dir           string    `json:"dir,omitempty"`
+	Timeout       string    `json:"timeout,omitempty"`
+	SecretRefs    []string  `json:"secretRefs,omitempty"`
+	ArmedAt       time.Time `json:"armedAt,omitempty"`
+	CommandHash   string    `json:"commandHash,omitempty"`
+	NextFire      time.Time `json:"nextFire,omitempty"`
+	LastFire      time.Time `json:"lastFire,omitempty"`
+	LastStatus    string    `json:"lastStatus,omitempty"`
+	LastSessionID string    `json:"lastSessionId,omitempty"`
+	LastError     string    `json:"lastError,omitempty"`
+	Fingerprint   string    `json:"fingerprint,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+	Runs          []Run     `json:"runs,omitempty"`
 }
 
 // Run is one fire, quiet check, skip, or miss.
@@ -99,6 +133,16 @@ type Run struct {
 	SessionID      string    `json:"sessionId,omitempty"`
 	PermissionMode string    `json:"permissionMode,omitempty"`
 	Error          string    `json:"error,omitempty"`
+	// Script-run fields. FiredAt stays the tick time; StartedAt/EndedAt are
+	// the process wall clock. ExitCode is nil when no process started.
+	// OutputPreview is the scrubbed last 4 KiB; OutputRef names the sidecar
+	// (see Store.WriteRunOutput). Decision is one of the Decision* values.
+	StartedAt     time.Time `json:"startedAt,omitempty"`
+	EndedAt       time.Time `json:"endedAt,omitempty"`
+	ExitCode      *int      `json:"exitCode,omitempty"`
+	OutputPreview string    `json:"outputPreview,omitempty"`
+	OutputRef     string    `json:"outputRef,omitempty"`
+	Decision      string    `json:"decision,omitempty"`
 }
 
 // Spec is a create or replace body. Enabled nil means enabled.
@@ -118,6 +162,19 @@ type Spec struct {
 	Overlap        string
 	Missed         string
 	Enabled        *bool
+	// Script-only. CommandHash is derived from Command by prepare, never
+	// supplied. ArmedAt is set by the caller that confirmed the command.
+	Command    string
+	Dir        string
+	Timeout    string
+	SecretRefs []string
+	ArmedAt    time.Time
+}
+
+// HashCommand is the sha256 hex pinned in Schedule.CommandHash at arming time.
+func HashCommand(command string) string {
+	sum := sha256.Sum256([]byte(command))
+	return hex.EncodeToString(sum[:])
 }
 
 // GoalRef is the slice of a goal the clock needs to phrase a prompt.
@@ -154,9 +211,9 @@ func prepare(spec Spec, now time.Time, id string) (Schedule, error) {
 	}
 	source := strings.ToLower(strings.TrimSpace(spec.Source))
 	switch source {
-	case SourcePrompt, SourceGoal, SourceWorkflow:
+	case SourcePrompt, SourceGoal, SourceWorkflow, SourceScript:
 	default:
-		return Schedule{}, invalid("source must be prompt, goal, or workflow")
+		return Schedule{}, invalid("source must be prompt, goal, workflow, or script")
 	}
 	prompt := strings.TrimSpace(spec.Prompt)
 	if utf8.RuneCountInString(prompt) > maxPrompt {
@@ -164,6 +221,7 @@ func prepare(spec Spec, now time.Time, id string) (Schedule, error) {
 	}
 	goalID := strings.TrimSpace(spec.GoalID)
 	workflow := strings.TrimSpace(spec.Workflow)
+	var script scriptFields
 	switch source {
 	case SourcePrompt:
 		if prompt == "" {
@@ -177,13 +235,30 @@ func prepare(spec Spec, now time.Time, id string) (Schedule, error) {
 		if workflow == "" {
 			return Schedule{}, invalid("workflow is required")
 		}
+	case SourceScript:
+		if prompt != "" || goalID != "" || workflow != "" {
+			return Schedule{}, invalid("script schedules take a command only; prompt, goalId, and workflow must be empty")
+		}
+		var err error
+		if script, err = prepareScript(spec); err != nil {
+			return Schedule{}, err
+		}
+	}
+	if source != SourceScript && (strings.TrimSpace(spec.Command) != "" || strings.TrimSpace(spec.Dir) != "" ||
+		strings.TrimSpace(spec.Timeout) != "" || len(spec.SecretRefs) > 0) {
+		return Schedule{}, invalid("command, dir, timeout, and secretRefs apply to script schedules only")
 	}
 	overlap := strings.ToLower(strings.TrimSpace(spec.Overlap))
 	if overlap == "" {
 		overlap = OverlapSkip
 	}
 	switch overlap {
-	case OverlapSkip, OverlapQueue, OverlapAllow:
+	case OverlapSkip:
+	case OverlapQueue, OverlapAllow:
+		if source == SourceScript {
+			// Two instances of one script never run concurrently.
+			return Schedule{}, invalid("overlap must be skip for script schedules")
+		}
 	default:
 		return Schedule{}, invalid("overlap must be skip, queue, or allow")
 	}
@@ -239,6 +314,12 @@ func prepare(spec Spec, now time.Time, id string) (Schedule, error) {
 		PermissionMode: mode,
 		Overlap:        overlap,
 		Missed:         missed,
+		Command:        script.command,
+		Dir:            script.dir,
+		Timeout:        script.timeout,
+		SecretRefs:     script.secretRefs,
+		ArmedAt:        script.armedAt,
+		CommandHash:    script.commandHash,
 	}
 	next, err := initialNext(sch, now)
 	if err != nil {
@@ -246,6 +327,76 @@ func prepare(spec Spec, now time.Time, id string) (Schedule, error) {
 	}
 	sch.NextFire = next
 	return sch, nil
+}
+
+// scriptFields is the validated script payload; zero for other sources.
+type scriptFields struct {
+	command     string
+	dir         string
+	timeout     string
+	secretRefs  []string
+	armedAt     time.Time
+	commandHash string
+}
+
+func prepareScript(spec Spec) (scriptFields, error) {
+	out := scriptFields{command: strings.TrimSpace(spec.Command)}
+	if out.command == "" {
+		return scriptFields{}, invalid("command is required")
+	}
+	if len(out.command) > maxCommand {
+		return scriptFields{}, invalid("command is too long")
+	}
+	out.commandHash = HashCommand(out.command)
+	out.timeout = strings.TrimSpace(spec.Timeout)
+	if out.timeout == "" {
+		out.timeout = defaultScriptTimeout
+	}
+	if _, err := parseScriptTimeout(out.timeout); err != nil {
+		return scriptFields{}, invalid("%s", err.Error())
+	}
+	out.dir = strings.TrimSpace(spec.Dir)
+	if out.dir != "" {
+		if !filepath.IsAbs(out.dir) {
+			return scriptFields{}, invalid("dir must be an absolute path")
+		}
+		info, err := os.Stat(out.dir)
+		if err != nil {
+			return scriptFields{}, invalid("dir: %s", err.Error())
+		}
+		if !info.IsDir() {
+			return scriptFields{}, invalid("dir is not a directory")
+		}
+	}
+	for _, raw := range spec.SecretRefs {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		ref, ok := secretref.ParseRef(raw)
+		if !ok {
+			return scriptFields{}, invalid("secretRefs: %q is not a secret://env/NAME ref", raw)
+		}
+		out.secretRefs = append(out.secretRefs, ref.String())
+	}
+	if !spec.ArmedAt.IsZero() {
+		out.armedAt = spec.ArmedAt.UTC()
+	}
+	return out, nil
+}
+
+// parseScriptTimeout bounds a script run: at least 10s, at most 6h.
+func parseScriptTimeout(raw string) (time.Duration, error) {
+	d, err := time.ParseDuration(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, fmt.Errorf("timeout: %w", err)
+	}
+	if d < minScriptTimeout {
+		return 0, fmt.Errorf("timeout: minimum is 10s")
+	}
+	if d > maxScriptTimeout {
+		return 0, fmt.Errorf("timeout: maximum is 6h")
+	}
+	return d, nil
 }
 
 func parseEvery(raw string) (time.Duration, error) {
@@ -372,6 +523,15 @@ func cloneSchedule(s Schedule) Schedule {
 	out := s
 	if s.Runs != nil {
 		out.Runs = append([]Run(nil), s.Runs...)
+		for i := range out.Runs {
+			if s.Runs[i].ExitCode != nil {
+				code := *s.Runs[i].ExitCode
+				out.Runs[i].ExitCode = &code
+			}
+		}
+	}
+	if s.SecretRefs != nil {
+		out.SecretRefs = append([]string(nil), s.SecretRefs...)
 	}
 	return out
 }

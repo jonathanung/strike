@@ -14,6 +14,8 @@ Go 1.26 agentic coding TUI. Engine emits protocol events; TUI consumes them. Ses
 
 CI (`.github/workflows/ci.yml`) always runs gofmt, TUI generate, web-check (when web present), build, vet, and `go test -race ./...`. Local race on every PR is redundant for tier A/B.
 
+WebUI (`webui/`): `make web-check` stays the local gate. Never commit `internal/frontend/server/static/**` in a PR; CI's `webui-smoke` builds the bundle from your sources and `webui-bundle-guard` fails PRs that touch it. `webui-bundle.yml` rebuilds main's committed bundle after merge (see `docs/webui-daemon.md`).
+
 ```sh
 make test          # go test ./...
 make vet           # go vet ./...
@@ -74,6 +76,7 @@ service/theme token).
 | `internal/product/auth` | 0600 ~/.strike/auth.json store; flow helpers re-exported from `harness/providers/auth` |
 | `internal/product/config` | global/project JSON + agents/skills markdown |
 | `internal/trust/audit` | Durable retention-bounded security audit sink (`~/.strike/audit/`) |
+| `internal/trust/workspacetrust` | Per-workspace trust store (`~/.strike/workspace-trust.json`); untrusted repos load no project config (#1352, `strike trust`) |
 | `internal/persist/session` | JSONL event log append/replay + concurrent Manager |
 | `internal/persist/history` | project-scoped prompt history |
 | `internal/persist/memory` | project-scoped durable key/value memory |

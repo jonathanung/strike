@@ -677,3 +677,153 @@ func TestStreamSendsCacheControlOnWire(t *testing.T) {
 		t.Fatalf("usage = %+v, want cache read=8 creation=2 still reported", usage)
 	}
 }
+
+// wireSystem is the decoded system array as the Messages API receives it.
+type wireSystem []struct {
+	Type         string `json:"type"`
+	Text         string `json:"text"`
+	CacheControl *struct {
+		Type string `json:"type"`
+	} `json:"cache_control"`
+}
+
+// streamSystemWire posts req through an httptest server and returns the
+// decoded system array from the request body.
+func streamSystemWire(t *testing.T, req provider.Request) wireSystem {
+	t.Helper()
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"stop_reason":"end_turn","content":[{"type":"text","text":"ok"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+	p := &Provider{Client: baseClientForTest(), baseURL: srv.URL}
+	stream, err := p.Stream(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for ev := range stream {
+		if ev.Type == provider.EventError {
+			t.Fatalf("stream error: %v", ev.Err)
+		}
+	}
+	var wire struct {
+		System wireSystem `json:"system"`
+	}
+	if err := json.Unmarshal(body, &wire); err != nil {
+		t.Fatalf("decode body: %v (%s)", err, body)
+	}
+	return wire.System
+}
+
+// TestStreamSplitsStableAndDynamicSystemBlocks pins #1200: the breakpoint sits
+// on the last stable block, and dynamic churn rides after it uncached, so the
+// stable block bytes are identical across dynamic-only changes.
+func TestStreamSplitsStableAndDynamicSystemBlocks(t *testing.T) {
+	const stable = "shared\n\npersona\n"
+	reqFor := func(dynamic string) provider.Request {
+		return provider.Request{
+			Model:  "claude-opus-5",
+			System: stable + "\n" + dynamic,
+			SystemBlocks: []provider.SystemBlock{
+				{Text: stable},
+				{Text: dynamic, Dynamic: true},
+			},
+			Tools: []provider.ToolSchema{
+				{Name: "bash", Description: "sh", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			},
+			Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+		}
+	}
+	first := streamSystemWire(t, reqFor("Today's date: Mon Jan 1 2026\n\nledger: v1\n"))
+	second := streamSystemWire(t, reqFor("Today's date: Tue Jan 2 2026\n\nledger: v2\n"))
+	for name, sys := range map[string]wireSystem{"first": first, "second": second} {
+		if len(sys) != 2 {
+			t.Fatalf("%s: system blocks = %d, want 2: %+v", name, len(sys), sys)
+		}
+		if sys[0].Type != "text" || sys[0].CacheControl == nil || sys[0].CacheControl.Type != "ephemeral" {
+			t.Errorf("%s: stable block = %+v, want ephemeral breakpoint", name, sys[0])
+		}
+		if sys[1].CacheControl != nil {
+			t.Errorf("%s: dynamic block carries cache_control: %+v", name, sys[1])
+		}
+	}
+	if first[0].Text != stable || second[0].Text != stable {
+		t.Errorf("stable block bytes changed: %q vs %q", first[0].Text, second[0].Text)
+	}
+	if first[1].Text == second[1].Text {
+		t.Error("dynamic block should differ between requests")
+	}
+}
+
+func TestSystemBlocksBreakpointPlacement(t *testing.T) {
+	tests := []struct {
+		name      string
+		req       provider.Request
+		wantTexts []string
+		wantCache []bool
+	}{
+		{
+			name:      "system string only",
+			req:       provider.Request{System: "sys"},
+			wantTexts: []string{"sys"},
+			wantCache: []bool{true},
+		},
+		{
+			name: "stable only",
+			req: provider.Request{System: "a\n", SystemBlocks: []provider.SystemBlock{
+				{Text: "a\n"},
+			}},
+			wantTexts: []string{"a\n"},
+			wantCache: []bool{true},
+		},
+		{
+			name: "empty dynamic dropped",
+			req: provider.Request{System: "a\n", SystemBlocks: []provider.SystemBlock{
+				{Text: "a\n"}, {Text: "  ", Dynamic: true},
+			}},
+			wantTexts: []string{"a\n"},
+			wantCache: []bool{true},
+		},
+		{
+			name: "dynamic only gets no system breakpoint",
+			req: provider.Request{System: "d\n", SystemBlocks: []provider.SystemBlock{
+				{Text: "d\n", Dynamic: true},
+			}},
+			wantTexts: []string{"d\n"},
+			wantCache: []bool{false},
+		},
+		{
+			name: "breakpoint on last stable of several",
+			req: provider.Request{System: "x", SystemBlocks: []provider.SystemBlock{
+				{Text: "a"}, {Text: "b"}, {Text: "d", Dynamic: true},
+			}},
+			wantTexts: []string{"a", "b", "d"},
+			wantCache: []bool{false, true, false},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.req.Model = "claude-opus-5"
+			tt.req.Messages = []provider.Message{{Role: provider.RoleUser, Text: "hi"}}
+			out, err := toAPIRequest(tt.req)
+			if err != nil {
+				t.Fatalf("toAPIRequest: %v", err)
+			}
+			if len(out.System) != len(tt.wantTexts) {
+				t.Fatalf("system = %+v, want %d blocks", out.System, len(tt.wantTexts))
+			}
+			for i, b := range out.System {
+				if b.Text != tt.wantTexts[i] {
+					t.Errorf("system[%d].Text = %q, want %q", i, b.Text, tt.wantTexts[i])
+				}
+				if got := b.CacheControl != nil; got != tt.wantCache[i] {
+					t.Errorf("system[%d] cached = %v, want %v", i, got, tt.wantCache[i])
+				}
+			}
+			// Message breakpoint is unaffected by the system split.
+			wantEphemeral(t, blockCacheControl(t, out.Messages[0].Content[0]), "user text")
+		})
+	}
+}

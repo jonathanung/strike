@@ -25,6 +25,7 @@ const modulePath = "github.com/jonathanung/strike"
 //     standard library only.
 //   - pkg/protocol imports the standard library only.
 //   - pkg/redact imports the standard library only.
+//   - pkg/loopspec imports the standard library only.
 //   - pkg/timeline may import only the standard library, pkg/protocol, and
 //     pkg/redact.
 //   - pkg/diag may import only the standard library, pkg/protocol, and
@@ -169,6 +170,12 @@ func boundaryViolation(pkgDir, imp string) string {
 	case pkgDir == "pkg/protocol" || strings.HasPrefix(pkgDir, "pkg/protocol/"):
 		if strings.Contains(imp, ".") {
 			return "pkg/protocol is a stdlib-only public wire package"
+		}
+		return ""
+
+	case pkgDir == "pkg/loopspec":
+		if strings.Contains(imp, ".") {
+			return "pkg/loopspec is a stdlib-only package (the TUI imports it)"
 		}
 		return ""
 
