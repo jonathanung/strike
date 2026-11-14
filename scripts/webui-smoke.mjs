@@ -690,6 +690,9 @@ try {
     { timeout: STEP_MS, interval: 250 },
   );
   if (peRes.status === 501) {
+    // The section renders only after the presets request settles with a
+    // non-501, so it must never appear here; give the fetch time to land.
+    await new Promise((r) => setTimeout(r, 1000));
     const shown = await apprEval(`!!document.querySelector('[data-permissions-explain]')`);
     if (shown === true) throw new Error("presets section must hide when permissions capability is unavailable");
   } else {
@@ -711,6 +714,8 @@ try {
       async () => {
         const hit = await apprEval(`!!document.querySelector('[data-preset-diff]')`);
         if (hit === true) return { ok: true };
+        const notice = await apprEval(`[...document.querySelectorAll('[data-permissions-explain] .notice')].map((n) => n.innerText).join(" | ")`);
+        if (notice) throw new Error(`preset diff error: ${notice}`);
         await apprEval(`document.querySelector('[data-preset-diff-run]')?.click()`);
         return { ok: false };
       },

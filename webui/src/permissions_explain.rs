@@ -260,7 +260,9 @@ fn preset_label(p: &PresetInfo) -> String {
 #[component]
 pub fn PermissionsExplain(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoView {
     let presets = RwSignal::new(Vec::<PresetInfo>::new());
-    let unavailable = RwSignal::new(false);
+    // Rendered only once the presets request settles with anything but a
+    // 501, so hosts without the Permissions service never flash the section.
+    let ready = RwSignal::new(false);
     let presets_error = RwSignal::new(String::new());
     let left = RwSignal::new(String::new());
     let right = RwSignal::new(String::new());
@@ -284,16 +286,18 @@ pub fn PermissionsExplain(base: RwSignal<String>, token: RwSignal<String>) -> im
                         let _ = presets.try_set(doc.presets);
                         let _ = left.try_set(l);
                         let _ = right.try_set(r);
+                        let _ = ready.try_set(true);
                     }
                     Err(e) => {
                         let _ = presets_error.try_set(format!("Presets: {e}"));
+                        let _ = ready.try_set(true);
                     }
                 },
-                Err(e) if is_capability_unavailable(&e) => {
-                    let _ = unavailable.try_set(true);
-                }
+                // Capability unavailable: stay hidden.
+                Err(e) if is_capability_unavailable(&e) => {}
                 Err(e) => {
                     let _ = presets_error.try_set(format!("Presets: {}", error_text(&e)));
+                    let _ = ready.try_set(true);
                 }
             }
         });
@@ -303,7 +307,11 @@ pub fn PermissionsExplain(base: RwSignal<String>, token: RwSignal<String>) -> im
         let gen = begin(diff_epoch);
         diff.set(None);
         diff_error.set(String::new());
-        let Some(path) = diff_path(&left.get_untracked(), &right.get_untracked()) else {
+        let (l, r) = (left.get_untracked(), right.get_untracked());
+        let Some(path) = diff_path(&l, &r) else {
+            if l.trim().is_empty() || r.trim().is_empty() {
+                diff_error.set("Pick a preset on both sides to compare.".into());
+            }
             return;
         };
         let (b, t) = (base.get_untracked(), token.get_untracked());
@@ -364,7 +372,7 @@ pub fn PermissionsExplain(base: RwSignal<String>, token: RwSignal<String>) -> im
     };
 
     view! {
-        <Show when=move || !unavailable.get()>
+        <Show when=move || ready.get()>
             <section class="perm-explain" data-permissions-explain="true">
                 <h3>"Presets"</h3>
                 <p class="hint">"Shipped rulesets. Read-only here: listing, comparing and dry-running a preset never applies it."</p>
