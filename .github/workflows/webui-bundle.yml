@@ -108,7 +108,8 @@ jobs:
           cd "$RUNNER_TEMP"
           curl -fsSLO "$base/$tgz"
           curl -fsSLO "$base/$tgz.sha256"
-          sha256sum -c "$tgz.sha256"
+          # The .sha256 asset is a bare hash (no filename column).
+          echo "$(tr -d '[:space:]' < "$tgz.sha256")  $tgz" | sha256sum -c -
           mkdir -p "$HOME/.local/bin"
           tar -xzf "$tgz" -C "$HOME/.local/bin" trunk
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
