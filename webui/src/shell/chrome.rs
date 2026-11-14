@@ -182,6 +182,12 @@ pub fn Chrome() -> impl IntoView {
         }
         run_ready(id, args);
     };
+    // Open on one command's prompt (#1512: the composer Model chip opens
+    // Switch model directly instead of the palette root).
+    host::set_show_palette_at(Rc::new(move |id: &str| {
+        open_palette();
+        activate(id.to_string());
+    }));
 
     Effect::new(move |_| {
         let _ = query.get();

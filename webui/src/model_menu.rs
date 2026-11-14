@@ -592,6 +592,61 @@ pub fn parse_freeform(raw: &str, fallback_provider: &str) -> (String, String) {
     (fallback_provider.trim().to_string(), raw.to_string())
 }
 
+/// Resolve what was submitted from the Switch model prompt to a catalog
+/// row (#1512). `raw` is either a picked choice id (`provider` + tab +
+/// model) or whatever the user typed when nothing matched. Only catalog
+/// rows are accepted: typed text used to go straight to `select.model`,
+/// so a provider with no key "worked" until the next turn failed.
+pub fn resolve_model_pick(
+    raw: &str,
+    catalog: &[(String, String)],
+) -> Result<(String, String), String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("Pick a model.".into());
+    }
+    let found = |provider: &str, id: &str| {
+        catalog
+            .iter()
+            .find(|(p, m)| p.eq_ignore_ascii_case(provider) && m.eq_ignore_ascii_case(id))
+            .cloned()
+    };
+    if let Some((provider, id)) = raw.split_once('\t') {
+        if let Some(row) = found(provider.trim(), id.trim()) {
+            return Ok(row);
+        }
+    } else {
+        if let Some((provider, id)) = raw.split_once('/') {
+            if let Some(row) = found(provider.trim(), id.trim()) {
+                return Ok(row);
+            }
+        }
+        let by_id: Vec<&(String, String)> = catalog
+            .iter()
+            .filter(|(_, m)| m.eq_ignore_ascii_case(raw))
+            .collect();
+        match by_id.as_slice() {
+            [row] => return Ok((*row).clone()),
+            [first, ..] => {
+                return Err(format!(
+                    "\"{raw}\" is offered by more than one provider. Type provider/model, for example {}/{}.",
+                    first.0, first.1
+                ))
+            }
+            [] => {}
+        }
+    }
+    let shown = raw.replace('\t', "/");
+    if catalog.is_empty() {
+        return Err(format!(
+            "The model catalog is empty (still loading, or no provider is configured), so \"{shown}\" can't be used. If no provider is set up, add a key: run \"Providers · API key\" from this palette."
+        ));
+    }
+    Err(format!(
+        "\"{shown}\" is not in the model catalog. Pick a listed model, or add its provider first: run \"Providers · API key\" from this palette."
+    ))
+}
+
 fn event_relevant(message: &str) -> bool {
     let m = message.to_ascii_lowercase();
     m.contains("model")
@@ -820,6 +875,32 @@ fn days_from_civil(mut y: i64, m: i64, d: i64) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_model_pick_accepts_only_catalog_rows() {
+        let catalog = vec![
+            ("echo".to_string(), "echo".to_string()),
+            ("anthropic".to_string(), "claude-x".to_string()),
+            ("openai".to_string(), "shared".to_string()),
+            ("other".to_string(), "shared".to_string()),
+        ];
+        let ok = |p: &str, m: &str| Ok((p.to_string(), m.to_string()));
+        assert_eq!(resolve_model_pick("echo\techo", &catalog), ok("echo", "echo"));
+        assert_eq!(resolve_model_pick(" Claude-X ", &catalog), ok("anthropic", "claude-x"));
+        assert_eq!(resolve_model_pick("openai/shared", &catalog), ok("openai", "shared"));
+        assert!(resolve_model_pick("shared", &catalog)
+            .unwrap_err()
+            .contains("more than one provider"));
+        let miss = resolve_model_pick("anthropic", &catalog).unwrap_err();
+        assert!(miss.contains("\"anthropic\" is not in the model catalog"), "{miss}");
+        assert!(miss.contains("Providers · API key"), "{miss}");
+        assert!(resolve_model_pick("nope/missing", &catalog).is_err());
+        assert!(resolve_model_pick("echo\tmissing", &catalog).is_err());
+        assert_eq!(resolve_model_pick("  ", &catalog), Err("Pick a model.".into()));
+        assert!(resolve_model_pick("echo", &[])
+            .unwrap_err()
+            .contains("The model catalog is empty"));
+    }
 
     #[test]
     fn chip_label_names_the_model() {

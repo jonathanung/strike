@@ -33,16 +33,27 @@ pub fn set_model_picker(pick: Rc<dyn Fn(&str, &str)>) {
     PICK_MODEL.with(|slot| *slot.borrow_mut() = Some(pick));
 }
 
+/// Check a submitted model against the catalog the page installed with
+/// [`set_model_choices`] (#1512). The palette passes the typed text when
+/// no choice matches; that must block with a reason, not reach the daemon.
+fn catalog_pick(encoded: &str) -> Result<(String, String), String> {
+    let catalog: Vec<(String, String)> = model_choices()
+        .into_iter()
+        .filter_map(|choice| {
+            let (provider, id) = choice.id.split_once('\t')?;
+            Some((provider.to_string(), id.to_string()))
+        })
+        .collect();
+    crate::model_menu::resolve_model_pick(encoded, &catalog)
+}
+
 /// `encoded` is `provider` + tab + model id, the choice id the palette stores.
 pub fn pick_model(encoded: &str) -> Result<(), String> {
-    let (provider, id) = encoded.split_once('\t').unwrap_or(("", encoded));
-    if id.is_empty() {
-        return Err("Pick a model.".into());
-    }
+    let (provider, id) = catalog_pick(encoded)?;
     let pick = PICK_MODEL
         .with(|slot| slot.borrow().clone())
         .ok_or_else(|| "Model picker is not ready.".to_string())?;
-    pick(provider, id);
+    pick(&provider, &id);
     Ok(())
 }
 
@@ -106,14 +117,11 @@ pub fn set_default_model_picker(pick: Rc<dyn Fn(&str, &str)>) {
 
 /// `encoded` is `provider` + tab + model id, same as [`pick_model`].
 pub fn set_default_model(encoded: &str) -> Result<(), String> {
-    let (provider, id) = encoded.split_once('\t').unwrap_or(("", encoded));
-    if id.is_empty() {
-        return Err("Pick a model.".into());
-    }
+    let (provider, id) = catalog_pick(encoded)?;
     let pick = SET_DEFAULT_MODEL
         .with(|slot| slot.borrow().clone())
         .ok_or_else(|| "Model picker is not ready.".to_string())?;
-    pick(provider, id);
+    pick(&provider, &id);
     Ok(())
 }
 
@@ -375,6 +383,25 @@ pub fn show_palette() {
             open();
         }
     });
+}
+
+thread_local! {
+    static OPEN_PALETTE_AT: RefCell<Option<Rc<dyn Fn(&str)>>> = const { RefCell::new(None) };
+}
+
+pub fn set_show_palette_at(open: Rc<dyn Fn(&str)>) {
+    OPEN_PALETTE_AT.with(|slot| *slot.borrow_mut() = Some(open));
+}
+
+/// Open the palette on one command — straight to its argument prompt when
+/// it takes one (the composer's Model chip opens Switch model, #1512).
+/// Falls back to the plain palette before Chrome mounts.
+pub fn show_palette_at(id: &str) {
+    let open = OPEN_PALETTE_AT.with(|slot| slot.borrow().clone());
+    match open {
+        Some(open) => open(id),
+        None => show_palette(),
+    }
 }
 
 pub fn open_help() {

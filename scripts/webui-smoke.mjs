@@ -1272,14 +1272,34 @@ try {
     const chip = document.querySelector("[data-model-status]");
     const text = chip ? chip.textContent : "";
     const hint = document.body.innerText.includes("Enter uses");
-    return JSON.stringify({ text, hint, menu: !!document.querySelector("[data-model-menu]") });
+    const blocked = document.body.innerText.includes('"nope/missing" is not in the model catalog');
+    return JSON.stringify({ text, hint, blocked, menu: !!document.querySelector("[data-model-menu]") });
   })()`);
   const freeformParsed = JSON.parse(freeform || "{}");
   if (String(freeformParsed.text || "").includes("nope/missing") || freeformParsed.hint) {
     throw new Error(`freeform model enter was accepted: ${freeform}`);
   }
+  // #1512: a typed model that is not in the catalog must block with a
+  // specific reason and a path to Providers, not close silently.
+  if (!freeformParsed.blocked) {
+    throw new Error(`freeform model enter did not explain the rejection: ${freeform}`);
+  }
 
   // Close the model menu (and any error note) before the navbar pass.
+  // #1512: the rejected freeform pick keeps Switch model's prompt open,
+  // so the first Escape steps back to the palette root and the second
+  // closes the palette. Escape until the dialog is gone.
+  for (let i = 0; i < 3; i++) {
+    const open = await evalValue(`Boolean(document.querySelector("[data-nav='palette-dialog']"))`);
+    if (!open) break;
+    await send("Runtime.evaluate", {
+      expression: `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
+    });
+    await delay(250);
+  }
+  if (await evalValue(`Boolean(document.querySelector("[data-nav='palette-dialog']"))`)) {
+    throw new Error("Escape did not close the palette after the rejected model pick");
+  }
   await send("Runtime.evaluate", {
     expression: `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
   });

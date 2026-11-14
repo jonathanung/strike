@@ -5510,6 +5510,28 @@ fn App() -> impl IntoView {
                                     ac_force.set(String::new());
                                     plus_open.update(|v| *v = !*v);
                                 }>"+"</button>
+                                // #1512: the model chip is a labelled control,
+                                // first after "+" so a 390px phone shows it
+                                // without sideways-scrolling the chip strip.
+                                // It opens Switch model, which only accepts
+                                // catalog rows.
+                                <button type="button" class="composer-glance model-glance" data-model-status="true" title="Change the session model (Alt+M opens the palette)" aria-label=move || {
+                                    let model = model_name.get();
+                                    let name = if model.is_empty() { provider_name.get() } else { model };
+                                    if name.is_empty() { "Model: none. Change model".to_string() } else { format!("Model: {name}. Change model") }
+                                } on:click=move |_| {
+                                    mode_menu.set(false);
+                                    model_menu.set(false);
+                                    autonomy_menu.set(false);
+                                    plus_open.set(false);
+                                    ac_open.set(false);
+                                    ac_force.set(String::new());
+                                    shell::show_palette_at("switch-model");
+                                }>{move || {
+                                    let model = model_name.get();
+                                    let name = if model.is_empty() { provider_name.get() } else { model };
+                                    if name.is_empty() { "Model · none".into() } else { format!("Model · {name}") }
+                                }}</button>
                                 <span class=move || {
                                     if approvals::is_dangerous(&perm_mode.get()) {
                                         "composer-glance approvals-mode-chip danger"
@@ -5535,11 +5557,6 @@ fn App() -> impl IntoView {
                                 <Show when=move || fast_on.get()>
                                     <span class="composer-glance" data-fast-status="true" title="Fast (priority service tier) is on for this session, as confirmed by the daemon. The current provider may not support priority tier.">"Fast · on"</span>
                                 </Show>
-                                <span class="composer-glance" data-model-status="true">{move || {
-                                    let model = model_name.get();
-                                    let name = if model.is_empty() { provider_name.get() } else { model };
-                                    if name.is_empty() { "Model · none".into() } else { format!("Model · {name}") }
-                                }}</span>
                                 </div>
                                 <div class="steer-actions">
                                     <Show when=move || session_busy_now.get()>
