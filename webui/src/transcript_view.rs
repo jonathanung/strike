@@ -632,7 +632,7 @@ pub fn TranscriptPane(
                         </button>
                     </div>
                 </Show>
-                <Show when=move || hidden_rows() > 0>
+                <Show when=move || hidden_rows() != 0>
                     <button type="button" class="sx-quiet sx-earlier" on:click=move |_| show_earlier()>
                         {move || {
                             let n = hidden_rows();
