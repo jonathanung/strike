@@ -35,4 +35,9 @@ const (
 	ErrorCodeQueueFull = "queue_full"
 	// ErrorCodeBudgetExhausted is a session cost/token envelope hard stop (#577).
 	ErrorCodeBudgetExhausted = "budget_exhausted"
+	// ErrorCodeProviderAuth is a provider rejecting the saved credential
+	// mid-session (vendor 401, or 403 with an explicit authentication error
+	// type). EngineError.Provider names the provider; never credential
+	// material. Classified conservatively at the source (#1546).
+	ErrorCodeProviderAuth = "provider_auth"
 )

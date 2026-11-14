@@ -188,6 +188,23 @@ func (e *StatusError) RetryAfterDelay() (time.Duration, bool) {
 	return e.RetryAfter, true
 }
 
+// AuthFailure reports that the provider rejected the saved credential
+// (#1546). Conservative: HTTP 401 always; 403 only when the API error type
+// says authentication — a 403 for quota, plan, or model permissions is not a
+// credential failure and keeps its generic classification.
+func (e *StatusError) AuthFailure() (string, bool) {
+	if e == nil {
+		return "", false
+	}
+	switch {
+	case e.Status == http.StatusUnauthorized:
+		return e.Provider, true
+	case e.Status == http.StatusForbidden && strings.EqualFold(e.Type, "authentication_error"):
+		return e.Provider, true
+	}
+	return "", false
+}
+
 func statusError(provider string, status int, data []byte, hdr http.Header) error {
 	retryAfter := parseRetryAfterHeader(hdr)
 	var apiErr apiError
