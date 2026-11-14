@@ -10,6 +10,7 @@ use serde_json::Value;
 use wasm_bindgen::JsCast;
 
 use crate::api::{auth_header, get_json};
+use load_guard::{commit_labeled, commit_usage, LoadEpoch};
 
 #[derive(Clone, Deserialize, Default)]
 struct UsageReport {
@@ -602,30 +603,58 @@ pub fn UsagePage(
     let loaded = RwSignal::new(false);
     let refresh = RwSignal::new(0u32);
     let session_sort = RwSignal::new("server".to_string());
+    let usage_epoch = RwSignal::new(LoadEpoch::new());
 
     Effect::new(move |_| {
         refresh.get();
         let (b, t) = (base.get(), token.get());
+        let ticket = crate::load_epoch::begin(usage_epoch);
         spawn_local(async move {
-            match get_json::<Value>(&b, &t, "/v1/usage").await {
+            // Fetch as a raw Value so the JSON export (#1481) keeps the
+            // report exactly as fetched, then decode for rendering.
+            let result = match get_json::<Value>(&b, &t, "/v1/usage").await {
                 Ok(body) => match serde_json::from_value::<UsageReport>(body.clone()) {
-                    Ok(rep) => {
-                        if rep.budget_set {
-                            budget.set(format!("{}", rep.daily_usd));
-                        }
+                    Ok(rep) => Ok((rep.budget_set, format!("{}", rep.daily_usd), rep, body)),
+                    Err(e) => Err(e.to_string()),
+                },
+                Err(e) => Err(e),
+            };
+            match result {
+                Ok((set, daily, rep, body)) => {
+                    let mut budget_v = budget.get_untracked();
+                    let mut error_v = error.get_untracked();
+                    let mut loaded_v = loaded.get_untracked();
+                    if commit_usage(
+                        &usage_epoch.get_untracked(),
+                        ticket,
+                        &mut budget_v,
+                        &mut error_v,
+                        &mut loaded_v,
+                        Ok((set, daily)),
+                    ) {
+                        budget.set(budget_v);
+                        error.set(error_v);
+                        loaded.set(loaded_v);
                         fetched.set(body);
                         report.set(rep);
-                        error.set(String::new());
-                        loaded.set(true);
                     }
-                    Err(e) => {
-                        error.set(e.to_string());
-                        loaded.set(true);
-                    }
-                },
+                }
                 Err(e) => {
-                    error.set(e);
-                    loaded.set(true);
+                    let mut budget_v = budget.get_untracked();
+                    let mut error_v = error.get_untracked();
+                    let mut loaded_v = loaded.get_untracked();
+                    if commit_usage(
+                        &usage_epoch.get_untracked(),
+                        ticket,
+                        &mut budget_v,
+                        &mut error_v,
+                        &mut loaded_v,
+                        Err(e),
+                    ) {
+                        budget.set(budget_v);
+                        error.set(error_v);
+                        loaded.set(loaded_v);
+                    }
                 }
             }
         });
@@ -864,6 +893,16 @@ pub fn UsagePage(
     }
 }
 
+fn audit_label(list: &AuditList) -> String {
+    if !list.configured {
+        "Not configured".into()
+    } else if list.verified {
+        "Chain intact".into()
+    } else {
+        "Chain broken".into()
+    }
+}
+
 fn short_id(id: &str) -> String {
     let n = id.chars().count();
     if n <= 10 {
@@ -883,20 +922,51 @@ pub fn AuditPage(
     let filter = RwSignal::new("all".to_string());
     let loaded = RwSignal::new(false);
     let refresh = RwSignal::new(0u32);
+    let audit_epoch = RwSignal::new(LoadEpoch::new());
 
     Effect::new(move |_| {
         refresh.get();
         let (b, t) = (base.get(), token.get());
+        let ticket = crate::load_epoch::begin(audit_epoch);
         spawn_local(async move {
-            match get_json::<AuditList>(&b, &t, "/v1/audit").await {
+            let result = match get_json::<AuditList>(&b, &t, "/v1/audit").await {
+                Ok(body) => Ok(body),
+                Err(e) => Err(e),
+            };
+            match result {
                 Ok(body) => {
-                    list.set(body);
-                    error.set(String::new());
-                    loaded.set(true);
+                    let verdict = audit_label(&body);
+                    let mut label = audit_label(&list.get_untracked());
+                    let mut error_v = error.get_untracked();
+                    let mut loaded_v = loaded.get_untracked();
+                    if commit_labeled(
+                        &audit_epoch.get_untracked(),
+                        ticket,
+                        &mut label,
+                        &mut error_v,
+                        &mut loaded_v,
+                        Ok(verdict),
+                    ) {
+                        list.set(body);
+                        error.set(error_v);
+                        loaded.set(loaded_v);
+                    }
                 }
                 Err(e) => {
-                    error.set(e);
-                    loaded.set(true);
+                    let mut label = audit_label(&list.get_untracked());
+                    let mut error_v = error.get_untracked();
+                    let mut loaded_v = loaded.get_untracked();
+                    if commit_labeled(
+                        &audit_epoch.get_untracked(),
+                        ticket,
+                        &mut label,
+                        &mut error_v,
+                        &mut loaded_v,
+                        Err(e),
+                    ) {
+                        error.set(error_v);
+                        loaded.set(loaded_v);
+                    }
                 }
             }
         });
