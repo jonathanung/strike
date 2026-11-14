@@ -68,6 +68,11 @@ func TestUsageAndAuditRoutes(t *testing.T) {
 	if usage.Sessions[0].CacheRead != 1_000_000 || usage.Sessions[0].CostUSD != 3+6+1 {
 		t.Fatalf("cost = %+v, want input 3 output 6 cache 1", usage.Sessions[0])
 	}
+	// One day of priced history is below the projection threshold
+	// (#1388): absent with a reason, never a zero estimate.
+	if usage.Projection != nil || !strings.Contains(usage.ProjectionNote, "priced history") {
+		t.Fatalf("projection = %+v note = %q, want absent with a history note", usage.Projection, usage.ProjectionNote)
+	}
 	// By model (#1470) rides the same payload, aggregated per event.
 	if len(usage.Models) != 1 || usage.Models[0].Provider != "openai" || usage.Models[0].Model != "priced" || usage.Models[0].CostUSD != 3+6+1 || usage.Models[0].Sessions != 1 {
 		t.Fatalf("models = %+v, want one openai/priced row at $10", usage.Models)

@@ -1816,6 +1816,14 @@ try {
   // Usage export (#1481): the client-side Export controls render beside
   // the report even before any usage is seeded.
   await openView("Usage", ["Input tokens", "Daily budget (USD)", "Export JSON", "Export CSV (by day)"]);
+  // Usage projection (#1388): the smoke daemon has no multi-day priced
+  // history, so no estimate may render — only the absent note, if any.
+  const projectionLevel = await evaluate(
+    `(document.querySelector("[data-usage-projection]") || {}).dataset?.usageProjection || ""`,
+  );
+  if (projectionLevel !== "" && projectionLevel !== "absent") {
+    throw new Error(`usage projection rendered without priced history: ${projectionLevel}`);
+  }
   // Audit window (#1440): seed a chain longer than the 100-row window
   // before opening Audit, so the first render is already capped.
   const auditSeed = 105;
