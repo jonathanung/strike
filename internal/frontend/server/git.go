@@ -77,6 +77,37 @@ type gitCommitJSON struct {
 	Date    string `json:"date"`
 }
 
+// Branch-changes states (#1450). Anything but "ok" is an honest empty
+// state the panel names instead of showing a misleading list.
+const (
+	branchStateOK          = "ok"
+	branchStateOnBase      = "on-base"
+	branchStateNoMergeBase = "no-merge-base"
+	branchStateDetached    = "detached"
+	branchStateNoCommits   = "no-commits"
+	branchStateChooseBase  = "choose-base"
+)
+
+type gitBranchFileJSON struct {
+	Path    string `json:"path"`
+	Added   int    `json:"added"`
+	Deleted int    `json:"deleted"`
+	Binary  bool   `json:"binary"`
+}
+
+// gitBranchChangesJSON is what the current branch contains versus its
+// base: commits base..HEAD and the three-dot (merge-base...HEAD) files.
+type gitBranchChangesJSON struct {
+	State        string              `json:"state"`
+	Branch       string              `json:"branch"`
+	Base         string              `json:"base"`
+	BaseDetected bool                `json:"baseDetected"`
+	MergeBase    string              `json:"mergeBase"`
+	Commits      []gitCommitJSON     `json:"commits"`
+	CommitsTotal int                 `json:"commitsTotal"`
+	Files        []gitBranchFileJSON `json:"files"`
+}
+
 // gitShowFileJSON is one changed path in an inspected commit (#1484).
 // Binary files report Binary with zero counts.
 type gitShowFileJSON struct {
@@ -192,17 +223,10 @@ func (s *Server) handleGitLog(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit := gitLogDefault
-	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 {
-			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "limit must be a positive integer"})
-			return
-		}
-		if n > gitLogMax {
-			n = gitLogMax
-		}
-		limit = n
+	limit, err := parseGitLogLimit(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), gitReadTimeout)
 	defer cancel()
@@ -212,6 +236,79 @@ func (s *Server) handleGitLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"commits": commits})
+}
+
+func (s *Server) handleGitBranchChanges(w http.ResponseWriter, r *http.Request) {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
+	cwd, ok := s.gitCWD(w, r)
+	if !ok {
+		return
+	}
+	base, err := optionalBaseName(r.URL.Query().Get("base"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	limit, err := parseGitLogLimit(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), gitReadTimeout)
+	defer cancel()
+	body, err := gitBranchChanges(ctx, cwd, base, limit)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, body)
+}
+
+// parseGitLogLimit reads ?limit= for commit lists: default gitLogDefault,
+// clamped to gitLogMax, 400 on a non-positive or non-numeric value.
+func parseGitLogLimit(r *http.Request) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if raw == "" {
+		return gitLogDefault, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, errors.New("limit must be a positive integer")
+	}
+	return min(n, gitLogMax), nil
+}
+
+func (s *Server) handleGitBranchDiff(w http.ResponseWriter, r *http.Request) {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
+	cwd, ok := s.gitCWD(w, r)
+	if !ok {
+		return
+	}
+	base, err := optionalBaseName(r.URL.Query().Get("base"))
+	if err == nil && base == "" {
+		err = errors.New("base is required")
+	}
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	rel, err := safeRepoPath(r.URL.Query().Get("path"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), gitReadTimeout)
+	defer cancel()
+	diff, truncated, err := gitBranchDiff(ctx, cwd, base, rel)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"path": rel, "base": base, "diff": diff, "truncated": truncated,
+	})
 }
 
 func (s *Server) handleGitShow(w http.ResponseWriter, r *http.Request) {
@@ -897,13 +994,20 @@ func gitBranches(ctx context.Context, cwd string) (string, []gitBranchJSON, erro
 }
 
 func gitLog(ctx context.Context, cwd string, limit int) ([]gitCommitJSON, error) {
-	out, stderr, err := gitRun(ctx, cwd, "log", "-n", strconv.Itoa(limit), "--format=%H%x1f%an%x1f%aI%x1f%s")
+	out, stderr, err := gitRun(ctx, cwd, "log", "-n", strconv.Itoa(limit), "--format="+gitLogFormat)
 	if err != nil {
 		if strings.Contains(stderr, "does not have any commits") {
 			return []gitCommitJSON{}, nil
 		}
 		return nil, errors.New(gitErr("log", err, stderr))
 	}
+	return parseLogLines(out), nil
+}
+
+const gitLogFormat = "%H%x1f%an%x1f%aI%x1f%s"
+
+// parseLogLines reads gitLogFormat records, one per line.
+func parseLogLines(out []byte) []gitCommitJSON {
 	commits := []gitCommitJSON{}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if strings.TrimSpace(line) == "" {
@@ -917,7 +1021,175 @@ func gitLog(ctx context.Context, cwd string, limit int) ([]gitCommitJSON, error)
 			Hash: parts[0], Author: parts[1], Date: parts[2], Subject: parts[3],
 		})
 	}
-	return commits, nil
+	return commits
+}
+
+// defaultBaseBranch picks the repo's default branch: local main, else
+// master, else the remote's HEAD (origin/HEAD). "" means no reliable
+// default; the panel then asks the user to choose (#1450 Q2).
+func defaultBaseBranch(ctx context.Context, cwd string) string {
+	for _, cand := range []string{"main", "master"} {
+		if resolveCommit(ctx, cwd, "refs/heads/"+cand) != "" {
+			return cand
+		}
+	}
+	out, _, err := gitRun(ctx, cwd, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return ""
+	}
+	// A dangling origin/HEAD (remote branch pruned) is no default: ask.
+	name := strings.TrimSpace(string(out))
+	if name == "" || resolveCommit(ctx, cwd, "refs/remotes/"+name) == "" {
+		return ""
+	}
+	return name
+}
+
+// resolveBase resolves a base branch name preferring branch refs over a
+// same-named tag: refs/heads/<name>, then refs/remotes/<name>, then the
+// plain name (any other validated ref).
+func resolveBase(ctx context.Context, cwd, name string) string {
+	for _, ref := range []string{"refs/heads/" + name, "refs/remotes/" + name, name} {
+		if rev := resolveCommit(ctx, cwd, ref); rev != "" {
+			return rev
+		}
+	}
+	return ""
+}
+
+// resolveCommit returns the full hash of rev or "" when it does not name
+// a commit. rev must already be validated (no leading "-").
+func resolveCommit(ctx context.Context, cwd, rev string) string {
+	out, _, err := gitRun(ctx, cwd, "rev-parse", "--verify", "--quiet", rev+"^{commit}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// gitBranchChanges answers "what is on this branch versus base" (#1450):
+// commits base..HEAD (newest first, up to limit, with the full count) and
+// files changed merge-base...HEAD (three-dot, Q1) with +/- counts. It is
+// read-only. base "" means detect the default branch.
+func gitBranchChanges(ctx context.Context, cwd, base string, limit int) (gitBranchChangesJSON, error) {
+	body := gitBranchChangesJSON{
+		State: branchStateOK, Base: base,
+		Commits: []gitCommitJSON{}, Files: []gitBranchFileJSON{},
+	}
+	head := resolveCommit(ctx, cwd, "HEAD")
+	if head == "" {
+		body.State = branchStateNoCommits
+		return body, nil
+	}
+	branch, _, err := gitRun(ctx, cwd, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		body.State = branchStateDetached
+		return body, nil
+	}
+	body.Branch = strings.TrimSpace(string(branch))
+	if body.Base == "" {
+		body.Base = defaultBaseBranch(ctx, cwd)
+		body.BaseDetected = body.Base != ""
+	}
+	if body.Base == "" {
+		body.State = branchStateChooseBase
+		return body, nil
+	}
+	if body.Base == body.Branch {
+		body.State = branchStateOnBase
+		return body, nil
+	}
+	baseRev := resolveBase(ctx, cwd, body.Base)
+	if baseRev == "" {
+		return gitBranchChangesJSON{}, errors.New("unknown base branch: " + body.Base)
+	}
+	mb, _, err := gitRun(ctx, cwd, "merge-base", baseRev, head)
+	if err != nil {
+		body.State = branchStateNoMergeBase
+		return body, nil
+	}
+	body.MergeBase = strings.TrimSpace(string(mb))
+	span := baseRev + ".." + head
+	out, stderr, err := gitRun(ctx, cwd, "log", "-n", strconv.Itoa(limit), "--format="+gitLogFormat, span)
+	if err != nil {
+		return gitBranchChangesJSON{}, errors.New(gitErr("log", err, stderr))
+	}
+	body.Commits = parseLogLines(out)
+	count, stderr, err := gitRun(ctx, cwd, "rev-list", "--count", span)
+	if err != nil {
+		return gitBranchChangesJSON{}, errors.New(gitErr("rev-list", err, stderr))
+	}
+	body.CommitsTotal, _ = strconv.Atoi(strings.TrimSpace(string(count)))
+	numstat, stderr, err := gitRun(ctx, cwd, "diff", "--numstat", "-z", "--no-renames", body.MergeBase, head)
+	if err != nil {
+		return gitBranchChangesJSON{}, errors.New(gitErr("diff", err, stderr))
+	}
+	body.Files = parseNumstatFilesZ(numstat)
+	return body, nil
+}
+
+// gitBranchDiff is one file's cumulative branch diff, merge-base...HEAD.
+func gitBranchDiff(ctx context.Context, cwd, base, rel string) (string, bool, error) {
+	head := resolveCommit(ctx, cwd, "HEAD")
+	baseRev := resolveBase(ctx, cwd, base)
+	if head == "" || baseRev == "" {
+		return "", false, errors.New("unknown base branch: " + base)
+	}
+	mb, _, err := gitRun(ctx, cwd, "merge-base", baseRev, head)
+	if err != nil {
+		return "", false, errors.New("no common history with " + base)
+	}
+	// --literal-pathspecs: "app/[id]/page.tsx" is a path, not a glob.
+	out, stderr, err := gitRun(ctx, cwd, "--literal-pathspecs", "diff", "--no-renames", strings.TrimSpace(string(mb)), head, "--", rel)
+	if err != nil {
+		return "", false, errors.New(gitErr("diff", err, stderr))
+	}
+	truncated := false
+	if len(out) > gitDiffCap {
+		out = out[:gitDiffCap]
+		truncated = true
+	}
+	return string(out), truncated, nil
+}
+
+// parseNumstatFilesZ reads `--numstat -z --no-renames` records
+// ("added\tdeleted\tpath\0"); binary files report "-" counts.
+func parseNumstatFilesZ(out []byte) []gitBranchFileJSON {
+	files := []gitBranchFileJSON{}
+	for _, rec := range bytes.Split(out, []byte{0}) {
+		rec = bytes.TrimLeft(rec, "\n")
+		if len(rec) == 0 {
+			continue
+		}
+		parts := bytes.SplitN(rec, []byte{'\t'}, 3)
+		if len(parts) != 3 || len(parts[2]) == 0 {
+			continue
+		}
+		f := gitBranchFileJSON{Path: string(parts[2])}
+		if string(parts[0]) == "-" && string(parts[1]) == "-" {
+			f.Binary = true
+		} else {
+			f.Added, _ = strconv.Atoi(string(parts[0]))
+			f.Deleted, _ = strconv.Atoi(string(parts[1]))
+		}
+		files = append(files, f)
+	}
+	return files
+}
+
+// optionalBaseName validates a base branch for read-only comparison:
+// local ("main") or remote-tracking ("origin/main") names, never an
+// option or revision expression. "" is allowed (detect the default).
+func optionalBaseName(base string) (string, error) {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return "", nil
+	}
+	name, err := safeBranchName(base)
+	if err != nil {
+		return "", errors.New("invalid base branch")
+	}
+	return name, nil
 }
 
 // gitShow resolves ref to one commit and returns its metadata, body,
