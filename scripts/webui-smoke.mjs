@@ -11,9 +11,10 @@
 // it (CI run 40403843230) — a text scrape or a longer sleep would have
 // papered over a real bug, and the old 400-char text slice could not say
 // what the page actually looked like.
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -28,6 +29,77 @@ const chromePort = 9222 + (process.pid % 200);
 // ends immediately unless degrade is on before the daemon reads config.
 await mkdir(join(home, ".strike"), { recursive: true });
 await writeFile(join(home, ".strike", "config"), '{"sandboxAllowDegrade":true}\n');
+
+// Decision ledger seed (#1485). There is no ledger write route, and the
+// store loads its file once at open, so the file must exist before the
+// daemon starts. Path: ~/.strike/ledger/<sha256(project key)>.json, where
+// the key is the canonical git root of the daemon's cwd (project.Resolve).
+let ledgerProjectKey = await realpath(process.cwd());
+try {
+  const top = execFileSync("git", ["-C", ledgerProjectKey, "rev-parse", "--show-toplevel"], {
+    encoding: "utf8",
+  }).replace(/\r?\n$/, "");
+  ledgerProjectKey = await realpath(top);
+} catch {
+  // Not a git work tree: the key stays the canonical cwd.
+}
+{
+  const now = "2026-11-01T10:00:00Z";
+  const later = "2026-11-02T10:00:00Z";
+  const entry = (e) => ({
+    confidence: "medium",
+    author_session: "smoke-session",
+    author_agent: "build",
+    author_root: "smoke-session",
+    created_at: now,
+    updated_at: now,
+    ...e,
+  });
+  const doc = {
+    version: 1,
+    entries: [
+      entry({
+        id: "led_smoke_old",
+        kind: "decision",
+        statement: "Smoke config is plain JSON",
+        status: "superseded",
+        superseded_by: "led_smoke_new",
+        updated_at: later,
+      }),
+      entry({
+        id: "led_smoke_new",
+        kind: "decision",
+        statement: "Smoke config is JSONC",
+        confidence: "high",
+        status: "active",
+        supersedes: "led_smoke_old",
+        evidence_refs: ["docs/config.md"],
+        scope_paths: ["internal/product/config"],
+        created_at: later,
+        updated_at: later,
+      }),
+      entry({
+        id: "led_smoke_net",
+        kind: "assumption",
+        statement: "Smoke runs without network",
+        status: "invalidated",
+        invalidate_reason: "CI runners have network",
+        invalidated_at: later,
+        updated_at: later,
+      }),
+      entry({
+        id: "led_smoke_fixture",
+        kind: "constraint",
+        statement: "Smoke fixtures never hold real credentials",
+        status: "active",
+      }),
+    ],
+  };
+  const ledgerDir = join(home, ".strike", "ledger");
+  await mkdir(ledgerDir, { recursive: true, mode: 0o700 });
+  const ledgerFile = createHash("sha256").update(ledgerProjectKey).digest("hex") + ".json";
+  await writeFile(join(ledgerDir, ledgerFile), JSON.stringify(doc), { mode: 0o600 });
+}
 
 // Git diff expand seed (#1428): an untracked file in the daemon's repo whose
 // --no-index diff runs past the Git panel's 400-line render cap. The git
@@ -2176,6 +2248,91 @@ try {
   await waitFor(
     "knowledge search cleared to restore the pin",
     textProbe((t) => t.includes("1 of 1 pins") && t.includes("docs/smoke-pin.md")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // Decisions tab (#1485): the seeded ledger renders read-only. Default is
+  // the active slice; Include history adds superseded/invalidated rows
+  // (distinguished by data-ledger-status); a kind chip narrows through
+  // the daemon; and the supersede chain is navigable old → new.
+  const ledgerBoot = await (
+    await fetch(`http://127.0.0.1:${port}/v1/bootstrap`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (!ledgerBoot.capabilities?.ledger) {
+    throw new Error(`bootstrap does not advertise the ledger capability: ${JSON.stringify(ledgerBoot.capabilities)}`);
+  }
+  const ledgerRows = async () =>
+    (await evaluate(`[...document.querySelectorAll("[data-ledger] .ledger-row")].map((r) => [
+      r.dataset.ledgerId,
+      r.dataset.ledgerStatus,
+    ])`)) || [];
+  await runPalette("Decisions");
+  await waitFor(
+    "decisions tab shows only the active slice",
+    async () => {
+      const rows = await ledgerRows();
+      const ids = rows.map((r) => r[0]).sort().join(",");
+      return { ok: ids === "led_smoke_fixture,led_smoke_new", body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-ledger-view="history"]').click()`);
+  await waitFor(
+    "include history adds superseded and invalidated rows",
+    async () => {
+      const rows = await ledgerRows();
+      const st = Object.fromEntries(rows);
+      return {
+        ok:
+          rows.length === 4 &&
+          st.led_smoke_old === "superseded" &&
+          st.led_smoke_net === "invalidated" &&
+          st.led_smoke_new === "active",
+        body: JSON.stringify(rows),
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-ledger-kind="assumption"]').click()`);
+  await waitFor(
+    "kind filter narrows history to the assumption",
+    async () => {
+      const rows = await ledgerRows();
+      return { ok: rows.length === 1 && rows[0][0] === "led_smoke_net", body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-ledger-kind=""]').click()`);
+  await waitFor(
+    "all kinds restores the history rows",
+    async () => ({ ok: (await ledgerRows()).length === 4 }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-ledger-id="led_smoke_old"] .link').click()`);
+  await waitFor(
+    "superseded entry detail names its replacement",
+    async () => {
+      const d = await evaluate(`(() => {
+        const el = document.querySelector('[data-ledger-detail="led_smoke_old"]');
+        return el ? { text: el.innerText, chain: !!el.querySelector('[data-ledger-chain="superseded-by"]') } : null;
+      })()`);
+      return { ok: !!d && d.chain && d.text.includes("led_smoke_new"), body: JSON.stringify(d) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-ledger-chain="superseded-by"]').click()`);
+  await waitFor(
+    "following the chain opens the current decision",
+    async () => {
+      const d = await evaluate(`(() => {
+        const el = document.querySelector('[data-ledger-detail="led_smoke_new"]');
+        return el ? { status: el.dataset.ledgerStatus, text: el.innerText, back: !!el.querySelector('[data-ledger-chain="supersedes"]') } : null;
+      })()`);
+      return {
+        ok: !!d && d.status === "active" && d.back && d.text.includes("Smoke config is JSONC") && d.text.includes("docs/config.md"),
+        body: JSON.stringify(d),
+      };
+    },
     { timeout: WAIT_MS, interval: 250 },
   );
 
