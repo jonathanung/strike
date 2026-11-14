@@ -581,6 +581,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/schedules", s.handleSchedulesList)
 	s.mux.HandleFunc("POST /v1/schedules", s.handleScheduleCreate)
 	s.mux.HandleFunc("GET /v1/schedules/{id}/history", s.handleScheduleHistory)
+	s.mux.HandleFunc("GET /v1/schedules/{id}/runs/{runId}/output", s.handleScheduleRunOutput)
 	s.mux.HandleFunc("POST /v1/schedules/{id}/pause", s.handleSchedulePause)
 	s.mux.HandleFunc("POST /v1/schedules/{id}/resume", s.handleScheduleResume)
 	s.mux.HandleFunc("POST /v1/schedules/{id}/run", s.handleScheduleRun)

@@ -1067,22 +1067,40 @@ switch the cockpit's active session.
 | Method | Path | Body |
 |---|---|---|
 | `GET` | `/v1/schedules` | `{schedules:[...]}` |
-| `POST` | `/v1/schedules` | spec below; `201` the stored schedule |
+| `POST` | `/v1/schedules` | spec below; `201` the stored schedule. `source: script` requires `confirm: true`, else `400 confirm required` and nothing is stored |
 | `GET` | `/v1/schedules/{id}` | one schedule |
-| `PATCH` | `/v1/schedules/{id}` | full spec; history is kept |
+| `PATCH` | `/v1/schedules/{id}` | full spec; history is kept. A script schedule needs `confirm: true` again (re-arms); `source` cannot change to or from `script` (`400`; delete and recreate) |
 | `DELETE` | `/v1/schedules/{id}` | |
 | `POST` | `/v1/schedules/{id}/pause` | |
 | `POST` | `/v1/schedules/{id}/resume` | arms the next future slot; does not catch up |
-| `POST` | `/v1/schedules/{id}/run` | one session now; `409` when overlap is skip and the last session is busy |
-| `GET` | `/v1/schedules/{id}/history` | `{runs:[...]}` newest first |
+| `POST` | `/v1/schedules/{id}/run` | one session now; `409` when overlap is skip and the last session is busy, or while a script run is in flight; returns the `started` run |
+| `GET` | `/v1/schedules/{id}/history` | `{runs:[...]}` newest first. Runs carry `startedAt`, `endedAt`, `exitCode`, `outputPreview`, `outputRef`, `decision` for script runs |
+| `GET` | `/v1/schedules/{id}/runs/{runId}/output` | `text/plain` scrubbed output tail of a script run; `404` when none. Read-only and attach-only servers may read it |
 
 Spec fields: `name`, `kind` (`cron` \| `interval` \| `once` \| `heartbeat`),
 `cron` (5 fields, timezone-aware), `every` (Go duration, minimum `1m`),
 `at` (RFC3339), `timezone` (IANA, default `UTC`), `source` (`prompt` \|
-`goal` \| `workflow`), `prompt`, `goalId`, `workflow`, `workspaceId`,
+`goal` \| `workflow` \| `script`), `prompt`, `goalId`, `workflow`, `workspaceId`,
 `permissionMode` (used only when the workspace has no mode; empty means
 `plan`), `overlap` (`skip` \| `queue` \| `allow`, default `skip`),
 `missed` (`skip` \| `once`, default `skip`), `enabled`.
+
+Script schedules (`source: script`, see
+[design/script-schedules.md](design/script-schedules.md)) take `command`
+(required, max 16 KiB), `dir` (absolute, must exist; empty means the
+workspace path), `timeout` (Go duration, `10s`..`6h`, default `30m`),
+`secretRefs` (`secret://env/NAME`), and `confirm: true`. `overlap` must be
+`skip`. The server stamps `armedAt` and `commandHash` (sha256 of the
+command) on every confirmed write and never accepts them from the client.
+`command` is scrubbed on every read. Create, replace, pause, resume, and
+delete of a script schedule each write one `script_run` audit record
+(`armed` \| `rearmed` \| `paused` \| `resumed` \| `deleted`) with the
+command, its hash, and the client IP. No tool, `/v1/ops` op, MCP bridge,
+or SDK call reaches the schedule service.
+
+At start, `strike serve` adds managed `deny` rules for `read` and `bash`
+on the configured `--token-file` path to every session it hosts, so an
+agent cannot read the cockpit token and call these routes itself.
 
 A workspace permission mode wins over `permissionMode`. Heartbeat fires
 compare a fingerprint of the workspace (git HEAD and status, otherwise a
