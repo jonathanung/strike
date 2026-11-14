@@ -697,7 +697,7 @@ try {
       }
       if (!probe.text.includes("OS sandbox")) return { ok: false, probe };
       if (!sbSnap) {
-        return { ok: probe.state === "unavailable" && !probe.text.includes("This session"), probe };
+        return { ok: probe.state === "unavailable" && !probe.text.includes("Active sandbox"), probe };
       }
       const label = sbModeLabel[sbSnap.mode] || sbSnap.mode;
       // "unprobed" (serve seeds it before any sandboxed command) is unknown,

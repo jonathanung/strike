@@ -156,7 +156,7 @@ pub fn unavailable_backend_copy(s: &SandboxSnapshot) -> Option<String> {
 }
 
 /// Shown only when the saved default differs from the active mode. Changing
-/// the default never affects the running session (snapshot `note`).
+/// the default never affects the running session (daemon note).
 pub fn default_differs_copy(s: &SandboxSnapshot) -> Option<String> {
     if s.default_mode.is_empty() || s.default_mode == s.mode {
         return None;
