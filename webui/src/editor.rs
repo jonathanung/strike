@@ -223,7 +223,13 @@ pub fn find_hits(text: &str, query: &str, opts: FindOptions) -> Vec<Hit> {
         // The fast path is only for pure ASCII. Anything else is a
         // whole-line hit: one match per line, start and end left at 0
         // (`marked_pieces` already treats that as the whole line).
-        if !query_ascii || !line.is_ascii() {
+        // Whole-word with an ASCII query stays on the byte path even
+        // for a non-ASCII line (an em dash or curly quote in prose):
+        // ASCII query bytes can only match ASCII bytes, so offsets
+        // stay exact and boundaries checkable. Sending those lines to
+        // the fold fallback would drop every hit on them.
+        let byte_path = query_ascii && (line.is_ascii() || opts.whole_word);
+        if !byte_path {
             let folded = line.to_lowercase();
             // Fold fallback: per-hit offsets cannot be trusted, so in
             // whole-word mode the hit's boundaries cannot be verified
@@ -2389,6 +2395,22 @@ mod tests {
         let hits = find_hits("say İ now\n", "İ", both);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].start, 4);
+    }
+
+    #[test]
+    fn search_whole_word_ascii_query_on_non_ascii_line() {
+        // An ASCII query on a line with non-ASCII prose is not a fold
+        // case: whole-word still finds it with exact offsets.
+        let opts = FindOptions::new(false, true);
+        let line = "café — Token tokens token\n";
+        let hits = find_hits(line, "token", opts);
+        assert_eq!(hits.len(), 2);
+        let first = line.find("Token").unwrap();
+        assert_eq!((hits[0].start, hits[0].end), (first, first + 5));
+        assert_eq!(&line[hits[1].start..hits[1].end], "token");
+        assert!(hits[1].start > first + 6);
+        // é is not an ASCII word char, so it is a boundary (#1419).
+        assert_eq!(find_hits("éa é\n", "a", opts).len(), 1);
     }
 
     #[test]
