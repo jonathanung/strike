@@ -303,6 +303,24 @@ func SetGlobalConfigDials(sandboxMode, notify, leanCode, deferTools, sessionWork
 	return writeGlobal(cfg, unlock)
 }
 
+// SetGlobalKeepAwake persists the gateway sleep-inhibition opt-in (on|off)
+// into ~/.strike/config. Unknown values are rejected without writing (#1496).
+func SetGlobalKeepAwake(mode string) error {
+	ka := NormalizeKeepAwake(mode)
+	if ka == "" {
+		return fmt.Errorf("unknown keepAwake %q (want on|off)", mode)
+	}
+	globalMu.Lock()
+	defer globalMu.Unlock()
+
+	cfg, unlock, err := readGlobalForWrite()
+	if err != nil {
+		return err
+	}
+	cfg.KeepAwake = ka
+	return writeGlobal(cfg, unlock)
+}
+
 // SetGlobalAutoApproveDials persists permission auto-approve countdown/exclude
 // and maxChildDepth into ~/.strike/config. Empty scalar strings leave the
 // corresponding field unchanged. exclude nil leaves the list unchanged; a

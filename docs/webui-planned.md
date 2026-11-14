@@ -68,6 +68,10 @@ arm the next future slot); `missed: once` catches up a single run. A
 heartbeat records a quiet baseline and does not start a session until the
 workspace fingerprint changes. The first observation is that baseline.
 
+A fourth source, `script` (a shell command that fires with no session), is
+designed in [design/script-schedules.md](design/script-schedules.md) (#1614)
+and not shipped.
+
 The goal loop (`POST /v1/goals/{id}/run`) is still the evaluate-only
 harness. A scheduled goal starts a root session whose prompt is the goal
 text; it does not call that loop.

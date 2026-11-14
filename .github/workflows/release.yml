@@ -34,6 +34,13 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Job-level permissions replace the workflow-level block, so contents
+    # is repeated here. id-token mints the OIDC token for keyless cosign
+    # signing and the provenance attestation; attestations stores it.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -84,6 +91,53 @@ jobs:
           )
           ls -la dist
 
+      # Keyless signing (#581). Each CLI archive and checksums.txt gets a
+      # Sigstore bundle (<asset>.sigstore.json) holding the signature, the
+      # short-lived Fulcio certificate for this workflow run, and the Rekor
+      # transparency-log entry. No long-lived key exists. Verify with
+      # `cosign verify-blob` (docs/release.md).
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Sign release assets
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(dist/strike_*.tar.gz dist/checksums.txt)
+          if [ "${#assets[@]}" -ne 5 ]; then
+            echo "::error::expected 4 archives and checksums.txt, found ${#assets[@]}"
+            exit 1
+          fi
+          for f in "${assets[@]}"; do
+            cosign sign-blob --yes --bundle "${f}.sigstore.json" "${f}"
+          done
+          ls -la dist
+
+      # SLSA build provenance for the same assets, stored by GitHub and
+      # checked with `gh attestation verify` (docs/release.md).
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/strike_*.tar.gz
+            dist/checksums.txt
+
+      # Homebrew formula + AUR PKGBUILD filled with this tag's checksums.
+      # Uploaded as a workflow artifact, not a release asset. Publishing to
+      # the tap / AUR is manual (packaging/README.md).
+      - name: Render package manifests
+        env:
+          TAG: ${{ github.ref_name }}
+        run: scripts/render-packaging.sh "${TAG}" dist/checksums.txt dist/packaging
+
+      - name: Upload package manifests
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: packaging-${{ github.ref_name }}
+          path: dist/packaging/
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Build release notes from changelog
         env:
           TAG: ${{ github.ref_name }}
@@ -130,6 +184,7 @@ jobs:
             printf '%s\n' "${INSTALL_CMD}"
             printf '```\n\n'
             printf 'Or download an archive below, verify `checksums.txt`, and place `strike` on your PATH.\n\n'
+            printf 'Each archive and `checksums.txt` has a keyless Sigstore signature (`<asset>.sigstore.json`) and a GitHub build provenance attestation. See [docs/release.md](https://github.com/%s/blob/%s/docs/release.md) for `cosign verify-blob` and `gh attestation verify`.\n\n' "${GITHUB_REPOSITORY}" "${TAG}"
             printf '## Changelog\n'
             cat changelog-entry.md
           } > release-notes.md
@@ -155,7 +210,8 @@ jobs:
             --notes-file release-notes.md \
             "${PRERELEASE_ARGS[@]}" \
             dist/strike_*.tar.gz \
-            dist/checksums.txt
+            dist/checksums.txt \
+            dist/*.sigstore.json
 
   # workflow_dispatch is a dry-run. Refusing dry_run=false keeps this
   # trigger from ever becoming a publish path.
@@ -466,6 +522,12 @@ jobs:
       needs.desktop.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Same keyless signing and provenance as the CLI assets (#581).
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+      attestations: write
     env:
       # This job has no checkout (it only downloads artifacts), so gh
       # cannot infer the repository from a git remote and dies with
@@ -479,6 +541,9 @@ jobs:
           pattern: desktop-bundles-*
           path: dist/desktop
           merge-multiple: true
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
 
       - name: Upload bundles to the release
         env:
@@ -535,9 +600,16 @@ jobs:
             cd dist/desktop
             sha256sum strike-desktop_* | sort -k2 > desktop-checksums.txt
           )
+          # Keyless Sigstore bundles for each installer and the desktop
+          # checksum list, written next to them as <asset>.sigstore.json.
+          sigs=()
+          for f in "${files[@]}" dist/desktop/desktop-checksums.txt; do
+            cosign sign-blob --yes --bundle "${f}.sigstore.json" "${f}"
+            sigs+=("${f}.sigstore.json")
+          done
           # --clobber overwrites only these filenames on a re-run.
           # It does not remove the CLI tarballs or checksums.txt.
-          gh release upload "${TAG}" "${files[@]}" dist/desktop/desktop-checksums.txt --clobber
+          gh release upload "${TAG}" "${files[@]}" dist/desktop/desktop-checksums.txt "${sigs[@]}" --clobber
           gh release view "${TAG}" --json assets --jq '.assets[].name' | sort > /tmp/asset-names.txt
           cat /tmp/asset-names.txt
           for required in \
@@ -546,13 +618,24 @@ jobs:
             "strike_${TAG}_darwin_amd64.tar.gz" \
             "strike_${TAG}_darwin_arm64.tar.gz" \
             "checksums.txt" \
-            "desktop-checksums.txt"
+            "checksums.txt.sigstore.json" \
+            "desktop-checksums.txt" \
+            "desktop-checksums.txt.sigstore.json"
           do
             if ! grep -Fxq "${required}" /tmp/asset-names.txt; then
               echo "::error::release is missing ${required}"
               exit 1
             fi
           done
+
+      - name: Attest desktop build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/desktop/strike-desktop_*.deb
+            dist/desktop/strike-desktop_*.AppImage
+            dist/desktop/strike-desktop_*.dmg
+            dist/desktop/desktop-checksums.txt
 
       - name: Append unsigned-macOS notes
         env:
