@@ -2616,6 +2616,29 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   .approvals-form button { flex: 1 1 140px; }
 }
 /* feature:approvals end */
+/* feature:rule-authoring begin */
+.rule-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rule-sentence { color: var(--ink); overflow-wrap: anywhere; }
+.rule-examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.rule-draft { margin: var(--space-2) 0 0; }
+.rule-feedback { margin: var(--space-2) 0 0; overflow-wrap: anywhere; }
+.rule-tester {
+  margin-top: var(--space-4);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--rule);
+}
+.rule-tester h4 { margin: 0; }
+.rule-tester-result { margin-top: var(--space-2); }
+@media (max-width: 960px) {
+  .rule-examples button { flex: 1 1 140px; }
+}
+/* feature:rule-authoring end */
 /* feature:terminal begin */
 .side-tabs { flex-wrap: wrap; }
 .term {
