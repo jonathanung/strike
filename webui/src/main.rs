@@ -2618,6 +2618,14 @@ fn App() -> impl IntoView {
         }
     };
 
+    // Page-level session links (Audit #1530, Permissions #1540): switch
+    // to chat and open through the shared live/resume path.
+    let open_session_page = move |id: String| {
+        mode.set("chat".into());
+        let live = roots.get_untracked().iter().any(|r| r.id == id);
+        open_session(id, live);
+    };
+
     let travel = move |back: bool| {
         let id = {
             let mut popped = None;
@@ -4509,11 +4517,7 @@ fn App() -> impl IntoView {
             reply_n=reply_n
             reply_id=reply_id
             reply_decision=reply_decision
-            open_session=move |id: String| {
-                mode.set("chat".into());
-                let live = roots.get_untracked().iter().any(|r| r.id == id);
-                open_session(id, live);
-            }
+            open_session=open_session_page
         />
         <shell::Chrome />
         {gateway_qr::phone_view()}
@@ -4565,11 +4569,7 @@ fn App() -> impl IntoView {
                 base=base
                 token=token
                 status=status
-                open_session=move |id: String| {
-                    mode.set("chat".into());
-                    let live = roots.get_untracked().iter().any(|r| r.id == id);
-                    open_session(id, live);
-                }
+                open_session=open_session_page
             />
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>

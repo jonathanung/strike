@@ -221,16 +221,18 @@ pub fn TaskRunner(
     let run_loading = RwSignal::new(false);
 
     // #1548: Schedule-style session open, built here because this page
-    // already holds active_root. Deliberate improvement on Schedule's
-    // closure, which discards the activation result: a failed activation
-    // (child pruned, gateway restarted) is reported on the status line
-    // instead of silently landing on an empty chat.
+    // already holds active_root. A failed activation (child pruned,
+    // gateway restarted) is reported on the status line instead of
+    // silently landing on an empty chat.
     let open_child = move |id: String| {
         if id.is_empty() {
             return;
         }
         let (b, t) = (base.get_untracked(), token.get_untracked());
         active_root.set(id.clone());
+        // Bypasses `activate_root` in main.rs, so persist the viewed
+        // session here too (#1391), as Schedule does.
+        crate::session_restore::persist(&id);
         mode.set("chat".into());
         status.set(format!("Opened {id}"));
         spawn_local(async move {
