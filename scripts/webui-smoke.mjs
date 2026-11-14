@@ -536,6 +536,17 @@ try {
     })()`);
   };
 
+  // Probe a Goals list row's own status label (#1455): the status filter
+  // chips render every status word, so whole-body text cannot prove a run
+  // reached a status.
+  const goalRowProbe = (title, status) => async () => {
+    const rows = await evaluate(`[...document.querySelectorAll(".goals-row")].map((r) => [
+      r.querySelector(".goals-row-title")?.textContent.trim(),
+      r.querySelector(".goals-status")?.textContent.trim(),
+    ])`) || [];
+    return { ok: rows.some(([t, s]) => t === title && s === status), body: JSON.stringify(rows) };
+  };
+
   // Probe on the whole body text.
   const textProbe = (ready) => async () => {
     const body = (await evaluate(`document.body ? document.body.innerText : ""`)) || "";
@@ -2007,7 +2018,7 @@ try {
   }
   await waitFor(
     "passing goal run to reach Done",
-    textProbe((body) => body.includes("smoke pass") && body.includes("Done")),
+    goalRowProbe("smoke pass", "Done"),
     { timeout: WAIT_MS, interval: 250 },
   );
   // Duplicate a goal (#1415): the detail Duplicate opens the create form
@@ -2045,7 +2056,7 @@ try {
   })()`);
   await waitFor(
     "duplicated goal run to reach Done",
-    textProbe((body) => body.includes("smoke pass copy") && body.includes("Done")),
+    goalRowProbe("smoke pass copy", "Done"),
     { timeout: WAIT_MS, interval: 250 },
   );
   const goalsAfterDupSubmit = await (
@@ -2065,7 +2076,13 @@ try {
   }
   await waitFor(
     "failing goal run to surface Needs you / verification failed",
-    textProbe((body) => body.includes("Needs you") && body.includes("verification failed")),
+    async () => {
+      // Row label or the detail escalation banner — never the filter chip.
+      const row = await goalRowProbe("smoke fail", "Needs you")();
+      const banner = (await evaluate(`!!document.getElementById("goals-escalate")`)) === true;
+      const body = await textProbe((b) => b.includes("verification failed"))();
+      return { ok: (row.ok || banner) && body.ok, body: row.body };
+    },
     { timeout: WAIT_MS, interval: 250 },
   );
   // Goal Abort confirm (#1559): Abort is terminal, so it must open the
@@ -2112,11 +2129,13 @@ try {
   await waitFor(
     "goal abort confirm to close on cancel, goal still Needs you",
     async () => {
-      const body = (await evaluate(`document.body.innerText`)) || "";
+      // Row label, not body text: the "Needs you" filter chip is always on screen (#1455).
+      const row = await goalRowProbe("smoke fail", "Needs you")();
       return {
         ok:
           (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === false &&
-          body.includes("Needs you"),
+          row.ok,
+        body: row.body,
       };
     },
     { timeout: STEP_MS, interval: 200 },
@@ -2134,8 +2153,52 @@ try {
   await evaluate(`document.querySelector("[data-confirm='accept']").click()`);
   await waitFor(
     "goal in Aborted state after confirmed abort",
-    textProbe((body) => body.includes("Aborted")),
+    // Row label, not body text: the "Aborted" filter chip is always on screen (#1455).
+    goalRowProbe("smoke fail", "Aborted"),
     { timeout: WAIT_MS, interval: 250 },
+  );
+  // Goals list filter (#1455): status chip + description search narrow the
+  // list with AND semantics; a no-match shows its own empty state, and
+  // Clear filters restores every row.
+  await evaluate(`document.querySelector('[data-goal-filter="done"]').click()`);
+  await waitFor(
+    "Done status chip narrows the goals list",
+    goalRowProbe("smoke pass", "Done"),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const doneRows = await evaluate(`[...document.querySelectorAll(".goals-row .goals-status")].map((s) => s.textContent.trim())`);
+  if (!doneRows.length || doneRows.some((s) => s !== "Done")) {
+    throw new Error(`Done filter left non-Done rows: ${JSON.stringify(doneRows)}`);
+  }
+  await evaluate(`(() => {
+    const el = document.getElementById("goals-search");
+    el.value = "zzz-no-such-goal";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+  await waitFor(
+    "goals no-match empty state and count",
+    async () => {
+      const r = await evaluate(`({
+        empty: document.body.innerText.includes("No goals match — clear filters"),
+        count: document.querySelector("[data-goals-count]")?.textContent.trim() || "",
+        rows: document.querySelectorAll(".goals-row").length,
+      })`);
+      return { ok: r.empty && r.rows === 0 && /^Showing 0 of \d+ goals$/.test(r.count), body: JSON.stringify(r) };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector("[data-goals-clear]").click()`);
+  await waitFor(
+    "Clear filters restores every goal row",
+    async () => {
+      const r = await evaluate(`({
+        rows: document.querySelectorAll(".goals-row").length,
+        search: document.getElementById("goals-search")?.value,
+        on: document.querySelector("[data-goal-filter].on")?.dataset.goalFilter,
+      })`);
+      return { ok: r.rows >= 3 && r.search === "" && r.on === "all", body: JSON.stringify(r) };
+    },
+    { timeout: STEP_MS, interval: 250 },
   );
 
   const clicked = await send("Runtime.evaluate", {
