@@ -256,23 +256,27 @@ pub fn chip_action_label(
 /// renders each with `data-pending-ask`), focus that card and flash its
 /// outline, without stealing the composer: focus lands on the card
 /// container (`tabindex="-1"`), whose decision buttons are next in tab
-/// order. Returns `false` when no pending-ask card is in the DOM, so
-/// the caller can say so plainly instead of scrolling nowhere.
-pub fn scroll_to_pending_ask_soon() -> bool {
-    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
-        return false;
-    };
-    let Some(el) = doc
-        .query_selector("[data-pending-ask=\"true\"]")
-        .ok()
-        .flatten()
-    else {
-        return false;
-    };
+/// order. With no card (a question can wait without one), scroll the
+/// transcript to its latest content instead. The lookup runs in a
+/// `setTimeout(0)` so a just-requested switch to chat mode has mounted
+/// (Leptos renders on a microtask) — the chip is clickable from any mode.
+pub fn scroll_to_pending_ask_soon() {
     use wasm_bindgen::closure::Closure;
     use wasm_bindgen::JsCast;
-    let flash = el.clone();
     let cb = Closure::once(move || {
+        let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+            return;
+        };
+        let card = doc
+            .query_selector("[data-pending-ask=\"true\"]")
+            .ok()
+            .flatten();
+        let Some(flash) = card else {
+            if let Some(el) = doc.get_element_by_id("tf-transcript") {
+                el.set_scroll_top(el.scroll_height());
+            }
+            return;
+        };
         flash.scroll_into_view();
         if let Some(html) = flash.dyn_ref::<web_sys::HtmlElement>() {
             let _ = html.focus();
@@ -297,7 +301,6 @@ pub fn scroll_to_pending_ask_soon() -> bool {
         );
     }
     cb.forget();
-    true
 }
 
 /// Page wiring for the shell slots in `src/shell/contrib/status.rs`.

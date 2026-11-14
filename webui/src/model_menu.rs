@@ -408,6 +408,14 @@ pub fn compact_disabled(busy: bool, in_flight: bool) -> Option<&'static str> {
     None
 }
 
+/// Whether an `engine.error` message is the daemon refusing a manual
+/// compact (#1567). The op is accepted over HTTP and refused on the
+/// event stream with no `compaction.completed`, so the in-flight flag
+/// must clear here too or it latches until the session changes.
+pub fn is_compact_refusal(message: &str) -> bool {
+    message.contains("nothing to compact") || message.contains("cannot compact")
+}
+
 pub fn effort_section(info: Option<&ModelInfo>, current: &str) -> EffortSection {
     let current = current.trim();
     let reasoning = info.map(|i| i.reasoning).unwrap_or(false);
@@ -910,6 +918,17 @@ mod tests {
             compact_disabled(true, true),
             Some("Compaction is already running.")
         );
+    }
+
+    #[test]
+    fn compact_refusals_are_recognised() {
+        assert!(is_compact_refusal("nothing to compact"));
+        assert!(is_compact_refusal("cannot compact while a turn is running"));
+        // The summarize fallback still ends in compaction.completed.
+        assert!(!is_compact_refusal(
+            "summarize compaction failed, fell back to trim: boom"
+        ));
+        assert!(!is_compact_refusal("no active turn"));
     }
 
     #[test]

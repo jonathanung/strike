@@ -1153,6 +1153,9 @@ fn App() -> impl IntoView {
     // daemon's own `compaction.completed` event lands — the meter only
     // ever moves from daemon events, never optimistically.
     let compacting = RwSignal::new(false);
+    // Daemon refusal text carried from the engine.error arm to the end
+    // of the same envelope handler (#1567).
+    let compact_refused = RwSignal::new(String::new());
     let model_defaults = RwSignal::new(ModelDefaults::default());
     // False until GET /v1/settings succeeds. Empty defaults are not "none saved".
     let defaults_known = RwSignal::new(false);
@@ -1913,6 +1916,12 @@ fn App() -> impl IntoView {
                         steer_queue::LiveNote::Usage { .. } | steer_queue::LiveNote::Fit { .. } => {}
                         steer_queue::LiveNote::EngineError { message, .. } => {
                             queue_note.set(message.clone());
+                            if compacting.get_untracked()
+                                && crate::model_menu::is_compact_refusal(&message)
+                            {
+                                compacting.set(false);
+                                compact_refused.set(message.clone());
+                            }
                             if message.contains("no active turn") || message.contains("already waiting") {
                                 steer_note.set(String::new());
                                 steer_mode.set(String::new());
@@ -1955,6 +1964,13 @@ fn App() -> impl IntoView {
                     model_note_after.set(next.note_after);
                     if data.contains("\"compaction.completed\"") {
                         compacting.set(false);
+                    }
+                    // Set after reduce_envelope so its note does not
+                    // overwrite the daemon's refusal (#1567).
+                    let refused = compact_refused.get_untracked();
+                    if !refused.is_empty() {
+                        compact_refused.set(String::new());
+                        model_note.set(format!("compact refused: {refused}"));
                     }
                 }
             });
@@ -3524,16 +3540,7 @@ fn App() -> impl IntoView {
                 status.set("That ask is already resolved — nothing is waiting.".into());
                 return;
             }
-            if !crate::status::scroll_to_pending_ask_soon() {
-                // A question can be pending without an approval card;
-                // it waits in the latest transcript content.
-                if let Some(el) = web_sys::window()
-                    .and_then(|w| w.document())
-                    .and_then(|doc| doc.get_element_by_id("tf-transcript"))
-                {
-                    el.set_scroll_top(el.scroll_height());
-                }
-            }
+            crate::status::scroll_to_pending_ask_soon();
         }),
     });
     // Gateway switcher page wiring (#1265). The slot is registered at
