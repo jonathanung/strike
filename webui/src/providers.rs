@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::api::{self, delete_json, get_text, post_json_value};
+use load_guard::{apply_provider_load, prepare_provider_load, LoadEpoch, ProviderView};
 use wasm_bindgen::JsCast;
 
 /// Wire dialects `config.ValidateWireAPI` accepts. Not a provider catalog.
@@ -65,6 +66,10 @@ pub struct ProviderStatus {
     pub wire_api: String,
     #[serde(default, rename = "baseURL")]
     pub base_url: String,
+    /// API-key verification state from the daemon (#1531): "", "stored"
+    /// (present, never verified), "verified", or "rejected".
+    #[serde(default, rename = "keyState")]
+    pub key_state: String,
     #[serde(default)]
     pub methods: Vec<String>,
 }
@@ -103,11 +108,37 @@ struct ModelList {
     models: Vec<ModelRow>,
 }
 
-pub fn connection_label(authed: bool) -> &'static str {
-    if authed {
-        "Connected"
-    } else {
-        "Not connected"
+/// The badge text for a provider card. A stored API key is not a
+/// connection (#1531): it reads "Key stored — not tested" until the
+/// daemon's probe has actually presented it to the provider, and
+/// "Key rejected" when the provider refused it. "Connected" is reserved
+/// for credentials that need no key (OAuth, device, builtin) or a key the
+/// provider has accepted.
+pub fn connection_label(authed: bool, key_state: &str) -> &'static str {
+    if !authed {
+        return "Not connected";
+    }
+    match key_state {
+        "verified" => "Connected",
+        "rejected" => "Key rejected",
+        "stored" => "Key stored — not tested",
+        _ => "Connected",
+    }
+}
+
+/// The note shown after a key probe (`POST /v1/auth/probe`). The daemon's
+/// detail strings are written for display and never contain the key.
+pub fn probe_note(status: &str, detail: &str) -> String {
+    match status {
+        "valid" => "Key verified — the provider accepted the stored key.".to_string(),
+        "invalid" => format!(
+            "Key rejected — {detail}. Paste a corrected key and save it."
+        ),
+        "unreachable" => format!("Could not verify the key — {detail}."),
+        "no-key" => "No key stored yet — paste a key and Save key first.".to_string(),
+        "unsupported" => format!("Nothing to test — {detail}."),
+        _ if detail.is_empty() => "Test finished without a verdict.".to_string(),
+        _ => detail.to_string(),
     }
 }
 
@@ -160,6 +191,42 @@ fn note_from(raw: &str, key: &str) -> String {
     scrub_secret(&error_message(raw), key)
 }
 
+/// What the note says after a custom provider's "Remove provider" (#1544).
+/// `credential` is the `DELETE /v1/auth/{name}` result; `definition` is the
+/// `DELETE /v1/custom-providers/{name}` result, or `None` when it was never
+/// attempted — the flow deletes the credential first and stops on failure,
+/// so a failed removal changes nothing and leaves no orphan credential
+/// behind for a provider that is already gone. Errors arrive scrubbed by
+/// `note_from`. The copy never claims more than actually happened.
+pub fn custom_removal_note(
+    credential: &Result<(), String>,
+    definition: Option<&Result<(), String>>,
+) -> String {
+    match (credential, definition) {
+        (Ok(()), Some(Ok(()))) => "Provider removed.".into(),
+        (Ok(()), Some(Err(err))) => format!(
+            "Stored credential removed, but the provider definition could not be deleted: {err}"
+        ),
+        (Ok(()), None) => "Stored credential removed.".into(),
+        (Err(err), Some(Ok(()))) => format!(
+            "Provider definition deleted, but its stored credential could not be removed: {err}"
+        ),
+        (Err(err), _) => {
+            format!("Could not remove the stored credential: {err} The provider was not removed.")
+        }
+    }
+}
+
+fn clock_label() -> String {
+    let now = js_sys::Date::new_0();
+    format!(
+        "{:02}:{:02}:{:02}",
+        now.get_hours(),
+        now.get_minutes(),
+        now.get_seconds()
+    )
+}
+
 fn focus_provider(name: &str) {
     let Some(doc) = web_sys::window().and_then(|window| window.document()) else {
         return;
@@ -191,6 +258,17 @@ fn request_reload(bump: RwSignal<u32>) {
     bump.update(|n| *n = n.wrapping_add(1));
 }
 
+/// Note shown when a base-URL edit misses the loaded custom list (#1578).
+/// A miss after a failed custom-providers load must blame the load, not
+/// the host.
+fn edit_host_miss_note(custom_load_failed: bool) -> &'static str {
+    if custom_load_failed {
+        "Custom providers could not be loaded, so this host cannot be checked right now."
+    } else {
+        "This host is not an editable custom provider."
+    }
+}
+
 fn map_insert(map: &RwSignal<HashMap<String, String>>, key: String, value: String) {
     map.update(|found| {
         found.insert(key, value);
@@ -201,6 +279,7 @@ fn map_insert(map: &RwSignal<HashMap<String, String>>, key: String, value: Strin
 fn ProviderCard(
     row: ProviderStatus,
     customs: RwSignal<Vec<CustomProvider>>,
+    custom_error: RwSignal<String>,
     drafts: RwSignal<HashMap<String, String>>,
     notes: RwSignal<HashMap<String, String>>,
     base_drafts: RwSignal<HashMap<String, String>>,
@@ -217,8 +296,13 @@ fn ProviderCard(
     let builtin = row.builtin;
     let base_url = row.base_url.clone();
     let wire = row.wire_api.clone();
-    let badge = if authed { "chip ok" } else { "chip" };
-    let state = connection_label(authed);
+    let key_state = row.key_state.clone();
+    let state = connection_label(authed, &key_state);
+    let badge = match state {
+        "Connected" => "chip ok",
+        "Key rejected" => "chip bad",
+        _ => "chip",
+    };
 
     let save_key = {
         let name = name.clone();
@@ -249,7 +333,7 @@ fn ProviderCard(
                         map_insert(
                             &notes,
                             name,
-                            "Key stored on the daemon. It is not shown again.".into(),
+                            "Key stored on the daemon. It is not shown again. It has not been tested yet — Test key checks it against the provider.".into(),
                         );
                         request_reload(bump);
                     }
@@ -267,6 +351,36 @@ fn ProviderCard(
             .cloned()
             .unwrap_or_default();
         spawn_local(async move {
+            if api_key {
+                // Real credential probe (#1531): the daemon presents the
+                // stored key to the provider itself. A catalog listing is
+                // not a test — it never touches the key.
+                let probed = post_json_value(
+                    &b,
+                    &t,
+                    "/v1/auth/probe",
+                    serde_json::json!({ "provider": name }),
+                )
+                .await;
+                match probed {
+                    Ok(value) => {
+                        let status = value
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        let detail = value
+                            .get("detail")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default();
+                        let note = probe_note(status, detail);
+                        map_insert(&notes, name, note_from(&note, &key));
+                        // Refresh so the badge picks up the new keyState.
+                        request_reload(bump);
+                    }
+                    Err(err) => map_insert(&notes, name, note_from(&err, &key)),
+                }
+                return;
+            }
             let path = format!("/v1/models?provider={}", api::js_encode(&name));
             match get_text(&b, &t, &path).await {
                 Ok(body) => match serde_json::from_str::<ModelList>(&body) {
@@ -281,18 +395,53 @@ fn ProviderCard(
         });
     };
 
-    let remove_stored = move |name: String| {
+    // "Remove provider" is rendered only for custom providers, and for them
+    // it must remove the provider (#1544): after the shared confirm, delete
+    // the stored credential, then the provider definition itself, so the
+    // provider is still gone after a reload. A credential failure stops
+    // before the definition delete; a definition failure is reported as the
+    // partial removal it is. Built-in providers never render this button —
+    // their credential-only path is the palette's "Remove stored key".
+    let remove_provider = move |name: String| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
-        spawn_local(async move {
-            let path = format!("/v1/auth/{}", api::js_encode(&name));
-            match delete_json(&b, &t, &path, None).await {
-                Ok(()) => {
-                    map_insert(&notes, name, "Stored credential removed.".into());
-                    request_reload(bump);
-                }
-                Err(err) => map_insert(&notes, name, note_from(&err, "")),
-            }
+        let run_name = name.clone();
+        let run = Rc::new(move || {
+            let (b, t) = (b.clone(), t.clone());
+            let name = run_name.clone();
+            spawn_local(async move {
+                let cred_path = format!("/v1/auth/{}", api::js_encode(&name));
+                let credential = delete_json(&b, &t, &cred_path, None)
+                    .await
+                    .map_err(|err| note_from(&err, ""));
+                let definition = if credential.is_ok() {
+                    let def_path = format!("/v1/custom-providers/{}", api::js_encode(&name));
+                    Some(
+                        delete_json(&b, &t, &def_path, None)
+                            .await
+                            .map_err(|err| note_from(&err, "")),
+                    )
+                } else {
+                    None
+                };
+                map_insert(
+                    &notes,
+                    name,
+                    custom_removal_note(&credential, definition.as_ref()),
+                );
+                request_reload(bump);
+            });
         });
+        let opened = crate::confirm::ask(
+            crate::confirm::ConfirmRequest {
+                title: format!("Remove provider {name}?"),
+                body: "This deletes the provider definition and its stored credential from the daemon. The provider stays gone after a reload.".into(),
+                confirm_label: "Remove provider".into(),
+            },
+            run,
+        );
+        if !opened {
+            map_insert(&notes, name, crate::confirm::BUSY.into());
+        }
     };
 
     let save_base = {
@@ -316,7 +465,7 @@ fn ProviderCard(
                 map_insert(
                     &notes,
                     name.clone(),
-                    "This host is not an editable custom provider.".into(),
+                    edit_host_miss_note(!custom_error.get_untracked().is_empty()).into(),
                 );
                 return;
             };
@@ -410,11 +559,11 @@ fn ProviderCard(
                 </label>
                 <div class="providers-actions">
                     <button type="button" class="primary" data-save-key="true" on:click=save_key>"Save key"</button>
-                    <button type="button" class="secondary" data-test-provider="true" on:click=move |_| test_provider(name_test_key.clone())>"Test"</button>
+                    <button type="button" class="secondary" data-test-provider="true" on:click=move |_| test_provider(name_test_key.clone())>"Test key"</button>
                     {custom.then(|| {
                         let name_remove_key = name_remove_key.clone();
                         view! {
-                            <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_stored(name_remove_key.clone())>"Remove provider"</button>
+                            <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_provider(name_remove_key.clone())>"Remove provider"</button>
                         }
                     })}
                 </div>
@@ -424,7 +573,7 @@ fn ProviderCard(
                 <div class="providers-actions">
                     <button type="button" class="secondary" data-test-provider="true" on:click=move |_| test_provider(name_test_plain.clone())>"Test"</button>
                     {(custom && !builtin).then(|| view! {
-                        <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_stored(name_remove_plain.clone())>"Remove provider"</button>
+                        <button type="button" class="secondary" data-remove-key="true" on:click=move |_| remove_provider(name_remove_plain.clone())>"Remove provider"</button>
                     })}
                 </div>
             })}
@@ -442,6 +591,7 @@ fn ProviderCard(
 pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoView {
     let rows = RwSignal::new(Vec::<ProviderStatus>::new());
     let customs = RwSignal::new(Vec::<CustomProvider>::new());
+    let custom_error = RwSignal::new(String::new());
     let load_error = RwSignal::new(String::new());
     let loading = RwSignal::new(true);
     let drafts = RwSignal::new(HashMap::<String, String>::new());
@@ -456,31 +606,88 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
     let new_note = RwSignal::new(String::new());
 
     let bump = RwSignal::new(0u32);
+    let load_epoch = RwSignal::new(LoadEpoch::new());
+    let loaded_base = RwSignal::new(String::new());
+    let loaded_at = RwSignal::new(String::new());
+    let stale_note = RwSignal::new(String::new());
     Effect::new(move |_| {
         let _ = base.get();
         let _ = bump.get();
         let (b, t) = (base.get_untracked(), token.get_untracked());
-        loading.set(true);
+        let mut view = ProviderView {
+            rows: rows.get_untracked(),
+            customs: customs.get_untracked(),
+            load_error: load_error.get_untracked(),
+            stale_note: stale_note.get_untracked(),
+            loading: loading.get_untracked(),
+            loaded_base: loaded_base.get_untracked(),
+            loaded_at: loaded_at.get_untracked(),
+        };
+        let mut epoch = load_epoch.get_untracked();
+        let ticket = prepare_provider_load(&mut epoch, &mut view, &b);
+        load_epoch.set(epoch);
+        rows.set(view.rows.clone());
+        customs.set(view.customs.clone());
+        load_error.set(view.load_error.clone());
+        stale_note.set(view.stale_note.clone());
+        loading.set(view.loading);
+        loaded_base.set(view.loaded_base.clone());
+        loaded_at.set(view.loaded_at.clone());
         spawn_local(async move {
             let listed = get_text(&b, &t, "/v1/providers").await;
+            if !load_epoch.get_untracked().accept(ticket) {
+                return;
+            }
             let custom = get_text(&b, &t, "/v1/custom-providers").await;
-            match listed {
+            if !load_epoch.get_untracked().accept(ticket) {
+                return;
+            }
+            let rows_result = match listed {
                 Ok(body) => match serde_json::from_str::<ProviderList>(&body) {
-                    Ok(list) => {
-                        publish_key_names(&list.providers);
-                        rows.set(list.providers);
-                        load_error.set(String::new());
-                    }
-                    Err(err) => load_error.set(format!("Could not read providers: {err}")),
+                    Ok(list) => Ok(list.providers),
+                    Err(err) => Err(format!("Could not read providers: {err}")),
                 },
-                Err(err) => load_error.set(note_from(&err, "")),
-            }
-            if let Ok(body) = custom {
-                if let Ok(list) = serde_json::from_str::<CustomList>(&body) {
-                    customs.set(list.providers);
+                Err(err) => Err(note_from(&err, "")),
+            };
+            let published = match &rows_result {
+                Ok(rows) => Some(rows.clone()),
+                Err(_) => None,
+            };
+            let customs_result = match custom {
+                Ok(body) => match serde_json::from_str::<CustomList>(&body) {
+                    Ok(list) => Ok(list.providers),
+                    Err(_) => Err("Could not read custom providers.".into()),
+                },
+                Err(err) => Err(err),
+            };
+            // Main's #1670 surfacing, applied only inside the guarded commit
+            // below: a superseded load must not paint this notice either.
+            let custom_notice = match &customs_result {
+                Ok(_) => String::new(),
+                Err(err) => format!(
+                    "Custom providers could not be loaded — the list below may be incomplete. ({err})"
+                ),
+            };
+            if apply_provider_load(
+                &load_epoch.get_untracked(),
+                ticket,
+                &mut view,
+                rows_result,
+                customs_result,
+                &clock_label(),
+            ) {
+                if let Some(rows) = published {
+                    publish_key_names(&rows);
                 }
+                custom_error.set(custom_notice);
+                rows.set(view.rows);
+                customs.set(view.customs);
+                load_error.set(view.load_error);
+                stale_note.set(view.stale_note);
+                loading.set(view.loading);
+                loaded_base.set(view.loaded_base);
+                loaded_at.set(view.loaded_at);
             }
-            loading.set(false);
         });
     });
 
@@ -525,7 +732,7 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
             new_name.set(String::new());
             new_url.set(String::new());
             new_model.set(String::new());
-            new_note.set("Host saved. The key, if you pasted one, stays on the daemon.".into());
+            new_note.set("Host saved. The key, if you pasted one, stays on the daemon and has not been tested yet.".into());
             request_reload(bump);
         });
     };
@@ -598,12 +805,19 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
             <Show when=move || !load_error.get().is_empty()>
                 <p class="notice" role="alert">{move || load_error.get()}</p>
             </Show>
+            <Show when=move || !stale_note.get().is_empty()>
+                <p class="hint" data-providers-stale="true">{move || stale_note.get()}</p>
+            </Show>
+            <Show when=move || !custom_error.get().is_empty()>
+                <p class="notice" role="alert" data-custom-load-error="true">{move || custom_error.get()}</p>
+            </Show>
             <ul class="providers-list plain">
                 {move || rows.get().into_iter().map(|row| {
                     view! {
                         <ProviderCard
                             row=row
                             customs=customs
+                            custom_error=custom_error
                             drafts=drafts
                             notes=notes
                             base_drafts=base_drafts
@@ -720,9 +934,69 @@ mod tests {
     }
 
     #[test]
-    fn connection_label_is_the_two_states() {
-        assert_eq!(connection_label(true), "Connected");
-        assert_eq!(connection_label(false), "Not connected");
+    fn connection_label_never_calls_a_stored_key_connected() {
+        assert_eq!(connection_label(false, ""), "Not connected");
+        assert_eq!(connection_label(false, "stored"), "Not connected");
+        // #1531: a pasted key is stored, not connected, until probed.
+        assert_eq!(connection_label(true, "stored"), "Key stored — not tested");
+        assert_eq!(connection_label(true, "rejected"), "Key rejected");
+        assert_eq!(connection_label(true, "verified"), "Connected");
+        // Keyless auth (OAuth, device, builtin) is connected as before.
+        assert_eq!(connection_label(true, ""), "Connected");
+    }
+
+    #[test]
+    fn probe_note_reports_each_verdict_plainly() {
+        assert_eq!(
+            probe_note("valid", "the provider accepted the stored key"),
+            "Key verified — the provider accepted the stored key."
+        );
+        let rejected = probe_note("invalid", "the provider refused the stored key (HTTP 401)");
+        assert!(rejected.starts_with("Key rejected"));
+        assert!(rejected.contains("HTTP 401"));
+        let unreachable = probe_note("unreachable", "could not reach the provider");
+        assert!(unreachable.starts_with("Could not verify the key"));
+        assert_eq!(
+            probe_note("no-key", "no API key is stored for this provider"),
+            "No key stored yet — paste a key and Save key first."
+        );
+        let oauth = probe_note("unsupported", "signed in with OAuth — there is no API key to test");
+        assert!(oauth.starts_with("Nothing to test"));
+    }
+
+    #[test]
+    fn custom_removal_note_claims_only_what_happened() {
+        // Full removal: honest success matching the button's label.
+        assert_eq!(
+            custom_removal_note(&Ok(()), Some(&Ok(()))),
+            "Provider removed."
+        );
+        // The issue's partial case, verbatim shape: credential gone,
+        // definition still there, and the note says exactly that.
+        assert_eq!(
+            custom_removal_note(&Ok(()), Some(&Err("no such provider".into()))),
+            "Stored credential removed, but the provider definition could not be deleted: no such provider"
+        );
+        // Credential failure stops the flow: definition never attempted,
+        // and the note must not claim a removal.
+        assert_eq!(
+            custom_removal_note(&Err("HTTP 400".into()), None),
+            "Could not remove the stored credential: HTTP 400 The provider was not removed."
+        );
+        // Credential-only path (no definition step) keeps the old copy.
+        assert_eq!(
+            custom_removal_note(&Ok(()), None),
+            "Stored credential removed."
+        );
+    }
+
+    #[test]
+    fn edit_host_miss_blames_the_load_not_the_host() {
+        assert!(edit_host_miss_note(true).contains("could not be loaded"));
+        assert_eq!(
+            edit_host_miss_note(false),
+            "This host is not an editable custom provider."
+        );
     }
 
     #[test]
