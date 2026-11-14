@@ -3905,7 +3905,8 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
     "app after reload for scheduler presets",
-    textProbe((body) => body.includes("Menu")),
+    // The header Menu is gone (#1590); boot is "Run a command" like the other reloads.
+    textProbe((body) => body.includes("Run a command")),
     { timeout: WAIT_MS, interval: 250 },
   );
   await runPalette("Schedule");
