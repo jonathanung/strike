@@ -18,6 +18,51 @@ const MAX_RENDER_LINES: usize = 2000;
 const MAX_HITS: usize = 2000;
 const MAX_DIFF_CHARS: usize = 20_000;
 
+/// localStorage key for the word-wrap preference (#1412). One global
+/// reading-style choice, like theme: `"on"` / `"off"`.
+pub const WRAP_STORAGE_KEY: &str = "strike.editorWrap";
+
+/// Wrap preference from a stored value: default ON (today's behaviour);
+/// only an explicit `"off"` disables wrapping.
+pub fn wrap_enabled_from_storage(raw: Option<&str>) -> bool {
+    !matches!(raw, Some("off"))
+}
+
+/// Stored / `data-ev-wrap` value for a wrap state.
+pub fn wrap_storage_value(wrap: bool) -> &'static str {
+    if wrap {
+        "on"
+    } else {
+        "off"
+    }
+}
+
+/// Explanatory title for the always-visible Reload control (#1407),
+/// which is disabled while the draft is dirty (`is_dirty`): the load
+/// effect would hold the reload behind the unsaved-edit guard anyway.
+pub fn reload_title(blocked: bool) -> &'static str {
+    if blocked {
+        "Reload is disabled while you have unsaved edits — save or cancel them first"
+    } else {
+        "Reload this file from disk"
+    }
+}
+
+fn wrap_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok().flatten()
+}
+
+fn load_wrap_pref() -> bool {
+    let raw = wrap_storage().and_then(|s| s.get_item(WRAP_STORAGE_KEY).ok().flatten());
+    wrap_enabled_from_storage(raw.as_deref())
+}
+
+fn save_wrap_pref(wrap: bool) {
+    if let Some(s) = wrap_storage() {
+        let _ = s.set_item(WRAP_STORAGE_KEY, wrap_storage_value(wrap));
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hit {
     pub line: u32,
@@ -1940,6 +1985,10 @@ pub fn DocumentPane(
     let goto_text = RwSignal::new(String::new());
     let goto_note = RwSignal::new(String::new());
     let diff_gen = RwSignal::new(0u32);
+    // Word-wrap preference (#1412): global, persisted, default on.
+    // Edit mode's textarea is explicitly out of scope — it wraps per
+    // its own attribute and does not follow this preference in slice 1.
+    let wrap_on = RwSignal::new(load_wrap_pref());
     // Unsaved-edit guard (#1394): the navigation held back while a
     // dirty draft is open, whether applying it on Discard / after a
     // successful Save still has to happen, and the one load a Stay
@@ -2446,6 +2495,7 @@ pub fn DocumentPane(
             data-ev-root="open"
             data-ev-path=move || loaded_path.get()
             data-ev-sha=move || sha.get()
+            data-ev-wrap=move || wrap_storage_value(wrap_on.get())
             on:keydown=on_key
         >
             <div class="ev-bar">
@@ -2564,6 +2614,18 @@ pub fn DocumentPane(
                 <span class="ev-goto-note" data-ev-goto-note="">{move || goto_note.get()}</span>
                 <button type="button" class="secondary" on:click=move |_| step(-1)>"Prev"</button>
                 <button type="button" class="secondary" on:click=move |_| step(1)>"Next"</button>
+                <button
+                    type="button"
+                    class="secondary"
+                    data-ev-reload-bar=true
+                    disabled=move || is_dirty(editing.get(), &draft.get(), &content.get())
+                    title=move || reload_title(is_dirty(editing.get(), &draft.get(), &content.get()))
+                    on:click=move |_| {
+                        if !is_dirty(editing.get_untracked(), &draft.get_untracked(), &content.get_untracked()) {
+                            reload_tick.update(|n| *n += 1);
+                        }
+                    }
+                >"Reload"</button>
                 <button type="button" class="secondary" data-ev-back=true on:click=move |_| {
                     // Back to chat (#1394): hold here instead of
                     // clearing `path` — an empty path unmounts this
@@ -2755,6 +2817,18 @@ pub fn DocumentPane(
                 </Show>
                 <button
                     type="button"
+                    class=move || if wrap_on.get() { "chip on" } else { "chip" }
+                    data-ev-wrap-toggle=true
+                    aria-pressed=move || if wrap_on.get() { "true" } else { "false" }
+                    title="Toggle word wrap for the code and diff views"
+                    on:click=move |_| {
+                        let next = !wrap_on.get_untracked();
+                        wrap_on.set(next);
+                        save_wrap_pref(next);
+                    }
+                >"Wrap"</button>
+                <button
+                    type="button"
                     class="secondary"
                     data-ev-download=true
                     disabled=move || loaded_path.get().is_empty() || binary.get()
@@ -2816,6 +2890,34 @@ pub fn DocumentPane(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wrap_pref_defaults_on_and_only_explicit_off_disables() {
+        assert!(wrap_enabled_from_storage(None));
+        assert!(wrap_enabled_from_storage(Some("")));
+        assert!(wrap_enabled_from_storage(Some("on")));
+        assert!(wrap_enabled_from_storage(Some("garbage")));
+        assert!(!wrap_enabled_from_storage(Some("off")));
+        assert_eq!(wrap_storage_value(true), "on");
+        assert_eq!(wrap_storage_value(false), "off");
+        // Round-trip through the storage representation.
+        assert!(wrap_enabled_from_storage(Some(wrap_storage_value(true))));
+        assert!(!wrap_enabled_from_storage(Some(wrap_storage_value(false))));
+        assert_eq!(WRAP_STORAGE_KEY, "strike.editorWrap");
+    }
+
+    #[test]
+    fn reload_blocked_only_while_editing_with_unsaved_changes() {
+        // Not editing: safe even though the texts differ (stale view).
+        assert!(!is_dirty(false, "draft", "on disk"));
+        // Editing but untouched draft: reload loses nothing.
+        assert!(!is_dirty(true, "same", "same"));
+        // Editing with unsaved changes: the load effect would reset
+        // editing and clobber the draft, so Reload must be disabled.
+        assert!(is_dirty(true, "edited", "on disk"));
+        assert!(reload_title(true).contains("unsaved edits"));
+        assert!(reload_title(false).contains("from disk"));
+    }
 
     #[test]
     fn linkify_paths_and_skips_urls() {
