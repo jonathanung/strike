@@ -138,6 +138,9 @@ type bootstrapResponse struct {
 	Skills           []map[string]any   `json:"skills"`
 	ProtocolOps      []string           `json:"protocolOps"`
 	ComposerCommands []triggers.Command `json:"composerCommands,omitempty"`
+	// LoadWarnings lists skill/agent files that failed to load or loaded
+	// with a problem (#1386). Omitted when there are none.
+	LoadWarnings []loadWarning `json:"loadWarnings,omitempty"`
 }
 
 var browserProtocolOps = []string{
@@ -207,7 +210,14 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	if live {
 		protocolOps = browserProtocolOpsWithTeamControl()
 	}
-	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: !live, Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps, ComposerCommands: triggers.Commands()})
+	writeJSON(w, http.StatusOK, bootstrapResponse{Version: version.Version, AuthRequired: s.opts.Auth, AttachOnly: !live, Capabilities: c, Status: status, Agents: agents, Skills: skills, ProtocolOps: protocolOps, ComposerCommands: triggers.Commands(), LoadWarnings: s.loadWarnings(statusCWD(status))})
+}
+
+func statusCWD(st *StatusSnapshot) string {
+	if st == nil {
+		return ""
+	}
+	return st.CWD
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
