@@ -29,6 +29,7 @@ mod providers;
 mod rule_author;
 mod sandbox_explain;
 mod schedule;
+mod scheduler_presets;
 mod model;
 mod notify;
 mod outcome;
