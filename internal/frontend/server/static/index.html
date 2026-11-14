@@ -42,8 +42,8 @@
 
 
 <script type="module">
-import init, * as bindings from '/assets/strike-webui-cea7d84b50ca45b1.js';
-const wasm = await init({ module_or_path: '/assets/strike-webui-cea7d84b50ca45b1_bg.wasm' });
+import init, * as bindings from '/assets/strike-webui-68e01f974c50cd30.js';
+const wasm = await init({ module_or_path: '/assets/strike-webui-68e01f974c50cd30_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -54,7 +54,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
 </script>
 <script src="/assets/register.js" defer></script>
 
-<link rel="modulepreload" href="/assets/strike-webui-cea7d84b50ca45b1.js" crossorigin="anonymous" integrity="sha384-4uvXoHQMNewxmB0hJ0sUpghxu1TM5R9Ikw6CekOY382nf/07oithR9KQAyLOlLp5"><link rel="preload" href="/assets/strike-webui-cea7d84b50ca45b1_bg.wasm" crossorigin="anonymous" integrity="sha384-gZaqhXLs9gDSyU1Qst+as8kcLS5nPT0q7JhBEyUe5ijxiarSrNd1OyCMRlLd8H5l" as="fetch" type="application/wasm"></head>
+<link rel="modulepreload" href="/assets/strike-webui-68e01f974c50cd30.js" crossorigin="anonymous" integrity="sha384-1h2AVTmZVJDTbcXWshv/Kb5fmp18Ex2YCx8SE/8dfZX9+AhHGvbgYuBO7vZDZGu8"><link rel="preload" href="/assets/strike-webui-68e01f974c50cd30_bg.wasm" crossorigin="anonymous" integrity="sha384-G+9nF+c3o5gTItzOxjiTGc+jdNFELprWMp0Gwf029U1kZAOorcjBKmTz1FSaeBlF" as="fetch" type="application/wasm"></head>
 <body>
 <!-- Boot shell: shown until the cockpit mounts (main.rs removes it on
      mount). If the gateway is unreachable and only the cached shell
