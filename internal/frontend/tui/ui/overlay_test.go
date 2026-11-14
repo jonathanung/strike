@@ -218,3 +218,58 @@ func sgrMarkerPaintsGlyph(s string, markers ...string) bool {
 	}
 	return false
 }
+
+func TestOverlayTopRight(t *testing.T) {
+	th := theme.Default().Resolve()
+	margin := th.Spacing.XS
+	row := strings.Repeat(".", 20)
+	tests := []struct {
+		name    string
+		bg      string
+		fg      string
+		width   int
+		wantTop string // stripped first row; "" means bg unchanged
+	}{
+		{"splices right aligned", row + "\n" + row, "XYZ", 20,
+			strings.Repeat(".", 20-3-margin) + "XYZ" + strings.Repeat(".", margin)},
+		{"pads short row", "ab", "XY", 10,
+			"ab" + strings.Repeat(" ", 10-2-margin-2) + "XY"},
+		{"too wide is noop", row, strings.Repeat("X", 30), 20, ""},
+		{"empty fg is noop", row, "", 20, ""},
+		{"zero width is noop", row, "X", 0, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := OverlayTopRight(th, tt.bg, tt.fg, tt.width)
+			if tt.wantTop == "" {
+				if out != tt.bg {
+					t.Fatalf("out = %q, want bg unchanged", out)
+				}
+				return
+			}
+			lines := strings.Split(out, "\n")
+			if got := ansi.Strip(lines[0]); got != tt.wantTop {
+				t.Fatalf("top row = %q, want %q", got, tt.wantTop)
+			}
+			bgLines := strings.Split(tt.bg, "\n")
+			for i := 1; i < len(bgLines); i++ {
+				if lines[i] != bgLines[i] {
+					t.Errorf("row %d changed: %q", i, lines[i])
+				}
+			}
+		})
+	}
+}
+
+func TestOverlayTopRightKeepsBadgeStyling(t *testing.T) {
+	th := theme.Default().Resolve()
+	badge := Badge(th, ToneAccent, "sent")
+	bg := lipgloss.NewStyle().Foreground(th.Accent).Render(strings.Repeat("a", 30))
+	out := OverlayTopRight(th, bg, badge, 30)
+	if !strings.Contains(out, badge) {
+		t.Fatalf("badge styling not preserved: %q", out)
+	}
+	if w := ansi.StringWidth(out); w != 30 {
+		t.Fatalf("row width = %d, want 30", w)
+	}
+}

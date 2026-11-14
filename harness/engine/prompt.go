@@ -364,14 +364,6 @@ func (e *Engine) composeSystemLayers() []promptLayer {
 		})
 	}
 
-	if env := e.environmentPrompt(); env != "" {
-		layers = append(layers, promptLayer{
-			Kind:   protocol.PromptLayerEnvironment,
-			Source: "env",
-			Mode:   protocol.PromptLayerAppend,
-			Text:   env,
-		})
-	}
 	for _, inst := range e.opts.Instructions {
 		if s := strings.TrimSpace(inst); s == "" {
 			continue
@@ -382,6 +374,17 @@ func (e *Engine) composeSystemLayers() []promptLayer {
 			Source: source,
 			Mode:   protocol.PromptLayerAppend,
 			Text:   inst,
+		})
+	}
+	// Dynamic tail (#1200): environment (date), memory, and ledger churn between
+	// turns, so they follow every stable layer and ride outside the cached
+	// system block. Keep new layers above this line unless they churn too.
+	if env := e.environmentPrompt(); env != "" {
+		layers = append(layers, promptLayer{
+			Kind:   protocol.PromptLayerEnvironment,
+			Source: "env",
+			Mode:   protocol.PromptLayerAppend,
+			Text:   env,
 		})
 	}
 	if text, source := e.projectMemoryLayer(); text != "" {
@@ -446,6 +449,40 @@ func (e *Engine) decisionLedgerLayer() (text, source string) {
 // system returns the composed system prompt for the next provider request.
 func (e *Engine) system() string {
 	return joinPromptLayerTexts(e.systemLayers())
+}
+
+// dynamicPromptKinds are layers whose text changes within a session (date
+// rollover, memory_write, ledger_write). Providers with prompt-cache
+// breakpoints keep them after the cached stable system block.
+var dynamicPromptKinds = map[string]struct{}{
+	protocol.PromptLayerEnvironment: {},
+	protocol.PromptLayerMemory:      {},
+	protocol.PromptLayerLedger:      {},
+}
+
+// requestSystem orders layers stable-then-dynamic and returns them with the
+// joined system text and its per-block partition for provider.Request.
+// composeSystemLayers already emits dynamic kinds last; the stable partition
+// here keeps System, SystemBlocks, and inspect attribution consistent anyway.
+func requestSystem(layers []promptLayer) (ordered []promptLayer, system string, blocks []provider.SystemBlock) {
+	stable := make([]promptLayer, 0, len(layers))
+	var dynamic []promptLayer
+	for _, layer := range layers {
+		if _, ok := dynamicPromptKinds[layer.Kind]; ok {
+			dynamic = append(dynamic, layer)
+			continue
+		}
+		stable = append(stable, layer)
+	}
+	ordered = append(stable, dynamic...)
+	system = joinPromptLayerTexts(ordered)
+	if s := joinPromptLayerTexts(stable); s != "" {
+		blocks = append(blocks, provider.SystemBlock{Text: s})
+	}
+	if d := joinPromptLayerTexts(dynamic); d != "" {
+		blocks = append(blocks, provider.SystemBlock{Text: d, Dynamic: true})
+	}
+	return ordered, system, blocks
 }
 
 func joinPromptLayerTexts(layers []promptLayer) string {

@@ -68,6 +68,13 @@ func TestUsageAndAuditRoutes(t *testing.T) {
 	if usage.Sessions[0].CacheRead != 1_000_000 || usage.Sessions[0].CostUSD != 3+6+1 {
 		t.Fatalf("cost = %+v, want input 3 output 6 cache 1", usage.Sessions[0])
 	}
+	// By model (#1470) rides the same payload, aggregated per event.
+	if len(usage.Models) != 1 || usage.Models[0].Provider != "openai" || usage.Models[0].Model != "priced" || usage.Models[0].CostUSD != 3+6+1 || usage.Models[0].Sessions != 1 {
+		t.Fatalf("models = %+v, want one openai/priced row at $10", usage.Models)
+	}
+	if !strings.Contains(res.Body.String(), `"models":[{`) {
+		t.Fatalf("usage payload has no models array: %s", res.Body.String())
+	}
 
 	res = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPut, "/v1/usage/budget", strings.NewReader(`{"dailyUsd":-1}`))
