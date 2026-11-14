@@ -199,3 +199,29 @@ func TestRedactEventInputQueued(t *testing.T) {
 		t.Fatalf("plain item = %q", got.Items[1].Text)
 	}
 }
+
+func TestRedactEventVerificationTriage(t *testing.T) {
+	key := "sk-abcdefghijklmnopqrstuvwxyz0123456789"
+	tri := &protocol.VerificationTriage{
+		Failures:       []protocol.VerificationFailure{{Package: "example.com/a", Tests: []string{"TestA"}}},
+		FocusedCommand: "go test './a' -count=1",
+		OriginalOutput: "token=" + key + "\nFAIL",
+		Attempts:       []protocol.VerificationAttempt{{Command: "go test './a' -count=1", Output: "leak " + key, Error: "exit 1"}},
+	}
+	ev := secret.RedactEvent(protocol.VerificationCompleted{Report: protocol.VerificationReport{
+		Checks: []protocol.VerificationCheck{{Kind: "cmd", Value: "make test", Triage: tri}},
+	}})
+	got := ev.(protocol.VerificationCompleted).Report.Checks[0].Triage
+	if got == nil || got == tri {
+		t.Fatalf("triage not copied: %p vs %p", got, tri)
+	}
+	if strings.Contains(got.OriginalOutput, key) || strings.Contains(got.Attempts[0].Output, key) {
+		t.Fatalf("triage leaked key: %+v", got)
+	}
+	if !strings.Contains(tri.OriginalOutput, key) || !strings.Contains(tri.Attempts[0].Output, key) {
+		t.Fatal("redaction mutated the source event")
+	}
+	if got.FocusedCommand != tri.FocusedCommand || got.Failures[0].Tests[0] != "TestA" || got.Attempts[0].Error != "exit 1" {
+		t.Fatalf("structural fields changed: %+v", got)
+	}
+}

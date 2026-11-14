@@ -2,6 +2,7 @@ package audit
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/jonathanung/strike/pkg/telemetry"
@@ -23,6 +24,9 @@ const (
 	FamilyHook = "hook"
 	// FamilyServeOp is strike serve control-plane ops (type + source IP only).
 	FamilyServeOp = "serve_op"
+	// FamilyScriptRun is script-schedule run outcomes and lifecycle changes
+	// (docs/design/script-schedules.md, "Audit").
+	FamilyScriptRun = "script_run"
 )
 
 // Record is one append-only audit line (already redacted when written).
@@ -48,6 +52,7 @@ var Families = []string{
 	FamilyToolchainMatch,
 	FamilyHook,
 	FamilyServeOp,
+	FamilyScriptRun,
 }
 
 // HookPayload is family hook (shell/declarative enforcement).
@@ -82,6 +87,30 @@ type ToolchainMatchPayload struct {
 	Matched string `json:"matched,omitempty" telemetry:"redact=scrub"`
 	Action  string `json:"action" telemetry:"redact=none"`
 	Source  string `json:"source,omitempty" telemetry:"redact=none"`
+}
+
+// ScriptRunPayload is family script_run: one record per schedule run outcome
+// and one per lifecycle change. Command, Dir, OutputTail and Error are
+// scrubbed; CommandHash and the ids are the correlation and survive as-is.
+type ScriptRunPayload struct {
+	ScheduleID string `json:"scheduleId" telemetry:"redact=none"`
+	RunID      string `json:"runId,omitempty" telemetry:"redact=none"` // empty for lifecycle records
+	// Status is a run outcome (started|finished|failed|denied|skipped|missed|error)
+	// or a lifecycle record (armed|rearmed|paused|resumed|deleted).
+	Status      string    `json:"status" telemetry:"redact=none"`
+	Decision    string    `json:"decision,omitempty" telemetry:"redact=none"` // allow|armed|deny|hook_block
+	Mode        string    `json:"mode,omitempty" telemetry:"redact=none"`
+	Sandbox     string    `json:"sandbox,omitempty" telemetry:"redact=none"` // dial + applied/degraded
+	Command     string    `json:"command" telemetry:"redact=scrub"`
+	CommandHash string    `json:"commandHash" telemetry:"redact=none"`
+	Dir         string    `json:"dir" telemetry:"redact=scrub"`
+	ClientIP    string    `json:"clientIp,omitempty" telemetry:"redact=none"` // lifecycle records only
+	StartedAt   time.Time `json:"startedAt,omitzero"`
+	EndedAt     time.Time `json:"endedAt,omitzero"`
+	ExitCode    *int      `json:"exitCode,omitempty"`
+	Timeout     string    `json:"timeout,omitempty" telemetry:"redact=none"`
+	OutputTail  string    `json:"outputTail,omitempty" telemetry:"redact=scrub"` // last 4 KiB
+	Error       string    `json:"error,omitempty" telemetry:"redact=scrub"`
 }
 
 // redactPayload runs family-specific redaction when the payload matches a
@@ -126,6 +155,21 @@ func redactPayload(family string, payload any) (json.RawMessage, error) {
 		var v HookPayload
 		b, _ := json.Marshal(payload)
 		_ = json.Unmarshal(b, &v)
+		if err := telemetry.RedactRecord(&v); err != nil {
+			return nil, err
+		}
+		return json.Marshal(v)
+	case FamilyScriptRun:
+		// Decode errors are fatal here (unlike the older cases): a malformed
+		// field would otherwise truncate the record silently.
+		var v ScriptRunPayload
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("audit: script_run payload: %w", err)
+		}
+		if err := json.Unmarshal(b, &v); err != nil {
+			return nil, fmt.Errorf("audit: script_run payload: %w", err)
+		}
 		if err := telemetry.RedactRecord(&v); err != nil {
 			return nil, err
 		}
