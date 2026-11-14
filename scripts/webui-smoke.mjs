@@ -576,8 +576,11 @@ try {
           acid: cs.getPropertyValue("--acid").trim(),
           ground: cs.getPropertyValue("--ground").trim(),
           title: document.title,
+          // #1590 A6/A7: the header prints no version/gateway text; the
+          // connection state ("Connected · v…") is the brand mark's title.
+          version: document.querySelector(".brand-mark")?.getAttribute("title") || "",
           status: mark ? mark.getAttribute("data-status") : "",
-          chip: !!document.querySelector(".status-chip-hit"),
+          chip: !!document.querySelector(".status-chip"),
         });
       })()`,
       returnByValue: true,
@@ -594,9 +597,9 @@ try {
       const text = parsed.body || "";
       return {
         ok:
-          text.includes("Menu") &&
+          text.includes("Run a command") &&
           text.includes("Activity") &&
-          text.includes("Connected") &&
+          (parsed.version || "").includes("Connected") &&
           parsed.acid === "#7c3aed" &&
           !!parsed.chip &&
           statusIds.includes(parsed.status || "") &&
@@ -612,11 +615,13 @@ try {
   const title = boot.title || "";
   const statusId = boot.status || "";
   const chip = !!boot.chip;
-  const want = ["Menu", "Strike", "Activity", "Files", "Changes", "Git", "Terminal", "Approval", "Connected"];
+  const version = boot.version || "";
+  const want = ["Run a command", "Strike", "Activity", "Files", "Changes", "Git", "Terminal", "Approval"];
   const missingText = want.filter((s) => !text.includes(s));
+  if (!version.includes("Connected")) missingText.push("Connected (brand-mark title)");
   if (missingText.length || acid !== "#7c3aed" || ground !== "#14131c" || !chip || !statusIds.includes(statusId) || !title.includes("Strike")) {
     throw new Error(
-      `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} text=${text.slice(0, 400)}\n${await diagnostics()}`,
+      `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} version=${version} text=${text.slice(0, 400)}\n${await diagnostics()}`,
     );
   }
   // Approvals (#1266): mode menu, Yolo confirm + Escape, and the
@@ -745,6 +750,95 @@ try {
     throw new Error(`remove deny: ${apprRemoved.status} ${apprRemoved.text.slice(0, 300)}`);
   }
 
+  // Rule duplicate (#1433): the surviving smoke-allow row's Duplicate
+  // button prefills the Add form verbatim and focuses Pattern. Prefill
+  // alone creates nothing; the copy is stored only through the existing
+  // Add path, dangerous-add confirm included.
+  await apprOpenPalette();
+  await waitFor(
+    "rule duplicate button in the rules panel",
+    async () => {
+      const hit = await apprEval(`!!document.querySelector('[data-rule-duplicate]')`);
+      if (hit === true) return { ok: true };
+      await apprEval(`document.querySelector('[data-command-id="approvals.rules"]')?.click()`);
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const dupClicked = await apprEval(`(() => {
+    const row = [...document.querySelectorAll(".approvals-rule")].find((li) => (li.textContent || "").includes("smoke-allow"));
+    const btn = row ? row.querySelector("[data-rule-duplicate]") : null;
+    if (!btn) return "missing";
+    btn.click();
+    return "clicked";
+  })()`);
+  if (dupClicked !== "clicked") {
+    throw new Error(`rule duplicate click: ${dupClicked}`);
+  }
+  await waitFor(
+    "duplicate prefill (all four fields, pattern focused)",
+    async () => {
+      const state = JSON.parse(
+        await apprEval(`JSON.stringify((() => {
+          const pattern = document.querySelector('input[aria-label="Pattern"]');
+          return {
+            scope: document.querySelector('select[aria-label="Rule scope"]')?.value || "",
+            permission: document.querySelector('select[aria-label="Permission name"]')?.value || "",
+            pattern: pattern?.value || "",
+            action: document.querySelector('select[aria-label="Rule action"]')?.value || "",
+            focused: document.activeElement === pattern,
+          };
+        })())`),
+      );
+      return {
+        ok:
+          state.scope === "global" &&
+          state.permission === "bash" &&
+          state.pattern === "smoke-allow" &&
+          state.action === "allow" &&
+          state.focused,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const prefillListed = await fetch(`http://127.0.0.1:${port}/v1/permissions/rules`, { headers: apprAuth });
+  const prefillDoc = JSON.parse(await prefillListed.text());
+  if ((prefillDoc.rules || []).filter((row) => row.pattern === "smoke-allow").length !== 1) {
+    throw new Error(`prefill must not create a rule: ${JSON.stringify(prefillDoc.rules)}`);
+  }
+  await apprEval(`(() => {
+    const input = document.querySelector('input[aria-label="Pattern"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "smoke-allow-copy");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    [...document.querySelectorAll(".approvals-form button")]
+      .find((b) => (b.textContent || "").trim() === "Add rule")?.click();
+    return "ok";
+  })()`);
+  await waitFor(
+    "duplicated add hits the dangerous-add confirm",
+    async () => {
+      const t = await apprText();
+      if (t.includes("Add allow rule?")) {
+        await apprEval(`[...document.querySelectorAll(".approvals-dialog button")].find((b) => (b.textContent || "").trim() === "Add rule")?.click()`);
+        return { ok: true };
+      }
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await waitFor(
+    "duplicated rule stored beside the original",
+    async () => {
+      const res = await fetch(`http://127.0.0.1:${port}/v1/permissions/rules`, { headers: apprAuth });
+      const doc = JSON.parse(await res.text());
+      const pats = (doc.rules || []).map((row) => row.pattern);
+      return { ok: pats.includes("smoke-allow") && pats.includes("smoke-allow-copy") };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await apprEval(`[...document.querySelectorAll(".approvals-panel-head button")].find((b) => (b.textContent || "").trim() === "Close")?.click()`);
+
   const evalValue = async (expression) => {
     const ev = await send("Runtime.evaluate", { expression, returnByValue: true });
     if (ev.result?.exceptionDetails) {
@@ -820,6 +914,7 @@ try {
           open: !!pop,
           pop: pop ? pop.innerText : "",
           body: document.body ? document.body.innerText : "",
+          version: document.querySelector(".brand-mark")?.getAttribute("title") || "",
           tokenField: !!pop?.querySelector('input[type="password"]'),
           visibleInputs,
         });
@@ -828,7 +923,7 @@ try {
         ok:
           !!parsed.open &&
           parsed.tokenField &&
-          (parsed.body || "").includes("Connected") &&
+          (parsed.version || "").includes("Connected") &&
           (parsed.pop || "").includes("Token for this gateway"),
         ...parsed,
       };
@@ -993,6 +1088,117 @@ try {
     },
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Folder Remove confirm (#1556): folder removal now lives behind the
+  // palette (declutter #1669), and its bind must open the shared confirm
+  // dialog stating both halves — sessions stay (unfiled, not deleted) and
+  // the grouping cannot be restored. Cancelling leaves the folder;
+  // confirming removes it while its sessions stay in the list.
+  const smokeFolder = await call("POST", "/v1/session-list/folders", { name: "Smoke folder" });
+  if (smokeFolder.status !== 201) {
+    throw new Error(`smoke folder create ${smokeFolder.status} ${smokeFolder.text}`);
+  }
+  // File Alpha session into the folder so Remove proves the "sessions stay,
+  // become unfiled" half of the confirm copy, not just the folder vanishing.
+  const smokeFolderId = JSON.parse(smokeFolder.text).id;
+  const filed = await call("PATCH", "/v1/session-list/sessions/alpha-session", { folderId: smokeFolderId });
+  if (filed.status !== 200) {
+    throw new Error(`file alpha into smoke folder ${filed.status} ${filed.text}`);
+  }
+  const folderRowProbe = async () => {
+    const raw = await evaluate(`(() => {
+      const row = [...document.querySelectorAll(".ss-folder-row")].find((r) => r.textContent.includes("Smoke folder"));
+      return JSON.stringify({ row: !!row });
+    })()`);
+    return JSON.parse(raw || "{}");
+  };
+  await waitFor(
+    "smoke folder row to render",
+    async () => {
+      const p = await folderRowProbe();
+      return { ok: p.row, ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const runFolderRemove = async () => {
+    await runPalette("Remove folder");
+    await waitFor(
+      "palette folder choices (Smoke folder)",
+      async () => {
+        const text = String(
+          (await evaluate(`(document.querySelector('[data-nav="palette-dialog"]') || {}).innerText || ""`)) || "",
+        );
+        return { ok: text.includes("Smoke folder"), text: text.slice(0, 240) };
+      },
+      { timeout: STEP_MS, interval: 100 },
+    );
+    await evaluate(`(() => {
+      const input = document.querySelector('[data-nav="palette-dialog"] input');
+      const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+      proto.set.call(input, "Smoke folder");
+      input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "Smoke folder" }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+  };
+  await runFolderRemove();
+  const folderDialog = await waitFor(
+    "folder remove confirm dialog (sessions stay, grouping cannot be restored)",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const dialog = document.querySelector("[data-confirm='dialog']");
+        return JSON.stringify({ ok: !!dialog, text: dialog ? dialog.innerText : "" });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: p.ok && p.text.includes("Sessions stay") && p.text.includes("cannot be restored"),
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!folderDialog.text.includes("Remove folder")) {
+    throw new Error(`folder confirm copy wrong: ${String(folderDialog.text).slice(0, 300)}`);
+  }
+  await evaluate(`document.querySelector("[data-confirm='cancel']").click()`);
+  await waitFor(
+    "folder confirm to close on cancel, folder intact",
+    async () => {
+      const p = await folderRowProbe();
+      return {
+        ok: p.row && (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === false,
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await runFolderRemove();
+  await waitFor(
+    "folder remove confirm dialog to reopen",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === true,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector("[data-confirm='accept']").click()`);
+  await waitFor(
+    "folder removed after confirm, sessions still listed",
+    async () => {
+      const p = await folderRowProbe();
+      const body = (await evaluate(`document.body.innerText`)) || "";
+      return { ok: !p.row && body.includes("Alpha session"), folder: p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const afterRemove = await call("GET", "/v1/session-list");
+  const afterOrg = JSON.parse(afterRemove.text || "{}");
+  const alphaOrg = (afterOrg.sessions || {})["alpha-session"];
+  if (
+    afterRemove.status !== 200 ||
+    (afterOrg.folders || []).some((f) => f.id === smokeFolderId) ||
+    (alphaOrg && alphaOrg.folderId)
+  ) {
+    throw new Error(`folder remove did not unfile alpha: ${afterRemove.status} ${afterRemove.text.slice(0, 300)}`);
+  }
   const before = await send("Runtime.evaluate", {
     expression: `(() => {
       const panel = document.querySelector(".ss-panel");
@@ -1033,6 +1239,33 @@ try {
   if (selected.result?.result?.value !== "yes") {
     throw new Error("keyboard x did not select the cursor session");
   }
+  // Session list actions (#1414/#1454/#1458): every session row carries a
+  // Copy ID button (data-ss-copy-id = the row's session id) and an
+  // Archive/Unarchive button, and the panel exposes the sort select.
+  // Clicking Copy ID must produce honest feedback — "Session ID copied."
+  // only when the browser accepted the write, otherwise the generic
+  // manual-copy failure line; never silence.
+  const rowActions = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const sort = document.querySelector("[data-ss-sort]");
+      const copy = document.querySelector("[data-ss-copy-id]");
+      const arch = document.querySelector("[data-ss-archive-id]");
+      if (!sort || !copy || !arch) return "missing";
+      const row = copy.closest("[data-session-id]");
+      if (!row || row.getAttribute("data-session-id") !== copy.getAttribute("data-ss-copy-id")) return "copy-hook-mismatch";
+      copy.click();
+      return "clicked";
+    })()`,
+    returnByValue: true,
+  });
+  if (rowActions.result?.result?.value !== "clicked") {
+    throw new Error(`session row actions missing (${rowActions.result?.result?.value})`);
+  }
+  await waitFor(
+    "copy ID feedback",
+    textProbe((t) => t.includes("Session ID copied.") || t.includes("Copy didn't work in this browser.")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
   // Needs you chip (#1451): the chip renders beside All/Unread, activates,
   // and filters the seeded (non-waiting) sessions out; All restores them.
   // Waiting-row rendering itself is covered by session_list unit tests —
@@ -1230,7 +1463,18 @@ try {
   })()`, "bad gateway command");
   await evaluate(`[...document.querySelectorAll("[data-command-id]")].find((el) => (el.textContent || "").includes("Switch to gateway: bad"))?.click()`);
   await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
-  await waitUntil(`document.body.innerText.includes("Unreachable")`, "bad gateway is unreachable");
+  // The gateway status chip is no longer rendered in the header (#1590 A6):
+  // gateway health lives in the Gateways panel, so read "Unreachable" there.
+  await waitUntil(`(() => {
+    if (document.querySelector(".gw-pop")) return true;
+    if (!document.querySelector('[data-nav="palette-dialog"]')) {
+      document.querySelector('[data-nav="palette"]')?.click();
+      return false;
+    }
+    document.querySelector('[data-command-id="gateways.open"]')?.click();
+    return false;
+  })()`, "gateways panel for bad gateway status");
+  await waitUntil(`document.body.innerText.includes("Could not reach this daemon")`, "bad gateway is unreachable");
   await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
   await runPalette("Data locations");
   await waitUntil(
@@ -1251,7 +1495,18 @@ try {
   })()`, "this gateway command");
   await evaluate(`[...document.querySelectorAll("[data-command-id]")].find((el) => (el.textContent || "").includes("Switch to gateway: This gateway"))?.click()`);
   await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
-  await waitUntil(`document.body.innerText.includes("Connected")`, "this gateway is connected");
+  // "Connected" was the header gateway chip / version text, both removed by
+  // #1590 (A6/A7): read it from the Gateways panel detail instead.
+  await waitUntil(`(() => {
+    if (document.querySelector(".gw-pop")) return true;
+    if (!document.querySelector('[data-nav="palette-dialog"]')) {
+      document.querySelector('[data-nav="palette"]')?.click();
+      return false;
+    }
+    document.querySelector('[data-command-id="gateways.open"]')?.click();
+    return false;
+  })()`, "gateways panel for reconnected status");
+  await waitUntil(`(() => { const pop = document.querySelector(".gw-pop"); return !!pop && pop.innerText.includes("loopback") && !pop.innerText.includes("Could not reach this daemon"); })()`, "this gateway is connected");
   await evaluate(`document.querySelector('[data-action="open-settings"]').click()`);
   await runPalette("Data locations");
   await waitUntil(
@@ -1394,8 +1649,8 @@ try {
   });
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
-    "cockpit reload after attachment checks (Menu, Memory)",
-    textProbe((t) => t.includes("Menu") && t.includes("Terminal")),
+    "cockpit reload after attachment checks (Run a command, Terminal)",
+    textProbe((t) => t.includes("Run a command") && t.includes("Terminal")),
     { timeout: WAIT_MS, interval: 250 },
   );
 
@@ -1412,7 +1667,9 @@ try {
       { timeout: WAIT_MS, interval: 250 },
     );
   };
-  await openView("Usage", ["Input tokens", "Daily budget (USD)"]);
+  // Usage export (#1481): the client-side Export controls render beside
+  // the report even before any usage is seeded.
+  await openView("Usage", ["Input tokens", "Daily budget (USD)", "Export JSON", "Export CSV (by day)"]);
   await openView("Audit", ["Verify chain", "Append-only hash chain"]);
   const auditProbe = await waitFor(
     "audit chain state (Chain intact / No audit entries / Not configured)",
@@ -1441,7 +1698,7 @@ try {
       const parsed = await readCockpit();
       const body = parsed.body || "";
       return {
-        ok: body.includes("Menu") && body.includes("Terminal"),
+        ok: body.includes("Run a command") && body.includes("Terminal"),
         body: body.slice(0, 300),
       };
     },
@@ -1507,6 +1764,102 @@ try {
       `memory export route failed status=${exportRes.status} disposition=${exportDisposition} body=${exportBody.slice(0, 500)}`,
     );
   }
+
+  // Memory Delete confirm (#1554): Delete must open the shared confirm
+  // dialog naming the entry; cancelling leaves the entry, confirming
+  // removes it. Runs last in this section — later checks do not use
+  // smoke-pref.
+  const memRowProbe = async () => {
+    const raw = await evaluate(`(() => {
+      const row = [...document.querySelectorAll(".storage-row")].find((r) => r.textContent.includes("smoke-pref"));
+      return JSON.stringify({ row: !!row, del: !!(row && row.querySelector("[data-action='delete-memory']")) });
+    })()`);
+    return JSON.parse(raw || "{}");
+  };
+  const clickMemoryDeleteOnce = async () =>
+    evaluate(`(() => {
+      const row = [...document.querySelectorAll(".storage-row")].find((r) => r.textContent.includes("smoke-pref"));
+      const btn =
+        row &&
+        (row.querySelector("[data-action='delete-memory']") ||
+          [...row.querySelectorAll("button")].find((b) => b.textContent.trim() === "Delete"));
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+  // The panel re-renders its rows when the async memory/knowledge loads
+  // settle, so a single-shot click can land in the empty window between
+  // renders (CI run 40971001626 failed exactly there). Retry the click
+  // until the button is present, like every other probe in this harness.
+  const clickMemoryDelete = async () => {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      if ((await clickMemoryDeleteOnce()) === "clicked") return "clicked";
+      await delay(200);
+    }
+    return "missing";
+  };
+  if ((await clickMemoryDelete()) !== "clicked") {
+    const diag = await evaluate(`(() => {
+      const rows = [...document.querySelectorAll(".storage-row")];
+      const row = rows.find((r) => r.textContent.includes("smoke-pref"));
+      return JSON.stringify({
+        rows: rows.length,
+        globalBtn: !!document.querySelector("[data-action='delete-memory']"),
+        rowHtml: row ? row.outerHTML.slice(0, 400) : null,
+      });
+    })()`).catch((e) => `diag failed: ${e}`);
+    throw new Error(`memory Delete button click failed diag=${diag}`);
+  }
+  const memDialog = await waitFor(
+    "memory delete confirm dialog (entry named, cannot be undone)",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const dialog = document.querySelector("[data-confirm='dialog']");
+        const err = document.querySelector(".storage-error");
+        return JSON.stringify({ ok: !!dialog, text: dialog ? dialog.innerText : "", err: err ? err.textContent : "" });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: p.ok && p.text.includes("smoke-pref") && p.text.includes("cannot be undone"),
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!memDialog.text.includes("Delete memory")) {
+    throw new Error(`memory confirm copy wrong: ${String(memDialog.text).slice(0, 300)}`);
+  }
+  await evaluate(`document.querySelector("[data-confirm='cancel']").click()`);
+  await waitFor(
+    "memory delete confirm to close on cancel, entry intact",
+    async () => {
+      const p = await memRowProbe();
+      return {
+        ok: p.row && (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === false,
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if ((await clickMemoryDelete()) !== "clicked") {
+    throw new Error("memory Delete button click (confirm path) failed");
+  }
+  await waitFor(
+    "memory delete confirm dialog to reopen",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === true,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector("[data-confirm='accept']").click()`);
+  await waitFor(
+    "memory entry gone after confirmed delete",
+    async () => {
+      const p = await memRowProbe();
+      return { ok: !p.row, ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
 
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
   // that predates Goals has no palette command and fails here.
@@ -1615,6 +1968,78 @@ try {
     },
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Goal Abort confirm (#1559): Abort is terminal, so it must open the
+  // shared confirm dialog; cancelling leaves the goal in Needs you,
+  // confirming moves it to Aborted.
+  const clickGoalAbortOnce = async () =>
+    evaluate(`(() => {
+      const btn = document.querySelector("[data-action='abort-goal']");
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+  // Same re-render race as the Memory Delete click above: retry until
+  // the button is present instead of failing on a single-shot probe.
+  const clickGoalAbort = async () => {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      if ((await clickGoalAbortOnce()) === "clicked") return "clicked";
+      await delay(200);
+    }
+    return "missing";
+  };
+  if ((await clickGoalAbort()) !== "clicked") {
+    throw new Error("goal Abort button click failed");
+  }
+  const goalDialog = await waitFor(
+    "goal abort confirm dialog (cannot be resumed)",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const dialog = document.querySelector("[data-confirm='dialog']");
+        return JSON.stringify({ ok: !!dialog, text: dialog ? dialog.innerText : "" });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: p.ok && p.text.includes("cannot be resumed or run again"),
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!goalDialog.text.includes("Abort goal")) {
+    throw new Error(`goal abort confirm copy wrong: ${String(goalDialog.text).slice(0, 300)}`);
+  }
+  await evaluate(`document.querySelector("[data-confirm='cancel']").click()`);
+  await waitFor(
+    "goal abort confirm to close on cancel, goal still Needs you",
+    async () => {
+      // Row label, not body text: the "Needs you" filter chip is always on screen (#1455).
+      const row = await goalRowProbe("smoke fail", "Needs you")();
+      return {
+        ok:
+          (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === false &&
+          row.ok,
+        body: row.body,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if ((await clickGoalAbort()) !== "clicked") {
+    throw new Error("goal Abort button click (confirm path) failed");
+  }
+  await waitFor(
+    "goal abort confirm dialog to reopen",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === true,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector("[data-confirm='accept']").click()`);
+  await waitFor(
+    "goal in Aborted state after confirmed abort",
+    // Row label, not body text: the "Aborted" filter chip is always on screen (#1455).
+    goalRowProbe("smoke fail", "Aborted"),
+    { timeout: WAIT_MS, interval: 250 },
+  );
   // Goals list filter (#1455): status chip + description search narrow the
   // list with AND semantics; a no-match shows its own empty state, and
   // Clear filters restores every row.
@@ -1661,8 +2086,6 @@ try {
 
   const clicked = await send("Runtime.evaluate", {
     expression: `(() => {
-      const more = document.querySelector('[data-nav="more"]');
-      if (more && more.getAttribute("aria-expanded") !== "true") more.click();
       const btn = document.querySelector('[data-feature="notifications"]');
       if (!btn) return "missing-bell";
       btn.click();
@@ -2317,7 +2740,7 @@ try {
   });
   await waitFor(
     "cockpit re-boot for session delete",
-    textProbe((t) => t.includes("Menu")),
+    textProbe((t) => t.includes("Run a command")),
     { timeout: WAIT_MS, interval: 250 },
   );
   await waitFor(
@@ -2481,7 +2904,7 @@ try {
     await send("Page.navigate", {
       url: "http://127.0.0.1:" + port + "/?token=" + token,
     });
-    await waitFor(label, textProbe((t) => t.includes("Menu")), {
+    await waitFor(label, textProbe((t) => t.includes("Run a command")), {
       timeout: WAIT_MS,
       interval: 250,
     });
@@ -2648,7 +3071,7 @@ try {
     });
     await waitFor(
       "cockpit after task restart",
-      textProbe((body) => body.includes("Menu") && body.includes("Terminal")),
+      textProbe((body) => body.includes("Run a command") && body.includes("Terminal")),
       { timeout: WAIT_MS, interval: 250 },
     );
     await runPalette("Task runner");
@@ -2677,7 +3100,7 @@ try {
     );
     await waitFor(
       "chat view after the task runner check",
-      textProbe((body) => body.includes("Menu")),
+      textProbe((body) => body.includes("Run a command")),
       { timeout: WAIT_MS, interval: 250 },
     );
   } catch (err) {
@@ -2795,7 +3218,7 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
     "app after reload for schedule duplicate check",
-    textProbe((body) => body.includes("Menu")),
+    textProbe((body) => body.includes("Run a command")),
     { timeout: WAIT_MS, interval: 250 },
   );
   await runPalette("Schedule");
@@ -2956,7 +3379,7 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitFor(
     "apps palette entry",
-    textProbe((body) => body.includes("Menu")),
+    textProbe((body) => body.includes("Run a command")),
     { timeout: WAIT_MS, interval: 250 },
   );
   await runPalette("Apps");
