@@ -369,3 +369,30 @@ func TestScheduleScriptCommandScrubbedOnRead(t *testing.T) {
 		t.Fatalf("secret in list: %s", list.Body.String())
 	}
 }
+
+// A script schedule never opens an agent session, whatever the fire path
+// does with it: POST /run must not reach the root starter.
+func TestScheduleScriptRunNowNeverStartsSession(t *testing.T) {
+	start := &recordingStarter{id: "sess-should-not-exist"}
+	svc, err := schedule.Open(t.TempDir(), schedule.Hooks{Starter: start}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := New(Options{SessionDir: t.TempDir(), Schedules: svc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := doSchedule(t, srv, http.MethodPost, "/v1/schedules", strings.Replace(scriptBody, "%s", `,"confirm":true`, 1))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create %d %s", rec.Code, rec.Body.String())
+	}
+	var script scheduleDTO
+	_ = json.Unmarshal(rec.Body.Bytes(), &script)
+	rec = doSchedule(t, srv, http.MethodPost, "/v1/schedules/"+script.ID+"/run", "")
+	if len(start.reqs) != 0 {
+		t.Fatalf("script run started an agent session: %+v (status %d %s)", start.reqs, rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "sess-should-not-exist") {
+		t.Fatalf("run carries a session id: %s", rec.Body.String())
+	}
+}
