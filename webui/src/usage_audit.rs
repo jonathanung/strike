@@ -40,6 +40,71 @@ struct UsageReport {
     daily_usd: f64,
     #[serde(rename = "pricingNote", default)]
     pricing_note: String,
+    #[serde(default)]
+    projection: Option<Projection>,
+    #[serde(rename = "projectionNote", default)]
+    projection_note: String,
+}
+
+/// Daemon-computed spend-pace estimate (#1388). Mirrors
+/// `usageaudit.Projection`; absent when prices are incomplete or priced
+/// history is too short, and the page then renders no number.
+#[derive(Clone, Deserialize, Default)]
+struct Projection {
+    #[serde(default)]
+    basis: String,
+    #[serde(rename = "avgDailyUsd", default)]
+    avg_daily_usd: f64,
+    #[serde(rename = "monthEndUsd", default)]
+    month_end_usd: f64,
+    #[serde(default)]
+    today: Option<TodayProjection>,
+}
+
+#[derive(Clone, Deserialize, Default)]
+struct TodayProjection {
+    #[serde(rename = "projectedUsd", default)]
+    projected_usd: f64,
+    #[serde(rename = "runOutAt", default)]
+    run_out_at: String,
+    #[serde(default)]
+    exhausted: bool,
+    #[serde(rename = "withinBudget", default)]
+    within_budget: bool,
+    #[serde(default)]
+    level: String,
+}
+
+/// One labelled estimate line, plus its severity class:
+/// (text, alert class, level for the smoke hook).
+fn projection_line(p: &Projection) -> (String, &'static str, String) {
+    let mut text = format!(
+        "Estimate ({}): {} a day, about {} by month end.",
+        p.basis,
+        money(true, false, p.avg_daily_usd, ""),
+        money(true, false, p.month_end_usd, ""),
+    );
+    let mut class = "ua-alert";
+    let mut level = "info".to_string();
+    if let Some(t) = &p.today {
+        level = t.level.clone();
+        if t.exhausted {
+            class = "ua-alert bad";
+            text.push_str(" Today's daily budget is already spent.");
+        } else if t.within_budget {
+            text.push_str(&format!(
+                " At today's pace ({} for the day) you stay within the daily budget.",
+                money(true, false, t.projected_usd, "")
+            ));
+        } else {
+            // runOutAt is RFC 3339 UTC; show its HH:MM.
+            let at = t.run_out_at.get(11..16).unwrap_or("later today");
+            text.push_str(&format!(
+                " At today's pace the daily budget runs out around {at} UTC."
+            ));
+        }
+    }
+    (text, class, level)
 }
 
 #[derive(Clone, Deserialize, Default)]
@@ -280,6 +345,18 @@ async fn put_json(base: &str, token: &str, path: &str, body: Value) -> Result<Va
         return Ok(Value::Null);
     }
     serde_json::from_str(&text).map_err(|e| e.to_string())
+}
+
+/// Rows the Audit page renders before "Show more" (#1440). The chain is
+/// append-only, so rendering it whole gets heavier for the daemon's life.
+const AUDIT_WINDOW: usize = 100;
+
+/// (rows to render, rows still hidden) for a filtered total and the
+/// current window. Export and Verify never look at this: they stay
+/// full-chain.
+fn audit_window(filtered: usize, shown: usize) -> (usize, usize) {
+    let visible = filtered.min(shown);
+    (visible, filtered - visible)
 }
 
 // --- Usage export (#1481) -------------------------------------------------
@@ -756,6 +833,19 @@ pub fn UsagePage(
                         view! { <p class=class role="status">{text}</p> }
                     }).collect_view()
                 }}
+                {move || {
+                    let r = report.get();
+                    match r.projection {
+                        Some(p) => {
+                            let (text, class, level) = projection_line(&p);
+                            Some(view! { <p class=class role="status" data-usage-projection=level>{text}</p> }.into_any())
+                        }
+                        None if !r.projection_note.is_empty() && !r.sessions.is_empty() => Some(view! {
+                            <p class="hint" data-usage-projection="absent">{r.projection_note.clone()}</p>
+                        }.into_any()),
+                        None => None,
+                    }
+                }}
                 <Show when=move || !report.get().pricing_note.is_empty()>
                     <p class="ua-alert">{move || report.get().pricing_note}</p>
                 </Show>
@@ -929,6 +1019,7 @@ pub fn AuditPage(
     let list = RwSignal::new(AuditList::default());
     let error = RwSignal::new(String::new());
     let filter = RwSignal::new("all".to_string());
+    let shown = RwSignal::new(AUDIT_WINDOW);
     let loaded = RwSignal::new(false);
     let refresh = RwSignal::new(0u32);
     let audit_epoch = RwSignal::new(LoadEpoch::new());
@@ -1059,7 +1150,10 @@ pub fn AuditPage(
                         let label = name.to_string();
                         let id_class = id.clone();
                         view! {
-                            <button class=move || if filter.get() == id_class { "chip on" } else { "chip" } on:click=move |_| filter.set(id.clone())>{label}</button>
+                            <button class=move || if filter.get() == id_class { "chip on" } else { "chip" } on:click=move |_| {
+                                filter.set(id.clone());
+                                shown.set(AUDIT_WINDOW);
+                            }>{label}</button>
                         }
                     }).collect_view()}
                 </div>
@@ -1069,10 +1163,27 @@ pub fn AuditPage(
                         <p>"Approvals, permission changes, shell commands, config edits, and token rotation are appended here. POST /v1/audit records terminal and other actions that are not already a protocol event."</p>
                     </div>
                 </Show>
+                {move || {
+                    let want = filter.get();
+                    let filtered = list.with(|l| l.entries.iter().filter(|e| want == "all" || e.action == want).count());
+                    let (visible, hidden) = audit_window(filtered, shown.get());
+                    let window_attr = format!("{visible}/{filtered}");
+                    let count = format!("Showing {visible} of {filtered}");
+                    (filtered > 0).then(|| view! {
+                        <div class="ua-form" data-audit-window=window_attr>
+                            <span class="hint">{count}</span>
+                            {(hidden > 0).then(|| view! {
+                                <button type="button" data-audit-more="1" on:click=move |_| shown.update(|n| *n = n.saturating_add(AUDIT_WINDOW))>"Show more"</button>
+                                <button type="button" data-audit-all="1" on:click=move |_| shown.set(usize::MAX)>"Show all"</button>
+                            })}
+                        </div>
+                    })
+                }}
                 <div class="ua-table" role="table">
                     {move || {
                         let want = filter.get();
-                        list.get().entries.into_iter().rev().filter(|e| want == "all" || e.action == want).map(|e| {
+                        let limit = shown.get();
+                        list.get().entries.into_iter().rev().filter(|e| want == "all" || e.action == want).take(limit).map(|e| {
                             // #1530: the session id is a link, not dead text.
                             // The full id stays in the payload; the button
                             // label is the truncated id and the title carries
@@ -1113,8 +1224,67 @@ pub fn AuditPage(
 }
 
 #[cfg(test)]
+mod projection_tests {
+    use super::*;
+
+    #[test]
+    fn projection_line_labels_basis_and_run_out() {
+        let p = Projection {
+            basis: "7-day average".into(),
+            avg_daily_usd: 2.0,
+            month_end_usd: 47.0,
+            today: Some(TodayProjection {
+                projected_usd: 24.0,
+                run_out_at: "2026-11-14T10:00:00Z".into(),
+                level: "warning".into(),
+                ..Default::default()
+            }),
+        };
+        let (text, class, level) = projection_line(&p);
+        assert!(text.starts_with("Estimate (7-day average): $2.00 a day, about $47.00 by month end."), "{text}");
+        assert!(text.contains("runs out around 10:00 UTC"), "{text}");
+        assert_eq!((class, level.as_str()), ("ua-alert", "warning"));
+    }
+
+    #[test]
+    fn projection_line_within_budget_and_exhausted() {
+        let mut p = Projection {
+            basis: "3-day average".into(),
+            today: Some(TodayProjection { within_budget: true, projected_usd: 1.0, level: "info".into(), ..Default::default() }),
+            ..Default::default()
+        };
+        let (text, class, _) = projection_line(&p);
+        assert!(text.contains("stay within the daily budget"), "{text}");
+        assert_eq!(class, "ua-alert");
+        p.today = Some(TodayProjection { exhausted: true, level: "warning".into(), ..Default::default() });
+        let (text, class, _) = projection_line(&p);
+        assert!(text.contains("already spent"), "{text}");
+        assert_eq!(class, "ua-alert bad");
+    }
+
+    #[test]
+    fn report_without_projection_decodes_to_none() {
+        let r: UsageReport = serde_json::from_str(r#"{"projectionNote":"no projection yet"}"#).unwrap();
+        assert!(r.projection.is_none());
+        assert_eq!(r.projection_note, "no projection yet");
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audit_window_caps_rows_and_counts_the_rest() {
+        // Longer than the window: only the newest AUDIT_WINDOW render.
+        assert_eq!(audit_window(250, AUDIT_WINDOW), (100, 150));
+        // Show more raises the window by one step.
+        assert_eq!(audit_window(250, AUDIT_WINDOW * 2), (200, 50));
+        // Show all, or a window past the end, hides nothing.
+        assert_eq!(audit_window(250, usize::MAX), (250, 0));
+        assert_eq!(audit_window(40, AUDIT_WINDOW), (40, 0));
+        assert_eq!(audit_window(0, AUDIT_WINDOW), (0, 0));
+    }
 
     fn report_fixture() -> UsageReport {
         let mut rep = UsageReport::default();

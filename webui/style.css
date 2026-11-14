@@ -1105,6 +1105,27 @@ button.link { text-align: left; width: 100%; }
   margin: var(--space-2) 0;
 }
 .triggers .secret-once p { margin: 0 0 var(--space-2); }
+/* feature:triggers-copy begin */
+/* Copy buttons (#1486): inline beside the hook hint; on phone widths the
+   new buttons are real 44px tap targets. */
+.triggers-hook-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.triggers-hook-row .hint { margin: 0; }
+@media (max-width: 800px) {
+  .triggers button.triggers-copy-secret,
+  .triggers button.triggers-copy-hook { min-height: 44px; }
+}
+/* feature:triggers-copy end */
+/* feature:trigger-session-link begin */
+/* Delivery-log session links (#1492): linkish on desktop, a real touch
+   target on phone widths. */
+@media (max-width: 800px) {
+  .triggers-log button.session-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+/* feature:trigger-session-link end */
 .triggers-log .row { justify-content: space-between; }
 .triggers-list button.row, .triggers-list button.card {
   width: 100%;
@@ -2661,6 +2682,17 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   .approvals-form button { flex: 1 1 140px; }
 }
 /* feature:approvals end */
+/* feature:sandbox-explain begin */
+.sandbox-summary { margin: var(--space-2) 0 0; display: grid; gap: var(--space-1); }
+.sandbox-row { display: grid; grid-template-columns: minmax(120px, 30%) 1fr; gap: var(--space-2); }
+.sandbox-row dt { color: var(--muted); }
+.sandbox-row dd { margin: 0; overflow-wrap: anywhere; }
+.sandbox-profile { margin-top: var(--space-2); }
+.sandbox-profile pre { margin-top: var(--space-2); max-height: 320px; overflow: auto; }
+@media (max-width: 600px) {
+  .sandbox-row { grid-template-columns: 1fr; gap: 0; }
+}
+/* feature:sandbox-explain end */
 /* feature:permissions-explain begin */
 /* #1504: presets list, preset diff and explain result in the Permissions panel. */
 .perm-explain-presets,

@@ -26,6 +26,7 @@ mod git;
 mod goals;
 mod mobile;
 mod providers;
+mod sandbox_explain;
 mod schedule;
 mod model;
 mod notify;
@@ -4677,7 +4678,16 @@ fn App() -> impl IntoView {
             />
         </Show>
         <Show when=move || mode.get() == "triggers" fallback=move || ()>
-            <triggers::TriggersPage base=base token=token status=status />
+            <triggers::TriggersPage
+                base=base
+                token=token
+                status=status
+                open_session=move |id: String| {
+                    mode.set("chat".into());
+                    let live = roots.get_untracked().iter().any(|r| r.id == id);
+                    open_session(id, live);
+                }
+            />
         </Show>
         <Show when=move || mode.get() == "apps" fallback=move || ()>
             <apps::AppsPane
