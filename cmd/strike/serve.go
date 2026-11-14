@@ -362,6 +362,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			auto:                       opts.auto,
 			dangerouslySkipPermissions: opts.dangerouslySkipPermissions,
 			workspaces:                 wsStore,
+			// Agents must not read the cockpit token (script schedules, #1775).
+			serveTokenFile: opts.tokenFile,
+			serveCwd:       serveCwd(),
 		}
 		a, err := assemble(cliOpts, true)
 		if err != nil {
