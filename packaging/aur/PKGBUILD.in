@@ -1,0 +1,22 @@
+# Maintainer: Jonathan Ung
+# AUR PKGBUILD template for strike-bin. scripts/render-packaging.sh fills the
+# placeholders from a release tag and its checksums.txt.
+pkgname=strike-bin
+_tag=@TAG@
+pkgver=@PKGVER@
+pkgrel=1
+pkgdesc="Agentic coding harness with a web UI and terminal client"
+arch=('x86_64' 'aarch64')
+url="https://strike.jonathanung.ca/"
+license=('Apache-2.0')
+provides=('strike')
+conflicts=('strike')
+options=('!strip' '!debug')
+source_x86_64=("strike_${_tag}_linux_amd64.tar.gz::https://github.com/jonathanung/strike/releases/download/${_tag}/strike_${_tag}_linux_amd64.tar.gz")
+source_aarch64=("strike_${_tag}_linux_arm64.tar.gz::https://github.com/jonathanung/strike/releases/download/${_tag}/strike_${_tag}_linux_arm64.tar.gz")
+sha256sums_x86_64=('@SHA256_LINUX_AMD64@')
+sha256sums_aarch64=('@SHA256_LINUX_ARM64@')
+
+package() {
+  install -Dm755 "${srcdir}/strike" "${pkgdir}/usr/bin/strike"
+}

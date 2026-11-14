@@ -123,8 +123,12 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
 | `GET` | `/v1/sessions/{id}/children` | **yes** | Child/subagent sessions under a root |
 | `POST` | `/v1/sessions/{id}/fork` | **yes** | Fork durable session → new id |
+| `POST` | `/v1/sessions/{id}/report` | **yes** | Generate a `session_report` artifact from the session record (#1444) → **201** artifact. Facts only (turns, asks, tool counts, files, approvals, children, tokens, errors); tool args/output never copied; redacted. **404** unknown session; **501** without sessions or artifact store |
 | `PATCH` | `/v1/sessions/{id}` | **yes** | Rename (`{ "title" }`) |
 | `DELETE` | `/v1/sessions/{id}` | **yes** | Delete durable session (`?force=true` optional) |
+| `GET` | `/v1/sessions/{id}/loops` | **yes** | Session `/loop` jobs (see [Session loops](#session-loops)) |
+| `POST` | `/v1/sessions/{id}/loops` | **yes** | Start a loop (`{ "interval", "job" }`) |
+| `DELETE` | `/v1/sessions/{id}/loops[/{loopID}]` | **yes** | Stop one loop, or all |
 | `GET` | `/v1/roots` | **yes** | Active live roots + `activeId` (503 without LiveHub) |
 | `POST` | `/v1/roots` | **yes** | Create empty live workspace; becomes active |
 | `POST` | `/v1/roots/{id}/activate` | **yes** | Set hub active root (must already be live) |
@@ -953,8 +957,41 @@ partial: omit or send empty string to leave a field unchanged.
 | Config dials | `sandbox`, `notify`, `leanCode`, `deferTools`, `sessionWorktree`, `autoupdate` | Same tokens as config JSON |
 | Auto-approve | `permissionAutoApproveSeconds`, `permissionAutoApproveExclude`, `maxChildDepth` | Seconds/depth are **strings** on PATCH (`off`\|`0`\|`1-60`; `default`\|`0`\|`1-8`). Exclude: omit = unchanged; `[]` clears; non-empty replaces |
 | Compaction | `compactionStrategy`, `compactionModel`, `compactionThreshold`, `compactionBuffer`, `keepUserTurns`, `pruneProtectTokens`, `pruneMinimumTokens`, `pruneKeepUserTurns`, `pruneProtectTools` | String dials (`trim`\|`summarize`; threshold/buffer ints as strings; `default`/`0` resets; model/tools `-` clears) |
+| Guardrails (#1577) | `turnTimeoutS`, `maxSessionCostUSD`, `maxTurnTokens`, `agentBudget{maxWallClockS,maxTokens,maxCostUsd,maxToolCalls,maxDangerousTools,stallAfterS,loopDetectN}`, `delegationPolicy{mode,tinyPromptRunes,maxPathsLocal,maxLiveChildren}`, `childHandoffRequired`, `childIsolation` | **Strings** on PATCH, numbers/bools on GET. Timeout: `default` (1800s)\|`off`\|`0`\|seconds\|duration (`30m`). Caps/budget: `off`\|`0`\|`unlimited` or a positive number. Delegation mode: `off`\|`advise`\|`enforce`\|`default`; `tinyPromptRunes`/`maxPathsLocal`: `default`\|`off`\|positive int. Handoff: `on`\|`off`\|`default`. Isolation: `shared` (children run in the parent workdir — the default)\|`worktree`\|`default` |
 
 Successful `PATCH` returns the updated defaults snapshot (same shape as `GET`).
+
+Guardrail dials are global (`~/.strike/config` `session.*`) gateway defaults.
+`GET` reports effective values with product defaults resolved
+(`turnTimeoutS` 1800, `-1` = off; caps `0` = unlimited; delegation `mode`
+`enforce` when omitted; `childHandoffRequired` true when omitted;
+`childIsolation` `shared`|`worktree`). The group is validated as a whole: an
+invalid value returns **400** naming the field and writes none of them. They
+are read when a strike process assembles, so a running `strike serve` applies
+changes after restart; CLI `--turn-timeout` / `--max-cost` still override.
+A project `.strike/config` that sets the same `session.*` key wins over the
+global value at load.
+
+`GET` also carries `autoupdateEffective` (the dial after
+`config.EffectiveAutoupdate`: empty/unknown → `notify`) and, once a check has
+run, `updateCheck` (the last `GET /v1/update` result). Reading settings never
+probes the network.
+
+### Update check (`GET /v1/update`)
+
+Bootstrap capability `updateCheck` is true when settings are readable and
+`strike serve` wired the probe. The route reuses the TUI startup probe
+(`internal/product/update.StartupProbe`) with its 24h cache, kept in
+`~/.strike/cache/update-check-web.json` so a web check does not consume the
+TUI's once-per-release notice. It is **check-only**: the probe runs in notify
+mode even when the dial is `auto`; installing stays a host-side action
+(`strike upgrade`).
+
+Response: `{ mode, state, current?, latest?, available, message?, error?, checkedAt?, canReplace }`.
+`state` is `off` (dial off — no network request is made), `available`,
+`current` (only after a successful check), `failed` (offline, rate limit, API
+error — never reported as up to date), or `unknown`. Missing capability returns
+501.
 The cockpit Settings dialog loads `GET`, edits sections, and saves via `PATCH`.
 Browser color scheme (auto/dark/light) is local-only (`data-appearance` +
 `localStorage`), not a host config key.
@@ -989,6 +1026,36 @@ budgets). **Run / pause / resume / abort** require a live session
 
 Default host run path is evaluate-only (empty tool allowlist) — same safety
 default as `/goal run` in the TUI. Wire JSON is camelCase host-safe DTOs only.
+
+### Session loops
+
+`/loop` from the TUI, served by the daemon (#1588). A loop re-injects a
+prompt into **one live session** on an interval until it is stopped or the
+session closes. Loops are ephemeral: they do not survive a daemon restart,
+a session close, or root removal. Anything that must persist or start new
+sessions is a [Schedule](#schedules). Bootstrap capability `loops` is true
+when a live engine is attached and the gateway is not `--read-only`.
+
+| Method | Path | Body / response |
+|---|---|---|
+| `GET` | `/v1/sessions/{id}/loops` | `{loops:[...], max, minIntervalMs, maxIntervalMs}` |
+| `POST` | `/v1/sessions/{id}/loops` | `{interval, job}`; `201 {loop}` |
+| `DELETE` | `/v1/sessions/{id}/loops/{loopID}` | `{ok, stopped:1}`; `404` unknown id |
+| `DELETE` | `/v1/sessions/{id}/loops` | stop all; `{ok, stopped:n}` |
+
+Grammar matches the TUI exactly (`pkg/loopspec`): `interval` is a Go
+duration (`30s`, `15m`, `2h`, `1h30m`) or bare minutes (`15`), between 1s
+and 168h. At most 16 loops per session; ids are `l1`, `l2`, … and never
+reused. Errors: `400` bad interval/job, `404` session not live
+(`code: session_not_live`) or unknown loop, `409` the 17th loop, `410`
+session already closed, `403` `--read-only`. Start and stop share the
+`POST /v1/ops` rate limit and are audited as `loop.start` / `loop.stop`.
+
+A loop object carries `id`, `interval`, `intervalMs`, `job`, `runs`,
+`createdAt`, `nextAt`, and when set `lastRunAt` and `lastError`. A firing is
+an ordinary `user.input`: while a turn is busy it waits on the same input
+queue as a queued send, and it counts as a normal turn for usage, budgets,
+and guardrails. `GET /v1/status` carries `loops`, the active count.
 
 ### Schedules
 
@@ -1061,8 +1128,11 @@ Permission asks appear as `permission.asked` events; resolve with
 ### Artifacts & decision ledger (read-only, WEBUI.15 / #1082)
 
 Bootstrap advertises `capabilities.artifacts` / `capabilities.ledger` only when
-the host wires those stores. There are **no** browser write routes — artifact
-create/update and ledger append/invalidate/supersede stay agent/tool-owned.
+the host wires those stores. The only browser write route is
+`POST /v1/sessions/{id}/report`, which stores a daemon-generated
+`session_report` (agent tools may read that type but never write it); other
+artifact create/update and ledger append/invalidate/supersede stay
+agent/tool-owned.
 Attach-only may read authorized rows; missing capability returns **501**.
 
 | Method | Path | Auth | Description |
