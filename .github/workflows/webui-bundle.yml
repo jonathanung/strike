@@ -151,9 +151,14 @@ jobs:
           echo "pushed=true" >> "$GITHUB_OUTPUT"
 
       # GITHUB_TOKEN pushes do not fire pull_request; dispatch CI so the
-      # new head SHA gets checks.
+      # new head SHA gets checks. Dispatch uses the branch's own ci.yml, so
+      # branches cut before #1780 (no workflow_dispatch trigger) get a
+      # warning instead of a red run: merge origin/main into them.
       - name: Dispatch CI on new head
         if: steps.push.outputs.pushed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+        run: |
+          if ! gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"; then
+            echo "::warning::bundle pushed, but CI could not be dispatched on '$BRANCH' (its ci.yml likely predates the workflow_dispatch trigger). Merge origin/main into the branch and push to get checks."
+          fi

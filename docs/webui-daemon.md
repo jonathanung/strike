@@ -204,6 +204,8 @@ changes need a rebuilt bundle. You don't have to build it yourself.
    `github-actions[bot]` to the PR branch, never to `main`.
 4. Dispatches `ci.yml` on the branch. `GITHUB_TOKEN` pushes don't fire
    `pull_request`, so this gives the new head SHA its checks.
+   Branches cut before this workflow existed have no dispatch trigger in
+   their `ci.yml`. For those it only warns: merge `origin/main` first.
 
 On a bundle merge conflict, take either side of the static files and push
 the merge. CI rebuilds the bundle on top. To rebuild by hand, run
