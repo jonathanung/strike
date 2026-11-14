@@ -50,6 +50,46 @@ issues and before writing config. A file symlink at `~/.strike/config` (for
 example stow/dotfiles) is preserved on save — the referent is updated, not
 replaced by a plain file.
 
+## Workspace trust
+
+A repository's own configuration loads only after you trust that workspace
+(#1352). Until then every project surface is **inert** and the session runs on
+builtin + global config:
+
+- `./.strike/config` scalars (`systemPrompt`, `permissionMode`, `sandbox`, …)
+  and its `permissions[]` / `hooks[]` entries
+- `./.strike/mcp.jsonc` servers, project LSP servers, project `harnesses`
+  (no process is spawned — the gate runs before admission, not after)
+- project agents (`.strike/agents`, `.claude/agents`, `.opencode/agent(s)`),
+  skills, workflows, and project-scope plugins (`./.strike/plugins`, whose
+  lockfile — including plugin trust records — lives inside the repo)
+- `AGENTS.md` / `CLAUDE.md` steering from the project root down to the cwd
+
+The decision is stored **outside the repo** in 0600
+`~/.strike/workspace-trust.json`, keyed by the canonical workspace root (git
+top level when known, else the launch directory). Launching from a
+subdirectory of a trusted repo is trusted; a repo under a trusted parent
+directory is **not** — trust is exact-root, never inherited. The home
+directory and the filesystem root cannot be trusted.
+
+```sh
+strike trust status          # state + what the repo would load (names and command lines)
+strike trust                 # trust the current workspace (takes effect on next start)
+strike trust revoke          # repo config goes inert again
+strike trust list            # trusted roots
+strike trust --dir <path>    # act on another checkout
+```
+
+While untrusted and the repo ships gated config, startup prints
+`strike: untrusted workspace: repo config inert (…)` and the session
+transcript records an `admission.decided` event with `surface: "workspace"`
+so headless / scheduled runs are never silently reconfigured by a clone.
+
+**Trust is not permission.** Trusting a workspace only lets its config
+*load*. Every tool call, MCP call and hook still goes through the permission
+system unchanged; the per-command hook Ask (#80) remains; plugin executable
+trust (`strike plugin trust`, #728) is a separate digest-bound grant.
+
 ## Managed / MDM config (enterprise)
 
 For organizations that need centralized policy users cannot override, Strike

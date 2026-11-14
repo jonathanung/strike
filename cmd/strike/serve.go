@@ -362,6 +362,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
+		if n := a.startupNotice(); n != "" {
+			fmt.Fprintln(stderr, n)
+		}
 		sharedAttachments = a.attachments
 		sessionDir = a.sessions.Dir()
 		sideChat = newSideChatModel(a.sideProvider, a.sideModel, a.sideSelect)
