@@ -953,7 +953,6 @@ partial: omit or send empty string to leave a field unchanged.
 | Config dials | `sandbox`, `notify`, `leanCode`, `deferTools`, `sessionWorktree`, `autoupdate` | Same tokens as config JSON |
 | Auto-approve | `permissionAutoApproveSeconds`, `permissionAutoApproveExclude`, `maxChildDepth` | Seconds/depth are **strings** on PATCH (`off`\|`0`\|`1-60`; `default`\|`0`\|`1-8`). Exclude: omit = unchanged; `[]` clears; non-empty replaces |
 | Compaction | `compactionStrategy`, `compactionModel`, `compactionThreshold`, `compactionBuffer`, `keepUserTurns`, `pruneProtectTokens`, `pruneMinimumTokens`, `pruneKeepUserTurns`, `pruneProtectTools` | String dials (`trim`\|`summarize`; threshold/buffer ints as strings; `default`/`0` resets; model/tools `-` clears) |
-
 | Guardrails (#1577) | `turnTimeoutS`, `maxSessionCostUSD`, `maxTurnTokens`, `agentBudget{maxWallClockS,maxTokens,maxCostUsd,maxToolCalls,maxDangerousTools,stallAfterS,loopDetectN}`, `delegationPolicy{mode,tinyPromptRunes,maxPathsLocal,maxLiveChildren}`, `childHandoffRequired`, `childIsolation` | **Strings** on PATCH, numbers/bools on GET. Timeout: `default` (1800s)\|`off`\|`0`\|seconds\|duration (`30m`). Caps/budget: `off`\|`0`\|`unlimited` or a positive number. Delegation mode: `off`\|`advise`\|`enforce`\|`default`; `tinyPromptRunes`/`maxPathsLocal`: `default`\|`off`\|positive int. Handoff: `on`\|`off`\|`default`. Isolation: `shared` (children run in the parent workdir — the default)\|`worktree`\|`default` |
 
 Successful `PATCH` returns the updated defaults snapshot (same shape as `GET`).
@@ -969,6 +968,26 @@ changes after restart; CLI `--turn-timeout` / `--max-cost` still override.
 A project `.strike/config` that sets the same `session.*` key wins over the
 global value at load.
 
+`GET` also carries `autoupdateEffective` (the dial after
+`config.EffectiveAutoupdate`: empty/unknown → `notify`) and, once a check has
+run, `updateCheck` (the last `GET /v1/update` result). Reading settings never
+probes the network.
+
+### Update check (`GET /v1/update`)
+
+Bootstrap capability `updateCheck` is true when settings are readable and
+`strike serve` wired the probe. The route reuses the TUI startup probe
+(`internal/product/update.StartupProbe`) with its 24h cache, kept in
+`~/.strike/cache/update-check-web.json` so a web check does not consume the
+TUI's once-per-release notice. It is **check-only**: the probe runs in notify
+mode even when the dial is `auto`; installing stays a host-side action
+(`strike upgrade`).
+
+Response: `{ mode, state, current?, latest?, available, message?, error?, checkedAt?, canReplace }`.
+`state` is `off` (dial off — no network request is made), `available`,
+`current` (only after a successful check), `failed` (offline, rate limit, API
+error — never reported as up to date), or `unknown`. Missing capability returns
+501.
 The cockpit Settings dialog loads `GET`, edits sections, and saves via `PATCH`.
 Browser color scheme (auto/dark/light) is local-only (`data-appearance` +
 `localStorage`), not a host config key.
