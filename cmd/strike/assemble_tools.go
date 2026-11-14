@@ -996,7 +996,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			Workflows:                  enginebind.Workflows(workflows),
 			Rules:                      permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, bypass),
 			RuleLayerNames:             permissionLayerNames(cfg.PermissionPreset, bypass),
-			ManagedRules:               sessionManagedRules(cfg.Managed.DenyRules, opts.managedDeny),
+			ManagedRules:               sessionManagedRules(cfg.Managed.DenyRules, tokenFileDenyRules(opts.serveTokenFile, opts.serveCwd)),
 			LockPermissionMode:         cfg.Managed.PermissionMode,
 			Hooks:                      hookDefs,
 			HookRules:                  cfg.HookRules(),
