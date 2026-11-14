@@ -287,6 +287,69 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       "goto clears an active search",
     );
 
+    // Wrap toggle (#1412): default on; off flips the pane-root
+    // attribute and code lines stop wrapping; toggled back on so the
+    // persisted preference does not leak into later steps.
+    const wrapState = await evalValue(
+      send,
+      `(() => document.querySelector("[data-ev-root]").getAttribute("data-ev-wrap"))()`,
+    );
+    if (wrapState !== "on") {
+      throw new Error(`wrap default = ${JSON.stringify(wrapState)}, want on`);
+    }
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-wrap-toggle]"); if (!b) return "no wrap toggle"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const root = document.querySelector("[data-ev-root]");
+        const line = document.querySelector(".ev-codeview .ev-line");
+        if (!root || root.getAttribute("data-ev-wrap") !== "off") return "attr not off";
+        if (localStorage.getItem("strike.editorWrap") !== "off") return "pref not stored";
+        return line && getComputedStyle(line).whiteSpace === "pre" ? "ok" : "white-space " + (line ? getComputedStyle(line).whiteSpace : "no line");
+      })()`,
+      "wrap off",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector("[data-ev-wrap-toggle]").click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("[data-ev-root]").getAttribute("data-ev-wrap") === "on" ? "ok" : "attr not back on")()`,
+      "wrap back on",
+    );
+
+    // Reload (#1407): a disk change stays stale until Reload, then
+    // renders; restored to the original content for later steps.
+    await writeFile(sample, "alpha beta reloaded\n");
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-reload-bar]"); if (!b || b.disabled) return "no reload"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("[data-ev-root]").innerText.includes("alpha beta reloaded") ? "ok" : "not reloaded")()`,
+      "reload shows disk change",
+    );
+    // Restore the exact original (the 5-line sample the cursor/Tab
+    // steps below depend on), not just its first line.
+    await writeFile(sample, "alpha beta\nsecond line\nthird line\nfourth line\nfifth line\n");
+    await evalValue(
+      send,
+      `(() => { document.querySelector("[data-ev-reload-bar]").click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const t = document.querySelector("[data-ev-root]").innerText;
+        return t.includes("alpha beta") && !t.includes("reloaded") ? "ok" : "not restored";
+      })()`,
+      "reload restores original",
+    );
+
     await evalValue(
       send,
       `(() => { const b = document.querySelector("[data-ev-edit]"); if (!b || b.disabled) return "edit disabled"; b.click(); return "ok"; })()`,
@@ -444,6 +507,12 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       );
     };
     await setDraft("alpha edited\n");
+    // Reload is disabled while the draft is dirty (#1407).
+    await waitFor(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-reload-bar]"); return b && b.disabled ? "ok" : "reload not disabled while dirty"; })()`,
+      "reload disabled while dirty",
+    );
     await waitFor(
       send,
       `(() => document.querySelector('[data-ev-open="editor-other.txt"]') ? "ok" : "no other file row")()`,

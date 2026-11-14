@@ -1077,6 +1077,8 @@ fn App() -> impl IntoView {
     let status = RwSignal::new("connecting…".to_string());
     // Bootstrap capability `diag` (#1489): gates Download diagnostics.
     let diag_capable = RwSignal::new(false);
+    // Bootstrap capability `ledger` (#1485): gates the Decisions tab.
+    let ledger_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
     let mode = RwSignal::new("chat".to_string());
@@ -1686,6 +1688,8 @@ fn App() -> impl IntoView {
                                     live_busy_root.set(root);
                                 }
                                 diag_capable.set(boot.capabilities.diag);
+                                crate::storage::set_ledger_capable(boot.capabilities.ledger);
+                                ledger_capable.set(boot.capabilities.ledger);
                                 project_init_capable.set(boot.capabilities.project_init);
                                 skills.set(boot.skills);
                                 commands.set(boot.composer_commands);
@@ -3644,6 +3648,16 @@ fn App() -> impl IntoView {
         "panel-artifacts",
         Rc::new(move |_args: &str| {
             side_tab.set("artifacts".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "panel-decisions",
+        Rc::new(move |_args: &str| {
+            if !ledger_capable.get_untracked() {
+                return Err("This daemon does not serve the decision ledger.".into());
+            }
+            side_tab.set("decisions".into());
             Ok(())
         }),
     );
@@ -5853,7 +5867,10 @@ fn App() -> impl IntoView {
                     </div>
                     <Show when=move || {
                         let tab = side_tab.get();
-                        tab == "memory" || tab == "knowledge" || tab == "artifacts"
+                        tab == "memory"
+                            || tab == "knowledge"
+                            || tab == "artifacts"
+                            || (tab == "decisions" && ledger_capable.get())
                     }>
                         <StoragePanel
                             tab=side_tab

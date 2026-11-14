@@ -157,3 +157,23 @@
 }
 /* feature:artifact-detail-actions end */
 /* feature:storage end */
+/* feature:decision-ledger begin */
+.ledger {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.ledger-row[data-ledger-status="superseded"] .name { color: var(--muted); text-decoration: line-through; }
+.ledger-row[data-ledger-status="invalidated"] .name { color: var(--muted); font-style: italic; }
+.ledger-statement { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+.ledger-link {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--acid);
+  text-decoration: underline;
+  cursor: pointer;
+}
+/* feature:decision-ledger end */
