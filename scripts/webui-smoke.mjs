@@ -700,7 +700,9 @@ try {
         return { ok: probe.state === "unavailable" && !probe.text.includes("This session"), probe };
       }
       const label = sbModeLabel[sbSnap.mode] || sbSnap.mode;
-      const want = sbSnap.available ? "ready" : "no-backend";
+      // "unprobed" (serve seeds it before any sandboxed command) is unknown,
+      // never rendered as "no working backend".
+      const want = sbSnap.available ? "ready" : sbSnap.backend === "unprobed" ? "unprobed" : "no-backend";
       return {
         ok:
           probe.state === want &&

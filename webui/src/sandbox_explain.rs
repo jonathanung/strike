@@ -23,10 +23,26 @@ pub struct SandboxSnapshot {
     pub explain: String,
     #[serde(rename = "defaultMode", default)]
     pub default_mode: String,
-    #[serde(rename = "permissionMode", default)]
-    pub permission_mode: String,
-    #[serde(default)]
-    pub note: String,
+}
+
+/// harness/sandbox BackendUnprobed: status assembled before the first
+/// sandboxed command checked the platform backend. Availability is unknown,
+/// not false.
+pub const BACKEND_UNPROBED: &str = "unprobed";
+
+pub fn is_unprobed(s: &SandboxSnapshot) -> bool {
+    s.backend == BACKEND_UNPROBED
+}
+
+/// data-sandbox-state for a loaded snapshot.
+pub fn snapshot_state(s: &SandboxSnapshot) -> &'static str {
+    if s.available {
+        "ready"
+    } else if is_unprobed(s) {
+        "unprobed"
+    } else {
+        "no-backend"
+    }
 }
 
 /// What the section renders. `Unavailable` is a first-class state: the
@@ -85,15 +101,18 @@ pub fn summary_rows(s: &SandboxSnapshot) -> Vec<Row> {
     }
     rows.push(Row {
         label: if s.available {
-            "This session"
+            "Active sandbox (this session)"
         } else {
             "Configured mode"
         },
         value: mode,
     });
+    let unprobed = is_unprobed(s);
     rows.push(Row {
         label: "Backend",
-        value: if s.backend.is_empty() {
+        value: if unprobed {
+            "Not checked yet".into()
+        } else if s.backend.is_empty() {
             "None reported".into()
         } else {
             s.backend.clone()
@@ -101,7 +120,13 @@ pub fn summary_rows(s: &SandboxSnapshot) -> Vec<Row> {
     });
     rows.push(Row {
         label: "Backend available",
-        value: if s.available { "Yes" } else { "No" }.into(),
+        value: if s.available {
+            "Yes".into()
+        } else if unprobed {
+            "Unknown (checked on the first sandboxed command)".into()
+        } else {
+            "No".into()
+        },
     });
     if !s.network_allow.is_empty() {
         rows.push(Row {
@@ -112,15 +137,21 @@ pub fn summary_rows(s: &SandboxSnapshot) -> Vec<Row> {
     rows
 }
 
-/// Shown when no working backend is reported. The configured mode is not
-/// presented as live confinement.
+/// Shown when confinement is not confirmed: the backend was not probed yet,
+/// or was probed and reported unavailable. The configured mode is never
+/// presented as live confinement. Off needs no warning (no confinement).
 pub fn unavailable_backend_copy(s: &SandboxSnapshot) -> Option<String> {
-    if s.available {
+    if s.available || s.mode == "off" {
         return None;
     }
+    let mode = mode_label(&s.mode);
+    if is_unprobed(s) {
+        return Some(format!(
+            "The sandbox backend has not been checked yet; it is checked when the first sandboxed command runs. {mode} is the configured mode; confinement is not confirmed yet."
+        ));
+    }
     Some(format!(
-        "The daemon reports no working sandbox backend on this host. {} is the configured mode, not confirmed confinement.",
-        mode_label(&s.mode)
+        "The daemon reports no working sandbox backend on this host. {mode} is the configured mode, not confirmed confinement."
     ))
 }
 
@@ -167,7 +198,7 @@ pub fn SandboxSection(base: RwSignal<String>, token: RwSignal<String>) -> impl I
                     let differs = default_differs_copy(&snap);
                     let explain = snap.explain.clone();
                     view! {
-                        <dl class="sandbox-summary" data-sandbox-state={if snap.available { "ready" } else { "no-backend" }}>
+                        <dl class="sandbox-summary" data-sandbox-state={snapshot_state(&snap)}>
                             {rows.into_iter().map(|r| view! {
                                 <div class="sandbox-row">
                                     <dt>{r.label}</dt>
@@ -235,7 +266,7 @@ mod tests {
             ("workspace-write", "Workspace write"),
         ] {
             let rows = summary_rows(&snap(mode, true));
-            assert_eq!(rows[0].label, "This session");
+            assert_eq!(rows[0].label, "Active sandbox (this session)");
             assert!(rows[0].value.starts_with(label), "{mode}: {:?}", rows[0]);
             assert!(rows[0].value.len() > label.len(), "{mode} lacks meaning");
         }
@@ -274,5 +305,22 @@ mod tests {
         let warn = unavailable_backend_copy(&s).unwrap();
         assert!(warn.contains("not confirmed confinement"));
         assert_eq!(unavailable_backend_copy(&snap("off", true)), None);
+        assert_eq!(unavailable_backend_copy(&snap("off", false)), None);
+        assert_eq!(snapshot_state(&s), "no-backend");
+        assert_eq!(snapshot_state(&snap("read-only", true)), "ready");
+    }
+
+    #[test]
+    fn unprobed_backend_is_unknown_not_unavailable() {
+        let mut s = snap("workspace-write", false);
+        s.backend = BACKEND_UNPROBED.into();
+        assert_eq!(snapshot_state(&s), "unprobed");
+        let rows = summary_rows(&s);
+        assert_eq!(rows[0].label, "Configured mode");
+        assert_eq!(rows[1].value, "Not checked yet");
+        assert!(rows[2].value.starts_with("Unknown"));
+        let warn = unavailable_backend_copy(&s).unwrap();
+        assert!(warn.contains("not been checked yet"));
+        assert!(!warn.contains("no working sandbox backend"));
     }
 }
