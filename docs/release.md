@@ -31,7 +31,9 @@ Every desktop and CLI asset also has a build provenance attestation.
 
 ## Verify a signature with cosign
 
-Requires [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) v2.4 or later.
+Requires [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) v3 or later.
+The bundles use the Sigstore protobuf bundle format; on cosign v2.4.x add
+`--new-bundle-format` to each `verify-blob` command below.
 
 ```sh
 TAG=v0.10.0
@@ -64,7 +66,8 @@ sha256sum -c checksums.txt   # macOS: shasum -a 256 -c checksums.txt
 
 ## Verify build provenance with gh
 
-Requires GitHub CLI 2.49 or later.
+Requires a recent GitHub CLI (`gh attestation verify --help` must list
+`--signer-workflow` and `--source-ref`).
 
 ```sh
 gh attestation verify "$ASSET" \
