@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 )
 
 // stderrCap bounds the captured child stderr folded into Wait errors.
@@ -17,7 +18,10 @@ type cappedBuffer struct {
 	buf bytes.Buffer
 }
 
+// Write swallows (never short-writes) so io.Copy in os/exec keeps draining
+// the child's stderr instead of closing the pipe and SIGPIPE-ing the child.
 func (b *cappedBuffer) Write(p []byte) (int, error) {
+	n := len(p)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if room := stderrCap - b.buf.Len(); room > 0 {
@@ -26,7 +30,7 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 		}
 		b.buf.Write(p)
 	}
-	return len(p), nil
+	return n, nil
 }
 
 func (b *cappedBuffer) String() string {
@@ -47,6 +51,10 @@ func execStart(path string, args []string) (Process, error) {
 	cmd := exec.Command(path, args...)
 	buf := &cappedBuffer{}
 	cmd.Stderr = buf
+	// The wrapped command (tail under systemd-inhibit) inherits the stderr
+	// pipe. Without WaitDelay, a wrapper that dies on its own would leave Wait
+	// blocked on the grandchild's pipe and Status stuck on a fake "on".
+	cmd.WaitDelay = time.Second
 	setProcAttr(cmd)
 	if err := cmd.Start(); err != nil {
 		return nil, err

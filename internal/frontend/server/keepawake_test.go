@@ -75,6 +75,15 @@ func (k keepAwakeSettings) SaveKeepAwake(mode string) error {
 	return nil
 }
 
+// SaveConfigDials rejects notify "bogus" so a mixed patch can fail after
+// keepAwake would otherwise have been written.
+func (k keepAwakeSettings) SaveConfigDials(_, notify, _, _, _, _ string) error {
+	if notify == "bogus" {
+		return errors.New("unknown notify")
+	}
+	return nil
+}
+
 func newKeepAwakeService(fs *fakeInhibitStarter, lookPath func(string) (string, error)) *keepawake.Service {
 	return keepawake.New(keepawake.Options{
 		Backend:  &keepawake.Backend{Name: "fake-inhibit", Detail: "fake", Args: func(int) []string { return nil }},
@@ -170,6 +179,18 @@ func TestSettingsKeepAwakeAppliesLiveAndReportsOnGateway(t *testing.T) {
 	}
 	if fs.count() != 1 {
 		t.Fatalf("theme patch touched keep-awake: starts=%d", fs.count())
+	}
+
+	// A mixed patch that fails on another dial must not persist keepAwake,
+	// or config and the live daemon would diverge until the next restart.
+	if res := patchSettings(t, srv, `{"keepAwake":"on","notify":"bogus"}`); res.Code != http.StatusBadRequest {
+		t.Fatalf("mixed patch = %d %s", res.Code, res.Body.String())
+	}
+	if got := srv.opts.Services.Settings.Defaults().KeepAwake; got != "off" {
+		t.Fatalf("failed mixed patch persisted keepAwake=%q", got)
+	}
+	if st := svc.Status(); st.State != keepawake.StateOff || fs.count() != 1 {
+		t.Fatalf("failed mixed patch touched service: %+v starts=%d", st, fs.count())
 	}
 }
 

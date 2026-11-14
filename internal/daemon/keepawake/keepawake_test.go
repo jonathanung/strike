@@ -268,3 +268,19 @@ func TestStaleExitAfterDisableDoesNotFlipState(t *testing.T) {
 	}
 	s.Close()
 }
+
+func TestCappedBufferNeverShortWrites(t *testing.T) {
+	b := &cappedBuffer{}
+	big := strings.Repeat("x", stderrCap+100)
+	n, err := b.Write([]byte(big))
+	if err != nil || n != len(big) {
+		t.Fatalf("Write = %d, %v; want %d, nil (short write would abort io.Copy)", n, err, len(big))
+	}
+	if got := len(b.String()); got != stderrCap {
+		t.Fatalf("captured %d bytes, want cap %d", got, stderrCap)
+	}
+	// Writes past the cap are swallowed, still reporting full length.
+	if n, err := b.Write([]byte("more")); err != nil || n != 4 {
+		t.Fatalf("overflow Write = %d, %v", n, err)
+	}
+}

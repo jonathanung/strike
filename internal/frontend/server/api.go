@@ -473,11 +473,6 @@ func applySettingsPatch(settings host.Settings, body settingsPatchBody) error {
 			return err
 		}
 	}
-	if body.KeepAwake != "" {
-		if err := settings.SaveKeepAwake(body.KeepAwake); err != nil {
-			return err
-		}
-	}
 	if body.Sandbox != "" || body.Notify != "" || body.LeanCode != "" || body.DeferTools != "" || body.SessionWorktree != "" || body.Autoupdate != "" {
 		if err := settings.SaveConfigDials(body.Sandbox, body.Notify, body.LeanCode, body.DeferTools, body.SessionWorktree, body.Autoupdate); err != nil {
 			return err
@@ -501,6 +496,13 @@ func applySettingsPatch(settings host.Settings, body settingsPatchBody) error {
 	}
 	if compaction != (host.CompactionDials{}) {
 		if err := settings.SaveCompactionDials(compaction); err != nil {
+			return err
+		}
+	}
+	// keepAwake goes last: it has live daemon state behind it, so it is only
+	// persisted when every other group succeeded and the handler will apply it.
+	if body.KeepAwake != "" {
+		if err := settings.SaveKeepAwake(body.KeepAwake); err != nil {
 			return err
 		}
 	}
