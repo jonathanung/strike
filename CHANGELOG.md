@@ -20,6 +20,8 @@ materially affect the shipped product.
 
 ### Added
 
+- **Automatic Go test failure triage for verification gates** — when a `cmd` completion gate fails with `go test` output, the harness maps the failure to its package, tests, and first `file:line`, reruns just that target with `go test <dir> -run '^(Tests)$' -count=1`, and attaches the result to the verification report. On the next claim the focused rerun runs first (the full gate is skipped while it still fails, and runs as the required final gate once it passes). Focused reruns are capped at 3 per gate until it passes, and the report keeps the original command, its output, and a short attempt history. Wire: optional `triage` on `VerificationCheck` (protocol 1.23.0).
+
 - **"Allow in this folder" approval scope** — write/edit approval cards in the web cockpit offer a fourth grant scope between Allow once and Allow session/project: the daemon records a session-only grant for the folder the file lives in (covering its subfolders), derived server-side from the ask — never from a client-supplied pattern. The card names the exact folder before you commit, the grant is listed under Permissions → Rules and audit as a "session folder" rule, and removing it there revokes it in the live session. Hard and managed denies still win. Wire: `PermissionReply` decision `folder` (protocol 1.22.0); older daemons treat it as allow-once.
 
 ## [v0.10.0] - 2026-10-29
