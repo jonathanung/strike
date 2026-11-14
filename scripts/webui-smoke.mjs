@@ -194,6 +194,20 @@ try {
   if (!listedText.includes("markdownFile") || !listedText.includes(".md")) {
     throw new Error(`memory list missing plain-file path body=${listedText.slice(0, 500)}`);
   }
+  // Seed one knowledge pin for the Knowledge search check (#1469).
+  const putPin = await fetch(`http://127.0.0.1:${port}/v1/knowledge`, {
+    method: "PUT",
+    headers: auth,
+    body: JSON.stringify({
+      path: "docs/smoke-pin.md",
+      note: "smoke pin note",
+      author: "operator",
+      scope: "project",
+    }),
+  });
+  if (!putPin.ok) {
+    throw new Error(`knowledge pin put failed ${putPin.status} ${await putPin.text()}`);
+  }
 
   const authz = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const call = async (method, path, body) => {
@@ -536,6 +550,17 @@ try {
     })()`);
   };
 
+  // Probe a Goals list row's own status label (#1455): the status filter
+  // chips render every status word, so whole-body text cannot prove a run
+  // reached a status.
+  const goalRowProbe = (title, status) => async () => {
+    const rows = await evaluate(`[...document.querySelectorAll(".goals-row")].map((r) => [
+      r.querySelector(".goals-row-title")?.textContent.trim(),
+      r.querySelector(".goals-status")?.textContent.trim(),
+    ])`) || [];
+    return { ok: rows.some(([t, s]) => t === title && s === status), body: JSON.stringify(rows) };
+  };
+
   // Probe on the whole body text.
   const textProbe = (ready) => async () => {
     const body = (await evaluate(`document.body ? document.body.innerText : ""`)) || "";
@@ -748,6 +773,63 @@ try {
     );
   }
   await apprEval(`[...document.querySelectorAll(".approvals-panel-head button")].find((b) => (b.textContent || "").trim() === "Close")?.click()`);
+
+  // Sandbox explain (#1532): the Permissions panel shows the daemon's real
+  // GET /v1/sandbox snapshot (or the honest unavailable state on 501).
+  const sbRes = await fetch(`http://127.0.0.1:${port}/v1/sandbox`, { headers: { Authorization: `Bearer ${token}` } });
+  const sbSnap = sbRes.status === 200 ? await sbRes.json() : null;
+  if (sbRes.status !== 200 && sbRes.status !== 501) {
+    throw new Error(`GET /v1/sandbox: ${sbRes.status}`);
+  }
+  const sbModeLabel = { off: "Off", "read-only": "Read-only", "workspace-write": "Workspace write" };
+  await waitFor(
+    "sandbox section in the Permissions panel",
+    async () => {
+      const probe = await apprEval(`(() => {
+        const sec = document.querySelector('[data-section="sandbox"]');
+        if (!sec) return null;
+        const state = sec.querySelector('[data-sandbox-state]');
+        return {
+          text: sec.innerText || "",
+          state: state ? state.getAttribute('data-sandbox-state') : "",
+          profile: !!sec.querySelector('details.sandbox-profile pre'),
+        };
+      })()`);
+      if (!probe) {
+        await apprOpenPalette();
+        await apprEval(`document.querySelector('[data-command-id="approvals.rules"]')?.click()`);
+        return { ok: false };
+      }
+      if (!probe.text.includes("OS sandbox")) return { ok: false, probe };
+      if (!sbSnap) {
+        return { ok: probe.state === "unavailable" && !probe.text.includes("Active sandbox"), probe };
+      }
+      const label = sbModeLabel[sbSnap.mode] || sbSnap.mode;
+      // "unprobed" (serve seeds it before any sandboxed command) is unknown,
+      // never rendered as "no working backend".
+      const want = sbSnap.available ? "ready" : sbSnap.backend === "unprobed" ? "unprobed" : "no-backend";
+      return {
+        ok:
+          probe.state === want &&
+          probe.text.includes(label) &&
+          probe.profile === !!sbSnap.explain &&
+          (sbSnap.networkAllow || []).every((h) => probe.text.includes(h)),
+        probe,
+        snap: sbSnap,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await waitFor(
+    "close the Permissions panel",
+    async () => {
+      const open = await apprEval(`!!document.querySelector('.approvals-panel')`);
+      if (!open) return { ok: true };
+      await apprEval(`[...document.querySelectorAll('.approvals-panel-head button')].find((b) => (b.innerText || '').trim() === 'Close')?.click()`);
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
 
   const apprAuth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const apprRuleCall = async (path, body) => {
@@ -1734,6 +1816,14 @@ try {
   // Usage export (#1481): the client-side Export controls render beside
   // the report even before any usage is seeded.
   await openView("Usage", ["Input tokens", "Daily budget (USD)", "Export JSON", "Export CSV (by day)"]);
+  // Usage projection (#1388): the smoke daemon has no multi-day priced
+  // history, so no estimate may render — only the absent note, if any.
+  const projectionLevel = await evaluate(
+    `(document.querySelector("[data-usage-projection]") || {}).dataset?.usageProjection || ""`,
+  );
+  if (projectionLevel !== "" && projectionLevel !== "absent") {
+    throw new Error(`usage projection rendered without priced history: ${projectionLevel}`);
+  }
   // Audit window (#1440): seed a chain longer than the 100-row window
   // before opening Audit, so the first render is already capped.
   const auditSeed = 105;
@@ -1871,9 +1961,46 @@ try {
     );
   }
 
+  // Memory search/filter (#1461): value fragment narrows to a visible-vs-
+  // total count, a no-match query shows the distinct filtered-empty state
+  // without hiding the Save form, and clearing restores every row.
+  const setSearch = async (selector, value) => {
+    const raw = await evaluate(
+      `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return "missing"; el.value = ${JSON.stringify(value)}; el.dispatchEvent(new Event("input", { bubbles: true })); return "set"; })()`,
+    );
+    if (raw !== "set") throw new Error(`storage search input ${selector} not found`);
+  };
+  await setSearch(".storage-search-memory", "smoke likes");
+  await waitFor(
+    "memory search by value fragment to narrow to 1 of 2",
+    textProbe((t) => t.includes("1 of 2 entries") && t.includes("smoke-pref")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await setSearch(".storage-search-memory", "zzz-no-memory-match");
+  await waitFor(
+    "memory filtered-empty state with the Save form still present",
+    async () => {
+      const raw = await evaluate(`(() => JSON.stringify({
+        empty: !!document.querySelector("[data-memory-filtered-empty]"),
+        form: !!document.querySelector(".storage-form"),
+        body: document.body.innerText.includes("No memory entries match"),
+        count: document.body.innerText.includes("0 of 2 entries"),
+      }))()`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: !!(p.empty && p.form && p.body && p.count), ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await setSearch(".storage-search-memory", "");
+  await waitFor(
+    "memory search cleared to restore all rows",
+    textProbe((t) => t.includes("2 of 2 entries") && t.includes("smoke-pref")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
   // Memory Delete confirm (#1554): Delete must open the shared confirm
   // dialog naming the entry; cancelling leaves the entry, confirming
-  // removes it. Runs last in this section — later checks do not use
+  // removes it. Runs after the Memory search checks — later checks do not use
   // smoke-pref.
   const memRowProbe = async () => {
     const raw = await evaluate(`(() => {
@@ -1967,6 +2094,41 @@ try {
     { timeout: WAIT_MS, interval: 250 },
   );
 
+  // Knowledge search/filter (#1469): same shape over path/note/author.
+  await runPalette("Knowledge");
+  await waitFor(
+    "knowledge panel to show the seeded pin",
+    textProbe((t) => t.includes("docs/smoke-pin.md") && t.includes("smoke pin note")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await setSearch(".storage-search-knowledge", "pin note");
+  await waitFor(
+    "knowledge search by note fragment to narrow to 1 of 1",
+    textProbe((t) => t.includes("1 of 1 pins") && t.includes("docs/smoke-pin.md")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await setSearch(".storage-search-knowledge", "zzz-no-pin-match");
+  await waitFor(
+    "knowledge filtered-empty state with the Pin form still present",
+    async () => {
+      const raw = await evaluate(`(() => JSON.stringify({
+        empty: !!document.querySelector("[data-knowledge-filtered-empty]"),
+        form: !!document.querySelector(".storage-form"),
+        body: document.body.innerText.includes("No pins match"),
+        count: document.body.innerText.includes("0 of 1 pins"),
+      }))()`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: !!(p.empty && p.form && p.body && p.count), ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await setSearch(".storage-search-knowledge", "");
+  await waitFor(
+    "knowledge search cleared to restore the pin",
+    textProbe((t) => t.includes("1 of 1 pins") && t.includes("docs/smoke-pin.md")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
   // that predates Goals has no palette command and fails here.
   await runPalette("Goals");
@@ -2007,7 +2169,7 @@ try {
   }
   await waitFor(
     "passing goal run to reach Done",
-    textProbe((body) => body.includes("smoke pass") && body.includes("Done")),
+    goalRowProbe("smoke pass", "Done"),
     { timeout: WAIT_MS, interval: 250 },
   );
   // Duplicate a goal (#1415): the detail Duplicate opens the create form
@@ -2045,7 +2207,7 @@ try {
   })()`);
   await waitFor(
     "duplicated goal run to reach Done",
-    textProbe((body) => body.includes("smoke pass copy") && body.includes("Done")),
+    goalRowProbe("smoke pass copy", "Done"),
     { timeout: WAIT_MS, interval: 250 },
   );
   const goalsAfterDupSubmit = await (
@@ -2065,7 +2227,13 @@ try {
   }
   await waitFor(
     "failing goal run to surface Needs you / verification failed",
-    textProbe((body) => body.includes("Needs you") && body.includes("verification failed")),
+    async () => {
+      // Row label or the detail escalation banner — never the filter chip.
+      const row = await goalRowProbe("smoke fail", "Needs you")();
+      const banner = (await evaluate(`!!document.getElementById("goals-escalate")`)) === true;
+      const body = await textProbe((b) => b.includes("verification failed"))();
+      return { ok: (row.ok || banner) && body.ok, body: row.body };
+    },
     { timeout: WAIT_MS, interval: 250 },
   );
   // Goal Abort confirm (#1559): Abort is terminal, so it must open the
@@ -2112,11 +2280,13 @@ try {
   await waitFor(
     "goal abort confirm to close on cancel, goal still Needs you",
     async () => {
-      const body = (await evaluate(`document.body.innerText`)) || "";
+      // Row label, not body text: the "Needs you" filter chip is always on screen (#1455).
+      const row = await goalRowProbe("smoke fail", "Needs you")();
       return {
         ok:
           (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === false &&
-          body.includes("Needs you"),
+          row.ok,
+        body: row.body,
       };
     },
     { timeout: STEP_MS, interval: 200 },
@@ -2134,8 +2304,52 @@ try {
   await evaluate(`document.querySelector("[data-confirm='accept']").click()`);
   await waitFor(
     "goal in Aborted state after confirmed abort",
-    textProbe((body) => body.includes("Aborted")),
+    // Row label, not body text: the "Aborted" filter chip is always on screen (#1455).
+    goalRowProbe("smoke fail", "Aborted"),
     { timeout: WAIT_MS, interval: 250 },
+  );
+  // Goals list filter (#1455): status chip + description search narrow the
+  // list with AND semantics; a no-match shows its own empty state, and
+  // Clear filters restores every row.
+  await evaluate(`document.querySelector('[data-goal-filter="done"]').click()`);
+  await waitFor(
+    "Done status chip narrows the goals list",
+    goalRowProbe("smoke pass", "Done"),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const doneRows = await evaluate(`[...document.querySelectorAll(".goals-row .goals-status")].map((s) => s.textContent.trim())`);
+  if (!doneRows.length || doneRows.some((s) => s !== "Done")) {
+    throw new Error(`Done filter left non-Done rows: ${JSON.stringify(doneRows)}`);
+  }
+  await evaluate(`(() => {
+    const el = document.getElementById("goals-search");
+    el.value = "zzz-no-such-goal";
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  })()`);
+  await waitFor(
+    "goals no-match empty state and count",
+    async () => {
+      const r = await evaluate(`({
+        empty: document.body.innerText.includes("No goals match — clear filters"),
+        count: document.querySelector("[data-goals-count]")?.textContent.trim() || "",
+        rows: document.querySelectorAll(".goals-row").length,
+      })`);
+      return { ok: r.empty && r.rows === 0 && /^Showing 0 of \d+ goals$/.test(r.count), body: JSON.stringify(r) };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector("[data-goals-clear]").click()`);
+  await waitFor(
+    "Clear filters restores every goal row",
+    async () => {
+      const r = await evaluate(`({
+        rows: document.querySelectorAll(".goals-row").length,
+        search: document.getElementById("goals-search")?.value,
+        on: document.querySelector("[data-goal-filter].on")?.dataset.goalFilter,
+      })`);
+      return { ok: r.rows >= 3 && r.search === "" && r.on === "all", body: JSON.stringify(r) };
+    },
+    { timeout: STEP_MS, interval: 250 },
   );
 
   const clicked = await send("Runtime.evaluate", {
@@ -2465,6 +2679,81 @@ try {
     stageAllSeeded = false;
   }
   await clickSideTab("Git", "Staged");
+  // Git panel small wins (#1427/#1432/#1435): the path filter exists,
+  // an active no-match query flips every section's empty text to
+  // "No files match.", and the log rows carry full-hash copy hooks.
+  await waitFor(
+    "git path filter input (data-git-filter)",
+    async () => {
+      const n = await evaluate(`document.querySelectorAll("[data-git-filter]").length`);
+      return { ok: n === 1, n };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    const el = document.querySelector("[data-git-filter]");
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(el, "zz-no-match-zz");
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  })()`);
+  await waitFor(
+    "active git filter shows No files match",
+    textProbe((t) => t.includes("No files match.")),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    const el = document.querySelector("[data-git-filter]");
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(el, "");
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  })()`);
+  const logRes = await fetch(`http://127.0.0.1:${port}/v1/git/log?limit=30`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!logRes.ok) {
+    throw new Error(`git log route failed: HTTP ${logRes.status} (copy-hash/show-more unchecked)`);
+  }
+  {
+    const logBody = await logRes.json();
+    const commitCount = (logBody.commits || []).length;
+    if (commitCount > 0) {
+      await evaluate(`(() => {
+        const panel = document.getElementById("git-panel");
+        panel.focus();
+        panel.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true }));
+        return true;
+      })()`);
+      await waitFor(
+        "git log copy-hash hooks carry full 40-char hashes",
+        async () => {
+          const raw = await evaluate(`JSON.stringify([...document.querySelectorAll("[data-git-copy-hash]")].map((b) => b.getAttribute("data-git-copy-hash") || ""))`);
+          const hashes = JSON.parse(raw || "[]");
+          return { ok: hashes.length > 0 && hashes.every((h) => h.length === 40), count: hashes.length };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      if (commitCount === 30) {
+        await waitFor(
+          "git log Show more hook at a full 30 page",
+          async () => {
+            const n = await evaluate(`document.querySelectorAll("[data-git-log-more]").length`);
+            return { ok: n === 1, n };
+          },
+          { timeout: STEP_MS, interval: 250 },
+        );
+      }
+      // Toggle the log back closed so later Git-tab probes see the
+      // default panel.
+      await evaluate(`(() => {
+        const panel = document.getElementById("git-panel");
+        panel.focus();
+        panel.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true }));
+        return true;
+      })()`);
+    }
+  }
   // Branch switcher regression (#1314): the rendered <select> value must
   // equal the daemon's current branch once the options exist. The defect
   // was prop:value being applied before the options rendered, so the
@@ -3425,6 +3714,37 @@ try {
   if (!triggersText.includes("New trigger") || !triggersText.includes("Delivery log")) {
     throw new Error(`triggers page missing: ${triggersText.slice(0, 400)}`);
   }
+
+  // #1486: create a trigger so the show-once secret and the hook URL
+  // render, then Copy secret must produce a visible outcome — the copied
+  // confirmation, or the manual-fallback notice when the harness denies
+  // clipboard permission. A silent click is the failure this guards.
+  await evaluate(`(() => {
+    const el = document.querySelector("#trigger-name");
+    if (!el) return false;
+    const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+    proto.set.call(el, "smoke-copy");
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, data: "smoke-copy" }));
+    return el.value === "smoke-copy";
+  })()`);
+  await evaluate(`(() => {
+    document.querySelector(".triggers-detail form button.primary")?.click();
+    return true;
+  })()`);
+  await waitFor(
+    "trigger copy buttons",
+    textProbe((t) => t.includes("Copy secret") && t.includes("Copy hook URL")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    [...document.querySelectorAll("button")].find((b) => b.innerText.trim() === "Copy secret")?.click();
+    return true;
+  })()`);
+  await waitFor(
+    "trigger copy outcome",
+    textProbe((t) => t.includes("Signing secret copied.") || t.includes("Copy failed")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
 
   await send("Runtime.evaluate", {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,

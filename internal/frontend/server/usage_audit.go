@@ -33,6 +33,7 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := usageResponse{Report: report, PricingNote: note}
+	now := time.Now()
 	if log := s.usageLog(); log != nil {
 		usd, set, err := log.DailyBudget()
 		if err != nil {
@@ -42,15 +43,16 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 		resp.BudgetSet = set
 		resp.DailyUSD = usd
 		today := usageaudit.DayUsage{}
-		day := time.Now().UTC().Format("2006-01-02")
+		day := now.UTC().Format("2006-01-02")
 		for _, d := range report.Days {
 			if d.Day == day {
 				today = d
 				break
 			}
 		}
-		resp.Alerts = append(resp.Alerts, usageaudit.DailyAlerts(today, usd, set, time.Now())...)
+		resp.Alerts = append(resp.Alerts, usageaudit.DailyAlerts(today, usd, set, now)...)
 	}
+	resp.Projection, resp.ProjectionNote = usageaudit.Project(report, resp.DailyUSD, resp.BudgetSet, now)
 	if resp.Sessions == nil {
 		resp.Sessions = []usageaudit.SessionUsage{}
 	}
