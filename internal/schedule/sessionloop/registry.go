@@ -46,7 +46,7 @@ type Loop struct {
 	Runs       int       `json:"runs"`
 	CreatedAt  time.Time `json:"createdAt"`
 	NextAt     time.Time `json:"nextAt"`
-	LastRunAt  time.Time `json:"lastRunAt,omitempty"`
+	LastRunAt  time.Time `json:"lastRunAt,omitzero"`
 	LastError  string    `json:"lastError,omitempty"`
 }
 

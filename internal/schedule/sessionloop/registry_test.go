@@ -2,8 +2,10 @@ package sessionloop
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -93,6 +95,29 @@ func TestStartListFireRearm(t *testing.T) {
 	h.last().f()
 	if len(h.sent) != 2 || r.List()[0].Runs != 2 {
 		t.Fatalf("second fire: sent=%v list=%+v", h.sent, r.List())
+	}
+}
+
+func TestLoopJSONOmitsUnsetFields(t *testing.T) {
+	t.Parallel()
+	r, h := newHarness(t)
+	l, err := r.Start("1m", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"lastRunAt", "lastError"} {
+		if strings.Contains(string(raw), key) {
+			t.Fatalf("unfired loop JSON has %s: %s", key, raw)
+		}
+	}
+	h.last().f()
+	raw, _ = json.Marshal(r.List()[0])
+	if !strings.Contains(string(raw), "lastRunAt") {
+		t.Fatalf("fired loop JSON lacks lastRunAt: %s", raw)
 	}
 }
 
