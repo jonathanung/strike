@@ -45,6 +45,7 @@ import (
 	"github.com/jonathanung/strike/internal/tools"
 	"github.com/jonathanung/strike/internal/trust/admission"
 	"github.com/jonathanung/strike/internal/trust/audit"
+	"github.com/jonathanung/strike/internal/trust/workspacetrust"
 )
 
 // assembled is the composition-root product shared by the TUI and headless
@@ -79,6 +80,9 @@ type assembled struct {
 	worktreeClose func() error
 	// worktreeNotice is a user-visible soft-fail message (e.g. non-git cwd).
 	worktreeNotice string
+	// trustNotice says repo config was skipped as untrusted ("" when trusted
+	// or when the repo ships none) (#1352).
+	trustNotice string
 	// mcpClose stops MCP server sessions (stdio/HTTP; process-scoped).
 	mcpClose func() error
 	// lspClose stops language server sessions (stdio; process-scoped).
@@ -110,6 +114,19 @@ type assembled struct {
 	sideSelect   func(string) (provider.Provider, string, error)
 }
 
+// startupNotice joins the user-visible soft-fail messages frontends show once
+// at start (worktree bind, untrusted workspace). Empty when there is nothing
+// to say.
+func (a *assembled) startupNotice() string {
+	var parts []string
+	for _, s := range []string{a.worktreeNotice, a.trustNotice} {
+		if s != "" {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 // assemble resolves project/config/auth, builds the engine and session store,
 // and wraps host services. requireProvider forces credential validation even
 // when --provider was not set (headless exec cannot pick a provider later).
@@ -131,6 +148,16 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if globalRoot == "" {
 		return nil, fmt.Errorf("opening prompt history: global config root is unavailable")
 	}
+	// Workspace trust gate (#1352): decided before any repo-supplied config is
+	// read. The store lives under the global root, never in the repo. While
+	// untrusted, cfgScope is "" so every project loader below sees only
+	// builtin + global layers and no project MCP/LSP/harness process starts.
+	trustStore, err := workspacetrust.Open(workspacetrust.DefaultPath(globalRoot))
+	if err != nil {
+		return nil, fmt.Errorf("opening workspace trust: %w", err)
+	}
+	wsTrust := resolveWorkspaceTrust(trustStore, workDir, projectIdentity.Root)
+	cfgScope := wsTrust.scope(workDir)
 	historyStore, err := history.Open(globalRoot, projectIdentity.Key)
 	if err != nil {
 		return nil, fmt.Errorf("opening prompt history: %w", err)
@@ -222,7 +249,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		_ = historyStore.Close()
 		return nil, fmt.Errorf("opening project ledger: %w", err)
 	}
-	cfg, err := config.Load(workDir)
+	cfg, err := config.Load(cfgScope)
 	if err != nil {
 		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
@@ -235,6 +262,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	}
 	// Trusted plugin MCP / harness / hook activation (#728). Untrusted
 	// executable contributions never start; user config names win collisions.
+	// Project plugins (lockfile inside the repo) also sit behind workspace trust.
 	{
 		userMCP := make(map[string]struct{}, len(cfg.MCP.Servers))
 		for name := range cfg.MCP.Servers {
@@ -244,9 +272,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		for name := range cfg.Harnesses {
 			userHarness[name] = struct{}{}
 		}
-		execSet := plugin.CompileExecutables(plugin.Options{WorkDir: workDir}, userMCP, userHarness)
+		execSet := plugin.CompileExecutables(plugin.Options{WorkDir: cfgScope}, userMCP, userHarness)
 		var pdiags []plugin.Diagnostic
-		cfg, pdiags = config.ApplyPluginExecutables(workDir, cfg, execSet, true)
+		cfg, pdiags = config.ApplyPluginExecutables(cfgScope, cfg, execSet, true)
 		for _, d := range pdiags {
 			if d.Code == "shadowed" {
 				continue
@@ -366,7 +394,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 
 	// Skills load before the tool registry so the skill tool can advertise
 	// available names in its description at construction time.
-	skills, err := config.LoadSkillsWithError(workDir)
+	skills, err := config.LoadSkillsWithError(cfgScope)
 	if err != nil {
 		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
@@ -381,7 +409,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	skills, skillVerdicts = config.FilterSkills(admitPol, skills, workDir)
 	admissionVerdicts = append(admissionVerdicts, skillVerdicts...)
 	// Plugin path/capability admission (trust remains a separate gate).
-	pluginVerdicts := config.AdmitPlugins(admitPol, config.DiscoverPlugins(workDir), workDir)
+	pluginVerdicts := config.AdmitPlugins(admitPol, config.DiscoverPlugins(cfgScope), workDir)
 	admissionVerdicts = append(admissionVerdicts, pluginVerdicts...)
 	skillInfos := make([]tools.SkillInfo, len(skills))
 	for i, s := range skills {
@@ -453,7 +481,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// from ~/.strike/agents and ./.strike/agents. Empty Prompt on build/plan
 	// means "compose shared baseline + provider/plan overlay at request time";
 	// other personas supply a body that becomes the persona layer.
-	loadedAgents, err := config.LoadAgentsWithError(workDir)
+	loadedAgents, err := config.LoadAgentsWithError(cfgScope)
 	if err != nil {
 		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
@@ -512,8 +540,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return nil, fmt.Errorf("agent %q references unknown harness %q", agent.Name, agent.Harness)
 		}
 	}
-	instructions := config.LoadInstructions(workDir, projectIdentity.Root)
-	workflows, err := config.LoadWorkflows(workDir)
+	instructions := config.LoadInstructions(cfgScope, projectIdentity.Root)
+	workflows, err := config.LoadWorkflows(cfgScope)
 	if err != nil {
 		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
@@ -768,6 +796,19 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			}
 			sessionID = info.ID
 		}
+		// Every root transcript (first, /new, rpc, unattended/scheduled spawn,
+		// resume) records that repo config was skipped as untrusted, so a
+		// headless run is never silently reconfigured — or silently
+		// un-configured (#1352).
+		if wsTrust.inert() {
+			_ = bound.Append(protocol.AdmissionDecided{
+				Correlation: protocol.Correlation{SessionID: sessionID},
+				Surface:     "workspace",
+				Target:      wsTrust.root,
+				Action:      string(admission.ActionBlock),
+				Reason:      wsTrust.reason(),
+			})
+		}
 
 		// Bind tool CWD to a per-session git worktree when configured / forced.
 		// Project-scoped state stays on projectIdentity.Key (launch repo).
@@ -803,7 +844,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		projectRoot := projectIdentity.Root
 		if binding.Bound {
 			projectRoot = binding.Root
-			sessionInstructions = config.LoadInstructions(binding.Dir, binding.Root)
+			// A session worktree is the same repository: the trust decision
+			// carries over, so an untrusted workspace still skips its steering.
+			sessionInstructions = config.LoadInstructions(wsTrust.scope(binding.Dir), binding.Root)
 			if binding.RulesBlock != "" && !workspace.InstructionCovers(sessionInstructions, binding.RulesPath) {
 				sessionInstructions = append(sessionInstructions, binding.RulesBlock)
 			}
@@ -953,7 +996,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			Workflows:                  enginebind.Workflows(workflows),
 			Rules:                      permissionLayersWithPreset(cfg.Permissions, cfg.PermissionPreset, bypass),
 			RuleLayerNames:             permissionLayerNames(cfg.PermissionPreset, bypass),
-			ManagedRules:               append(permission.Ruleset(nil), cfg.Managed.DenyRules...),
+			ManagedRules:               sessionManagedRules(cfg.Managed.DenyRules, tokenFileDenyRules(opts.serveTokenFile, opts.serveCwd)),
 			LockPermissionMode:         cfg.Managed.PermissionMode,
 			Hooks:                      hookDefs,
 			HookRules:                  cfg.HookRules(),
@@ -1311,6 +1354,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		},
 		worktreeClose:  first.wtClose,
 		worktreeNotice: first.wtNotice,
+		trustNotice:    wsTrust.notice(),
 		mcpClose: func() error {
 			return mcpMgr.Close()
 		},

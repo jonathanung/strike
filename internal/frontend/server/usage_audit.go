@@ -59,6 +59,9 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	if resp.Days == nil {
 		resp.Days = []usageaudit.DayUsage{}
 	}
+	if resp.Models == nil {
+		resp.Models = []usageaudit.ModelUsage{}
+	}
 	if resp.Alerts == nil {
 		resp.Alerts = []usageaudit.Alert{}
 	}
@@ -284,6 +287,7 @@ func settingsPatchFields(body settingsPatchBody) []string {
 	add("deferTools", body.DeferTools)
 	add("sessionWorktree", body.SessionWorktree)
 	add("autoupdate", body.Autoupdate)
+	add("keepAwake", body.KeepAwake)
 	add("permissionAutoApproveSeconds", body.PermissionAutoApproveSeconds)
 	add("maxChildDepth", body.MaxChildDepth)
 	add("compactionStrategy", body.CompactionStrategy)
@@ -298,6 +302,20 @@ func settingsPatchFields(body settingsPatchBody) []string {
 	if body.PermissionAutoApproveExclude != nil {
 		out = append(out, "permissionAutoApproveExclude")
 	}
+	g := body.guardrailDials()
+	add("turnTimeoutS", g.TurnTimeout)
+	add("maxSessionCostUSD", g.MaxSessionCostUSD)
+	add("maxTurnTokens", g.MaxTurnTokens)
+	if g.AgentBudgetMaxWallClockS != "" || g.AgentBudgetMaxTokens != "" || g.AgentBudgetMaxCostUSD != "" ||
+		g.AgentBudgetMaxToolCalls != "" || g.AgentBudgetMaxDangerousTools != "" || g.AgentBudgetStallAfterS != "" ||
+		g.AgentBudgetLoopDetectN != "" {
+		out = append(out, "agentBudget")
+	}
+	if g.DelegationMode != "" || g.DelegationTinyPromptRunes != "" || g.DelegationMaxPathsLocal != "" || g.DelegationMaxLiveChildren != "" {
+		out = append(out, "delegationPolicy")
+	}
+	add("childHandoffRequired", g.ChildHandoffRequired)
+	add("childIsolation", g.ChildIsolation)
 	return out
 }
 
