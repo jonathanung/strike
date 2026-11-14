@@ -1685,6 +1685,7 @@ func toolVerification(v protocol.VerificationReport) tool.VerificationReport {
 			Output:     c.Output,
 			Error:      c.Error,
 			DurationMs: c.DurationMs,
+			Triage:     triageFromProtocol(c.Triage),
 		})
 	}
 	if checks == nil {
