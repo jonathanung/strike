@@ -133,14 +133,24 @@ pub fn session_token(id: &str) -> String {
     token_map().get(id).cloned().unwrap_or_default()
 }
 
-pub fn persist_token(id: &str, token: &str) {
-    let mut map = token_map();
+/// Pure core of [`persist_token`]: an empty token deletes the entry, a
+/// non-empty one stores it. Removal paths (#1562) go through the empty
+/// case so a removed profile's credential leaves with the profile.
+fn updated_token_map(
+    mut map: HashMap<String, String>,
+    id: &str,
+    token: &str,
+) -> HashMap<String, String> {
     if token.is_empty() {
         map.remove(id);
     } else {
         map.insert(id.to_string(), token.to_string());
     }
-    write_token_map(&map);
+    map
+}
+
+pub fn persist_token(id: &str, token: &str) {
+    write_token_map(&updated_token_map(token_map(), id, token));
 }
 
 /// Moves a legacy localStorage token into this tab's session and deletes it.
@@ -929,6 +939,10 @@ pub fn GatewaySwitcher(
     };
 
     let remove_profile = move |id: String| {
+        // The token leaves with the profile (#1562). Without this the
+        // removed gateway's credential stays in the tab's token map for
+        // the tab's lifetime, and a re-added profile whose derived ID
+        // matches the old one silently resurrects it instead of prompting.
         persist_token(&id, "");
         profiles.update(|list| list.retain(|p| p.id != id));
         save_profiles(&profiles.get());
@@ -1048,5 +1062,36 @@ pub fn GatewaySwitcher(
                 </div>
             </Show>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_token_deletes_only_that_profiles_entry() {
+        // The #1562 delete path: removing one profile's token must not
+        // disturb any other profile's credential.
+        let mut map = HashMap::new();
+        map.insert("g1".to_string(), "dummy-token-one".to_string());
+        map.insert("g2".to_string(), "dummy-token-two".to_string());
+        let map = updated_token_map(map, "g1", "");
+        assert!(!map.contains_key("g1"));
+        assert_eq!(map.get("g2").map(String::as_str), Some("dummy-token-two"));
+    }
+
+    #[test]
+    fn non_empty_token_stores_and_overwrites() {
+        let map = updated_token_map(HashMap::new(), "g1", "dummy-token");
+        assert_eq!(map.get("g1").map(String::as_str), Some("dummy-token"));
+        let map = updated_token_map(map, "g1", "dummy-rotated");
+        assert_eq!(map.get("g1").map(String::as_str), Some("dummy-rotated"));
+    }
+
+    #[test]
+    fn deleting_a_token_that_was_never_stored_is_a_no_op() {
+        let map = updated_token_map(HashMap::new(), "gone", "");
+        assert!(map.is_empty());
     }
 }

@@ -26,6 +26,24 @@ pub fn install(reg: &mut ShellHook) {
     );
     reg.command(
         Command::new(
+            "session.filter.needs-you",
+            Group::Session,
+            "Filter sessions: Needs you",
+            "Show sessions waiting on an approval or a question",
+            go("session.filter.needs-you"),
+        )
+        .keywords(&[
+            "filter",
+            "waiting",
+            "approval",
+            "question",
+            "blocked",
+            "needs you",
+        ])
+        .order(41),
+    );
+    reg.command(
+        Command::new(
             "session.filter.progress",
             Group::Session,
             "Filter sessions: In progress",
