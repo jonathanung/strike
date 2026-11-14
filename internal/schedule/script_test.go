@@ -156,7 +156,7 @@ func TestPrepareScriptValidation(t *testing.T) {
 				}
 			},
 		},
-		{name: "bad permission mode still checked", mutate: func(s *Spec) { s.PermissionMode = "yolo" }, wantErr: "unknown permission mode"},
+		{name: "bad permission mode still checked", mutate: func(s *Spec) { s.PermissionMode = "not-a-mode" }, wantErr: "unknown permission mode"},
 		{name: "bad source", mutate: func(s *Spec) { s.Source = "shell" }, wantErr: "source must be prompt, goal, workflow, or script"},
 	}
 	for _, tc := range cases {
@@ -420,7 +420,7 @@ func TestRunOutputSidecarWriteReadAndBounds(t *testing.T) {
 	if !bytes.Contains(got, []byte("[REDACTED_AWS_KEY]")) {
 		t.Fatal("sidecar is not scrubbed")
 	}
-	path := filepath.Join(dir, "runs", "sch_a", "run_1.log")
+	path := filepath.Join(dir, "schedules", "runs", "sch_a", "run_1.log")
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -428,7 +428,7 @@ func TestRunOutputSidecarWriteReadAndBounds(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("file mode %o", info.Mode().Perm())
 	}
-	for _, d := range []string{filepath.Join(dir, "runs"), filepath.Join(dir, "runs", "sch_a")} {
+	for _, d := range []string{filepath.Join(dir, "schedules"), filepath.Join(dir, "schedules", "runs"), filepath.Join(dir, "schedules", "runs", "sch_a")} {
 		info, err := os.Stat(d)
 		if err != nil {
 			t.Fatal(err)
@@ -472,6 +472,7 @@ func TestTailOutputBoundary(t *testing.T) {
 		{"far over", strings.Repeat("ab", 5000), 100},
 		{"multibyte", strings.Repeat("é", 300), 100},
 		{"digit rollover", strings.Repeat("x", 100+99), 100},
+		{"limit below note", strings.Repeat("x", 50), 5},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -482,6 +483,13 @@ func TestTailOutputBoundary(t *testing.T) {
 			if len(tc.in) <= tc.limit {
 				if out != tc.in {
 					t.Fatalf("short input changed: %q", out)
+				}
+				return
+			}
+			if tc.limit < 32 {
+				// Nothing of the text fits beside the note; no panic, empty result.
+				if out != "" {
+					t.Fatalf("tiny limit produced %q", out)
 				}
 				return
 			}
@@ -537,7 +545,7 @@ func TestRunOutputFallsOffWithRunCap(t *testing.T) {
 			t.Fatalf("run %d sidecar missing: %v", i, err)
 		}
 	}
-	entries, err := os.ReadDir(filepath.Join(dir, "runs", sch.ID))
+	entries, err := os.ReadDir(filepath.Join(dir, "schedules", "runs", sch.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,7 +580,7 @@ func TestDeleteRemovesRunOutputs(t *testing.T) {
 	if err := svc.Delete(sch.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "runs", sch.ID)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(dir, "schedules", "runs", sch.ID)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("sidecar dir survived delete: %v", err)
 	}
 	if _, err := svc.store.ReadRunOutput(other.ID, "run_1"); err != nil {
@@ -597,7 +605,7 @@ func TestOpenStoreReconcilesOrphanOutputs(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	runs := filepath.Join(dir, "runs")
+	runs := filepath.Join(dir, "schedules", "runs")
 	if _, err := svc.store.WriteRunOutput(sch.ID, "run_keep", []byte("keep")); err != nil {
 		t.Fatal(err)
 	}
@@ -607,12 +615,31 @@ func TestOpenStoreReconcilesOrphanOutputs(t *testing.T) {
 	if _, err := svc.store.WriteRunOutput("sch_gone", "run_1", []byte("gone")); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := svc.store.WriteRunOutput("sch_mixed", "run_1", []byte("gone")); err != nil {
+		t.Fatal(err)
+	}
+	foreignInMixed := filepath.Join(runs, "sch_mixed", "notes.json")
+	if err := os.WriteFile(foreignInMixed, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	strayTmp := filepath.Join(runs, sch.ID, "run_half.log.tmp")
 	if err := os.WriteFile(strayTmp, []byte("half"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	foreignInLive := filepath.Join(runs, sch.ID, "README")
+	if err := os.WriteFile(foreignInLive, []byte("mine"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	strayFile := filepath.Join(runs, "junk")
 	if err := os.WriteFile(strayFile, []byte("junk"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// ~/.strike/runs is the session snapshot root; the store must never look there.
+	snapshot := filepath.Join(dir, "runs", "sess_abc", "root.json")
+	if err := os.MkdirAll(filepath.Dir(snapshot), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(snapshot, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -623,27 +650,43 @@ func TestOpenStoreReconcilesOrphanOutputs(t *testing.T) {
 	for _, p := range []string{
 		filepath.Join(runs, sch.ID, "run_orphan.log"),
 		filepath.Join(runs, "sch_gone"),
+		filepath.Join(runs, "sch_mixed", "run_1.log"),
 		strayTmp,
-		strayFile,
 	} {
 		if _, err := os.Stat(p); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("%s survived reconcile: %v", p, err)
 		}
 	}
+	for _, p := range []string{foreignInMixed, foreignInLive, strayFile, snapshot} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("reconcile removed a file it did not write, %s: %v", p, err)
+		}
+	}
 
-	// A store with no schedules.json yet still sweeps a leftover runs tree.
+	// A store with no schedules.json yet still sweeps a leftover sidecar
+	// tree, and still leaves the snapshot root alone.
 	fresh := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(fresh, "runs", "sch_x"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(fresh, "schedules", "runs", "sch_x"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(fresh, "runs", "sch_x", "run_1.log"), []byte("x"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(fresh, "schedules", "runs", "sch_x", "run_1.log"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	freshSnapshot := filepath.Join(fresh, "runs", "sess_x", "root.json")
+	if err := os.MkdirAll(filepath.Dir(freshSnapshot), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(freshSnapshot, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := OpenStore(fresh); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(fresh, "runs", "sch_x")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(fresh, "schedules", "runs", "sch_x")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("fresh store kept an orphan schedule dir: %v", err)
+	}
+	if _, err := os.Stat(freshSnapshot); err != nil {
+		t.Fatalf("fresh store touched the snapshot root: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(fresh, "schedules.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("reconcile created schedules.json: %v", err)

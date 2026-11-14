@@ -29,7 +29,9 @@ func OpenStore(dir string) (*Store, error) {
 	if dir == "" {
 		return nil, fmt.Errorf("schedule: empty dir")
 	}
-	s := &Store{path: filepath.Join(dir, "schedules.json"), runsDir: filepath.Join(dir, "runs")}
+	// Sidecars live under schedules/runs, not dir/runs: ~/.strike/runs is the
+	// session snapshot root (eval/replay, trace retention) and must not be swept.
+	s := &Store{path: filepath.Join(dir, "schedules.json"), runsDir: filepath.Join(dir, "schedules", "runs")}
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		s.reconcileOutputsLocked()

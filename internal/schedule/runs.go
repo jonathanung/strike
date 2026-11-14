@@ -66,7 +66,7 @@ func tailOutput(text string, limit int) string {
 		return text
 	}
 	dropped := len(text) - limit
-	for {
+	for dropped < len(text) {
 		note := fmt.Sprintf("… (%d bytes dropped)\n", dropped)
 		if len(note)+len(text)-dropped <= limit {
 			for dropped < len(text) && !utf8.RuneStart(text[dropped]) {
@@ -76,6 +76,8 @@ func tailOutput(text string, limit int) string {
 		}
 		dropped++
 	}
+	// limit is smaller than the note itself; nothing of the text fits.
+	return ""
 }
 
 // ReadRunOutput returns the sidecar for runID, or ErrNoOutput.
@@ -120,7 +122,9 @@ func (s *Store) removeScheduleOutputs(scheduleID string) {
 
 // reconcileOutputsLocked removes sidecars whose schedule or run no longer
 // exists (a crash between the record write and the file write, or a cap
-// trim that did not finish). Files that are not <runId>.log are strays.
+// trim that did not finish). It only ever deletes files this store writes
+// (<runId>.log and its .tmp) and then removes a schedule dir that is left
+// empty, so a misconfigured root cannot take anything else with it.
 func (s *Store) reconcileOutputsLocked() {
 	entries, err := os.ReadDir(s.runsDir)
 	if err != nil {
@@ -135,21 +139,28 @@ func (s *Store) reconcileOutputsLocked() {
 		runsOf[sch.ID] = ids
 	}
 	for _, entry := range entries {
-		dir := filepath.Join(s.runsDir, entry.Name())
-		ids, ok := runsOf[entry.Name()]
-		if !ok || !entry.IsDir() {
-			_ = os.RemoveAll(dir)
+		if !entry.IsDir() {
 			continue
 		}
+		dir := filepath.Join(s.runsDir, entry.Name())
+		ids, known := runsOf[entry.Name()]
 		files, err := os.ReadDir(dir)
 		if err != nil {
 			continue
 		}
 		for _, f := range files {
-			runID, isLog := strings.CutSuffix(f.Name(), ".log")
-			if !isLog || f.IsDir() || !ids[runID] {
-				_ = os.RemoveAll(filepath.Join(dir, f.Name()))
+			if f.IsDir() {
+				continue
 			}
+			name := f.Name()
+			runID, isLog := strings.CutSuffix(name, ".log")
+			if strings.HasSuffix(name, ".log.tmp") || (isLog && !ids[runID]) {
+				_ = os.Remove(filepath.Join(dir, name))
+			}
+		}
+		if !known {
+			// Succeeds only when nothing foreign is left inside.
+			_ = os.Remove(dir)
 		}
 	}
 }
