@@ -725,7 +725,7 @@ fn text(data: &Value, key: &str) -> Option<String> {
     data.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
 }
 
-fn known_tokens(v: Option<&Value>) -> Option<i64> {
+pub(crate) fn known_tokens(v: Option<&Value>) -> Option<i64> {
     let obj = v?.as_object()?;
     if obj.get("known").and_then(|k| k.as_bool()) != Some(true) {
         return None;

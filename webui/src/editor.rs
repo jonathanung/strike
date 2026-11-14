@@ -84,6 +84,41 @@ pub fn language_of(path: &str) -> &'static str {
     }
 }
 
+/// The local filename for a Download of the open file (#1420): the
+/// basename of the workspace-relative path as displayed, falling back
+/// to a plain name when the path has no usable final segment.
+pub fn download_filename(path: &str) -> String {
+    let base = path.rsplit('/').next().unwrap_or("").trim();
+    if base.is_empty() {
+        "download.txt".to_string()
+    } else {
+        base.to_string()
+    }
+}
+
+/// What a Download saves (#1420): in Edit mode the current buffer —
+/// what you see is what you get — never the stale on-disk content.
+/// Returns the text and whether it carries unsaved changes, so the
+/// status line can say so instead of downloading silently.
+pub fn download_buffer(editing: bool, content: &str, draft: &str) -> (String, bool) {
+    if editing {
+        (draft.to_string(), draft != content)
+    } else {
+        (content.to_string(), false)
+    }
+}
+
+/// The text a Copy path click puts on the clipboard (#1410): the
+/// workspace-relative path as displayed, in `path:line` form when a
+/// jump target (go-to-line or current find hit) is active.
+pub fn path_for_copy(path: &str, line: u32) -> String {
+    if line > 0 {
+        format!("{path}:{line}")
+    } else {
+        path.to_string()
+    }
+}
+
 /// Fences above this many lines or bytes stay plain (#1575): the
 /// transcript rebuilds every message on each streamed delta, so a huge
 /// pasted log must not become tens of thousands of spans. Mirrors the
@@ -1003,6 +1038,9 @@ pub fn markdown_blocks(src: &str) -> Vec<MdBlock> {
             continue;
         }
         if let Some(info) = trimmed.strip_prefix("```") {
+            // The fence info string is the language label (#1421); the
+            // transcript parser keeps it and MarkdownView used to drop
+            // it, which is why its fences had neither label nor Copy.
             let lang = info.trim().to_string();
             i += 1;
             let mut body = String::new();
@@ -1388,6 +1426,43 @@ fn Inlines(text: String) -> impl IntoView {
         .collect_view()
 }
 
+/// One fenced code block in rendered Markdown (#1421), with the same
+/// fence chrome as the transcript's `Block::Code`: a bar with the
+/// language label (hidden when the fence has no info string) and a
+/// Copy button on the shared clipboard helper, with the transcript's
+/// transient label feedback — one copy behaviour crate-wide, so the
+/// two renderers cannot drift on this affordance again.
+#[component]
+fn MdCodeBlock(lang: String, text: String) -> impl IntoView {
+    let copy_state = RwSignal::new(None::<bool>);
+    let copy = text.clone();
+    let has_lang = !lang.is_empty();
+    // Known fence languages get the file viewer's token spans (#1575);
+    // Copy still copies the raw fence text.
+    let code = highlighted_code(&lang, &text);
+    view! {
+        <div class="sx-fence ev-fence">
+            <div class="sx-fence-bar">
+                {has_lang.then(|| view! { <span class="sx-lang">{lang.clone()}</span> })}
+                <button
+                    type="button"
+                    class="sx-quiet ev-copy-code"
+                    data-ev-copy-code=true
+                    on:click=move |_| {
+                        let text = copy.clone();
+                        spawn_local(async move {
+                            let ok = crate::clipboard::copy_text(&text).await.is_ok();
+                            copy_state.set(Some(ok));
+                            crate::clipboard::after_ms(2_000, move || copy_state.set(None));
+                        });
+                    }
+                >{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
+            </div>
+            <pre class="sx-code">{code}</pre>
+        </div>
+    }
+}
+
 #[component]
 pub fn MarkdownView(text: String) -> impl IntoView {
     let blocks = markdown_blocks(&text);
@@ -1403,7 +1478,7 @@ pub fn MarkdownView(text: String) -> impl IntoView {
                     }
                 }
                 MdBlock::Paragraph(text) => view! { <p><Inlines text=text /></p> }.into_any(),
-                MdBlock::Code { lang, text } => view! { <pre>{highlighted_code(&lang, &text)}</pre> }.into_any(),
+                MdBlock::Code { lang, text } => view! { <MdCodeBlock lang=lang text=text /> }.into_any(),
                 MdBlock::Quote(text) => view! { <blockquote><Inlines text=text /></blockquote> }.into_any(),
                 MdBlock::List(items) => view! {
                     <ul>
@@ -2334,10 +2409,13 @@ pub fn DocumentPane(
             if path.is_empty() {
                 return Err("Open a file first.".into());
             }
-            if let Some(win) = web_sys::window() {
-                let _ = win.navigator().clipboard().write_text(&path);
-            }
-            notice.set("Copied the path.".into());
+            // Await the write through the shared helper (#1410): the
+            // old fire-and-forget call claimed "Copied the path." even
+            // when the browser rejected the write.
+            spawn_local(async move {
+                let ok = crate::clipboard::copy_text(&path).await.is_ok();
+                notice.set(crate::clipboard::path_copy_feedback(ok).into());
+            });
             Ok(())
         }),
     );
@@ -2348,10 +2426,10 @@ pub fn DocumentPane(
             if text.is_empty() {
                 return Err("Open a file first.".into());
             }
-            if let Some(win) = web_sys::window() {
-                let _ = win.navigator().clipboard().write_text(&text);
-            }
-            notice.set("Copied the file.".into());
+            spawn_local(async move {
+                let ok = crate::clipboard::copy_text(&text).await.is_ok();
+                notice.set(crate::clipboard::file_copy_feedback(ok).into());
+            });
             Ok(())
         }),
     );
@@ -2376,6 +2454,35 @@ pub fn DocumentPane(
                     if p.is_empty() { path.get() } else { p }
                 }}</span>
                 <span class="hint">{move || language_of(&loaded_path.get())}</span>
+                <button
+                    type="button"
+                    class="secondary"
+                    data-ev-copy-path=true
+                    disabled=move || loaded_path.get().is_empty()
+                    title="Copy the open file's path"
+                    on:click=move |_| {
+                        let p = loaded_path.get_untracked();
+                        if p.is_empty() {
+                            return;
+                        }
+                        // Same effective line the scroll effect uses:
+                        // the current find hit while searching, else
+                        // the go-to-line jump target (#1410 Q2).
+                        let line = if query.get_untracked().is_empty() {
+                            jump_line.get_untracked()
+                        } else {
+                            hits.get_untracked()
+                                .get(hit_idx.get_untracked())
+                                .map(|h| h.line)
+                                .unwrap_or(0)
+                        };
+                        let text = path_for_copy(&p, line);
+                        spawn_local(async move {
+                            let ok = crate::clipboard::copy_text(&text).await.is_ok();
+                            status.set(crate::clipboard::path_copy_feedback(ok).into());
+                        });
+                    }
+                >"Copy path"</button>
                 <input
                     id="ev-search"
                     class="ev-search"
@@ -2646,6 +2753,39 @@ pub fn DocumentPane(
                 <Show when=move || is_dirty(editing.get(), &draft.get(), &content.get())>
                     <span class="ev-dirty" data-ev-dirty=true>"Unsaved changes"</span>
                 </Show>
+                <button
+                    type="button"
+                    class="secondary"
+                    data-ev-download=true
+                    disabled=move || loaded_path.get().is_empty() || binary.get()
+                    title="Download a copy of the open file"
+                    on:click=move |_| {
+                        let p = loaded_path.get_untracked();
+                        if p.is_empty() {
+                            return;
+                        }
+                        // Download what is loaded (#1420): the full
+                        // content is already client-side, past the
+                        // 2,000-line render cap; in Edit mode that is
+                        // the current buffer, unsaved changes included,
+                        // and the status line says so.
+                        let (text, unsaved) = download_buffer(
+                            editing.get_untracked(),
+                            &content.get_untracked(),
+                            &draft.get_untracked(),
+                        );
+                        crate::transcript_view::save_download(
+                            &download_filename(&p),
+                            "text/plain;charset=utf-8",
+                            &text,
+                        );
+                        status.set(if unsaved {
+                            "Downloaded the current buffer, including unsaved changes.".into()
+                        } else {
+                            "Downloaded.".into()
+                        });
+                    }
+                >"Download"</button>
                 <button
                     type="button"
                     class="secondary"
@@ -2934,6 +3074,58 @@ mod tests {
         assert!(inline.iter().any(|p| matches!(p, Inline::Strong(t) if t == "bold")));
         assert!(inline.iter().any(|p| matches!(p, Inline::Link { href, .. } if href == "https://example.com")));
         assert!(!inline.iter().any(|p| matches!(p, Inline::Link { href, .. } if href.contains("javascript"))));
+    }
+
+    #[test]
+    fn markdown_fence_keeps_its_language() {
+        let blocks = markdown_blocks("```rust\nfn main() {}\n```\n\n```\nplain\n```\n");
+        match &blocks[0] {
+            MdBlock::Code { lang, text } => {
+                assert_eq!(lang, "rust");
+                assert_eq!(text, "fn main() {}");
+            }
+            other => panic!("expected code, got {other:?}"),
+        }
+        match &blocks[1] {
+            MdBlock::Code { lang, text } => {
+                assert!(lang.is_empty());
+                assert_eq!(text, "plain");
+            }
+            other => panic!("expected code, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn download_filename_is_the_basename() {
+        assert_eq!(download_filename("webui/src/editor.rs"), "editor.rs");
+        assert_eq!(download_filename("README.md"), "README.md");
+        assert_eq!(download_filename("a/b/"), "download.txt");
+        assert_eq!(download_filename(""), "download.txt");
+    }
+
+    #[test]
+    fn download_buffer_prefers_the_edit_buffer_and_flags_unsaved() {
+        assert_eq!(
+            download_buffer(false, "disk", "draft"),
+            ("disk".to_string(), false)
+        );
+        assert_eq!(
+            download_buffer(true, "disk", "disk"),
+            ("disk".to_string(), false)
+        );
+        assert_eq!(
+            download_buffer(true, "disk", "edited"),
+            ("edited".to_string(), true)
+        );
+    }
+
+    #[test]
+    fn path_for_copy_adds_line_only_with_a_jump_target() {
+        assert_eq!(path_for_copy("webui/src/editor.rs", 0), "webui/src/editor.rs");
+        assert_eq!(
+            path_for_copy("webui/src/editor.rs", 42),
+            "webui/src/editor.rs:42"
+        );
     }
 
     #[test]

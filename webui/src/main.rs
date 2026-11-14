@@ -28,6 +28,7 @@ mod git;
 mod goals;
 mod mobile;
 mod providers;
+mod rule_author;
 mod sandbox_explain;
 mod schedule;
 mod model;
@@ -59,6 +60,7 @@ mod transcript;
 mod transcript_view;
 mod triggers;
 mod turn_elapsed;
+mod turn_usage;
 mod workspaces;
 use crate::shell::icon;
 
@@ -2688,6 +2690,14 @@ fn App() -> impl IntoView {
         }
     };
 
+    // Page-level session links (Audit #1530, Permissions #1540): switch
+    // to chat and open through the shared live/resume path.
+    let open_session_page = move |id: String| {
+        mode.set("chat".into());
+        let live = roots.get_untracked().iter().any(|r| r.id == id);
+        open_session(id, live);
+    };
+
     let travel = move |back: bool| {
         let id = {
             let mut popped = None;
@@ -4646,6 +4656,7 @@ fn App() -> impl IntoView {
             reply_n=reply_n
             reply_id=reply_id
             reply_decision=reply_decision
+            open_session=open_session_page
         />
         <shell::Chrome />
         {gateway_qr::phone_view()}
@@ -4698,11 +4709,7 @@ fn App() -> impl IntoView {
                 base=base
                 token=token
                 status=status
-                open_session=move |id: String| {
-                    mode.set("chat".into());
-                    let live = roots.get_untracked().iter().any(|r| r.id == id);
-                    open_session(id, live);
-                }
+                open_session=open_session_page
             />
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
@@ -4714,6 +4721,7 @@ fn App() -> impl IntoView {
                 token=token
                 active_root=active_root
                 status=status
+                mode=mode
             />
         </Show>
         <Show when=move || mode.get() == "schedule" fallback=move || ()>

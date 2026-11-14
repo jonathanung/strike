@@ -2872,6 +2872,44 @@ try {
     }
     await evaluate(toggleLog);
   }
+  // Branch changes (#1450): the panel's Branch view must agree with the
+  // daemon route — a summary for "ok", the named empty state otherwise
+  // (CI checks out a detached merge commit, so "detached" is expected
+  // there).
+  const bcRes = await fetch(`http://127.0.0.1:${port}/v1/git/branch-changes`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!bcRes.ok) {
+    throw new Error(`branch-changes route: HTTP ${bcRes.status} ${await bcRes.text()}`);
+  }
+  const bcBody = await bcRes.json();
+  const bcBad = await fetch(`http://127.0.0.1:${port}/v1/git/branch-changes?base=-p`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (bcBad.status !== 400) {
+    throw new Error(`branch-changes accepted an option-looking base: HTTP ${bcBad.status}`);
+  }
+  await evaluate(`(() => { document.querySelector("[data-git-branch-toggle]").click(); return true; })()`);
+  await waitFor(
+    `git Branch view renders daemon state ${bcBody.state}`,
+    async () => {
+      const raw = await evaluate(`JSON.stringify((() => {
+        const root = document.querySelector("[data-git-branch-changes]");
+        if (!root) return null;
+        const st = root.querySelector("[data-git-branch-state]");
+        return {
+          state: st ? st.getAttribute("data-git-branch-state") : "ok",
+          summary: !!root.querySelector("[data-git-branch-summary]"),
+          picker: !!root.querySelector("[data-git-branch-base]"),
+        };
+      })())`);
+      const got = JSON.parse(raw || "null");
+      const ok = !!got && got.picker && got.state === bcBody.state && (bcBody.state !== "ok" || got.summary);
+      return { ok, got };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`(() => { document.querySelector("[data-git-branch-toggle]").click(); return true; })()`);
   // Branch switcher regression (#1314): the rendered <select> value must
   // equal the daemon's current branch once the options exist. The defect
   // was prop:value being applied before the options rendered, so the
