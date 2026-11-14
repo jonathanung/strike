@@ -439,6 +439,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/git/diff", s.handleGitDiff)
 	s.mux.HandleFunc("GET /v1/git/branches", s.handleGitBranches)
 	s.mux.HandleFunc("GET /v1/git/log", s.handleGitLog)
+	s.mux.HandleFunc("GET /v1/git/show", s.handleGitShow)
 	s.mux.HandleFunc("POST /v1/git/stage", s.handleGitStage)
 	s.mux.HandleFunc("POST /v1/git/unstage", s.handleGitUnstage)
 	s.mux.HandleFunc("POST /v1/git/commit", s.handleGitCommit)

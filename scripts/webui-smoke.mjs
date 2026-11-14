@@ -1928,6 +1928,84 @@ try {
     stageAllSeeded = false;
   }
   await clickSideTab("Git", "Staged");
+  // Commit detail (#1484): the daemon show route returns the real
+  // commit, and clicking a log row renders its header, files and patch.
+  const showLogRes = await fetch(`http://127.0.0.1:${port}/v1/git/log?limit=1`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!showLogRes.ok) {
+    throw new Error(`git log route failed: HTTP ${showLogRes.status} (commit detail unchecked)`);
+  }
+  const headCommit = ((await showLogRes.json()).commits || [])[0];
+  if (headCommit) {
+    const showRes = await fetch(
+      `http://127.0.0.1:${port}/v1/git/show?ref=${encodeURIComponent(headCommit.hash)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!showRes.ok) {
+      throw new Error(`git show route: HTTP ${showRes.status} ${await showRes.text()}`);
+    }
+    const shown = await showRes.json();
+    if (shown.hash !== headCommit.hash || !Array.isArray(shown.files)) {
+      throw new Error(`git show payload mismatch: ${JSON.stringify(shown).slice(0, 300)}`);
+    }
+    const badRef = await fetch(`http://127.0.0.1:${port}/v1/git/show?ref=--output%3D%2Ftmp%2Fx`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (badRef.status !== 400) {
+      throw new Error(`git show accepted an option-looking ref: HTTP ${badRef.status}`);
+    }
+    const toggleLog = `(() => {
+      const panel = document.getElementById("git-panel");
+      panel.focus();
+      panel.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true }));
+      return true;
+    })()`;
+    await evaluate(toggleLog);
+    await waitFor(
+      "git log rows are clickable commit buttons",
+      async () => {
+        const n = await evaluate(`document.querySelectorAll("[data-git-commit]").length`);
+        return { ok: n > 0, n };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await evaluate(`(() => { document.querySelector("[data-git-commit]").click(); return true; })()`);
+    await waitFor(
+      "git commit detail renders header, files and patch",
+      async () => {
+        const raw = await evaluate(`JSON.stringify((() => {
+          const d = document.querySelector("[data-git-commit-detail]");
+          if (!d) return null;
+          return {
+            hash: d.getAttribute("data-git-commit-detail"),
+            text: d.textContent || "",
+            patch: !!d.querySelector("pre.git-diff"),
+            files: d.querySelectorAll(".git-commit-files li").length,
+          };
+        })())`);
+        const got = JSON.parse(raw || "null");
+        const ok = !!got &&
+          got.hash === headCommit.hash &&
+          got.text.includes(headCommit.hash) &&
+          got.patch &&
+          got.files === shown.files.length;
+        return { ok, got: got && { ...got, text: got.text.slice(0, 120) } };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    // Clicking the open commit closes the detail.
+    await evaluate(`(() => { document.querySelector("[data-git-commit]").click(); return true; })()`);
+    await waitFor(
+      "clicking the open commit closes the detail",
+      async () => {
+        const n = await evaluate(`document.querySelectorAll("[data-git-commit-detail]").length`);
+        return { ok: n === 0, n };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await evaluate(toggleLog);
+  }
   // Branch switcher regression (#1314): the rendered <select> value must
   // equal the daemon's current branch once the options exist. The defect
   // was prop:value being applied before the options rendered, so the

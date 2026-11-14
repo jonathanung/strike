@@ -197,6 +197,76 @@ fn diff_kind(line: &str) -> &'static str {
     }
 }
 
+/// One changed path in an inspected commit (#1484).
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct GitShowFile {
+    path: String,
+    #[serde(default)]
+    added: i64,
+    #[serde(default)]
+    deleted: i64,
+    #[serde(default)]
+    binary: bool,
+}
+
+/// GET /v1/git/show — read-only commit detail (#1484).
+#[derive(Clone, Debug, Deserialize)]
+struct GitShow {
+    hash: String,
+    #[serde(default)]
+    subject: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    author: String,
+    #[serde(default)]
+    date: String,
+    #[serde(default)]
+    parents: Vec<String>,
+    #[serde(default)]
+    files: Vec<GitShowFile>,
+    #[serde(default)]
+    patch: String,
+    #[serde(default)]
+    truncated: bool,
+}
+
+/// Render window for a commit patch: the same 400 lines as the working
+/// tree diff (#1484 Q2, #1428).
+const PATCH_RENDER_LINES: usize = 400;
+
+/// Clicking a log row opens that commit; clicking the open one closes it
+/// (#1484). Returns the hash to load, or `None` to close the detail.
+fn commit_click_target(open: &str, clicked: &str) -> Option<String> {
+    if !open.is_empty() && open == clicked {
+        None
+    } else {
+        Some(clicked.to_string())
+    }
+}
+
+/// Honest notes under a commit detail: merges are diffed against the
+/// first parent, and a daemon-truncated patch says so (#1484).
+fn commit_detail_notes(parents: usize, truncated: bool) -> Vec<&'static str> {
+    let mut notes = Vec::new();
+    if parents > 1 {
+        notes.push("Merge commit — changes shown against the first parent.");
+    }
+    if truncated {
+        notes.push("Patch truncated by the daemon — showing the first 200 KB.");
+    }
+    notes
+}
+
+/// "+3 -1" for text files, "binary" for binary ones.
+fn show_file_stat(file: &GitShowFile) -> String {
+    if file.binary {
+        "binary".to_string()
+    } else {
+        format!("+{} -{}", file.added, file.deleted)
+    }
+}
+
 fn short_hash(hash: &str) -> String {
     hash.chars().take(7).collect()
 }
@@ -288,6 +358,13 @@ pub fn GitPanel(
     // copy partial rather than complete.
     let diff_truncated = RwSignal::new(false);
     let show_log = RwSignal::new(false);
+    // #1484: commit detail. `shown_hash` is the row the user opened (set
+    // at click so the row highlights while loading); `shown` its payload.
+    let shown_hash = RwSignal::new(String::new());
+    let shown = RwSignal::new(None::<GitShow>);
+    let show_note = RwSignal::new(String::new());
+    let show_expanded = RwSignal::new(false);
+    let show_epoch = RwSignal::new(LoadEpoch::new());
     let message = RwSignal::new(String::new());
     let switch_to = RwSignal::new(String::new());
     let load_epoch = RwSignal::new(LoadEpoch::new());
@@ -295,6 +372,12 @@ pub fn GitPanel(
 
     let load = move || {
         let gen = begin(load_epoch);
+        // A refresh (commit, checkout, repo switch) may change history;
+        // drop any open commit detail and its in-flight request (#1484).
+        let _ = begin(show_epoch);
+        shown_hash.set(String::new());
+        shown.set(None);
+        show_note.set(String::new());
         // Rows are what Stage / Discard act on. Drop them before the new
         // status arrives so the previous branch's files are not clickable
         // under a checkout that has already moved on.
@@ -519,6 +602,31 @@ pub fn GitPanel(
         diff_expanded.set(false);
         diff_text.set(String::new());
         diff_truncated.set(false);
+    };
+
+    let open_commit = move |hash: String| {
+        let gen = begin(show_epoch);
+        show_expanded.set(false);
+        show_note.set(String::new());
+        shown.set(None);
+        let Some(target) = commit_click_target(&shown_hash.get_untracked(), &hash) else {
+            shown_hash.set(String::new());
+            return;
+        };
+        shown_hash.set(target.clone());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            // Log hashes are hex; no query escaping needed.
+            let path = format!("/v1/git/show?ref={target}");
+            let res = get_json::<GitShow>(&b, &t, &path).await;
+            if !show_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
+            }
+            match res {
+                Ok(body) => shown.set(Some(body)),
+                Err(e) => show_note.set(format!("Commit: {}", http_message(&e))),
+            }
+        });
     };
 
     let open_selected = move || {
@@ -880,10 +988,21 @@ pub fn GitPanel(
                         let hash = short_hash(&c.hash);
                         let subject = c.subject.clone();
                         let meta = format!("{} · {}", c.author, c.date);
+                        let full = c.hash.clone();
+                        let full_on = c.hash.clone();
+                        let full_attr = c.hash.clone();
                         view! {
                             <li class="wt-card">
-                                <span class="name">{subject}</span>
-                                <span class="path">{hash} " · " {meta}</span>
+                                <button
+                                    type="button"
+                                    class="git-commit"
+                                    data-git-commit=full_attr
+                                    aria-pressed=move || (shown_hash.get() == full_on).to_string()
+                                    on:click=move |_| open_commit(full.clone())
+                                >
+                                    <span class="name">{subject}</span>
+                                    <span class="path">{hash} " · " {meta}</span>
+                                </button>
                             </li>
                         }
                     }).collect_view()}
@@ -891,6 +1010,52 @@ pub fn GitPanel(
                 <Show when=move || commits.get().is_empty()>
                     <p class="hint">"No commits yet."</p>
                 </Show>
+                <Show when=move || !show_note.get().is_empty()>
+                    <p class="hint" role="alert">{move || show_note.get()}</p>
+                </Show>
+                {move || shown.get().map(|c| {
+                    let notes = commit_detail_notes(c.parents.len(), c.truncated);
+                    let meta = format!("{} · {}", c.author, c.date);
+                    let body = c.body.clone();
+                    let files = c.files.clone();
+                    let no_files = files.is_empty();
+                    let lines: Vec<String> = c.patch.lines().map(str::to_string).collect();
+                    let total = lines.len();
+                    view! {
+                        <section class="git-commit-detail" data-git-commit-detail=c.hash.clone() aria-label="Commit detail">
+                            <h3 class="git-section">{c.subject.clone()}</h3>
+                            <span class="path" title=c.hash.clone()>{c.hash.clone()}</span>
+                            <span class="path">{meta}</span>
+                            {(!body.is_empty()).then(|| view! { <pre class="git-commit-body">{body}</pre> })}
+                            {notes.into_iter().map(|n| view! { <p class="hint">{n}</p> }).collect_view()}
+                            <ul class="plain git-commit-files" aria-label="Changed files">
+                                {files.into_iter().map(|f| {
+                                    let stat = show_file_stat(&f);
+                                    view! {
+                                        <li class="git-file">
+                                            <span class="name">{f.path}</span>
+                                            <span class="git-commit-stat">{stat}</span>
+                                        </li>
+                                    }
+                                }).collect_view()}
+                            </ul>
+                            {no_files.then(|| view! { <p class="hint">"No file changes."</p> })}
+                            <pre class="git-diff" aria-label="Commit patch">{move || {
+                                let limit = if show_expanded.get() { usize::MAX } else { PATCH_RENDER_LINES };
+                                lines.iter().take(limit).map(|line| {
+                                    let kind = diff_kind(line);
+                                    let text = line.clone();
+                                    view! { <div class=kind>{text}</div> }.into_any()
+                                }).collect_view()
+                            }}</pre>
+                            {move || (total > PATCH_RENDER_LINES && !show_expanded.get()).then(|| view! {
+                                <button type="button" class="secondary git-diff-expand" on:click=move |_| show_expanded.set(true)>
+                                    {format!("Show all {total} lines")}
+                                </button>
+                            })}
+                        </section>
+                    }
+                })}
             </Show>
             {move || {
                 let rows = rows.get();
@@ -1209,6 +1374,44 @@ pub fn WorktreePanel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commit_click_opens_then_toggles_closed() {
+        assert_eq!(commit_click_target("", "abc").as_deref(), Some("abc"));
+        assert_eq!(commit_click_target("abc", "abc"), None);
+        // Choosing another commit replaces the open one.
+        assert_eq!(commit_click_target("abc", "def").as_deref(), Some("def"));
+    }
+
+    #[test]
+    fn commit_detail_notes_are_honest_about_merges_and_truncation() {
+        assert!(commit_detail_notes(1, false).is_empty());
+        assert!(commit_detail_notes(0, false).is_empty());
+        let merge = commit_detail_notes(2, false);
+        assert_eq!(merge.len(), 1);
+        assert!(merge[0].contains("first parent"));
+        let both = commit_detail_notes(2, true);
+        assert_eq!(both.len(), 2);
+        assert!(both[1].contains("truncated"));
+    }
+
+    #[test]
+    fn show_file_stat_labels_binary_and_text() {
+        let text = GitShowFile { path: "a.rs".into(), added: 3, deleted: 1, binary: false };
+        assert_eq!(show_file_stat(&text), "+3 -1");
+        let bin = GitShowFile { path: "a.png".into(), added: 0, deleted: 0, binary: true };
+        assert_eq!(show_file_stat(&bin), "binary");
+    }
+
+    #[test]
+    fn git_show_payload_decodes_daemon_shape() {
+        let raw = r#"{"hash":"0123456789abcdef0123456789abcdef01234567","subject":"s","body":"b","author":"A","date":"2026-01-01T00:00:00Z","parents":["p1","p2"],"files":[{"path":"x.rs","added":1,"deleted":2,"binary":false}],"patch":"+x","truncated":true}"#;
+        let got: GitShow = serde_json::from_str(raw).expect("decode");
+        assert_eq!(got.parents.len(), 2);
+        assert_eq!(got.files[0].path, "x.rs");
+        assert!(got.truncated);
+        assert_eq!(got.body, "b");
+    }
 
     fn row(section: &str, path: &str, staged: bool) -> GitRow {
         GitRow {

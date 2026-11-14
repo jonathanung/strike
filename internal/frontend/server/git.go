@@ -72,6 +72,29 @@ type gitCommitJSON struct {
 	Date    string `json:"date"`
 }
 
+// gitShowFileJSON is one changed path in an inspected commit (#1484).
+// Binary files report Binary with zero counts.
+type gitShowFileJSON struct {
+	Path    string `json:"path"`
+	Added   int    `json:"added"`
+	Deleted int    `json:"deleted"`
+	Binary  bool   `json:"binary"`
+}
+
+// gitShowJSON is the read-only commit detail behind GET /v1/git/show.
+// Merge commits are diffed against their first parent.
+type gitShowJSON struct {
+	Hash      string            `json:"hash"`
+	Subject   string            `json:"subject"`
+	Body      string            `json:"body"`
+	Author    string            `json:"author"`
+	Date      string            `json:"date"`
+	Parents   []string          `json:"parents"`
+	Files     []gitShowFileJSON `json:"files"`
+	Patch     string            `json:"patch"`
+	Truncated bool              `json:"truncated"`
+}
+
 type gitWorktreeJSON struct {
 	Path          string `json:"path"`
 	Branch        string `json:"branch"`
@@ -181,6 +204,28 @@ func (s *Server) handleGitLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"commits": commits})
+}
+
+func (s *Server) handleGitShow(w http.ResponseWriter, r *http.Request) {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
+	cwd, ok := s.gitCWD(w, r)
+	if !ok {
+		return
+	}
+	ref, err := safeGitRef(r.URL.Query().Get("ref"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), gitReadTimeout)
+	defer cancel()
+	body, err := gitShow(ctx, cwd, ref)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) handleGitStage(w http.ResponseWriter, r *http.Request) {
@@ -867,6 +912,81 @@ func gitLog(ctx context.Context, cwd string, limit int) ([]gitCommitJSON, error)
 	return commits, nil
 }
 
+// gitShow resolves ref to one commit and returns its metadata, body,
+// changed files and (capped) patch. Merges diff against the first parent;
+// renames are reported as delete+add so the file list and patch agree.
+func gitShow(ctx context.Context, cwd, ref string) (gitShowJSON, error) {
+	rev, stderr, err := gitRun(ctx, cwd, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	if err != nil {
+		if stderr == "" {
+			return gitShowJSON{}, errors.New("unknown commit: " + ref)
+		}
+		return gitShowJSON{}, errors.New(gitErr("show", err, stderr))
+	}
+	hash := strings.TrimSpace(string(rev))
+	if hash == "" {
+		return gitShowJSON{}, errors.New("unknown commit: " + ref)
+	}
+	meta, stderr, err := gitRun(ctx, cwd, "show", "-s", "--format=%H%x00%an%x00%aI%x00%P%x00%s%x00%b", hash)
+	if err != nil {
+		return gitShowJSON{}, errors.New(gitErr("show", err, stderr))
+	}
+	parts := strings.SplitN(string(meta), "\x00", 6)
+	if len(parts) < 6 {
+		return gitShowJSON{}, errors.New("git show: unexpected output")
+	}
+	body := gitShowJSON{
+		Hash:    parts[0],
+		Author:  parts[1],
+		Date:    parts[2],
+		Parents: strings.Fields(parts[3]),
+		Subject: parts[4],
+		Body:    strings.TrimRight(parts[5], "\n"),
+		Files:   []gitShowFileJSON{},
+	}
+	diffArgs := []string{"show", "--format=", "--no-renames", "-m", "--first-parent"}
+	numstat, stderr, err := gitRun(ctx, cwd, append(diffArgs, "--numstat", "-z", hash)...)
+	if err != nil {
+		return gitShowJSON{}, errors.New(gitErr("show", err, stderr))
+	}
+	body.Files = parseShowNumstatZ(numstat)
+	patch, stderr, err := gitRun(ctx, cwd, append(diffArgs, "--patch", hash)...)
+	if err != nil {
+		return gitShowJSON{}, errors.New(gitErr("show", err, stderr))
+	}
+	if len(patch) > gitDiffCap {
+		patch = patch[:gitDiffCap]
+		body.Truncated = true
+	}
+	body.Patch = string(patch)
+	return body, nil
+}
+
+// parseShowNumstatZ reads `--numstat -z --no-renames` records
+// ("added\tdeleted\tpath\0"); binary files report "-" counts.
+func parseShowNumstatZ(out []byte) []gitShowFileJSON {
+	files := []gitShowFileJSON{}
+	for _, rec := range bytes.Split(out, []byte{0}) {
+		rec = bytes.TrimLeft(rec, "\n")
+		if len(rec) == 0 {
+			continue
+		}
+		parts := bytes.SplitN(rec, []byte{'\t'}, 3)
+		if len(parts) != 3 || len(parts[2]) == 0 {
+			continue
+		}
+		f := gitShowFileJSON{Path: string(parts[2])}
+		if string(parts[0]) == "-" && string(parts[1]) == "-" {
+			f.Binary = true
+		} else {
+			f.Added, _ = strconv.Atoi(string(parts[0]))
+			f.Deleted, _ = strconv.Atoi(string(parts[1]))
+		}
+		files = append(files, f)
+	}
+	return files
+}
+
 func gitDiscard(ctx context.Context, cwd, rel string, staged bool) error {
 	tracked, _, _ := gitRun(ctx, cwd, "ls-files", "--", rel)
 	if len(bytes.TrimSpace(tracked)) == 0 {
@@ -1159,6 +1279,26 @@ func safeRepoPathsOptional(paths []string) ([]string, error) {
 		out = append(out, clean)
 	}
 	return out, nil
+}
+
+// safeGitRef accepts a revision for read-only inspection: a hash from the
+// log, or any branch/tag name. It refuses option-looking, ranged,
+// reflog/at-sign and whitespace/control refs; the caller still resolves
+// it with rev-parse --verify inside the workspace repo.
+func safeGitRef(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || len(ref) > 200 {
+		return "", errors.New("invalid ref")
+	}
+	if strings.HasPrefix(ref, "-") || strings.Contains(ref, "..") || strings.Contains(ref, "@{") {
+		return "", errors.New("invalid ref")
+	}
+	for _, r := range ref {
+		if r <= ' ' || r == 0x7f || strings.ContainsRune("~^:?*[\\", r) {
+			return "", errors.New("invalid ref")
+		}
+	}
+	return ref, nil
 }
 
 func safeBranchName(name string) (string, error) {
