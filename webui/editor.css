@@ -200,6 +200,28 @@
 /* feature:agent-diff-expand begin */
 .ev-diff > button.secondary { margin: 0 0 8px 8px; }
 /* feature:agent-diff-expand end */
+/* feature:document-reload begin */
+/* Reload uses the existing .secondary button style in .ev-bar; no
+   extra rules are needed for #1407. */
+/* feature:document-reload end */
+/* feature:viewer-wrap-toggle begin */
+/* Wrap off (#1412): one row per line, columns line up, and the
+   containers' existing overflow:auto provides horizontal scroll.
+   Keyed on the pane root's data-ev-wrap only, so toggling restyles
+   in place without rebuilding the views (render window and diff
+   expansion survive the toggle). */
+.ev-doc[data-ev-wrap="off"] .ev-codeview .ev-line {
+  white-space: pre;
+  word-break: normal;
+  width: max-content;
+  min-width: 100%;
+}
+.ev-doc[data-ev-wrap="off"] .ev-diff pre {
+  white-space: pre;
+  width: max-content;
+  min-width: 100%;
+}
+/* feature:viewer-wrap-toggle end */
 /* feature:find-match-case begin */
 /* Find toggles (#1409 Aa match-case, #1419 ab| whole-word): compact
    chips in the editor find bar; `.on` (from the shared chip style)
