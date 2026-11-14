@@ -261,6 +261,22 @@
     min-height: 44px;
   }
 
+  /* #1524: two out-of-header controls the 44px lists above missed.
+     The session multi-select checkbox was 14px; a 44px box with the
+     top margin trimmed (16px -> 7px) keeps it on the row's first
+     line inside the 58px row. The terminal tab toolbar chips
+     (New / Close and the tab chips) are plain 28px .chip buttons
+     outside .chips and .side-tabs, so neither rule reached them. */
+  body[data-phone="1"] .ss-check {
+    width: 44px;
+    height: 44px;
+    margin: 7px 0 0;
+  }
+
+  body[data-phone="1"] .term-bar .chip {
+    min-height: 44px;
+  }
+
   body[data-phone="1"] .composer .menu {
     position: fixed;
     left: max(8px, env(safe-area-inset-left));

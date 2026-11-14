@@ -110,3 +110,7 @@
 }
 .git-diff-expand { align-self: flex-start; }
 /* feature:git-diff-expand end */
+/* feature:git-copy-diff begin */
+.git-diff-bar { display: flex; justify-content: flex-end; }
+.git-copy-diff { min-height: 44px; padding: 4px 12px; }
+/* feature:git-copy-diff end */
