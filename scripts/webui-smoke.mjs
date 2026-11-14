@@ -669,6 +669,76 @@ try {
     { timeout: STEP_MS, interval: 250 },
   );
 
+  // Permissions presets / diff / explain (#1504): read-only section in the
+  // rules panel. A host without the Permissions service answers 501 and
+  // the section must be absent; otherwise it lists the daemon's presets,
+  // diffs the default pair, and labels a dry-run explain.
+  const peRes = await fetch(`http://127.0.0.1:${port}/v1/permissions/presets`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const peText = await peRes.text();
+  await apprOpenPalette();
+  await waitFor(
+    "permissions panel open for presets",
+    async () => {
+      const open = await apprEval(`!!document.querySelector('.approvals-panel')`);
+      if (open === true) return { ok: true };
+      await apprOpenPalette();
+      await apprEval(`document.querySelector('[data-command-id="approvals.rules"]')?.click()`);
+      return { ok: false };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  if (peRes.status === 501) {
+    const shown = await apprEval(`!!document.querySelector('[data-permissions-explain]')`);
+    if (shown === true) throw new Error("presets section must hide when permissions capability is unavailable");
+  } else {
+    if (peRes.status !== 200) throw new Error(`presets: ${peRes.status} ${peText.slice(0, 300)}`);
+    const peIds = (JSON.parse(peText).presets || []).map((p) => p.ID).filter(Boolean);
+    if (peIds.length < 2) throw new Error(`presets: expected at least two shipped presets: ${peText.slice(0, 300)}`);
+    await waitFor(
+      "presets section lists the daemon presets",
+      async () => {
+        const ids = JSON.parse(
+          await apprEval(`JSON.stringify([...document.querySelectorAll('[data-permission-presets] [data-preset-id]')].map((li) => li.getAttribute("data-preset-id")))`),
+        );
+        return { ok: peIds.every((id) => ids.includes(id)) };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await waitFor(
+      "preset diff renders",
+      async () => {
+        const hit = await apprEval(`!!document.querySelector('[data-preset-diff]')`);
+        if (hit === true) return { ok: true };
+        await apprEval(`document.querySelector('[data-preset-diff-run]')?.click()`);
+        return { ok: false };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await apprEval(`(() => {
+      const sel = document.querySelector('select[aria-label="Dry-run preset"]');
+      if (sel) { sel.value = ${JSON.stringify(peIds[0])}; sel.dispatchEvent(new Event("change", { bubbles: true })); }
+      return "ok";
+    })()`);
+    await waitFor(
+      "dry-run explain result is labelled",
+      async () => {
+        const state = JSON.parse(
+          await apprEval(`JSON.stringify((() => {
+            const r = document.querySelector('[data-permission-explain-result]');
+            return r ? { dry: r.getAttribute("data-dry-run"), text: r.innerText || "" } : null;
+          })())`),
+        );
+        if (state && state.dry === "true" && state.text.includes(`Dry run under ${peIds[0]}`)) return { ok: true };
+        await apprEval(`document.querySelector('[data-permission-explain-run]')?.click()`);
+        return { ok: false };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  }
+  await apprEval(`[...document.querySelectorAll(".approvals-panel-head button")].find((b) => (b.textContent || "").trim() === "Close")?.click()`);
+
   const apprAuth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const apprRuleCall = async (path, body) => {
     const res = await fetch(`http://127.0.0.1:${port}${path}`, {
