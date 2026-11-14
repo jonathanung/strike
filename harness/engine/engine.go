@@ -18,6 +18,7 @@ import (
 	"github.com/jonathanung/strike/harness/question"
 	"github.com/jonathanung/strike/harness/scheduler"
 	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/harness/verify"
 	"github.com/jonathanung/strike/pkg/protocol"
 )
 
@@ -494,6 +495,9 @@ type Engine struct {
 	eventsClosed bool
 	perms        *permission.Service
 	questions    *question.Service
+	// verifyTriage keeps focused-rerun history per cmd gate across
+	// verification runs on this engine (#1178).
+	verifyTriage verify.Triage
 
 	// beginReqs is served only by Run so Interrupt stays responsive while a
 	// worker needs ToolCallBegin emitted into a full Events buffer.
