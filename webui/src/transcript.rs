@@ -721,6 +721,7 @@ impl Transcript {
                         copy_text: message,
                         reconnect: provider,
                         at_ms,
+                        turn_id: String::new(),
                     });
                     return;
                 }
