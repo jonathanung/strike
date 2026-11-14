@@ -86,6 +86,12 @@ func (grepTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	var b strings.Builder
 	matches := 0
 	truncated := false
+	// Past grepMaxMatches, keep collecting into a spill buffer (bounded by
+	// spillMaxBytes) when session scratch exists so the remainder is readable.
+	canSpill := tc.SessionTempDir != ""
+	var overflow strings.Builder
+	overflowMatches := 0
+	spillCapped := false
 	walkErr := filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // skip unreadable entries
@@ -136,11 +142,23 @@ func (grepTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 			if len(line) > grepMaxLineLen {
 				line = line[:grepMaxLineLen] + "…"
 			}
-			fmt.Fprintf(&b, "%s:%d: %s\n", rel, lineNo, strings.TrimSpace(line))
+			entry := fmt.Sprintf("%s:%d: %s\n", rel, lineNo, strings.TrimSpace(line))
+			if truncated {
+				if overflow.Len()+len(entry) > spillMaxBytes {
+					spillCapped = true
+					return fs.SkipAll
+				}
+				overflow.WriteString(entry)
+				overflowMatches++
+				continue
+			}
+			b.WriteString(entry)
 			matches++
 			if matches >= grepMaxMatches {
 				truncated = true
-				return fs.SkipAll
+				if !canSpill {
+					return fs.SkipAll
+				}
 			}
 		}
 		return nil
@@ -154,6 +172,15 @@ func (grepTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	}
 	if truncated {
 		out += fmt.Sprintf("(results truncated to %d; narrow the pattern or use include)\n", grepMaxMatches)
+		if overflowMatches > 0 {
+			full := b.String() + overflow.String()
+			if spillCapped {
+				full += "… (spill truncated; narrow the pattern or use include)\n"
+			}
+			if hint := spillOverflow(tc, "grep", full); hint != "" {
+				out += fmt.Sprintf("(%d more match(es) beyond the cap)\n", overflowMatches) + hint + "\n"
+			}
+		}
 	}
 	return Result{Title: a.Pattern, Output: out}, nil
 }

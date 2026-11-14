@@ -2,9 +2,11 @@
 //! not invent a list when that request fails.
 
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use serde::Deserialize;
 
 use crate::api::get_json;
+use crate::clipboard;
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct LocalFiles {
@@ -79,11 +81,33 @@ pub fn FileList(doc: LocalFiles) -> impl IntoView {
                                 let mark = if f.exists { "On disk" } else { "Not on disk" };
                                 let klass = if f.exists { "exist on" } else { "exist" };
                                 let access = access_label(&f.access).to_string();
+                                // Row-local copy state (#1555): copies the
+                                // displayed path string only — never file
+                                // contents — and works for missing files too.
+                                // The write is awaited via the shared
+                                // clipboard helper, so a rejected write
+                                // shows "Copy failed" instead of silence.
+                                let state = RwSignal::new(None::<bool>);
+                                let path_copy = f.path.clone();
+                                let aria = format!("Copy path {}", f.path);
+                                let on_copy = move |_| {
+                                    let text = path_copy.clone();
+                                    spawn_local(async move {
+                                        let ok = clipboard::copy_text(&text).await.is_ok();
+                                        state.set(Some(ok));
+                                        clipboard::after_ms(2_000, move || state.set(None));
+                                    });
+                                };
                                 view! {
                                     <li class="file-item">
-                                        <span class="name">{f.path}</span>
-                                        <span class="path">{f.detail}</span>
-                                        <span class="file-meta"><span class=klass>{mark}</span><span class="path">{access}</span></span>
+                                        <div class="file-main">
+                                            <span class="name">{f.path}</span>
+                                            <span class="path">{f.detail}</span>
+                                            <span class="file-meta"><span class=klass>{mark}</span><span class="path">{access}</span></span>
+                                        </div>
+                                        <button type="button" class="secondary file-copy" aria-label=aria on:click=on_copy>
+                                            {move || clipboard::path_copy_label(state.get())}
+                                        </button>
                                     </li>
                                 }
                             }).collect_view()}

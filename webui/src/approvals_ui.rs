@@ -21,6 +21,40 @@ use crate::approvals::{
 use crate::model::{autonomies, autonomy_label, mode_label, permission_modes, Workspace};
 use crate::outcome::{self, AUTO_SECONDS_UNKNOWN};
 
+/// Initial audit fetch size (#1438): the panel starts at the daemon's
+/// default page and only fetches more when the user asks.
+pub(crate) const AUDIT_INITIAL_LIMIT: usize = 40;
+/// Daemon clamp for `?limit=` on `/v1/permissions/audit`
+/// (`parseAuditLimit`): requesting more than this is pointless, and at
+/// this limit the panel must name the cap instead of silently stopping.
+pub(crate) const AUDIT_MAX_LIMIT: usize = 200;
+
+/// Next audit limit after "Show more" (#1438 Q1, recommended default):
+/// one jump straight to the daemon cap — the rows are text, the daemon
+/// clamps anyway, and steps would multiply fetches for no triage benefit.
+pub(crate) fn next_audit_limit(current: usize) -> usize {
+    let _ = current;
+    AUDIT_MAX_LIMIT
+}
+
+/// The "Show more" control is offered only when the last fetch filled
+/// the current limit (so more may exist) and the cap is not yet reached.
+/// A short return means the stored history is already fully shown.
+pub(crate) fn audit_more_visible(returned: usize, limit: usize) -> bool {
+    limit > 0 && limit < AUDIT_MAX_LIMIT && returned >= limit
+}
+
+/// The cap label shows only when the fetch is at the daemon cap *and*
+/// filled it — claiming "newest 200" for a 41-record log would be wrong.
+pub(crate) fn audit_cap_visible(returned: usize, limit: usize) -> bool {
+    limit >= AUDIT_MAX_LIMIT && returned >= AUDIT_MAX_LIMIT
+}
+
+pub(crate) fn audit_fetch_path(limit: usize) -> String {
+    let clamped = limit.clamp(1, AUDIT_MAX_LIMIT);
+    format!("/v1/permissions/audit?limit={clamped}")
+}
+
 pub fn commit_session_mode(
     base: RwSignal<String>,
     token: RwSignal<String>,
@@ -129,6 +163,7 @@ pub fn ApprovalHost(
     reply_id: RwSignal<String>,
     reply_decision: RwSignal<String>,
 ) -> impl IntoView {
+    let audit_limit = RwSignal::new(AUDIT_INITIAL_LIMIT);
     let seen_reply = Rc::new(Cell::new(0u32));
     Effect::new(move |_| {
         let n = reply_n.get();
@@ -164,7 +199,10 @@ pub fn ApprovalHost(
 
     Effect::new(move |_| {
         if panel_open.get() {
-            reload_panel(base, token, auto_seconds, auto_exclude, rules, stored_audit, panel_error);
+            // Each open starts at the initial page (#1438); "Show more"
+            // raises the limit for this viewing only.
+            audit_limit.set(AUDIT_INITIAL_LIMIT);
+            reload_panel(base, token, auto_seconds, auto_exclude, rules, stored_audit, panel_error, audit_limit);
         }
     });
 
@@ -175,7 +213,7 @@ pub fn ApprovalHost(
                 if key == "Enter" {
                     ev.prevent_default();
                     ev.stop_propagation();
-                    accept_pending(confirm, base, token, root, perm_mode, status, panel_error, rules, stored_audit, auto_seconds, auto_exclude);
+                    accept_pending(confirm, base, token, root, perm_mode, status, panel_error, rules, stored_audit, auto_seconds, auto_exclude, audit_limit);
                 } else if key == "Escape" {
                     ev.prevent_default();
                     ev.stop_propagation();
@@ -302,7 +340,7 @@ pub fn ApprovalHost(
                         <p class="approvals-copy">{body}</p>
                         <div class="approvals-actions">
                             <button type="button" class="secondary" on:click=move |_| confirm.set(None)>"Cancel"</button>
-                            <button type="button" class="danger" on:click=move |_| accept_pending(confirm, base, token, root, perm_mode, status, panel_error, rules, stored_audit, auto_seconds, auto_exclude)>{label}</button>
+                            <button type="button" class="danger" on:click=move |_| accept_pending(confirm, base, token, root, perm_mode, status, panel_error, rules, stored_audit, auto_seconds, auto_exclude, audit_limit)>{label}</button>
                         </div>
                         <p class="hint">"Enter confirms. Escape cancels and leaves permissions unchanged."</p>
                     </div>
@@ -357,7 +395,7 @@ pub fn ApprovalHost(
                                         if let Err(e) = patch_json(&b, &t, "/v1/settings", json!({"mode": mode})).await {
                                             panel_error.set(format!("global default failed: {e}"));
                                         } else {
-                                            reload_panel(base, token, auto_seconds, auto_exclude, rules, stored_audit, panel_error);
+                                            reload_panel(base, token, auto_seconds, auto_exclude, rules, stored_audit, panel_error, audit_limit);
                                         }
                                     });
                                 }
@@ -443,6 +481,22 @@ pub fn ApprovalHost(
                                 audit_row(row.permission, row.action, row.decision, detail, when)
                             }).collect_view()}
                         </ul>
+                        {move || {
+                            let returned = stored_audit.get().records.len();
+                            let limit = audit_limit.get();
+                            if audit_cap_visible(returned, limit) {
+                                view! { <p class="hint" data-audit-cap="true">"Showing the newest 200"</p> }.into_any()
+                            } else if audit_more_visible(returned, limit) {
+                                view! {
+                                    <button type="button" class="secondary" data-audit-more="true" on:click=move |_| {
+                                        audit_limit.set(next_audit_limit(audit_limit.get_untracked()));
+                                        reload_panel(base, token, auto_seconds, auto_exclude, rules, stored_audit, panel_error, audit_limit);
+                                    }>"Show more"</button>
+                                }.into_any()
+                            } else {
+                                view! { <span></span> }.into_any()
+                            }
+                        }}
                     </section>
                 </div>
             </div>
@@ -458,6 +512,7 @@ fn reload_panel(
     rules: RwSignal<RulesDocument>,
     stored_audit: RwSignal<AuditDocument>,
     panel_error: RwSignal<String>,
+    audit_limit: RwSignal<usize>,
 ) {
     panel_error.set(String::new());
     let (b, t) = (base.get_untracked(), token.get_untracked());
@@ -487,7 +542,7 @@ fn reload_panel(
         if let Some(doc) = outcome::take_ok(
             &mut err,
             "Audit",
-            get_json::<AuditDocument>(&b, &t, "/v1/permissions/audit?limit=40").await,
+            get_json::<AuditDocument>(&b, &t, &audit_fetch_path(audit_limit.get_untracked())).await,
         ) {
             stored_audit.set(doc);
         }
@@ -507,6 +562,7 @@ fn accept_pending(
     stored_audit: RwSignal<AuditDocument>,
     auto_seconds: RwSignal<i32>,
     auto_exclude: RwSignal<Vec<String>>,
+    audit_limit: RwSignal<usize>,
 ) {
     let Some(pending) = confirm.get_untracked() else {
         return;
@@ -525,7 +581,7 @@ fn accept_pending(
                 if let Err(e) = patch_json(&b, &t, "/v1/settings", json!({"mode": mode})).await {
                     status.set(format!("global default failed: {e}"));
                 } else {
-                    reload_panel(base, token, auto_seconds, auto_exclude, rules, stored_audit, panel_error);
+                    reload_panel(base, token, auto_seconds, auto_exclude, rules, stored_audit, panel_error, audit_limit);
                 }
             });
         }
@@ -536,7 +592,7 @@ fn accept_pending(
                 if let Err(e) = patch_json(&b, &t, &path, json!({"permissionMode": mode})).await {
                     status.set(format!("workspace default failed: {e}"));
                 } else {
-                    reload_panel(base, token, auto_seconds, auto_exclude, rules, stored_audit, panel_error);
+                    reload_panel(base, token, auto_seconds, auto_exclude, rules, stored_audit, panel_error, audit_limit);
                 }
             });
         }
@@ -1025,4 +1081,44 @@ fn typing_target(ev: &web_sys::KeyboardEvent) -> bool {
     };
     let tag = el.tag_name().to_ascii_lowercase();
     tag == "textarea" || tag == "input" || tag == "select"
+}
+
+#[cfg(test)]
+mod audit_more_tests {
+    use super::*;
+
+    #[test]
+    fn audit_limit_starts_at_40_and_jumps_to_the_daemon_cap() {
+        assert_eq!(AUDIT_INITIAL_LIMIT, 40);
+        assert_eq!(AUDIT_MAX_LIMIT, 200);
+        assert_eq!(next_audit_limit(AUDIT_INITIAL_LIMIT), 200);
+        assert_eq!(next_audit_limit(200), 200);
+    }
+
+    #[test]
+    fn show_more_only_when_the_fetch_filled_the_limit() {
+        // Full page at 40: more may exist.
+        assert!(audit_more_visible(40, 40));
+        assert!(audit_more_visible(41, 40));
+        // Short return: history is already fully shown, hide the control.
+        assert!(!audit_more_visible(39, 40));
+        assert!(!audit_more_visible(0, 40));
+        // At the cap there is no further fetch to offer.
+        assert!(!audit_more_visible(200, 200));
+    }
+
+    #[test]
+    fn cap_label_only_when_the_cap_is_actually_reached() {
+        assert!(audit_cap_visible(200, 200));
+        // Expanded to 200 but only 41 stored: not a capped view.
+        assert!(!audit_cap_visible(41, 200));
+        assert!(!audit_cap_visible(200, 40));
+    }
+
+    #[test]
+    fn audit_fetch_path_uses_and_clamps_the_limit() {
+        assert_eq!(audit_fetch_path(40), "/v1/permissions/audit?limit=40");
+        assert_eq!(audit_fetch_path(200), "/v1/permissions/audit?limit=200");
+        assert_eq!(audit_fetch_path(999), "/v1/permissions/audit?limit=200");
+    }
 }
