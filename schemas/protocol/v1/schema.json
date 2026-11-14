@@ -1540,6 +1540,9 @@
         "parentSessionId": {
           "type": "string"
         },
+        "provider": {
+          "type": "string"
+        },
         "providerRequestId": {
           "type": "string"
         },

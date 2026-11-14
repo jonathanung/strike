@@ -92,6 +92,10 @@ type Options struct {
 	SyncWorkDir func(dir string)
 	// Schedules is the persisted clock (/v1/schedules). Nil returns 501.
 	Schedules *schedule.Service
+	// ProjectInitFor builds the host ProjectInit for a live root's working
+	// directory so /v1/init writes AGENTS.md where the browser is looking
+	// (#1581). Nil uses Services.Init (the daemon's directory) for every root.
+	ProjectInitFor func(workDir string) host.ProjectInit
 	// Services exposes optional frontend host capabilities.
 	Services *host.Services
 	// TaskRuns is the durable plan-run board (GET/POST /v1/plans/{id}/run).
@@ -467,6 +471,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/git/diff", s.handleGitDiff)
 	s.mux.HandleFunc("GET /v1/git/branches", s.handleGitBranches)
 	s.mux.HandleFunc("GET /v1/git/log", s.handleGitLog)
+	s.mux.HandleFunc("GET /v1/git/show", s.handleGitShow)
 	s.mux.HandleFunc("POST /v1/git/stage", s.handleGitStage)
 	s.mux.HandleFunc("POST /v1/git/unstage", s.handleGitUnstage)
 	s.mux.HandleFunc("POST /v1/git/commit", s.handleGitCommit)
@@ -628,6 +633,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/agents", s.handleAgents)
 	s.mux.HandleFunc("GET /v1/diag", s.handleDiag)
 	s.mux.HandleFunc("POST /v1/diag", s.handleDiag)
+	// Project init (#1581): AGENTS.md bootstrap via host.ProjectInit.
+	s.mux.HandleFunc("GET /v1/init", s.handleProjectInitGet)
+	s.mux.HandleFunc("POST /v1/init", s.handleProjectInitPost)
 	s.mux.HandleFunc("POST /v1/attachments", s.handleAttachmentIngest)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)
 	s.mux.HandleFunc("GET /v1/sidechat", s.handleSideChatList)

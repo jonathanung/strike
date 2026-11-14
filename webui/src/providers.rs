@@ -587,6 +587,58 @@ fn ProviderCard(
     }
 }
 
+/// `data-provider` names to try for a provider id from a `provider_auth`
+/// notice (#1546): the id itself, then its leading word ("openai
+/// (chatgpt)" → "openai"). Quote and backslash characters are dropped so
+/// the name is safe inside an attribute selector.
+pub fn focus_candidates(provider: &str) -> Vec<String> {
+    let clean: String = provider
+        .trim()
+        .chars()
+        .filter(|c| *c != '"' && *c != '\\')
+        .collect();
+    if clean.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec![clean.clone()];
+    if let Some((head, _)) = clean.split_once(' ') {
+        if !head.is_empty() {
+            out.push(head.to_string());
+        }
+    }
+    out
+}
+
+/// Scroll to and focus the named provider's card once the page has
+/// rendered its rows (#1546). Rows load asynchronously, so this polls
+/// briefly; when no card matches, the page simply stays at the top.
+pub fn focus_provider_row(provider: String) {
+    focus_attempt(focus_candidates(&provider), 0);
+}
+
+fn focus_attempt(names: Vec<String>, tries: u32) {
+    if names.is_empty() {
+        return;
+    }
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    for name in &names {
+        let sel = format!("li.providers-card[data-provider=\"{name}\"]");
+        if let Ok(Some(el)) = doc.query_selector(&sel) {
+            el.scroll_into_view();
+            if let Some(html) = el.dyn_ref::<web_sys::HtmlElement>() {
+                html.set_tab_index(-1);
+                let _ = html.focus();
+            }
+            return;
+        }
+    }
+    if tries < 20 {
+        crate::clipboard::after_ms(150, move || focus_attempt(names, tries + 1));
+    }
+}
+
 #[component]
 pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoView {
     let rows = RwSignal::new(Vec::<ProviderStatus>::new());
@@ -901,6 +953,17 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn focus_candidates_try_exact_then_leading_word() {
+        assert_eq!(focus_candidates("openai"), vec!["openai".to_string()]);
+        assert_eq!(
+            focus_candidates("openai (chatgpt)"),
+            vec!["openai (chatgpt)".to_string(), "openai".to_string()]
+        );
+        assert!(focus_candidates("  ").is_empty());
+        assert_eq!(focus_candidates("a\"b\\c"), vec!["abc".to_string()]);
+    }
 
     #[test]
     fn env_note_names_the_variable_only() {

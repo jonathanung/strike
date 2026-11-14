@@ -411,6 +411,7 @@ const (
 	ErrorCodeNetworkDenied      = pub.ErrorCodeNetworkDenied
 	ErrorCodeQueueFull          = pub.ErrorCodeQueueFull
 	ErrorCodeBudgetExhausted    = pub.ErrorCodeBudgetExhausted
+	ErrorCodeProviderAuth       = pub.ErrorCodeProviderAuth
 
 	// Human orchestration Ops (WEBUI.18).
 	OpTeamSpawn          = pub.OpTeamSpawn
