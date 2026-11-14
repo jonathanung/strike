@@ -19,6 +19,7 @@ use crate::approvals::{
     Ask, AuditDocument, AuditLine, ConfirmKind, ModeChange, PendingConfirm, PermNote, RuleRecord,
     RulesDocument, SettingsBits,
 };
+use crate::permissions_explain::PermissionsExplain;
 use crate::model::{autonomies, autonomy_label, mode_label, permission_modes, Workspace};
 use crate::outcome::{self, AUTO_SECONDS_UNKNOWN};
 
@@ -479,6 +480,7 @@ pub fn ApprovalHost(
                             <button type="button" class="primary" on:click=move |_| submit_rule()>"Add rule"</button>
                         </div>
                     </section>
+                    <PermissionsExplain base=base token=token />
                     <section>
                         <h3>"Audit"</h3>
                         <p class="hint">{move || {
