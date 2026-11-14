@@ -170,7 +170,9 @@ type Server struct {
 	// gzip memoizes gzip encodings of static bundle files (#1514).
 	gzip gzipAssets
 
-	// updateMu serialises release probes and guards updateLast (#1583).
+	// probeMu serialises release probes; updateMu guards updateLast only, so
+	// GET /v1/settings never waits on the network (#1583).
+	probeMu    sync.Mutex
 	updateMu   sync.Mutex
 	updateLast *updateCheckResponse
 

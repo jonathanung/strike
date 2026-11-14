@@ -133,17 +133,16 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mode := s.updateMode()
+	var out updateCheckResponse
 	if !update.ShouldProbe(mode) {
-		out := updateCheckResponse{Mode: mode, State: updateStateOff}
-		s.updateMu.Lock()
-		s.updateLast = &out
-		s.updateMu.Unlock()
-		writeJSON(w, http.StatusOK, out)
-		return
+		out = updateCheckResponse{Mode: mode, State: updateStateOff}
+	} else {
+		s.probeMu.Lock()
+		res, err := s.opts.UpdateProbe(r.Context())
+		s.probeMu.Unlock()
+		out = updateCheckFromProbe(mode, res, err)
 	}
 	s.updateMu.Lock()
-	res, err := s.opts.UpdateProbe(r.Context())
-	out := updateCheckFromProbe(mode, res, err)
 	s.updateLast = &out
 	s.updateMu.Unlock()
 	writeJSON(w, http.StatusOK, out)
