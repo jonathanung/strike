@@ -1488,6 +1488,114 @@ fn restore_selection_soon(text: String, start: usize, end: usize) {
     cb.forget();
 }
 
+/// One line of `GET /v1/git/blame` (#1479).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct BlameLine {
+    #[serde(default)]
+    pub line: u32,
+    #[serde(default)]
+    pub hash: String,
+    #[serde(default)]
+    pub author: String,
+    #[serde(default)]
+    pub date: String,
+    /// Author time, Unix seconds.
+    #[serde(default)]
+    pub time: i64,
+    #[serde(default)]
+    pub subject: String,
+    #[serde(default)]
+    pub uncommitted: bool,
+}
+
+#[derive(Deserialize)]
+struct BlameBody {
+    #[serde(default)]
+    available: bool,
+    #[serde(default)]
+    reason: String,
+    #[serde(default)]
+    truncated: bool,
+    #[serde(default)]
+    lines: Vec<BlameLine>,
+}
+
+/// localStorage key for the Blame toggle (#1479). Default off (Q1):
+/// blame widens the gutter and costs a daemon round-trip.
+pub const BLAME_STORAGE_KEY: &str = "strike.editorBlame";
+
+/// Lines of blame requested per file — the daemon's window cap.
+pub const BLAME_LIMIT: usize = 5000;
+
+/// Blame preference from a stored value: only an explicit `"on"`.
+pub fn blame_enabled_from_storage(raw: Option<&str>) -> bool {
+    matches!(raw, Some("on"))
+}
+
+/// Coarse relative age ("just now", "5 minutes ago", "3 days ago",
+/// "2 years ago") from Unix seconds; a future time reads as just now.
+pub fn relative_age(now: i64, then: i64) -> String {
+    let secs = (now - then).max(0);
+    let (n, unit) = if secs < 60 {
+        return "just now".to_string();
+    } else if secs < 3_600 {
+        (secs / 60, "minute")
+    } else if secs < 86_400 {
+        (secs / 3_600, "hour")
+    } else if secs < 30 * 86_400 {
+        (secs / 86_400, "day")
+    } else if secs < 365 * 86_400 {
+        (secs / (30 * 86_400), "month")
+    } else {
+        (secs / (365 * 86_400), "year")
+    };
+    if n == 1 {
+        format!("1 {unit} ago")
+    } else {
+        format!("{n} {unit}s ago")
+    }
+}
+
+/// Gutter label for the first line of a blame run: the git author
+/// name verbatim (Q3) and the relative date; uncommitted lines say so.
+pub fn blame_label(line: &BlameLine, now: i64) -> String {
+    if line.uncommitted {
+        return "Uncommitted".to_string();
+    }
+    format!("{} · {}", line.author, relative_age(now, line.time))
+}
+
+/// Whether gutter row `idx` starts a run of lines from one commit; a
+/// run's later rows render blank so grouped lines read as one block.
+pub fn blame_run_start(lines: &[BlameLine], idx: usize) -> bool {
+    match (idx.checked_sub(1).and_then(|p| lines.get(p)), lines.get(idx)) {
+        (_, None) => false,
+        (None, Some(_)) => true,
+        (Some(prev), Some(cur)) => prev.hash != cur.hash,
+    }
+}
+
+/// Client cache key for fetched blame: the file, its content hash, and
+/// the reload count, so a save or an explicit reload refetches.
+pub fn blame_cache_key(path: &str, sha: &str, reload: u32) -> String {
+    format!("{path}@{sha}#{reload}")
+}
+
+fn blame_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok().flatten()
+}
+
+fn load_blame_pref() -> bool {
+    let raw = blame_storage().and_then(|s| s.get_item(BLAME_STORAGE_KEY).ok().flatten());
+    blame_enabled_from_storage(raw.as_deref())
+}
+
+fn save_blame_pref(on: bool) {
+    if let Some(s) = blame_storage() {
+        let _ = s.set_item(BLAME_STORAGE_KEY, if on { "on" } else { "off" });
+    }
+}
+
 #[derive(Deserialize)]
 struct DocBody {
     path: String,
@@ -1725,6 +1833,11 @@ fn SourceView(
     hits: Vec<Hit>,
     current: usize,
     target_line: u32,
+    /// Blame rows by line (#1479); empty means Blame is off and the
+    /// view renders exactly as before.
+    blame: Vec<BlameLine>,
+    /// Set when a blame gutter entry is clicked.
+    blame_pick: RwSignal<Option<BlameLine>>,
 ) -> impl IntoView {
     // The whole file is already loaded; only the rendered window is
     // capped (#1431). The window lives in a signal so "Show more" can
@@ -1747,9 +1860,14 @@ fn SourceView(
             .unwrap_or(target_line)
     };
     let limit = RwSignal::new(initial_render_limit(total, target));
+    let blame_on = !blame.is_empty();
+    let blame: Arc<Vec<BlameLine>> = Arc::new(blame);
+    let now = (js_sys::Date::now() / 1000.0) as i64;
+    let code_class = if blame_on { "ev-codeview ev-blame-on" } else { "ev-codeview" };
     view! {
-        <div class="ev-codeview">
+        <div class=code_class>
             {move || {
+                let rows_blame = blame.clone();
                 let rows_lines = lines.clone();
                 let rows_hits = hits.clone();
                 let rows_hit = current_hit.clone();
@@ -1787,8 +1905,27 @@ fn SourceView(
                                 .collect_view()
                                 .into_any()
                         };
+                        let blame_cell = if !blame_on {
+                            None
+                        } else if blame_run_start(&rows_blame, idx) {
+                            let entry = rows_blame[idx].clone();
+                            let label = blame_label(&entry, now);
+                            let title = entry.subject.clone();
+                            Some(view! {
+                                <button
+                                    type="button"
+                                    class="ev-blame"
+                                    data-ev-blame=n.to_string()
+                                    title=title
+                                    on:click=move |_| blame_pick.set(Some(entry.clone()))
+                                >{label}</button>
+                            }.into_any())
+                        } else {
+                            Some(view! { <span class="ev-blame ev-blame-cont"></span> }.into_any())
+                        };
                         view! {
                             <div class=row_class id=format!("ev-line-{n}")>
+                                {blame_cell}
                                 <span class="ev-gutter">{n.to_string()}</span>
                                 <span>{body}</span>
                             </div>
@@ -2139,6 +2276,16 @@ pub fn DocumentPane(
     let goto_text = RwSignal::new(String::new());
     let goto_note = RwSignal::new(String::new());
     let diff_gen = RwSignal::new(0u32);
+    // Blame (#1479): toggle (persisted, default off), the fetched rows
+    // and their cache key, a note for unavailable/error states, the
+    // clicked entry, and a generation guard for in-flight fetches.
+    let blame_on = RwSignal::new(load_blame_pref());
+    let blame = RwSignal::new(Vec::<BlameLine>::new());
+    let blame_key = RwSignal::new(String::new());
+    let blame_note = RwSignal::new(String::new());
+    let blame_pick = RwSignal::new(None::<BlameLine>);
+    let blame_gen = RwSignal::new(0u32);
+    let blame_copy = RwSignal::new(None::<bool>);
     // Word-wrap preference (#1412): global, persisted, default on.
     // Edit mode's textarea is explicitly out of scope — it wraps per
     // its own attribute and does not follow this preference in slice 1.
@@ -2371,6 +2518,50 @@ pub fn DocumentPane(
                     // was cleared when this fetch started.
                     diff_note.set(http_message(&e));
                 }
+            }
+        });
+    });
+
+    // Fetch blame on demand (#1479): only while the toggle is on, once
+    // per file + content + reload; a stale completion is dropped.
+    Effect::new(move |_| {
+        let on = blame_on.get();
+        let p = loaded_path.get();
+        let key = blame_cache_key(&p, &sha.get(), reload_tick.get());
+        if !on || p.is_empty() || blame_key.get_untracked() == key {
+            return;
+        }
+        let gen = blame_gen.get_untracked().wrapping_add(1);
+        blame_gen.set(gen);
+        blame.set(Vec::new());
+        blame_pick.set(None);
+        blame_note.set("Loading blame…".into());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let q = format!("/v1/git/blame?path={}&limit={}", js_encode(&p), BLAME_LIMIT);
+            let res = get_json::<BlameBody>(&b, &t, &q).await;
+            if blame_gen.get_untracked() != gen {
+                return;
+            }
+            match res {
+                Ok(body) if body.available => {
+                    blame_note.set(if body.truncated {
+                        format!("Blame covers the first {} lines.", body.lines.len())
+                    } else {
+                        String::new()
+                    });
+                    blame.set(body.lines);
+                    blame_key.set(key);
+                }
+                Ok(body) => {
+                    blame_note.set(if body.reason.is_empty() {
+                        "No blame available.".to_string()
+                    } else {
+                        body.reason
+                    });
+                    blame_key.set(key);
+                }
+                Err(e) => blame_note.set(http_message(&e)),
             }
         });
     });
@@ -2920,6 +3111,42 @@ pub fn DocumentPane(
             <Show when=move || binary.get()>
                 <p class="hint">"Binary file. Nothing to show."</p>
             </Show>
+            <Show when=move || blame_on.get() && !blame_note.get().is_empty()>
+                <p class="hint ev-blame-note" data-ev-blame-note=true>{move || blame_note.get()}</p>
+            </Show>
+            {move || blame_pick.get().map(|entry| {
+                let hash = entry.hash.clone();
+                let meta = if entry.uncommitted {
+                    "Not committed yet".to_string()
+                } else {
+                    format!("{} · {}", entry.author, entry.date)
+                };
+                view! {
+                    <div class="notice ev-blame-pick" data-ev-blame-pick=true>
+                        <span class="ev-blame-subject">{entry.subject.clone()}</span>
+                        <code class="ev-blame-hash">{entry.hash.clone()}</code>
+                        <span class="hint">{meta}</span>
+                        <button
+                            type="button"
+                            class="secondary"
+                            data-ev-blame-copy=true
+                            on:click=move |_| {
+                                let h = hash.clone();
+                                spawn_local(async move {
+                                    let ok = crate::clipboard::copy_text(&h).await.is_ok();
+                                    blame_copy.set(Some(ok));
+                                    crate::clipboard::after_ms(2_000, move || blame_copy.set(None));
+                                });
+                            }
+                        >{move || match blame_copy.get() {
+                            Some(true) => "Copied",
+                            Some(false) => "Copy failed",
+                            None => "Copy hash",
+                        }}</button>
+                        <button type="button" class="secondary" on:click=move |_| blame_pick.set(None)>"Close"</button>
+                    </div>
+                }
+            })}
             <div class="ev-body">
                 <Show when=move || !binary.get() && !loading.get() && preview.get()>
                     {move || view! { <MarkdownView text=content.get() outline=true /> }}
@@ -2933,6 +3160,8 @@ pub fn DocumentPane(
                             hits=hits.get()
                             current=hit_idx.get()
                             target_line=jump_line.get()
+                            blame={if blame_on.get() { blame.get() } else { Vec::new() }}
+                            blame_pick=blame_pick
                         />
                     }}
                 </Show>
@@ -2969,6 +3198,26 @@ pub fn DocumentPane(
                 <Show when=move || is_dirty(editing.get(), &draft.get(), &content.get())>
                     <span class="ev-dirty" data-ev-dirty=true>"Unsaved changes"</span>
                 </Show>
+                <button
+                    type="button"
+                    class=move || if blame_on.get() { "chip on" } else { "chip" }
+                    data-ev-blame-toggle=true
+                    aria-pressed=move || if blame_on.get() { "true" } else { "false" }
+                    disabled=move || binary.get()
+                    title="Show who last changed each line (git blame)"
+                    on:click=move |_| {
+                        let next = !blame_on.get_untracked();
+                        blame_on.set(next);
+                        save_blame_pref(next);
+                        if next {
+                            // Blame annotates the source view, not the
+                            // rendered Markdown preview.
+                            preview.set(false);
+                        } else {
+                            blame_pick.set(None);
+                        }
+                    }
+                >"Blame"</button>
                 <button
                     type="button"
                     class=move || if wrap_on.get() { "chip on" } else { "chip" }
@@ -3316,6 +3565,68 @@ mod tests {
         assert!(toks.iter().any(|t| t.kind == "ev-com" && t.text.contains("note")));
         let joined: String = toks.iter().map(|t| t.text.as_str()).collect();
         assert_eq!(joined, "func main() { return \"hi\" } // note");
+    }
+
+    #[test]
+    fn blame_pref_defaults_off() {
+        assert!(!blame_enabled_from_storage(None));
+        assert!(!blame_enabled_from_storage(Some("")));
+        assert!(!blame_enabled_from_storage(Some("off")));
+        assert!(blame_enabled_from_storage(Some("on")));
+        assert_eq!(BLAME_STORAGE_KEY, "strike.editorBlame");
+    }
+
+    #[test]
+    fn relative_age_buckets() {
+        let now = 1_000_000_000;
+        assert_eq!(relative_age(now, now), "just now");
+        assert_eq!(relative_age(now, now + 500), "just now");
+        assert_eq!(relative_age(now, now - 59), "just now");
+        assert_eq!(relative_age(now, now - 60), "1 minute ago");
+        assert_eq!(relative_age(now, now - 5 * 60), "5 minutes ago");
+        assert_eq!(relative_age(now, now - 3_600), "1 hour ago");
+        assert_eq!(relative_age(now, now - 3 * 86_400), "3 days ago");
+        assert_eq!(relative_age(now, now - 45 * 86_400), "1 month ago");
+        assert_eq!(relative_age(now, now - 2 * 365 * 86_400), "2 years ago");
+    }
+
+    #[test]
+    fn blame_label_runs_and_cache_key() {
+        let line = |hash: &str, author: &str, time: i64, uncommitted: bool| BlameLine {
+            hash: hash.into(),
+            author: author.into(),
+            time,
+            uncommitted,
+            ..BlameLine::default()
+        };
+        let now = 10 * 86_400;
+        assert_eq!(blame_label(&line("a", "Ada", now - 2 * 86_400, false), now), "Ada · 2 days ago");
+        assert_eq!(blame_label(&line("0", "Not Committed Yet", now, true), now), "Uncommitted");
+        let rows = vec![line("a", "Ada", 0, false), line("a", "Ada", 0, false), line("b", "Grace", 0, false)];
+        assert!(blame_run_start(&rows, 0));
+        assert!(!blame_run_start(&rows, 1));
+        assert!(blame_run_start(&rows, 2));
+        assert!(!blame_run_start(&rows, 3));
+        assert!(!blame_run_start(&[], 0));
+        assert_ne!(blame_cache_key("a.rs", "s1", 0), blame_cache_key("a.rs", "s2", 0));
+        assert_ne!(blame_cache_key("a.rs", "s1", 0), blame_cache_key("a.rs", "s1", 1));
+        assert_ne!(blame_cache_key("a.rs", "s1", 0), blame_cache_key("b.rs", "s1", 0));
+    }
+
+    #[test]
+    fn blame_body_decodes_daemon_shape() {
+        let body: BlameBody = serde_json::from_str(
+            r#"{"path":"a.txt","available":true,"start":1,"total":1,"truncated":false,
+                "lines":[{"line":1,"hash":"abc","author":"Ada","date":"2024-01-02T03:04:05Z","time":1704164645,"subject":"init"}]}"#,
+        )
+        .unwrap();
+        assert!(body.available && !body.truncated && body.reason.is_empty());
+        assert_eq!(body.lines[0].author, "Ada");
+        assert_eq!(body.lines[0].time, 1_704_164_645);
+        assert!(!body.lines[0].uncommitted);
+        let none: BlameBody =
+            serde_json::from_str(r#"{"path":"x","available":false,"reason":"No blame available: untracked.","lines":[]}"#).unwrap();
+        assert!(!none.available && none.reason.contains("untracked"));
     }
 
     #[test]

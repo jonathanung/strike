@@ -129,9 +129,12 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     popup only list those real actions (`composerCommands` and `skills` on
     bootstrap, files from `/v1/files/search`). A shell ask shows Allow once /
     Reject on the composer until the approvals stream replaces that bar. Git
-    (`GET/POST /v1/git/status|diff|branches|log|stage|unstage|commit|checkout|discard|reset|branch/delete`
+    (`GET/POST /v1/git/status|diff|branches|log|blame|stage|unstage|commit|checkout|discard|reset|branch/delete`
     and `/v1/git/worktrees`) runs git as an argument vector. There is no
-    push route. Discard, hard reset, branch delete, worktree remove, and
+    push route. `GET /v1/git/blame?path=&start=&limit=` (read-only, limit
+    default 2000, max 5000) backs the document viewer's Blame toggle and
+    returns `available:false` with a reason for untracked or uncommitted
+    files. Discard, hard reset, branch delete, worktree remove, and
     stale prune require an exact confirm token. Hard reset is `HEAD` only.
     Branch delete is `git branch -d`. Worktree create/remove uses the
     existing strike worktree helper and only deletes paths under

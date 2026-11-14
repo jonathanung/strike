@@ -1106,6 +1106,85 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "readme from path link",
     );
+    // Git blame (#1479): README.md is tracked in the served checkout.
+    // Turning Blame on leaves the Markdown preview for the source view
+    // and fills the gutter; clicking an entry shows the full hash.
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-blame-toggle]"); if (!b || b.disabled) return "no blame toggle"; if (b.getAttribute("aria-pressed") !== "true") b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const cell = document.querySelector("button[data-ev-blame]");
+        if (!cell) {
+          const note = document.querySelector("[data-ev-blame-note]");
+          return note ? "note: " + note.innerText : "no blame gutter";
+        }
+        if (!document.querySelector(".ev-codeview.ev-blame-on")) return "no blame layout";
+        const t = cell.textContent.trim();
+        return t.includes("·") || t === "Uncommitted" ? "ok" : "label=" + t;
+      })()`,
+      "blame gutter on README.md",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector("button[data-ev-blame]").click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const pick = document.querySelector("[data-ev-blame-pick]");
+        if (!pick) return "no blame popover";
+        const hash = pick.querySelector(".ev-blame-hash");
+        return hash && /^[0-9a-f]{40}([0-9a-f]{24})?$/.test(hash.textContent.trim()) ? "ok" : pick.innerText.slice(0, 160);
+      })()`,
+      "blame commit popover",
+    );
+    // An untracked file gets the honest no-blame note, not an error;
+    // the toggle state persists across files.
+    await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("textarea") ? "ok" : "no composer")()`,
+      "composer before untracked blame",
+    );
+    await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Files"); if (b) b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector('[data-ev-open="editor-smoke.txt"]') ? "ok" : "no sample row")()`,
+      "open button for editor-smoke.txt (blame)",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-open="editor-smoke.txt"]').click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const note = document.querySelector("[data-ev-blame-note]");
+        return note && note.innerText.includes("not tracked") ? "ok" : (note ? note.innerText : "no note");
+      })()`,
+      "untracked blame note",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector("[data-ev-blame-toggle]").click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        if (document.querySelector(".ev-blame, [data-ev-blame-note], .ev-blame-on")) return "blame still shown";
+        return localStorage.getItem("strike.editorBlame") === "off" ? "ok" : "pref not off";
+      })()`,
+      "blame off restores the viewer",
+    );
     console.log("webui-editor-check ok");
   } finally {
     await rm(sample, { force: true });
