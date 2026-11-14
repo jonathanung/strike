@@ -159,6 +159,8 @@ type Server struct {
 	mux    *http.ServeMux
 	http   *http.Server
 	static fs.FS
+	// gzip memoizes gzip encodings of static bundle files (#1514).
+	gzip gzipAssets
 
 	authFlowOnce   sync.Once
 	authFlowsStore *authFlowStore
@@ -288,12 +290,14 @@ func (s *Server) Handler() http.Handler { return s.http.Handler }
 
 // ListenAndServe binds and serves until the server is closed.
 func (s *Server) ListenAndServe() error {
+	go s.warmStaticGzip()
 	return s.http.ListenAndServe()
 }
 
 // Serve serves on ln until closed.
 func (s *Server) Serve(ln net.Listener) error {
 	s.http.Addr = ln.Addr().String()
+	go s.warmStaticGzip()
 	return s.http.Serve(ln)
 }
 
@@ -405,6 +409,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/models", s.handleModels)
 	s.mux.HandleFunc("GET /v1/history", s.handleHistory)
 	s.mux.HandleFunc("POST /v1/history", s.handleHistory)
+	s.mux.HandleFunc("GET /v1/onboarding", s.handleOnboarding)
+	s.mux.HandleFunc("POST /v1/onboarding/acknowledge", s.handleOnboardingAcknowledge)
 	s.mux.HandleFunc("GET /v1/settings", s.handleSettings)
 	s.mux.HandleFunc("GET /v1/themes", s.handleThemesList)
 	s.mux.HandleFunc("GET /v1/themes/{id}", s.handleThemeGet)
@@ -988,7 +994,7 @@ func (s *Server) handleAttach(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(data)
+	s.writeStatic(w, r, "index.html", data)
 }
 
 func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
@@ -1013,7 +1019,7 @@ func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/manifest+json")
 	}
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	_, _ = w.Write(data)
+	s.writeStatic(w, r, path, data)
 }
 
 // handleStaticRoot serves one file from the static root (PWA service worker
@@ -1027,7 +1033,7 @@ func (s *Server) handleStaticRoot(name, contentType string) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Cache-Control", "no-store")
-		_, _ = w.Write(data)
+		s.writeStatic(w, r, name, data)
 	}
 }
 

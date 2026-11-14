@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike/harness/provider"
+	"github.com/jonathanung/strike/harness/tool"
 )
 
 const (
@@ -13,8 +14,11 @@ const (
 	// pruneMinimum requires at least this many tokens would be freed before
 	// mutating history (OpenCode PRUNE_MINIMUM) — avoids thrashing on small wins.
 	pruneMinimum = 20_000
-	// prunedToolResultText replaces blanked tool-result bodies (peer wording).
+	// prunedToolResultText is the legacy placeholder (and the fallback when the
+	// tool name is unknown). Sessions resumed from older logs still carry it.
 	prunedToolResultText = "[Old tool result content cleared]"
+	// prunedToolResultPrefix starts every tool-naming placeholder (#1199).
+	prunedToolResultPrefix = "[Old tool result cleared"
 	// pruneRecentUserTurns skips tool results inside the most recent N real
 	// user turns so the active intent's tool I/O stays complete.
 	pruneRecentUserTurns = 2
@@ -32,6 +36,9 @@ type pruneParams struct {
 	minimum         int
 	recentUserTurns int
 	protectedTools  map[string]struct{}
+	// spillDir is the session scratch dir; spill hints in pruned outputs are
+	// kept only when they point under it (tool.IsSpillPath).
+	spillDir string
 }
 
 func resolvePruneParams(protect, minimum, recent int, extraTools []string) pruneParams {
@@ -69,12 +76,33 @@ func resolvePruneParams(protect, minimum, recent int, extraTools []string) prune
 }
 
 func (e *Engine) pruneParams() pruneParams {
-	return resolvePruneParams(
+	p := resolvePruneParams(
 		e.opts.PruneProtectTokens,
 		e.opts.PruneMinimumTokens,
 		e.opts.PruneKeepUserTurns,
 		e.opts.PruneProtectTools,
 	)
+	e.sessionTempMu.Lock()
+	p.spillDir = e.sessionTemp.dir
+	e.sessionTempMu.Unlock()
+	return p
+}
+
+// isPrunedToolResult reports whether out is a prune placeholder (current or legacy).
+func isPrunedToolResult(out string) bool {
+	return out == prunedToolResultText || strings.HasPrefix(out, prunedToolResultPrefix)
+}
+
+// prunedPlaceholder names the tool and how to re-fetch its output: read the
+// spill file when the result spilled under spillDir, else re-run the tool.
+func prunedPlaceholder(toolName, output, spillDir string) string {
+	if toolName == "" {
+		return prunedToolResultText
+	}
+	if path := tool.SpillPathFromOutput(output); path != "" && tool.IsSpillPath(spillDir, path) {
+		return prunedToolResultPrefix + ": " + toolName + "; full output saved, read " + path + " with offset/limit to re-fetch]"
+	}
+	return prunedToolResultPrefix + ": " + toolName + "; re-run " + toolName + " to re-fetch]"
 }
 
 // pruneToolResults blanks older completed tool-result bodies outside the
@@ -118,8 +146,9 @@ func pruneToolResults(msgs []provider.Message, p pruneParams) (cleared, tokensFr
 	}
 
 	type cand struct {
-		idx int
-		est int
+		idx  int
+		est  int
+		name string
 	}
 	var toPrune []cand
 	total := 0
@@ -141,7 +170,7 @@ func pruneToolResults(msgs []provider.Message, p pruneParams) (cleared, tokensFr
 			continue
 		}
 		out := m.ToolResult.Output
-		if out == prunedToolResultText {
+		if isPrunedToolResult(out) {
 			// Prior prune boundary — older results already handled.
 			break
 		}
@@ -158,7 +187,7 @@ func pruneToolResults(msgs []provider.Message, p pruneParams) (cleared, tokensFr
 			continue
 		}
 		prunedEst += est
-		toPrune = append(toPrune, cand{idx: i, est: est})
+		toPrune = append(toPrune, cand{idx: i, est: est, name: name})
 	}
 
 	if prunedEst <= p.minimum {
@@ -167,10 +196,10 @@ func pruneToolResults(msgs []provider.Message, p pruneParams) (cleared, tokensFr
 
 	for _, c := range toPrune {
 		tr := msgs[c.idx].ToolResult
-		if tr == nil || tr.Output == prunedToolResultText {
+		if tr == nil || isPrunedToolResult(tr.Output) {
 			continue
 		}
-		tr.Output = prunedToolResultText
+		tr.Output = prunedPlaceholder(c.name, tr.Output, p.spillDir)
 		cleared++
 		tokensFreed += c.est
 	}
