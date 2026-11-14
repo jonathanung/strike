@@ -1506,6 +1506,8 @@ select.mode, .daemon select {
 .ss-bulk button,
 .ss-older button { height: 24px; padding: 0 8px; font-size: var(--type-sm); }
 .ss-bulk-count { font-size: var(--type-sm); color: var(--muted); margin-right: 4px; }
+.ss-folder-cleanup { margin: 0 0 8px; }
+.ss-folder-cleanup button { height: 24px; padding: 0 8px; font-size: var(--type-sm); }
 .ss-list { display: flex; flex-direction: column; gap: 2px; }
 .ss-older { margin: 6px 0; }
 .ss-folder-row {
@@ -2080,24 +2082,6 @@ select.mode, .daemon select {
   font-size: var(--type-sm);
 }
 .sx-quiet:hover { color: var(--ink); border-color: var(--border-focus); }
-/* feature:provider-auth-notice begin */
-/* #1546: a provider_auth notice carries its fix path — Open Providers
-   plus Retry — under the headline; the vendor text stays in Details. */
-.sx-auth-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-}
-.sx-auth-open {
-  height: 24px;
-  padding: 0 8px;
-  font-size: var(--type-sm);
-}
-@media (max-width: 800px) {
-  .sx-auth-actions button { min-height: 44px; }
-}
-/* feature:provider-auth-notice end */
 .sx-keys, .sx-note {
   margin: 0;
   color: var(--muted);
