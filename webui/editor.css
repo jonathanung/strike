@@ -192,3 +192,36 @@
 }
 .ev-dirty { color: var(--warning); font-size: var(--type-sm); }
 /* feature:editor-unsaved-guard end */
+/* feature:git-blame begin */
+/* Blame gutter (#1479): a third grid column before the line number,
+   only while the toggle is on; run continuations render blank. */
+.ev-codeview.ev-blame-on .ev-line { grid-template-columns: 12em 3.2em minmax(0, 1fr); }
+.ev-blame {
+  min-width: 0;
+  height: auto;
+  padding: 0 4px;
+  background: none;
+  border: 0;
+  border-right: 1px solid var(--border-muted);
+  border-radius: 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--type-sm);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+.ev-blame:hover { color: var(--ink); background: var(--raised); }
+.ev-blame:focus-visible { outline: 1px solid var(--border-focus); outline-offset: -1px; }
+.ev-blame-cont { cursor: default; }
+.ev-blame-note { margin: 4px 8px; }
+.ev-blame-pick { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 8px; }
+.ev-blame-subject { color: var(--ink); font-weight: 600; }
+.ev-blame-hash { font: 12px/1.4 ui-monospace, monospace; color: var(--accent-alt); overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .ev-codeview.ev-blame-on .ev-line { grid-template-columns: 7em 2.6em minmax(0, 1fr); }
+}
+/* feature:git-blame end */
