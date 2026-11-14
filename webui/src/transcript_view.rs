@@ -830,6 +830,35 @@ fn fold_toggle_action(dom_open: bool, rendered_open: bool, find_forced: bool) ->
     }
 }
 
+/// Apply one native `toggle` of fold `id` against the live state:
+/// the currently rendered open state is recomputed from `map` and
+/// `dismissed` (never a captured render-time value), then the change is
+/// ignored, recorded, or recorded as a dismissal of the forced open.
+/// Returns whether anything was written.
+fn handle_fold_toggle(
+    map: &mut HashMap<u32, bool>,
+    dismissed: &mut Option<(u32, crate::transcript_find::TMatch)>,
+    id: u32,
+    current_key: Option<(u32, crate::transcript_find::TMatch)>,
+    find_forced: bool,
+    dom_open: bool,
+) -> bool {
+    let is_dismissed = find_forced && current_key.is_some() && *dismissed == current_key;
+    let rendered = resolve_fold_open(fold_is_open(map, id), find_forced, is_dismissed);
+    match fold_toggle_action(dom_open, rendered, find_forced) {
+        FoldToggle::Ignore => false,
+        FoldToggle::Record => {
+            record_fold_toggle(map, id, dom_open);
+            true
+        }
+        FoldToggle::Dismiss => {
+            record_fold_toggle(map, id, false);
+            *dismissed = current_key;
+            true
+        }
+    }
+}
+
 /// Record a single fold's native toggle. Returns without writing
 /// when the state already matches, so the `toggle` event fired by
 /// our own controlled re-render does not loop.
@@ -1011,17 +1040,24 @@ fn message_view(
                             // state, so the list is not rebuilt (keeps
                             // focus, selection and inner scroll); the next
                             // natural re-render reads the map.
-                            match fold_toggle_action(open, fold_open, find_forced) {
-                                FoldToggle::Ignore => {}
-                                FoldToggle::Record => {
-                                    folds.map.update_untracked(|map| record_fold_toggle(map, id, open));
-                                    folds.rev.update(|n| *n = n.wrapping_add(1));
-                                }
-                                FoldToggle::Dismiss => {
-                                    folds.map.update_untracked(|map| record_fold_toggle(map, id, false));
-                                    folds.dismissed.set_untracked(current_key);
-                                    folds.rev.update(|n| *n = n.wrapping_add(1));
-                                }
+                            // Decided against live map/dismissed state, not
+                            // the render-time `fold_open`, which goes stale
+                            // once a toggle skips the rebuild.
+                            let mut dismissed = folds.dismissed.get_untracked();
+                            let mut changed = false;
+                            folds.map.update_untracked(|map| {
+                                changed = handle_fold_toggle(
+                                    map,
+                                    &mut dismissed,
+                                    id,
+                                    current_key,
+                                    find_forced,
+                                    open,
+                                );
+                            });
+                            if changed {
+                                folds.dismissed.set_untracked(dismissed);
+                                folds.rev.update(|n| *n = n.wrapping_add(1));
                             }
                         }
                     >
@@ -1298,6 +1334,41 @@ mod tests {
         // No find: recorded state rules.
         assert!(!resolve_fold_open(false, false, false));
         assert!(resolve_fold_open(true, false, false));
+    }
+
+    #[test]
+    fn repeated_toggles_without_rebuild_use_live_state() {
+        let m = crate::transcript_find::TMatch {
+            line: 3,
+            field: crate::transcript_find::Field::Detail,
+            start: 0,
+            end: 2,
+        };
+        let key = Some((7, m));
+        let shown = |map: &HashMap<u32, bool>, d: &Option<(u32, crate::transcript_find::TMatch)>, forced: bool| {
+            resolve_fold_open(fold_is_open(map, 7), forced, forced && *d == key)
+        };
+        // Plain fold: open then close, no rebuild in between.
+        let (mut map, mut d) = (HashMap::new(), None);
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, None, false, true));
+        assert!(shown(&map, &d, false));
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, None, false, false));
+        assert!(!shown(&map, &d, false), "second toggle must not be ignored");
+        // A rebuild's own toggle (DOM equals state) writes nothing.
+        assert!(!handle_fold_toggle(&mut map, &mut d, 7, None, false, false));
+        // Forced fold: dismiss, reopen, close again.
+        let (mut map, mut d) = (HashMap::new(), None);
+        assert!(shown(&map, &d, true));
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, key, true, false));
+        assert!(!shown(&map, &d, true), "dismissed");
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, key, true, true));
+        assert!(shown(&map, &d, true), "reopen after dismiss sticks");
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, key, true, false));
+        assert!(!shown(&map, &d, true));
+        // After Collapse all the forced fold still shows (no dismissal).
+        let (mut map, d) = (HashMap::new(), None);
+        apply_bulk_fold(&mut map, &[7], false);
+        assert!(shown(&map, &d, true));
     }
 
     #[test]
