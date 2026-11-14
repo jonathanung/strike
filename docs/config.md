@@ -50,6 +50,47 @@ issues and before writing config. A file symlink at `~/.strike/config` (for
 example stow/dotfiles) is preserved on save — the referent is updated, not
 replaced by a plain file.
 
+## Workspace trust
+
+A repository's own configuration loads only after you trust that workspace
+(#1352). Until then every project surface is **inert** and the session runs on
+builtin + global config:
+
+- `./.strike/config` scalars (`systemPrompt`, `permissionMode`, `sandbox`, …)
+  and its `permissions[]` / `hooks[]` entries
+- `./.strike/mcp.jsonc` servers, `./.strike/providers.jsonc` custom providers and
+  endpoint overlays (where credentials get sent), project LSP servers, project `harnesses`
+  (no process is spawned — the gate runs before admission, not after)
+- project agents (`.strike/agents`, `.claude/agents`, `.opencode/agent(s)`),
+  skills, workflows, and project-scope plugins (`./.strike/plugins`, whose
+  lockfile — including plugin trust records — lives inside the repo)
+- `AGENTS.md` / `CLAUDE.md` steering from the project root down to the cwd
+
+The decision is stored **outside the repo** in 0600
+`~/.strike/workspace-trust.json`, keyed by the canonical workspace root (git
+top level when known, else the launch directory). Launching from a
+subdirectory of a trusted repo is trusted; a repo under a trusted parent
+directory is **not** — trust is exact-root, never inherited. The home
+directory and the filesystem root cannot be trusted.
+
+```sh
+strike trust status          # state + what the repo would load (names and command lines)
+strike trust                 # trust the current workspace (takes effect on next start)
+strike trust revoke          # repo config goes inert again
+strike trust list            # trusted roots
+strike trust --dir <path>    # act on another checkout
+```
+
+While untrusted and the repo ships gated config, startup prints
+`strike: untrusted workspace: repo config inert (…)` and the session
+transcript records an `admission.decided` event with `surface: "workspace"`
+so headless / scheduled runs are never silently reconfigured by a clone.
+
+**Trust is not permission.** Trusting a workspace only lets its config
+*load*. Every tool call, MCP call and hook still goes through the permission
+system unchanged; the per-command hook Ask (#80) remains; plugin executable
+trust (`strike plugin trust`, #728) is a separate digest-bound grant.
+
 ## Managed / MDM config (enterprise)
 
 For organizations that need centralized policy users cannot override, Strike
@@ -152,6 +193,7 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "mdReadMode": "embedded",
   "notify": "unfocused-only",
   "autoupdate": "notify",
+  "keepAwake": "off",
   "permissionMode": "default",
   "sandbox": "workspace-write",
   "network": {
@@ -721,6 +763,42 @@ remains unsupported (same as manual upgrade).
 
 Probe state is cached under `~/.strike/cache/update-check.json`. Editable under
 `/settings` → Defaults.
+
+## Keep awake (`keepAwake`)
+
+Opt-in sleep inhibition for the gateway host while `strike serve` runs, so a
+phone-steered daemon does not fall asleep mid-turn
+([#1496](https://github.com/jonathanung/strike/issues/1496)). Default **off**
+because it changes host power behaviour; nothing is held until you turn it on.
+Host-scoped: only the **global** `~/.strike/config` value is honoured; project
+and managed layers are ignored for this key so a repo cannot re-arm it behind
+the cockpit toggle.
+
+| Value | Behavior |
+|---|---|
+| `off` (default) | no inhibitor; the OS sleeps as usual |
+| `on` | hold an OS sleep-inhibition assertion for the daemon's lifetime |
+
+Primitive per OS (no sudo, no helper daemon, no lid-close override):
+
+| OS | Command held by the daemon | Scope |
+|---|---|---|
+| Linux | `systemd-inhibit --what=sleep:idle --who=strike --mode=block tail --pid=<daemon>` | idle + sleep; lid-close policy is not overridden |
+| macOS | `caffeinate -s -w <daemon>` | system sleep on **AC power only** (no battery drain) |
+| Windows / other | — | reported as `unsupported` |
+
+Both commands are bound to the daemon pid, so a hard-killed daemon still
+releases the lock; a clean toggle-off or shutdown kills the child.
+
+Set it from the cockpit settings surface (`PATCH /v1/settings`
+`{"keepAwake":"on"}`), which persists the dial and applies it to the running
+daemon immediately. The effective state is reported read-only on
+`GET /v1/gateway` as `keepAwake: {enabled, supported, state, backend, reason,
+since}` with `state` one of `off | on | unsupported | blocked`. `unsupported`
+means no primitive is usable on this host (wrong OS or binary not in PATH);
+`blocked` means the preference is on but the primitive refused or exited —
+`reason` carries the OS error. Verify at the OS level with
+`systemd-inhibit --list` or `pmset -g assertions`.
 
 ## Container (native containerization, E12)
 

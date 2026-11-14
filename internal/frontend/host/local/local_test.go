@@ -1143,3 +1143,31 @@ func TestSaveAutoApproveDialsWritesGlobalConfig(t *testing.T) {
 		t.Fatalf("reject cleared seconds: %#v", d)
 	}
 }
+
+func TestSaveKeepAwakeWritesGlobalConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	svc := New(nil, nil, nil, nil, nil, nil, nil, "")
+
+	if d := svc.Settings.Defaults(); d.KeepAwake != "" {
+		t.Fatalf("default keepAwake = %q, want unset (off)", d.KeepAwake)
+	}
+	if err := svc.Settings.SaveKeepAwake("on"); err != nil {
+		t.Fatal(err)
+	}
+	if d := svc.Settings.Defaults(); d.KeepAwake != "on" {
+		t.Fatalf("keepAwake = %q, want on", d.KeepAwake)
+	}
+	if err := svc.Settings.SaveKeepAwake("sometimes"); err == nil {
+		t.Fatal("unknown keepAwake accepted")
+	}
+	if d := svc.Settings.Defaults(); d.KeepAwake != "on" {
+		t.Fatalf("reject cleared keepAwake: %#v", d)
+	}
+	if err := svc.Settings.SaveKeepAwake("off"); err != nil {
+		t.Fatal(err)
+	}
+	if d := svc.Settings.Defaults(); d.KeepAwake != "off" {
+		t.Fatalf("keepAwake = %q, want off", d.KeepAwake)
+	}
+}
