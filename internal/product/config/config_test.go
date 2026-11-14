@@ -2140,3 +2140,21 @@ func TestNormalizeChildIsolation(t *testing.T) {
 		t.Fatal("spawn override worktree")
 	}
 }
+
+func TestNormalizeKeepAwake(t *testing.T) {
+	cases := map[string]string{
+		"":        "",
+		"off":     KeepAwakeOff,
+		"FALSE":   KeepAwakeOff,
+		"on":      KeepAwakeOn,
+		" yes ":   KeepAwakeOn,
+		"true":    KeepAwakeOn,
+		"always":  "",
+		"battery": "",
+	}
+	for in, want := range cases {
+		if got := NormalizeKeepAwake(in); got != want {
+			t.Errorf("NormalizeKeepAwake(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

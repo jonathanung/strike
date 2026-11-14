@@ -78,6 +78,10 @@ type Config struct {
 	// writable). Unknown values are ignored at load time. Never auto-replaces
 	// on the default (notify) setting.
 	Autoupdate string `json:"autoupdate,omitempty"`
+	// KeepAwake opts the gateway host (strike serve) into OS sleep inhibition
+	// while the daemon runs: "on" or "off" (default). Default-off because it
+	// changes host power behaviour (#1496). Unknown values are ignored at load.
+	KeepAwake string `json:"keepAwake,omitempty"`
 	// PermissionAutoApproveSeconds enables permission-modal auto-allow once
 	// after N seconds (yolo-lite). Zero disables (default). Clamped to 1–60
 	// when positive.
@@ -1104,6 +1108,7 @@ func read(path string) (Config, error) {
 	c.PruneProtectTools = NormalizePruneProtectTools(c.PruneProtectTools)
 	c.Notify = NormalizeNotify(c.Notify)
 	c.Autoupdate = NormalizeAutoupdate(c.Autoupdate)
+	c.KeepAwake = NormalizeKeepAwake(c.KeepAwake)
 	c.LeanCode = NormalizeLeanCode(c.LeanCode)
 	c.SystemPromptMode = NormalizeSystemPromptMode(c.SystemPromptMode)
 	c.DeferTools = NormalizeDeferTools(c.DeferTools)
@@ -1442,6 +1447,25 @@ func EffectiveAutoupdate(s string) string {
 	return AutoupdateNotify
 }
 
+// KeepAwake values for Config.KeepAwake / gateway sleep inhibition (#1496).
+const (
+	KeepAwakeOff = "off"
+	KeepAwakeOn  = "on"
+)
+
+// NormalizeKeepAwake maps config aliases to on|off. Unknown → "" (treated as
+// off, the default).
+func NormalizeKeepAwake(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "off", "false", "0", "no", "disabled", "none":
+		return KeepAwakeOff
+	case "on", "true", "1", "yes", "enabled":
+		return KeepAwakeOn
+	default:
+		return ""
+	}
+}
+
 // SystemPromptMode values for Config.SystemPromptMode / engine composition.
 const (
 	SystemPromptModeOverlay  = "overlay"
@@ -1605,6 +1629,9 @@ func merge(base, layer Config) Config {
 	}
 	if layer.Autoupdate != "" {
 		base.Autoupdate = layer.Autoupdate
+	}
+	if layer.KeepAwake != "" {
+		base.KeepAwake = layer.KeepAwake
 	}
 	if layer.PermissionAutoApproveSeconds != 0 {
 		base.PermissionAutoApproveSeconds = layer.PermissionAutoApproveSeconds

@@ -152,6 +152,7 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "mdReadMode": "embedded",
   "notify": "unfocused-only",
   "autoupdate": "notify",
+  "keepAwake": "off",
   "permissionMode": "default",
   "sandbox": "workspace-write",
   "network": {
@@ -721,6 +722,39 @@ remains unsupported (same as manual upgrade).
 
 Probe state is cached under `~/.strike/cache/update-check.json`. Editable under
 `/settings` → Defaults.
+
+## Keep awake (`keepAwake`)
+
+Opt-in sleep inhibition for the gateway host while `strike serve` runs, so a
+phone-steered daemon does not fall asleep mid-turn
+([#1496](https://github.com/jonathanung/strike/issues/1496)). Default **off**
+because it changes host power behaviour; nothing is held until you turn it on.
+
+| Value | Behavior |
+|---|---|
+| `off` (default) | no inhibitor; the OS sleeps as usual |
+| `on` | hold an OS sleep-inhibition assertion for the daemon's lifetime |
+
+Primitive per OS (no sudo, no helper daemon, no lid-close override):
+
+| OS | Command held by the daemon | Scope |
+|---|---|---|
+| Linux | `systemd-inhibit --what=sleep:idle --who=strike --mode=block tail --pid=<daemon>` | idle + sleep; lid-close policy is not overridden |
+| macOS | `caffeinate -s -w <daemon>` | system sleep on **AC power only** (no battery drain) |
+| Windows / other | — | reported as `unsupported` |
+
+Both commands are bound to the daemon pid, so a hard-killed daemon still
+releases the lock; a clean toggle-off or shutdown kills the child.
+
+Set it from the cockpit settings surface (`PATCH /v1/settings`
+`{"keepAwake":"on"}`), which persists the dial and applies it to the running
+daemon immediately. The effective state is reported read-only on
+`GET /v1/gateway` as `keepAwake: {enabled, supported, state, backend, reason,
+since}` with `state` one of `off | on | unsupported | blocked`. `unsupported`
+means no primitive is usable on this host (wrong OS or binary not in PATH);
+`blocked` means the preference is on but the primitive refused or exited —
+`reason` carries the OS error. Verify at the OS level with
+`systemd-inhibit --list` or `pmset -g assertions`.
 
 ## Container (native containerization, E12)
 

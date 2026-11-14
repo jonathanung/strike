@@ -314,6 +314,7 @@ type settingsResponse struct {
 	Sandbox                      string   `json:"sandbox,omitempty"`
 	Notify                       string   `json:"notify,omitempty"`
 	Autoupdate                   string   `json:"autoupdate,omitempty"`
+	KeepAwake                    string   `json:"keepAwake,omitempty"`
 	LeanCode                     string   `json:"leanCode,omitempty"`
 	DeferTools                   string   `json:"deferTools,omitempty"`
 	SessionWorktree              string   `json:"sessionWorktree,omitempty"`
@@ -355,6 +356,9 @@ type settingsPatchBody struct {
 	DeferTools      string `json:"deferTools"`
 	SessionWorktree string `json:"sessionWorktree"`
 	Autoupdate      string `json:"autoupdate"`
+	// KeepAwake is the gateway sleep-inhibition opt-in: on|off. Persisted
+	// through host.Settings and applied live to Options.KeepAwake (#1496).
+	KeepAwake string `json:"keepAwake"`
 
 	// permissionAutoApproveSeconds: off|0|1-60 (string dial, not int).
 	PermissionAutoApproveSeconds string `json:"permissionAutoApproveSeconds"`
@@ -384,6 +388,7 @@ func settingsFromDefaults(d host.UserDefaults) settingsResponse {
 		Sandbox:                      d.Sandbox,
 		Notify:                       d.Notify,
 		Autoupdate:                   d.Autoupdate,
+		KeepAwake:                    d.KeepAwake,
 		LeanCode:                     d.LeanCode,
 		DeferTools:                   d.DeferTools,
 		SessionWorktree:              d.SessionWorktree,
@@ -438,6 +443,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	// The persisted keepAwake dial is applied to this daemon right away so the
+	// phone sees the effective state on its next GET /v1/gateway poll.
+	if body.KeepAwake != "" && s.opts.KeepAwake != nil {
+		s.opts.KeepAwake.SetEnabled(settings.Defaults().KeepAwake == "on")
+	}
 	fields := settingsPatchFields(body)
 	if sandboxMode != "" {
 		fields = append(fields, "sandbox")
@@ -460,6 +470,11 @@ func applySettingsPatch(settings host.Settings, body settingsPatchBody) error {
 	}
 	if body.Theme != "" {
 		if err := settings.SaveTheme(body.Theme); err != nil {
+			return err
+		}
+	}
+	if body.KeepAwake != "" {
+		if err := settings.SaveKeepAwake(body.KeepAwake); err != nil {
 			return err
 		}
 	}
