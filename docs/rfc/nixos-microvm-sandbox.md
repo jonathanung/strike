@@ -48,8 +48,8 @@ Conditions (all of them):
    with the reason.
 3. **No silent host fallback.** If the user picked `microvm` and the VM is
    not ready, wrapped commands fail with a typed error. `sandboxAllowDegrade`
-   does not apply to this backend. Running on the host means the user
-   switches the backend to `process`.
+   does not apply to this runtime. Running on the host means the user
+   switches the runtime to `process`.
 4. **Nothing from `~/.strike` enters the guest.** No auth file, daemon token,
    session log, audit sink, host Nix store, or nix-daemon socket. Guest
    network is off by default.
@@ -92,13 +92,13 @@ Today (`harness/sandbox/sandbox.go`, `harness/tool/process.go`):
   `bash -i`). `RunProcess` fails closed on `Degraded` unless `AllowDegrade`.
 - Availability is probed once per process (`avail.go`).
 
-The microVM backend keeps that contract. **Wrap still only rewrites argv.**
+The microVM runtime keeps that contract. **Wrap still only rewrites argv.**
 
 ```
-process backend (today):
+process runtime (today):
   bwrap --ro-bind / / --bind $WD $WD … --die-with-parent -- bash -c "<cmd>"
 
-microvm backend (proposed):
+microvm runtime (proposed):
   strike vm exec --slot <slot> --cwd $WD [--no-workspace-write] -- bash -c "<cmd>"
 ```
 
@@ -114,13 +114,14 @@ Details that make the mapping hold:
 
 | Concern | Rule |
 |---|---|
-| Paths | The guest mounts each workspace root over virtiofs **at the same absolute path** as on the host. `cmd.Dir`, argv paths, and tool output need no translation. File tools (`read`/`write`/`edit`) keep running in-process on the host against the same directory, so the host and guest see one tree (virtiofs cache mode must not hide writes; see runtime note). |
+| Paths | The guest mounts each workspace root over virtiofs **at the same absolute path** as on the host. `cmd.Dir`, argv paths, and tool output need no translation. File tools (`read`/`write`/`edit`) keep running in-process on the host against the same directory, so the host and guest see one tree (virtiofs cache mode must not hide writes; see runtime note). Only the roots are mounted at those paths: guest `HOME` is a fresh guest directory, never the host user's home, even when the workspace sits under `/home/<user>`. |
 | `Mode` | `workspace-write` → workspace root mounted read-write. `read-only` / `NoWorkspaceWrite` (plan mode) → the exec request asks for the read-only mount view. This **closes** the known plan-mode gap where bash could still write on the host (security note, "Mounts"). `off` with `microvm` selected → treated as a config error at load; the user picks `process` to turn isolation off. |
 | `DenyWritePaths` | Applied inside the guest by the guest exec agent as read-only bind mounts. bwrap inside the guest is optional extra isolation, not the boundary. |
 | `NoNetwork` / `NetworkAllow` | The guest has no NIC in Phase 1, so `NoNetwork` is always effectively true. `NetworkAllow` preflight keeps running on the host as it does today. Networking in the guest waits for the egress proxy. |
 | Env | `spec.Env` is filtered before it leaves the host. `BashSecrets` values are **not** forwarded by default; this matches condition 4. A per-secret opt-in is a later decision. |
-| `Result` | `Applied: true`, `Backend: "microvm"`. Degraded is never set for this backend — not ready is an error (condition 3). |
-| Probe | `Available()` for `microvm` = KVM vCPU probe + driver present + slot reachable. It stays lazy: `/sandbox explain` does not boot a VM (same rule as `BackendUnprobed`). |
+| Probe | Availability for `microvm` is **static**: KVM vCPU probe + driver (`sandboxd` socket or `microvm-run`) present. It does not require a running slot, because the slot is booted lazily by the first exec. Probed once per process, as today; `/sandbox explain` does not probe or boot (same rule as `BackendUnprobed`). |
+| `Result` | Available → `Applied: true`, `Backend: "microvm"`. Unavailable → `Degraded: true`, and `RunProcess` fails closed with `ErrSandboxDenied` **ignoring `AllowDegrade`** for this runtime (condition 3). The terminal manager refuses the same way. |
+| Runtime failure | A boot, probe, hello, or attach failure happens after Wrap returned, inside the shim. The shim reports it on a status pipe the caller passes as an extra fd (`ExtraFiles`), which guest output cannot write to, and exits non-zero. `RunProcess` and the terminal manager map a status-pipe failure to `ErrSandboxDenied` so the model and the UI see a sandbox denial, not a command that exited 1. An exit code alone cannot carry this, because a guest program can return any value 0–255; guest exit codes pass through unchanged. |
 | Explain | `ProfileText` prints the shim argv, slot, mounts, guest image hash, memory/vCPU. |
 | Isolation ladder | `pkg/protocol/isolation.go` gains `vm` (and `vm+no-network` once the guest has a network). The host sets it, because the host booted the VM; never inferred from inside the guest. |
 
@@ -132,14 +133,14 @@ cockpit text must say so instead of implying everything is in the VM.
 
 | Layer | Owns | Must not own |
 |---|---|---|
-| `harness/sandbox` | `Backend` selection, the `microvm` argv rewrite, explain text | `/dev/kvm`, systemd, NixOS |
+| `harness/sandbox` | `sandboxRuntime` selection, the `microvm` argv rewrite, explain text | `/dev/kvm`, systemd, NixOS |
 | `internal/integrate/vm` (new, sibling of `container`) | `Driver` interface (`Boot`, `List`, `Kill`) with `dryrun`, `subprocess`, `systemd` backends; slot state | HTTP, TUI, provider calls |
 | `cmd/strike` | Wires driver into `serve` and the shim; `strike vm exec` and `strike vm agent` subcommands | Hypervisor argv in UI code |
 | `strike-sandboxd` (root system unit) + NixOS module `nix/modules/strike-sandbox.nix` | microvm.nix slot units, virtiofsd, `/run/strike/sandbox.sock` (0660 root:strike) | The tool loop, `~/.strike` |
 | Guest image (flake output) | NixOS closure with the pinned `strike` package; `guest-agent` on VSOCK; no `wheel` for the agent user | Provider keys, host paths outside the workspace roots |
 | Agent Plugin (optional, later) | A pane or skill that **reads** `/v1/vms` | Booting, KVM, secrets |
 
-It is a **system service plus a sandbox backend**, not an Agent Plugin.
+It is a **system service plus a sandbox runtime**, not an Agent Plugin.
 `docs/plugins.md` trust classes do not cover opening `/dev/kvm` or
 installing a root unit, and should not be stretched to. The user daemon
 never opens `/dev/kvm`; it asks `sandboxd` over the unix socket.
