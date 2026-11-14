@@ -27,6 +27,7 @@ mod goals;
 mod mobile;
 mod providers;
 mod schedule;
+mod scheduler_presets;
 mod model;
 mod notify;
 mod outcome;
