@@ -895,7 +895,16 @@ pub fn SchedulePage(
                             if rows.is_empty() {
                                 return view! { <p class="hint">"No runs yet."</p> }.into_any();
                             }
-                            let hist_tz = timezone.get();
+                            // The selected schedule's saved zone, not the
+                            // edit field: an unsaved (or half-typed) zone must
+                            // not re-label runs that fired under the saved one.
+                            let sel = editing.get();
+                            let hist_tz = items
+                                .get()
+                                .into_iter()
+                                .find(|s| s.id == sel)
+                                .map(|s| s.timezone)
+                                .unwrap_or_default();
                             let rows = rows.into_iter().map(|run| {
                                 let when = fmt_when(&run.fired_at, &hist_tz);
                                 let when_title = fmt_when_title(&run.fired_at);
