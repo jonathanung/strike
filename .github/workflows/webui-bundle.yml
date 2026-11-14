@@ -1,0 +1,164 @@
+name: WebUI Bundle
+
+# Rebuild the committed webui bundle (internal/frontend/server/static) in CI
+# so nobody runs `make webui-build` locally (#1780). ci.yml only *checks* the
+# committed bundle (scripts/check-webui-bundle.mjs); this workflow produces it
+# and pushes a `ci(webui): rebuild bundle` commit to the PR branch.
+#
+# Pushes made with GITHUB_TOKEN do not trigger `pull_request` workflows, so
+# after pushing we dispatch ci.yml on the branch to get checks on the new
+# head SHA. The same rule means the bot commit cannot re-trigger this
+# workflow; the author guard below is belt-and-braces.
+on:
+  pull_request:
+    paths:
+      - "webui/**"
+      - "internal/frontend/server/static/**"
+      - ".github/workflows/webui-bundle.yml"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch to rebuild and push to (never main)"
+        required: true
+        type: string
+
+concurrency:
+  group: webui-bundle-${{ github.head_ref || inputs.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  # Match the nix dev shell: fenix `stable` (flake.lock does not pin fenix,
+  # so this tracks the stable the dev shell resolved; bump together) and
+  # nixpkgs' trunk. wasm-opt is fetched by trunk per webui/Trunk.toml
+  # (`version_131`) — do not apt-install binaryen (108 breaks the page).
+  RUST_TOOLCHAIN: "1.100.0"
+  TRUNK_VERSION: "0.21.14"
+
+jobs:
+  rebuild:
+    name: rebuild webui bundle
+    # Same-repo PR branches only: fork tokens cannot push back.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BRANCH: ${{ github.head_ref || inputs.ref }}
+    steps:
+      - name: Refuse protected branches
+        run: |
+          case "$BRANCH" in
+            ""|main|master|mainline) echo "refusing to rebuild/push to '$BRANCH'"; exit 1 ;;
+          esac
+
+      - name: Checkout branch head
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ env.BRANCH }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Loop guard
+        id: guard
+        run: |
+          author="$(git log -1 --format=%an)"
+          echo "head commit author: $author"
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "$author" = "github-actions[bot]" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Rust
+        if: steps.guard.outputs.skip != 'true'
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+
+      - name: Setup Node
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Cache cargo and trunk tools
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/trunk
+            webui/target
+          key: webui-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-trunk${{ env.TRUNK_VERSION }}-${{ hashFiles('webui/Cargo.lock', 'webui/Trunk.toml') }}
+          restore-keys: |
+            webui-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-trunk${{ env.TRUNK_VERSION }}-
+
+      - name: Install trunk
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          base="https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}"
+          tgz="trunk-x86_64-unknown-linux-gnu.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/$tgz"
+          curl -fsSLO "$base/$tgz.sha256"
+          # The .sha256 asset is a bare hash (no filename column).
+          echo "$(tr -d '[:space:]' < "$tgz.sha256")  $tgz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf "$tgz" -C "$HOME/.local/bin" trunk
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build bundle
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          trunk --version
+          rustc --version
+          make webui-build
+
+      - name: No conflict markers in bundle
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          if git grep -n '^<<<<<<<' -- internal/frontend/server/static; then
+            echo "conflict markers left in internal/frontend/server/static"
+            exit 1
+          fi
+
+      - name: Check bundle matches sources
+        if: steps.guard.outputs.skip != 'true'
+        run: node scripts/check-webui-bundle.mjs
+
+      - name: Commit and push rebuilt bundle
+        id: push
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          if [ -z "$(git status --porcelain internal/frontend/server/static)" ]; then
+            echo "bundle already current"
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A internal/frontend/server/static
+          git commit -m "ci(webui): rebuild bundle"
+          git push origin "HEAD:refs/heads/${BRANCH}"
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+
+      # GITHUB_TOKEN pushes do not fire pull_request; dispatch CI so the
+      # new head SHA gets checks. Dispatch uses the branch's own ci.yml, so
+      # branches cut before #1780 (no workflow_dispatch trigger) get a
+      # warning instead of a red run: merge origin/main into them.
+      - name: Dispatch CI on new head
+        if: steps.push.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"; then
+            echo "::warning::bundle pushed, but CI could not be dispatched on '$BRANCH' (its ci.yml likely predates the workflow_dispatch trigger). Merge origin/main into the branch and push to get checks."
+          fi

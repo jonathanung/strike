@@ -217,14 +217,27 @@ func LoadAgents(workDir string) []Agent {
 // project claude/opencode). build remains first when present.
 // Strike-native roots fail hard on invalid files; external trees warn and skip.
 func LoadAgentsWithError(workDir string) ([]Agent, error) {
-	disk, err := loadDiskAgents(workDir)
+	return loadAgents(workDir, nil)
+}
+
+// LoadAgentsReport is LoadAgentsWithError plus per-file load diagnostics
+// (#1386). What loads is unchanged: a strict-root error still fails the
+// whole load and is reported as a Fatal diagnostic.
+func LoadAgentsReport(workDir string) ([]Agent, []LoadDiagnostic, error) {
+	col := &loadCollector{kind: "agent"}
+	agents, err := loadAgents(workDir, col)
+	return agents, col.diags, err
+}
+
+func loadAgents(workDir string, col *loadCollector) ([]Agent, error) {
+	disk, err := loadDiskAgents(workDir, col)
 	if err != nil {
 		return nil, err
 	}
 	return mergeAgents(BuiltinAgents(), disk), nil
 }
 
-func loadDiskAgents(workDir string) ([]Agent, error) {
+func loadDiskAgents(workDir string, col *loadCollector) ([]Agent, error) {
 	byName := map[string]Agent{}
 	var order []string
 	// Merge order (docs/plugins.md §4.1):
@@ -233,12 +246,15 @@ func loadDiskAgents(workDir string) ([]Agent, error) {
 
 	loadRoot := func(src agentSource) error {
 		for _, path := range markdownFiles(src.dir) {
-			agent, err := parseAgentFile(path)
+			agent, notes, err := parseAgentFileNotes(path)
+			col.addNotes(path, notes)
 			if err != nil {
 				if src.strict {
+					col.addFatal(path, err)
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "loading agents: skip %s: %v\n", path, err)
+				col.addSkipped(path, err)
+				col.stderrf("loading agents: skip %s: %v\n", path, err)
 				continue
 			}
 			if agent == nil {
@@ -258,16 +274,16 @@ func loadDiskAgents(workDir string) ([]Agent, error) {
 		}
 	}
 	pres := DiscoverPlugins(workDir)
-	for _, d := range applyPluginAgentLayer(pres.Plugins, plugin.ScopeGlobal, byName, &order) {
-		fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+	for _, d := range applyPluginAgentLayer(pres.Plugins, plugin.ScopeGlobal, byName, &order, col) {
+		col.stderrf("plugin: %s\n", d.String())
 	}
 	for _, src := range projectRoots {
 		if err := loadRoot(src); err != nil {
 			return nil, err
 		}
 	}
-	for _, d := range applyPluginAgentLayer(pres.Plugins, plugin.ScopeProject, byName, &order) {
-		fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+	for _, d := range applyPluginAgentLayer(pres.Plugins, plugin.ScopeProject, byName, &order, col) {
+		col.stderrf("plugin: %s\n", d.String())
 	}
 
 	agents := make([]Agent, 0, len(order))
@@ -310,14 +326,22 @@ func isProjectScopedDir(dir, workClean, projRoot string) bool {
 }
 
 func parseAgentFile(path string) (*Agent, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, nil
+	agent, _, err := parseAgentFileNotes(path)
+	return agent, err
+}
+
+// parseAgentFileNotes parses an agent file and reports non-fatal findings
+// (unreadable, empty, malformed frontmatter) alongside the result.
+func parseAgentFileNotes(path string) (*Agent, []fileNote, error) {
+	meta, body, nestedPerms, notes, ok := readMarkdownDoc(path)
+	if !ok {
+		return nil, notes, nil
 	}
-	meta, body, nestedPerms := parseFrontmatter(string(data))
-	if body == "" {
-		return nil, nil
-	}
+	agent, err := buildAgent(path, meta, body, nestedPerms)
+	return agent, notes, err
+}
+
+func buildAgent(path string, meta map[string]string, body string, nestedPerms permission.Ruleset) (*Agent, error) {
 	name := strings.TrimSuffix(filepath.Base(path), ".md")
 	if meta["name"] != "" {
 		name = meta["name"]
@@ -428,18 +452,34 @@ func LoadSkills(workDir string) []Skill {
 // project strike < project claude/opencode < project plugins). Strike-native
 // roots fail hard on invalid files; external trees warn and skip.
 func LoadSkillsWithError(workDir string) ([]Skill, error) {
+	return loadSkills(workDir, nil)
+}
+
+// LoadSkillsReport is LoadSkillsWithError plus per-file load diagnostics
+// (#1386). What loads is unchanged: a strict-root error still fails the
+// whole load and is reported as a Fatal diagnostic.
+func LoadSkillsReport(workDir string) ([]Skill, []LoadDiagnostic, error) {
+	col := &loadCollector{kind: "skill"}
+	skills, err := loadSkills(workDir, col)
+	return skills, col.diags, err
+}
+
+func loadSkills(workDir string, col *loadCollector) ([]Skill, error) {
 	byName := map[string]Skill{}
 	var order []string
 	globalRoots, projectRoots := splitSkillRoots(workDir)
 
 	loadRoot := func(src skillSource) error {
 		for _, path := range markdownSkillFiles(src.dir) {
-			skill, err := parseSkillFile(path)
+			skill, notes, err := parseSkillFileNotes(path)
+			col.addNotes(path, notes)
 			if err != nil {
 				if src.strict {
+					col.addFatal(path, err)
 					return err
 				}
-				fmt.Fprintf(os.Stderr, "loading skills: skip %s: %v\n", path, err)
+				col.addSkipped(path, err)
+				col.stderrf("loading skills: skip %s: %v\n", path, err)
 				continue
 			}
 			if skill == nil {
@@ -459,16 +499,16 @@ func LoadSkillsWithError(workDir string) ([]Skill, error) {
 		}
 	}
 	pres := DiscoverPlugins(workDir)
-	for _, d := range applyPluginSkillLayer(pres.Plugins, plugin.ScopeGlobal, byName, &order) {
-		fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+	for _, d := range applyPluginSkillLayer(pres.Plugins, plugin.ScopeGlobal, byName, &order, col) {
+		col.stderrf("plugin: %s\n", d.String())
 	}
 	for _, src := range projectRoots {
 		if err := loadRoot(src); err != nil {
 			return nil, err
 		}
 	}
-	for _, d := range applyPluginSkillLayer(pres.Plugins, plugin.ScopeProject, byName, &order) {
-		fmt.Fprintf(os.Stderr, "plugin: %s\n", d.String())
+	for _, d := range applyPluginSkillLayer(pres.Plugins, plugin.ScopeProject, byName, &order, col) {
+		col.stderrf("plugin: %s\n", d.String())
 	}
 
 	disk := make([]Skill, 0, len(order))
@@ -496,26 +536,33 @@ func splitSkillRoots(workDir string) (global, project []skillSource) {
 }
 
 func parseSkillFile(path string) (*Skill, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, nil
-	}
-	meta, body, _ := parseFrontmatter(string(data))
-	if body == "" {
-		return nil, nil
+	skill, _, err := parseSkillFileNotes(path)
+	return skill, err
+}
+
+// parseSkillFileNotes parses a skill file and reports non-fatal findings
+// (unreadable, empty, malformed frontmatter, missing description).
+func parseSkillFileNotes(path string) (*Skill, []fileNote, error) {
+	meta, body, _, notes, ok := readMarkdownDoc(path)
+	if !ok {
+		return nil, notes, nil
 	}
 	name := skillNameFromPath(path)
 	if meta["name"] != "" {
 		name = meta["name"]
 	}
 	if err := ValidateSkillName(name); err != nil {
-		return nil, fmt.Errorf("load skill %s: %w", path, err)
+		return nil, notes, fmt.Errorf("load skill %s: %w", path, err)
+	}
+	// Malformed frontmatter already explains the missing description.
+	if !hasNote(notes, DiagMalformedFrontmatter) && strings.TrimSpace(meta["description"]) == "" {
+		notes = append(notes, fileNote{code: DiagMissingDescription, msg: "no description in frontmatter; the skill loads with a blank description"})
 	}
 	abs := path
 	if a, err := filepath.Abs(path); err == nil {
 		abs = a
 	}
-	return &Skill{Name: name, Description: meta["description"], Template: body, Path: abs}, nil
+	return &Skill{Name: name, Description: meta["description"], Template: body, Path: abs}, notes, nil
 }
 
 // Render substitutes the skill's arguments into its template.
