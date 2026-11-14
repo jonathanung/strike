@@ -243,6 +243,10 @@ type Model struct {
 	textSel textSel
 	// copyFlashGen invalidates in-flight clearCellCopiedFlashMsg timers.
 	copyFlashGen int
+	// copyToast shows the top-right clipboard badge after a mouse-drag copy;
+	// copyToastGen invalidates in-flight clearCopyToastMsg timers (#1254).
+	copyToast    bool
+	copyToastGen int
 	// modal is the visible top overlay. modalQueue holds blocking asks that
 	// arrived while a user modal was open (or behind a higher-priority peer).
 	modal      modal
@@ -1261,6 +1265,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setNotice(notice, false)
 		// Attention-style desktop notify when the notify dial allows it.
 		return m, m.desktopNotifyCmd("strike: update available", true)
+
+	case clearCopyToastMsg:
+		if msg.gen == m.copyToastGen {
+			m.copyToast = false
+		}
+		return m, nil
 
 	case clearCellCopiedFlashMsg:
 		if msg.gen != m.copyFlashGen {
