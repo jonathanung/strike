@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/daemon/deploywatch"
 	"github.com/jonathanung/strike/internal/daemon/keepawake"
 	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
@@ -115,6 +116,9 @@ type Options struct {
 	// Nil makes /v1/triggers and POST /hooks 503. The launcher inside the
 	// service is NewRootLauncher (authored for #1282).
 	Triggers *trigger.Service
+	// DeployWatches is the post-merge deploy watch registry (#1782). Nil
+	// makes /v1/deploy-watches 503.
+	DeployWatches *deploywatch.Service
 	// Assembled is true when this process ran assemble (config load, project
 	// stores, auth.json, attachments). Attach-only serve leaves it false.
 	Assembled bool
@@ -589,6 +593,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /v1/triggers/{id}", s.handleTriggerUpdate)
 	s.mux.HandleFunc("DELETE /v1/triggers/{id}", s.handleTriggerDelete)
 	s.mux.HandleFunc("POST /hooks/{id}", s.handleHook)
+	s.mux.HandleFunc("GET /v1/deploy-watches", s.handleDeployWatchesList)
+	s.mux.HandleFunc("POST /v1/deploy-watches", s.handleDeployWatchCreate)
+	s.mux.HandleFunc("GET /v1/deploy-watches/{id}", s.handleDeployWatchGet)
+	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/poll", s.handleDeployWatchPoll)
+	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/cancel", s.handleDeployWatchCancel)
 	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
 	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/activate", s.handleRootActivate)
