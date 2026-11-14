@@ -113,7 +113,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/frontend/tui/theme` | Resolved design tokens: adaptive color roles, surfaces, chrome mode (soft\|solid\|bordered), terminal background, glyphs, border/spacing tokens, and precomputed styles | lipgloss, stdlib |
 | `internal/frontend/tui/common` | Pure formatting helpers (ThemedSpace, DotJoin, compact durations) | `tui/theme`, stdlib |
 | `internal/frontend/tui/term` | PTY + vt10x for embedded editors | stdlib + pty/vt10x |
-| `internal/frontend/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter/Scrim, Canvas) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
+| `internal/frontend/tui/ui` | Reusable component library (Panel, Dialog, Badge, KeyHints, StatusBar, List, Notice, Card/Bento, OverlayCenter/OverlayTopRight/Scrim, Canvas) | stdlib, lipgloss, bubbles, charmbracelet/x/ansi, `tui/theme` |
 
 ## Dependency rules
 
