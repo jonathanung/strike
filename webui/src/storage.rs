@@ -8,8 +8,120 @@ use load_guard::{commit_load, Commit, ErrPolicy, LoadEpoch};
 
 use crate::load_epoch::begin;
 
-use crate::api::{delete_json, get_json, get_text, now_ms, put_json};
+use crate::api::{delete_json, get_json, get_text, now_ms, post_raw_json, put_json};
 use crate::model::{fmt_ago, rfc3339_to_ms};
+
+/// Daemon route for the whole-store memory import (#1541). Like export,
+/// it ignores the panel's scope and always writes the Project store, so
+/// the panel only offers it on the Project tab.
+pub const MEMORY_IMPORT_PATH: &str = "/v1/memory/import";
+/// Format/version the daemon's export writes and its import accepts
+/// (internal/persist/memory/store.go exportFormat / exportVersion).
+const MEMORY_IMPORT_FORMAT: &str = "strike.memory";
+const MEMORY_IMPORT_VERSION: i64 = 1;
+pub const MEMORY_IMPORT_HINT: &str = "Import reads a strike-memory.json (plain, unencrypted JSON \u{2014} the file Export memory downloads) into Project memory. You see what it will change before anything is written.";
+pub const MEMORY_IMPORT_GLOBAL_HINT: &str = "Import targets Project memory only. Switch to the Project tab to import.";
+
+/// The daemon import route writes only the Project store (#1541), so
+/// the action is offered only while the panel shows Project.
+fn memory_import_allowed(scope: &str) -> bool {
+    scope == "project"
+}
+
+/// Client-side preview of an import file (#1541). Computed from the
+/// file and the current Project keys only to show what will change;
+/// the bytes sent to the daemon are always the file text itself.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct MemoryImportPreview {
+    /// Entries in the file.
+    entries: usize,
+    /// File keys that already exist in Project memory (merge overwrites them).
+    overwrites: usize,
+    /// File keys not yet in Project memory.
+    new_keys: usize,
+    /// Entries currently in Project memory (replace clears all of them).
+    existing: usize,
+    /// Keys repeated in the file; the daemon rejects the whole import.
+    duplicates: Vec<String>,
+    /// Set when format/version do not match what the daemon accepts;
+    /// the daemon will reject the import, so the preview says so.
+    format_problem: String,
+}
+
+fn preview_memory_import(raw: &str, existing_keys: &[String]) -> Result<MemoryImportPreview, String> {
+    if raw.trim().is_empty() {
+        return Err("Choose a file or paste its JSON first.".into());
+    }
+    let doc: serde_json::Value =
+        serde_json::from_str(raw).map_err(|e| format!("Not valid JSON: {e}"))?;
+    let Some(obj) = doc.as_object() else {
+        return Err("Not a strike-memory.json export: expected a JSON object.".into());
+    };
+    let format = obj.get("format").and_then(|v| v.as_str()).unwrap_or("");
+    let version = obj.get("version").and_then(|v| v.as_i64());
+    let mut format_problem = String::new();
+    if format != MEMORY_IMPORT_FORMAT {
+        format_problem = format!(
+            "The file's format is {:?}, not {MEMORY_IMPORT_FORMAT:?}; the daemon will reject it.",
+            format
+        );
+    } else if version != Some(MEMORY_IMPORT_VERSION) {
+        format_problem = format!(
+            "The file's version is {}, not {MEMORY_IMPORT_VERSION}; the daemon will reject it.",
+            version.map(|v| v.to_string()).unwrap_or_else(|| "missing".into())
+        );
+    }
+    let rows = obj
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let existing: std::collections::HashSet<&str> =
+        existing_keys.iter().map(|k| k.as_str()).collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut preview = MemoryImportPreview {
+        entries: rows.len(),
+        existing: existing_keys.len(),
+        format_problem,
+        ..Default::default()
+    };
+    for row in &rows {
+        // The daemon trims keys before storing them; count the same way.
+        let key = row
+            .get("key")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if !seen.insert(key.clone()) {
+            if !preview.duplicates.contains(&key) {
+                preview.duplicates.push(key);
+            }
+            continue;
+        }
+        if existing.contains(key.as_str()) {
+            preview.overwrites += 1;
+        } else {
+            preview.new_keys += 1;
+        }
+    }
+    Ok(preview)
+}
+
+/// Request body for the daemon import: the file text is spliced in as
+/// the `data` value byte-for-byte (never re-serialised from the preview
+/// parse), and the browser never sends the host-local `path` form.
+fn memory_import_body(raw: &str, replace: bool) -> String {
+    format!("{{\"replace\":{replace},\"data\":{}}}", raw.trim())
+}
+
+/// Imported count from the daemon's `{imported: n}` reply.
+fn memory_import_count(reply: &str) -> Option<u64> {
+    serde_json::from_str::<serde_json::Value>(reply)
+        .ok()?
+        .get("imported")?
+        .as_u64()
+}
 
 /// Daemon route for the whole-store memory export (#1534). The daemon
 /// already serves this as a file download; the panel only fetches it.
@@ -156,6 +268,16 @@ pub fn StoragePanel(
     let list_key = RwSignal::new(String::new());
     let exporting = RwSignal::new(false);
     let exported = RwSignal::new(String::new());
+    // Memory import (#1541). `import_text` is the exact file/paste text;
+    // any edit clears the preview so what was previewed is what is sent.
+    let import_open = RwSignal::new(false);
+    let import_text = RwSignal::new(String::new());
+    let import_source = RwSignal::new(String::new());
+    let import_preview = RwSignal::new(None::<Result<MemoryImportPreview, String>>);
+    let import_previewing = RwSignal::new(false);
+    let import_confirm_replace = RwSignal::new(false);
+    let importing = RwSignal::new(false);
+    let import_result = RwSignal::new(String::new());
 
     let reload = move || {
         let tab_now = tab.get_untracked();
@@ -316,6 +438,109 @@ pub fn StoragePanel(
                 }
             }
             exporting.set(false);
+        });
+    };
+
+    // Any change to the import text invalidates the preview and any
+    // pending replace confirm: the preview must describe the bytes sent.
+    let set_import_text = move |text: String, source: String| {
+        import_text.set(text);
+        import_source.set(source);
+        import_preview.set(None);
+        import_confirm_replace.set(false);
+        import_result.set(String::new());
+    };
+
+    let close_import = move || {
+        import_open.set(false);
+        set_import_text(String::new(), String::new());
+    };
+
+    let read_import_file = move |ev: web_sys::Event| {
+        use wasm_bindgen::JsCast;
+        let Some(input) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+        else {
+            return;
+        };
+        let Some(file) = input.files().and_then(|files| files.get(0)) else {
+            return;
+        };
+        let name = file.name();
+        spawn_local(async move {
+            match wasm_bindgen_futures::JsFuture::from(file.text()).await {
+                Ok(v) => set_import_text(v.as_string().unwrap_or_default(), name),
+                Err(_) => {
+                    set_import_text(String::new(), String::new());
+                    import_preview.set(Some(Err(format!("Could not read {name}."))));
+                }
+            }
+        });
+    };
+
+    let preview_import = move || {
+        if !memory_import_allowed(&scope.get_untracked()) || import_previewing.get_untracked() {
+            return;
+        }
+        let raw = import_text.get_untracked();
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        import_previewing.set(true);
+        import_confirm_replace.set(false);
+        import_result.set(String::new());
+        spawn_local(async move {
+            // Fresh Project keys (not the possibly stale visible list), so
+            // the overwrite count describes the store as it is now.
+            let preview = match load_memory(&b, &t, "project").await {
+                Ok(loaded) => {
+                    let keys: Vec<String> = loaded.entries.into_iter().map(|e| e.key).collect();
+                    preview_memory_import(&raw, &keys)
+                }
+                Err(e) => Err(format!("Could not read current Project memory: {e}")),
+            };
+            // Drop the result if the text changed while loading.
+            if import_text.get_untracked() == raw {
+                import_preview.set(Some(preview));
+            }
+            import_previewing.set(false);
+        });
+    };
+
+    let apply_import = move |replace: bool| {
+        if !memory_import_allowed(&scope.get_untracked()) || importing.get_untracked() {
+            return;
+        }
+        if !matches!(import_preview.get_untracked(), Some(Ok(_))) {
+            return;
+        }
+        let body = memory_import_body(&import_text.get_untracked(), replace);
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        importing.set(true);
+        error.set(String::new());
+        spawn_local(async move {
+            match post_raw_json(&b, &t, MEMORY_IMPORT_PATH, body).await {
+                Ok(reply) => {
+                    let mode = if replace { "replaced" } else { "merged" };
+                    let msg = match memory_import_count(&reply) {
+                        Some(n) => format!("Imported {n} entries into Project memory ({mode})."),
+                        None => format!("Import finished into Project memory ({mode})."),
+                    };
+                    set_import_text(String::new(), String::new());
+                    import_open.set(false);
+                    import_result.set(msg.clone());
+                    status.set(msg);
+                    reload();
+                }
+                // The daemon validates everything before applying, so an
+                // error means nothing was written.
+                Err(e) => {
+                    import_confirm_replace.set(false);
+                    error.set(format!(
+                        "Import failed: {e} (the daemon checks the whole file before writing, so a rejected file changes nothing)."
+                    ));
+                }
+            }
+            importing.set(false);
         });
     };
 
@@ -496,6 +721,102 @@ pub fn StoragePanel(
                 </div>
                 <Show when=move || !exported.get().is_empty()>
                     <p class="hint" role="status">{move || exported.get()}</p>
+                </Show>
+                <div class="storage-import">
+                    <button type="button" class="secondary" data-action="memory-import"
+                        disabled=move || !memory_import_allowed(&scope.get()) || import_open.get()
+                        on:click=move |_| { import_open.set(true); import_result.set(String::new()); }>
+                        "Import memory\u{2026}"
+                    </button>
+                    <p class="hint" data-memory-import-hint="true">
+                        {move || if memory_import_allowed(&scope.get()) { MEMORY_IMPORT_HINT } else { MEMORY_IMPORT_GLOBAL_HINT }}
+                    </p>
+                </div>
+                <Show when=move || !import_result.get().is_empty()>
+                    <p class="hint" role="status" data-memory-import-result="true">{move || import_result.get()}</p>
+                </Show>
+                <Show when=move || import_open.get() && memory_import_allowed(&scope.get())>
+                    <div class="storage-import-panel" data-memory-import-panel="true">
+                        <p class="storage-import-target">"This imports into " <strong>"Project"</strong> " memory."</p>
+                        <label class="storage-import-field">"File"
+                            <input type="file" accept=".json,application/json" on:change=read_import_file />
+                        </label>
+                        <label class="storage-import-field">"Or paste the JSON"
+                            <textarea rows="5" placeholder="{\"format\":\"strike.memory\",\"version\":1,\"entries\":[...]}"
+                                prop:value=move || import_text.get()
+                                on:input=move |ev| set_import_text(event_target_value(&ev), "pasted JSON".into())></textarea>
+                        </label>
+                        <Show when=move || !import_source.get().is_empty()>
+                            <p class="hint">{move || format!("Source: {}", import_source.get())}</p>
+                        </Show>
+                        <div class="storage-import-actions">
+                            <button type="button" class="secondary" data-action="memory-import-preview"
+                                disabled=move || import_text.get().trim().is_empty() || import_previewing.get()
+                                on:click=move |_| preview_import()>
+                                {move || if import_previewing.get() { "Checking\u{2026}" } else { "Preview import" }}
+                            </button>
+                            <button type="button" class="secondary" on:click=move |_| close_import()>"Cancel"</button>
+                        </div>
+                        {move || match import_preview.get() {
+                            None => view! { <span></span> }.into_any(),
+                            Some(Err(e)) => view! {
+                                <p class="hint storage-error" role="alert" data-memory-import-invalid="true">{e}</p>
+                            }.into_any(),
+                            Some(Ok(p)) => {
+                                let blocked = !p.duplicates.is_empty() || !p.format_problem.is_empty();
+                                let dups = p.duplicates.join(", ");
+                                let format_problem = p.format_problem.clone();
+                                let summary = format!(
+                                    "{} entries in the file: {} would overwrite existing Project keys, {} are new.",
+                                    p.entries, p.overwrites, p.new_keys
+                                );
+                                let replace_text = format!(
+                                    "Replace first clears all {} entries currently in Project memory, then writes the {} from the file. This cannot be undone.",
+                                    p.existing, p.entries
+                                );
+                                view! {
+                                    <div class="storage-import-preview" data-memory-import-preview="true">
+                                        <p><strong>{summary}</strong></p>
+                                        <Show when={let d = dups.clone(); move || !d.is_empty()}>
+                                            <p class="hint storage-error">{format!("Duplicate keys in the file ({dups}); the daemon will reject it.")}</p>
+                                        </Show>
+                                        <Show when={let f = format_problem.clone(); move || !f.is_empty()}>
+                                            <p class="hint storage-error">{format_problem.clone()}</p>
+                                        </Show>
+                                        <p class="hint">"Merge (default) keeps every other Project entry; matching keys take the file's value."</p>
+                                        <Show when=move || !import_confirm_replace.get()>
+                                            <div class="storage-import-actions">
+                                                <button type="button" class="primary" data-action="memory-import-merge"
+                                                    disabled=move || importing.get()
+                                                    title=if blocked { "The daemon is expected to reject this file; importing shows its error and changes nothing." } else { "" }
+                                                    on:click=move |_| apply_import(false)>
+                                                    {move || if importing.get() { "Importing\u{2026}" } else { "Merge into Project memory" }}
+                                                </button>
+                                                <button type="button" class="secondary" data-action="memory-import-replace"
+                                                    disabled=move || importing.get()
+                                                    on:click=move |_| import_confirm_replace.set(true)>
+                                                    "Replace Project memory\u{2026}"
+                                                </button>
+                                            </div>
+                                        </Show>
+                                        <Show when=move || import_confirm_replace.get()>
+                                            <div class="storage-import-danger" role="alertdialog" aria-label="Confirm replace" data-memory-import-replace-confirm="true">
+                                                <p><strong>{replace_text.clone()}</strong></p>
+                                                <div class="storage-import-actions">
+                                                    <button type="button" class="danger" data-action="memory-import-replace-confirm"
+                                                        disabled=move || importing.get()
+                                                        on:click=move |_| apply_import(true)>
+                                                        {move || if importing.get() { "Replacing\u{2026}" } else { "Clear Project memory and import" }}
+                                                    </button>
+                                                    <button type="button" class="secondary" on:click=move |_| import_confirm_replace.set(false)>"Keep current memory"</button>
+                                                </div>
+                                            </div>
+                                        </Show>
+                                    </div>
+                                }.into_any()
+                            }
+                        }}
+                    </div>
                 </Show>
                 <form class="storage-form" on:submit=move |ev| { ev.prevent_default(); save_memory(); }>
                     <label>"Key" <input prop:value=move || key_in.get() on:input=move |ev| key_in.set(event_target_value(&ev)) /></label>
@@ -729,6 +1050,79 @@ impl Default for Loaded {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn keys(list: &[&str]) -> Vec<String> {
+        list.iter().map(|k| k.to_string()).collect()
+    }
+
+    const VALID_IMPORT: &str = r#"{"format":"strike.memory","version":1,"entries":[
+        {"key":"pref","value":"plain files"},
+        {"key":" deploy ","value":"fridays"},
+        {"key":"fresh","value":"new"}
+    ]}"#;
+
+    #[test]
+    fn import_only_allowed_on_project_scope() {
+        assert!(memory_import_allowed("project"));
+        assert!(!memory_import_allowed("global"));
+        assert!(!memory_import_allowed(""));
+        assert!(MEMORY_IMPORT_GLOBAL_HINT.contains("Project memory only"));
+        assert!(MEMORY_IMPORT_HINT.contains("unencrypted"));
+        assert!(MEMORY_IMPORT_HINT.contains("Project"));
+    }
+
+    #[test]
+    fn import_preview_counts_overwrites_against_trimmed_existing_keys() {
+        let p = preview_memory_import(VALID_IMPORT, &keys(&["pref", "deploy", "other"])).unwrap();
+        assert_eq!(p.entries, 3);
+        assert_eq!(p.overwrites, 2);
+        assert_eq!(p.new_keys, 1);
+        assert_eq!(p.existing, 3);
+        assert!(p.duplicates.is_empty());
+        assert!(p.format_problem.is_empty());
+    }
+
+    #[test]
+    fn import_preview_flags_duplicates_and_format_problems() {
+        let dup = r#"{"format":"strike.memory","version":1,"entries":[{"key":"a","value":"1"},{"key":"a ","value":"2"}]}"#;
+        let p = preview_memory_import(dup, &[]).unwrap();
+        assert_eq!(p.duplicates, vec!["a".to_string()]);
+        assert_eq!(p.new_keys, 1);
+
+        let wrong_format = r#"{"format":"other","version":1,"entries":[]}"#;
+        assert!(preview_memory_import(wrong_format, &[]).unwrap().format_problem.contains("reject"));
+        let wrong_version = r#"{"format":"strike.memory","version":2,"entries":[]}"#;
+        assert!(preview_memory_import(wrong_version, &[]).unwrap().format_problem.contains("version is 2"));
+        let missing_version = r#"{"format":"strike.memory","entries":[]}"#;
+        assert!(preview_memory_import(missing_version, &[]).unwrap().format_problem.contains("missing"));
+    }
+
+    #[test]
+    fn import_preview_rejects_empty_invalid_and_non_object_input() {
+        assert!(preview_memory_import("   ", &[]).is_err());
+        assert!(preview_memory_import("{not json", &[]).unwrap_err().starts_with("Not valid JSON"));
+        assert!(preview_memory_import("[1,2]", &[]).unwrap_err().contains("JSON object"));
+    }
+
+    #[test]
+    fn import_body_splices_file_text_untouched_as_data() {
+        // Key order, spacing and unknown fields survive byte-for-byte:
+        // the preview parse never becomes the thing imported.
+        let raw = "{ \"version\":1, \"format\":\"strike.memory\", \"x\":[1], \"entries\":[] }";
+        let body = memory_import_body(&format!("\n{raw}\n"), false);
+        assert_eq!(body, format!("{{\"replace\":false,\"data\":{raw}}}"));
+        assert!(!body.contains("\"path\""));
+        let parsed: serde_json::Value = serde_json::from_str(&memory_import_body(raw, true)).unwrap();
+        assert_eq!(parsed["replace"], serde_json::Value::Bool(true));
+        assert_eq!(parsed["data"]["x"][0], 1);
+    }
+
+    #[test]
+    fn import_count_reads_daemon_reply() {
+        assert_eq!(memory_import_count(r#"{"imported":3}"#), Some(3));
+        assert_eq!(memory_import_count("{}"), None);
+        assert_eq!(memory_import_count("nope"), None);
+    }
 
     #[test]
     fn export_targets_the_daemon_route_and_filename() {

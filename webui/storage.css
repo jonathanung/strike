@@ -79,6 +79,47 @@
 .storage-export { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 .storage-export .hint { margin: 0; flex: 1 1 220px; }
 /* feature:memory-export end */
+/* feature:memory-import begin */
+.storage-import { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.storage-import .hint { margin: 0; flex: 1 1 220px; }
+.storage-import-panel,
+.storage-import-danger {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.storage-import-danger { border-color: var(--signal); }
+.storage-import-panel p { margin: 0; }
+.storage-import-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  min-width: 0;
+}
+.storage-import-field textarea {
+  background: var(--ground);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font: inherit;
+  font-family: var(--mono, ui-monospace, monospace);
+  resize: vertical;
+  min-width: 0;
+}
+.storage-import-preview { display: flex; flex-direction: column; gap: var(--space-2); }
+.storage-import-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.storage-import-actions button.danger {
+  background: var(--signal);
+  color: var(--on-accent);
+  border-color: transparent;
+}
+/* feature:memory-import end */
 @media (max-width: 720px) {
   .storage-row { flex-wrap: wrap; }
   .storage-form { flex-direction: column; align-items: stretch; }

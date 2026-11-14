@@ -1496,6 +1496,56 @@ try {
       `memory export route failed status=${exportRes.status} disposition=${exportDisposition} body=${exportBody.slice(0, 500)}`,
     );
   }
+  // Memory import (#1541): paste the export straight back, preview
+  // (every key overwrites, none new — so later entry counts are
+  // unchanged), merge, and see the daemon's imported count.
+  const importDoc = JSON.parse(exportBody);
+  const overlap = importDoc.entries.length;
+  const importOpened = await evaluate(`(() => {
+    const btn = document.querySelector('[data-action="memory-import"]');
+    if (!btn || btn.disabled) return false;
+    btn.click();
+    return true;
+  })()`);
+  if (!importOpened) {
+    throw new Error("memory import button missing or disabled on the Project tab");
+  }
+  await waitFor(
+    "memory import panel",
+    async () => ({
+      ok: await evaluate(`(() => {
+        const ta = document.querySelector('[data-memory-import-panel] textarea');
+        if (!ta) return false;
+        ta.value = ${JSON.stringify(JSON.stringify(importDoc))};
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        const btn = document.querySelector('[data-action="memory-import-preview"]');
+        if (!btn || btn.disabled) return false;
+        btn.click();
+        return true;
+      })()`),
+    }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const previewText = (
+    await waitFor(
+      "memory import preview counts",
+      textProbe((t) => t.includes(`${overlap} entries in the file: ${overlap} would overwrite existing Project keys, 0 are new`)),
+      { timeout: WAIT_MS, interval: 250 },
+    )
+  ).body;
+  if (!previewText.includes("This imports into Project memory")) {
+    throw new Error(`memory import preview did not name the Project target text=${previewText.slice(0, 1500)}`);
+  }
+  await evaluate(`document.querySelector('[data-action="memory-import-merge"]').click()`);
+  await waitFor(
+    "memory import merged with the daemon's count",
+    textProbe(
+      (t) =>
+        t.includes(`Imported ${overlap} entries into Project memory (merged)`) &&
+        t.includes("smoke-pref"),
+    ),
+    { timeout: WAIT_MS, interval: 250 },
+  );
 
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
   // that predates Goals has no palette command and fails here.

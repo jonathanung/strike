@@ -194,6 +194,30 @@ pub async fn get_text(base: &str, token: &str, path: &str) -> Result<String, Str
     Ok(text)
 }
 
+/// POST a caller-built JSON body verbatim (no re-serialisation), so bytes
+/// the user supplied can reach the daemon untouched. Returns the response
+/// text on 2xx; otherwise `HTTP <status> <daemon body>`.
+pub async fn post_raw_json(
+    base: &str,
+    token: &str,
+    path: &str,
+    body: String,
+) -> Result<String, String> {
+    let resp = with_auth(Request::post(&api(base, path)), token)
+        .header("Content-Type", "application/json")
+        .body(body)
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !(200..300).contains(&status) {
+        return Err(format!("HTTP {status} {}", text.trim()));
+    }
+    Ok(text)
+}
+
 pub async fn patch_json(base: &str, token: &str, path: &str, body: Value) -> Result<(), String> {
     let resp = with_auth(Request::patch(&api(base, path)), token)
         .json(&body)
