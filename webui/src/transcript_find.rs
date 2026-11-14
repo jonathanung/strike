@@ -14,14 +14,15 @@
 //! A hit inside a fold is returned as `Field::Detail`, so the pane can
 //! expand that fold, scroll to it, and highlight it in place through
 //! `MarkedText`; the corpus is complete, so the find bar needs no
-//! scope note. Case-insensitive only, like the editor; no case toggle
-//! in this slice.
+//! scope note. Match-case (#1409) and whole-word (#1419) ride the
+//! editor's shared `FindOptions`: the bar threads its toggles through
+//! here, still with no second matcher.
 
 use leptos::prelude::*;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-use crate::editor::find_hits;
+use crate::editor::{find_hits, FindOptions};
 
 /// Which rendered field of a transcript line a match sits in.
 /// `Detail` is the collapsed fold (`Message::detail` / `ChatLine::detail`):
@@ -63,16 +64,17 @@ pub struct SearchLine<'a> {
     pub detail: &'a str,
 }
 
-/// Byte ranges of every case-insensitive occurrence of `query` in
-/// `text`. Ranges are offsets in the whole `text`, across its newlines.
-pub fn ranges_in(text: &str, query: &str) -> Vec<(usize, usize)> {
+/// Byte ranges of every occurrence of `query` in `text` under `opts`
+/// (case-insensitive substring by default). Ranges are offsets in the
+/// whole `text`, across its newlines.
+pub fn ranges_in(text: &str, query: &str, opts: FindOptions) -> Vec<(usize, usize)> {
     if query.is_empty() || text.is_empty() {
         return Vec::new();
     }
     let mut out = Vec::new();
     let mut offset = 0usize;
     for line in text.split('\n') {
-        for hit in find_hits(line, query) {
+        for hit in find_hits(line, query, opts) {
             if hit.start == 0 && hit.end == 0 {
                 // Editor fallback for case folds that change byte length:
                 // the whole line counts as one match.
@@ -88,13 +90,13 @@ pub fn ranges_in(text: &str, query: &str) -> Vec<(usize, usize)> {
 
 /// All matches in transcript order: line by line, title before body
 /// before detail, left to right inside each field.
-pub fn matches_for_lines(lines: &[SearchLine<'_>], query: &str) -> Vec<TMatch> {
+pub fn matches_for_lines(lines: &[SearchLine<'_>], query: &str, opts: FindOptions) -> Vec<TMatch> {
     if query.is_empty() {
         return Vec::new();
     }
     let mut out = Vec::new();
     for (idx, line) in lines.iter().enumerate() {
-        for (start, end) in ranges_in(line.title, query) {
+        for (start, end) in ranges_in(line.title, query, opts) {
             out.push(TMatch {
                 line: idx,
                 field: Field::Title,
@@ -102,7 +104,7 @@ pub fn matches_for_lines(lines: &[SearchLine<'_>], query: &str) -> Vec<TMatch> {
                 end,
             });
         }
-        for (start, end) in ranges_in(line.body, query) {
+        for (start, end) in ranges_in(line.body, query, opts) {
             out.push(TMatch {
                 line: idx,
                 field: Field::Body,
@@ -110,7 +112,7 @@ pub fn matches_for_lines(lines: &[SearchLine<'_>], query: &str) -> Vec<TMatch> {
                 end,
             });
         }
-        for (start, end) in ranges_in(line.detail, query) {
+        for (start, end) in ranges_in(line.detail, query, opts) {
             out.push(TMatch {
                 line: idx,
                 field: Field::Detail,
@@ -314,7 +316,7 @@ mod tests {
             ("deploy-tool", "nothing here"),
             ("Strike", "ALPHA once more"),
         ]);
-        let hits = matches_for_lines(&rows, "alpha");
+        let hits = matches_for_lines(&rows, "alpha", FindOptions::default());
         // Two in the first body, one in the third line's body; the
         // middle line (a tool card) contributes none.
         assert_eq!(hits.len(), 3);
@@ -339,23 +341,48 @@ mod tests {
             }
         );
         let titled = lines(&[("alpha deploy", "body")]);
-        let hits = matches_for_lines(&titled, "alpha");
+        let hits = matches_for_lines(&titled, "alpha", FindOptions::default());
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].field, Field::Title);
     }
 
     #[test]
     fn search_is_case_insensitive_and_empty_is_noop() {
-        assert_eq!(ranges_in("Alpha ALPHA alpha", "alpha").len(), 3);
-        assert!(ranges_in("abc", "").is_empty());
-        assert!(ranges_in("abc", "z").is_empty());
-        assert!(matches_for_lines(&lines(&[("t", "b")]), "").is_empty());
+        assert_eq!(
+            ranges_in("Alpha ALPHA alpha", "alpha", FindOptions::default()).len(),
+            3
+        );
+        assert!(ranges_in("abc", "", FindOptions::default()).is_empty());
+        assert!(ranges_in("abc", "z", FindOptions::default()).is_empty());
+        assert!(matches_for_lines(&lines(&[("t", "b")]), "", FindOptions::default()).is_empty());
     }
 
     #[test]
     fn ranges_span_newlines_with_whole_text_offsets() {
-        let ranges = ranges_in("foo\nbar foo\nfoo", "foo");
+        let ranges = ranges_in("foo\nbar foo\nfoo", "foo", FindOptions::default());
         assert_eq!(ranges, vec![(0, 3), (8, 11), (12, 15)]);
+    }
+
+    #[test]
+    fn match_case_and_whole_word_thread_through() {
+        let rows = lines(&[("You", "Token token tokens TOKEN")]);
+        assert_eq!(matches_for_lines(&rows, "Token", FindOptions::default()).len(), 4);
+        assert_eq!(
+            matches_for_lines(&rows, "Token", FindOptions::new(true, false)).len(),
+            1
+        );
+        assert_eq!(
+            matches_for_lines(&rows, "token", FindOptions::new(false, true)).len(),
+            3
+        );
+        assert_eq!(
+            matches_for_lines(&rows, "token", FindOptions::new(true, true)).len(),
+            1
+        );
+        assert_eq!(
+            ranges_in("tokens token", "token", FindOptions::new(false, true)),
+            vec![(7, 12)]
+        );
     }
 
     #[test]
@@ -401,7 +428,7 @@ mod tests {
             ),
             ("Strike", "done", ""),
         ]);
-        let hits = matches_for_lines(&rows, "needle-test");
+        let hits = matches_for_lines(&rows, "needle-test", FindOptions::default());
         assert_eq!(hits.len(), 1);
         assert_eq!(
             hits[0],
@@ -414,7 +441,7 @@ mod tests {
         );
         assert!(hits[0].in_fold());
         // Visible-field hits are not fold hits.
-        let visible = matches_for_lines(&rows, "tests ran");
+        let visible = matches_for_lines(&rows, "tests ran", FindOptions::default());
         assert_eq!(visible.len(), 1);
         assert!(!visible[0].in_fold());
     }
@@ -422,7 +449,7 @@ mod tests {
     #[test]
     fn detail_hits_come_after_title_and_body_hits_on_the_same_line() {
         let rows = lines_with_detail(&[("alpha title", "alpha body", "alpha detail")]);
-        let hits = matches_for_lines(&rows, "alpha");
+        let hits = matches_for_lines(&rows, "alpha", FindOptions::default());
         assert_eq!(hits.len(), 3);
         assert_eq!(hits[0].field, Field::Title);
         assert_eq!(hits[1].field, Field::Body);
@@ -436,7 +463,7 @@ mod tests {
         // shape must still be hit, with detail-wide offsets.
         let long = format!("{}needle", "x".repeat(300));
         let rows = lines_with_detail(&[("tool", "ran", &long)]);
-        let hits = matches_for_lines(&rows, "needle");
+        let hits = matches_for_lines(&rows, "needle", FindOptions::default());
         assert_eq!(hits.len(), 1);
         assert_eq!((hits[0].start, hits[0].end), (300, 306));
         assert_eq!(hits[0].field, Field::Detail);
@@ -446,7 +473,7 @@ mod tests {
             "ran",
             "{\"path\": \"/tmp/needle.json\", \"ok\": false}",
         )]);
-        let hits = matches_for_lines(&rows, "needle.json");
+        let hits = matches_for_lines(&rows, "needle.json", FindOptions::default());
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].field, Field::Detail);
     }
@@ -456,9 +483,9 @@ mod tests {
         // Streaming append: the line list grows; recomputing over the
         // longer list keeps the earlier matches at the same ranges.
         let before = lines(&[("You", "alpha one")]);
-        let first = matches_for_lines(&before, "alpha");
+        let first = matches_for_lines(&before, "alpha", FindOptions::default());
         let after = lines(&[("You", "alpha one"), ("Strike", "alpha two alpha")]);
-        let second = matches_for_lines(&after, "alpha");
+        let second = matches_for_lines(&after, "alpha", FindOptions::default());
         assert_eq!(second.len(), 3);
         assert_eq!(second[0], first[0]);
         assert_eq!(second[1].line, 1);

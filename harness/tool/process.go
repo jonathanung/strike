@@ -60,6 +60,10 @@ type ProcessSpec struct {
 	// MaxOutput caps retained stdout+stderr bytes (each stream shares the budget
 	// when separate; combined mode uses one budget). Zero uses the default.
 	MaxOutput int
+	// SpillMax, when > 0, additionally retains up to this many bytes of the
+	// full stream (not reported to observers) in ProcessResult.Full so callers
+	// can spill overflow past MaxOutput to a file (#1199). Zero discards it.
+	SpillMax int
 	// Combine merges stdout and stderr into one ordered stream (bash-style).
 	// ProcessObserver.Output still labels chunks stdout/stderr when separate;
 	// when Combine is true every chunk is labeled stdout.
@@ -87,7 +91,10 @@ type ProcessResult struct {
 	// BytesSeen is the total bytes observed before truncation.
 	BytesSeen int
 	Truncated bool
-	Status    ProcessStatus
+	// Full is the full stream (capped at ProcessSpec.SpillMax) when Truncated
+	// and SpillMax > 0; empty otherwise.
+	Full   string
+	Status ProcessStatus
 	// SandboxApplied is true when an OS sandbox launcher prefixed the exec argv.
 	SandboxApplied bool
 	// SandboxBackend is "bwrap", "sandbox-exec", or empty when not applied.
@@ -156,6 +163,7 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 	)
 	if spec.Combine {
 		combinedW = newProcessStreamWriter(maxOut, id, ProcessStreamStdout, obs.Output)
+		combinedW.spillMax = spec.SpillMax
 		cmd.Stdout = combinedW
 		cmd.Stderr = combinedW
 	} else {
@@ -166,6 +174,8 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 		}
 		stdoutW = newProcessStreamWriter(half, id, ProcessStreamStdout, obs.Output)
 		stderrW = newProcessStreamWriter(maxOut-half, id, ProcessStreamStderr, obs.Output)
+		stdoutW.spillMax = spec.SpillMax / 2
+		stderrW.spillMax = spec.SpillMax - spec.SpillMax/2
 		cmd.Stdout = stdoutW
 		cmd.Stderr = stderrW
 	}
@@ -205,6 +215,9 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 	if spec.Combine {
 		res.Output, res.BytesSeen, res.Truncated = combinedW.result()
 		res.Stdout = res.Output
+		if res.Truncated {
+			res.Full = combinedW.spilled()
+		}
 	} else {
 		out, outSeen, outTrunc := stdoutW.result()
 		errOut, errSeen, errTrunc := stderrW.result()
@@ -213,6 +226,11 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 		res.Output = out + errOut
 		res.BytesSeen = outSeen + errSeen
 		res.Truncated = outTrunc || errTrunc
+		if res.Truncated {
+			if full := stdoutW.spilled() + stderrW.spilled(); full != "" {
+				res.Full = full
+			}
+		}
 	}
 	if injectedKill {
 		res.ExitCode = -1
@@ -260,6 +278,9 @@ type processStreamWriter struct {
 	id     string
 	stream string
 	report func(id, stream, data string)
+	// spill retains up to spillMax bytes of the full stream (0 = disabled).
+	spill    bytes.Buffer
+	spillMax int
 }
 
 func newProcessStreamWriter(max int, id, stream string, report func(id, stream, data string)) *processStreamWriter {
@@ -271,6 +292,9 @@ func (w *processStreamWriter) Write(p []byte) (int, error) {
 	defer w.mu.Unlock()
 	n := len(p)
 	w.seen += n
+	if room := w.spillMax - w.spill.Len(); room > 0 {
+		w.spill.Write(p[:min(room, n)])
+	}
 	if w.total >= w.max {
 		return n, nil
 	}
@@ -293,6 +317,13 @@ func (w *processStreamWriter) result() (string, int, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.buf.String(), w.seen, w.seen > w.total
+}
+
+// spilled returns the retained full stream (empty when spill is disabled).
+func (w *processStreamWriter) spilled() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.spill.String()
 }
 
 // ensure processStreamWriter satisfies io.Writer

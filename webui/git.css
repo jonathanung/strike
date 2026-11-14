@@ -114,3 +114,7 @@
 .git-diff-bar { display: flex; justify-content: flex-end; }
 .git-copy-diff { min-height: 44px; padding: 4px 12px; }
 /* feature:git-copy-diff end */
+/* feature:git-panel-small begin */
+.git-copy-hash { align-self: flex-start; }
+.git-filter { flex: none; }
+/* feature:git-panel-small end */

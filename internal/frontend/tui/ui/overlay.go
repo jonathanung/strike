@@ -79,6 +79,42 @@ func OverlayCenter(th theme.Theme, bg, fg string, width, height int) string {
 	return strings.Join(bgLines, "\n")
 }
 
+// OverlayTopRight splices fg (a small rendered chip such as a Badge) into the
+// top-right corner of bg without a scrim, leaving every other cell intact.
+// The right margin is the resolved Spacing.XS. ANSI styling on either side of
+// the chip is preserved; a reset closes the chip so its fill cannot bleed into
+// the right-hand remainder of the row. Rows of bg shorter than the chip's
+// column are space-padded. A chip wider than width, or a non-positive width,
+// returns bg unchanged.
+//
+//	frame = ui.OverlayTopRight(th, frame, ui.Badge(th, ui.ToneAccent, "sent"), w)
+func OverlayTopRight(th theme.Theme, bg, fg string, width int) string {
+	if fg == "" || width <= 0 {
+		return bg
+	}
+	th = th.Resolve()
+	fgLines := strings.Split(fg, "\n")
+	fgWidth := lipgloss.Width(fg)
+	x := width - fgWidth - max(0, th.Spacing.XS)
+	if x < 0 {
+		return bg
+	}
+	bgLines := strings.Split(bg, "\n")
+	for len(bgLines) < len(fgLines) {
+		bgLines = append(bgLines, "")
+	}
+	for i, fgLine := range fgLines {
+		line := bgLines[i]
+		left := ansi.Truncate(line, x, "")
+		leftPad := max(0, x-ansi.StringWidth(left))
+		right := ansi.TruncateLeft(line, x+fgWidth, "")
+		linePad := max(0, fgWidth-ansi.StringWidth(fgLine))
+		bgLines[i] = left + strings.Repeat(" ", leftPad) + "\x1b[0m" + fgLine +
+			strings.Repeat(" ", linePad) + "\x1b[0m" + right
+	}
+	return strings.Join(bgLines, "\n")
+}
+
 // fitScrimLine forces a scrimmed row to exactly width display cells.
 func fitScrimLine(line string, width int, scrim lipgloss.Style) string {
 	if width <= 0 {
