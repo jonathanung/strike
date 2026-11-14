@@ -2148,6 +2148,22 @@ fn App() -> impl IntoView {
     }
     interval.forget();
 
+    // Orphan settle on load (#1506): a replayed log that ends mid-tool
+    // leaves rows `running` with no turn boundary to sweep them. Once the
+    // daemon reports the open session idle, those calls cannot still be
+    // in flight, so settle them. Tracks roots only (refreshed by polls
+    // and the status stream); a stale idle that races a live call is
+    // healed by that call's `tool.end`, which matches by callId.
+    Effect::new(move |_| {
+        let root = active_root.get();
+        let idle = roots.with(|rows| model::root_reported_idle(rows, &root));
+        if !idle || !transcript.with_untracked(|t| t.has_running_tools()) {
+            return;
+        }
+        transcript.update(|t| t.settle_orphaned_tools());
+        lines.set(transcript.with_untracked(|t| t.chat_lines()));
+    });
+
     let status_tail: Rc<RefCell<Option<web_sys::EventSource>>> = Rc::new(RefCell::new(None));
     let status_tail_fx = status_tail.clone();
     Effect::new(move |_| {

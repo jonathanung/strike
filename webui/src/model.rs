@@ -556,6 +556,17 @@ pub fn is_running(state: &str) -> bool {
     matches!(state, "running" | "stalled")
 }
 
+/// True only when the daemon has reported a status for `root` and that
+/// status is not busy: the evidence the orphan sweep (#1506) needs before
+/// settling a replayed log that ends mid-tool. An unknown root or a row
+/// without a status is not evidence of idleness.
+pub fn root_reported_idle(rows: &[RootSummary], root: &str) -> bool {
+    !root.is_empty()
+        && rows
+            .iter()
+            .any(|r| r.id == root && !r.busy && !r.status.is_empty())
+}
+
 pub fn can_retry(state: &str) -> bool {
     matches!(state, "failed" | "blocked" | "stopped")
 }
@@ -1267,6 +1278,20 @@ fn one_line(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn root_reported_idle_needs_a_daemon_status() {
+        let mk = |id: &str, busy: bool, status: &str| -> RootSummary {
+            serde_json::from_value(serde_json::json!({"id": id, "busy": busy, "status": status}))
+                .unwrap()
+        };
+        let rows = vec![mk("a", false, "idle"), mk("b", true, "running"), mk("c", false, "")];
+        assert!(root_reported_idle(&rows, "a"));
+        assert!(!root_reported_idle(&rows, "b"), "busy root is not idle");
+        assert!(!root_reported_idle(&rows, "c"), "no status is not evidence");
+        assert!(!root_reported_idle(&rows, "missing"));
+        assert!(!root_reported_idle(&rows, ""));
+    }
 
     fn row(id: &str, mtime: i64, busy: bool, pinned: bool) -> SessionRow {
         SessionRow {
