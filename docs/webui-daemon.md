@@ -211,6 +211,13 @@ the merge. CI rebuilds the bundle on top. To rebuild by hand, run
 again, because the bot commit lands on your branch. Forks are skipped
 because their tokens can't push back.
 
+When the PR head is a bot commit, `gh pr checks` and the PR rollup show no
+checks. GitHub parks the bot-triggered `pull_request` runs as
+`action_required`, and the dispatched run isn't attached to the PR. Read
+the real result from the commit:
+`gh api repos/jonathanung/strike/commits/<sha>/check-runs -q '.check_runs[]|.name+" "+.conclusion'`
+or `gh run list --commit <sha>`.
+
 ## Several workspaces, one daemon
 
 One `strike serve` process can hold several live roots at once. Each root
