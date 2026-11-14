@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Manual re-run on any branch.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -173,12 +175,46 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # PRs must never edit the committed webui bundle: it is rebuilt on main by
+  # webui-bundle.yml, and a bundle diff on one PR conflicts every other
+  # webui PR. Diffs the PR merge ref against its first parent (current base
+  # tip), so a branch that restored the static dir from origin/main passes
+  # even if it carries older bot bundle commits.
+  webui-bundle-guard:
+    if: github.event_name == 'pull_request' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout PR merge ref
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 2
+
+      - name: PR must not modify internal/frontend/server/static
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only HEAD^1 HEAD -- internal/frontend/server/static)"
+          if [ -n "$changed" ]; then
+            echo "::error::This PR modifies the committed webui bundle. CI builds it from webui/ sources; main's copy is rebuilt by webui-bundle.yml after merge."
+            echo "$changed"
+            echo "Fix: git checkout origin/main -- internal/frontend/server/static && git commit -m 'chore: restore main webui bundle'"
+            exit 1
+          fi
+          echo "no committed-bundle changes"
+
   # Rust cockpit smoke. web-e2e skips when web/package.json is absent, so
-  # nothing else loads the embedded Leptos UI. Uses the committed static
-  # bundle (no Rust toolchain) plus headless Chrome.
+  # nothing else loads the embedded Leptos UI. Builds the bundle from this
+  # ref's webui/ sources (make webui-build) before go build, so the smoke
+  # runs against the PR's UI, not main's committed bundle.
   webui-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
+    env:
+      # Keep in sync with webui-bundle.yml (nix dev shell fenix stable +
+      # nixpkgs trunk). trunk fetches wasm-opt per webui/Trunk.toml; do not
+      # apt-install binaryen.
+      RUST_TOOLCHAIN: "1.100.0"
+      TRUNK_VERSION: "0.21.14"
     steps:
       - name: Checkout code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -212,9 +248,51 @@ jobs:
       - name: Generate TUI flatten
         run: go generate ./internal/frontend/tui/app
 
-      # #1710: fail if the committed bundle this job serves has diverged
-      # from webui/*.css sources (make build does not regenerate it).
-      - name: Check committed webui bundle matches sources
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo and trunk tools
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cache/trunk
+            webui/target
+          key: webui-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-trunk${{ env.TRUNK_VERSION }}-${{ hashFiles('webui/Cargo.lock', 'webui/Trunk.toml') }}
+          restore-keys: |
+            webui-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-trunk${{ env.TRUNK_VERSION }}-
+
+      - name: Install trunk
+        run: |
+          set -euo pipefail
+          base="https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}"
+          tgz="trunk-x86_64-unknown-linux-gnu.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/$tgz"
+          curl -fsSLO "$base/$tgz.sha256"
+          # The .sha256 asset is a bare hash (no filename column).
+          echo "$(tr -d '[:space:]' < "$tgz.sha256")  $tgz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar -xzf "$tgz" -C "$HOME/.local/bin" trunk
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Overwrites the committed static dir in this checkout with a bundle
+      # built from this ref's sources; go:embed below picks it up.
+      - name: Build webui bundle from sources
+        run: |
+          trunk --version
+          rustc --version
+          make webui-build
+
+      # #1710 source guard (CSS copied verbatim, header-scoped phone hide)
+      # against the bundle just built. On PRs the committed bundle is main's
+      # and is not checked here; main's committed copy is verified by
+      # webui-bundle.yml before it commits.
+      - name: Check built webui bundle matches sources
         run: node scripts/check-webui-bundle.mjs
 
       - name: Build strike
