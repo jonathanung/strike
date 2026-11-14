@@ -53,7 +53,7 @@
   height: 26px;
   background: var(--surface-muted);
   color: var(--ink);
-  border: 1px solid var(--border-muted);
+  border: 1px solid var(--rule);
   border-radius: var(--radius-sm);
   padding: 0 8px;
   font: 12px/1.4 ui-sans-serif, system-ui, sans-serif;
