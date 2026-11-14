@@ -74,6 +74,9 @@
   }
   .usage-audit .ua-row.ua-head { display: none; }
 }
+/* feature:audit-session-link begin */
+.usage-audit .ua-row.ua-audit .session-link { justify-self: start; }
+/* feature:audit-session-link end */
 /* feature:usage-audit end */
 /* feature:usage-export begin */
 .usage-audit .usage-export { align-items: center; }
