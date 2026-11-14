@@ -281,9 +281,9 @@ pub fn PermissionsExplain(base: RwSignal<String>, token: RwSignal<String>) -> im
                 Ok(text) => match serde_json::from_str::<PresetsDocument>(&text) {
                     Ok(doc) => {
                         let (l, r) = default_pair(&doc.presets);
+                        let _ = presets.try_set(doc.presets);
                         let _ = left.try_set(l);
                         let _ = right.try_set(r);
-                        let _ = presets.try_set(doc.presets);
                     }
                     Err(e) => {
                         let _ = presets_error.try_set(format!("Presets: {e}"));
@@ -344,16 +344,23 @@ pub fn PermissionsExplain(base: RwSignal<String>, token: RwSignal<String>) -> im
         });
     };
 
-    let preset_options = move || {
-        presets
-            .get()
-            .into_iter()
-            .map(|p| {
-                let value = p.id.clone();
-                let label = preset_label(&p);
-                view! { <option value=value>{label}</option> }
-            })
-            .collect_view()
+    // Options carry a reactive `selected` as well as the select's
+    // `prop:value`: presets arrive after the selects mount, and a value set
+    // before its option exists would otherwise fall back to the first
+    // option while the signal still holds the default pair.
+    let preset_options = move |chosen: RwSignal<String>| {
+        move || {
+            presets
+                .get()
+                .into_iter()
+                .map(|p| {
+                    let id = p.id.clone();
+                    let value = p.id.clone();
+                    let label = preset_label(&p);
+                    view! { <option value=value selected=move || chosen.get() == id>{label}</option> }
+                })
+                .collect_view()
+        }
     };
 
     view! {
@@ -380,10 +387,10 @@ pub fn PermissionsExplain(base: RwSignal<String>, token: RwSignal<String>) -> im
                 <h3>"Compare presets"</h3>
                 <div class="approvals-form">
                     <select aria-label="Left preset" prop:value=move || left.get() on:change=move |ev| left.set(event_target_value(&ev))>
-                        {preset_options}
+                        {preset_options(left)}
                     </select>
                     <select aria-label="Right preset" prop:value=move || right.get() on:change=move |ev| right.set(event_target_value(&ev))>
-                        {preset_options}
+                        {preset_options(right)}
                     </select>
                     <button type="button" class="secondary" data-preset-diff-run="true" on:click=move |_| run_diff()>"Compare"</button>
                 </div>
@@ -436,7 +443,7 @@ pub fn PermissionsExplain(base: RwSignal<String>, token: RwSignal<String>) -> im
                     />
                     <select aria-label="Dry-run preset" prop:value=move || dry_preset.get() on:change=move |ev| dry_preset.set(event_target_value(&ev))>
                         <option value="">"Current rules"</option>
-                        {preset_options}
+                        {preset_options(dry_preset)}
                     </select>
                     <button type="button" class="secondary" data-permission-explain-run="true" on:click=move |_| run_explain()>"Explain"</button>
                 </div>
