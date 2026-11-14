@@ -36,7 +36,7 @@ The bundles use the Sigstore protobuf bundle format; on cosign v2.4.x add
 `--new-bundle-format` to each `verify-blob` command below.
 
 ```sh
-TAG=v0.10.0
+TAG=v0.11.0   # any tag released after signing landed (#581)
 ASSET=strike_${TAG}_linux_amd64.tar.gz
 gh release download "$TAG" --repo jonathanung/strike \
   --pattern "$ASSET" --pattern "$ASSET.sigstore.json"
