@@ -287,6 +287,15 @@ pub struct Transcript {
     /// turns under a minute, still in progress, or containing an untimed
     /// line have no entry and render nothing.
     pub turn_elapsed: HashMap<u32, String>,
+    /// Per-turn token footers (#1558), keyed like `turn_elapsed` by the
+    /// turn's final message id. Only turns with a known input or output
+    /// count get an entry.
+    pub turn_usage: HashMap<u32, crate::turn_usage::TurnUsage>,
+    /// Usage streams of the turn in progress, folded at `turn.completed`.
+    usage_acc: crate::turn_usage::TurnUsage,
+    /// `sessionId` of the turn in progress (from `turn.started`), so a
+    /// child session's streams are not counted on the parent's turn.
+    turn_session: String,
 }
 
 impl Default for Transcript {
@@ -310,6 +319,9 @@ impl Transcript {
             event_count: 0,
             turn_start: None,
             turn_elapsed: HashMap::new(),
+            turn_usage: HashMap::new(),
+            usage_acc: crate::turn_usage::TurnUsage::default(),
+            turn_session: String::new(),
         }
     }
 
@@ -317,6 +329,12 @@ impl Transcript {
     /// final line of a completed turn that exceeded a minute (#1364).
     pub fn elapsed_for(&self, id: u32) -> Option<&str> {
         self.turn_elapsed.get(&id).map(String::as_str)
+    }
+
+    /// The per-turn usage footer stamped on this message, if it is the
+    /// final line of a completed turn with known token counts (#1558).
+    pub fn usage_for(&self, id: u32) -> Option<&crate::turn_usage::TurnUsage> {
+        self.turn_usage.get(&id)
     }
 
     pub fn set_listed_title(&mut self, listed: &str) {
@@ -480,7 +498,12 @@ impl Transcript {
                 self.absorb();
             }
             "session.titled" => self.note_titled(&field_str(&data, "title")),
-            "turn.started" => self.assistant_open = false,
+            "turn.started" => {
+                self.assistant_open = false;
+                self.usage_acc = crate::turn_usage::TurnUsage::default();
+                self.turn_session = field_str(&data, "sessionId");
+            }
+            "usage.reported" => self.usage_acc.absorb(&data, &self.turn_session),
             "reasoning.delta" => {}
             "text.delta" => {
                 let chunk = field_str(&data, "text");
@@ -521,7 +544,8 @@ impl Transcript {
             "turn.completed" => {
                 self.assistant_open = false;
                 self.absorb();
-                self.stamp_turn(at_ms);
+                let usage = std::mem::take(&mut self.usage_acc);
+                self.stamp_turn(at_ms, usage);
             }
             "tool.begin" => {
                 self.assistant_open = false;
@@ -772,7 +796,7 @@ impl Transcript {
         None
     }
 
-    fn stamp_turn(&mut self, completed_ms: f64) {
+    fn stamp_turn(&mut self, completed_ms: f64, usage: crate::turn_usage::TurnUsage) {
         let Some(id) = self.turn_start else {
             return;
         };
@@ -802,6 +826,11 @@ impl Transcript {
                 crate::turn_elapsed::turn_elapsed_label(first_ms, completed_ms, all_timed)
             {
                 self.turn_elapsed.insert(last_id, label);
+            }
+            // Turn usage (#1558): same final line, only when a stream
+            // reported a known input or output count.
+            if usage.label().is_some() {
+                self.turn_usage.insert(last_id, usage);
             }
         }
         self.turn_start = None;
@@ -2438,6 +2467,49 @@ mod tests {
         assert_eq!(t.turn_elapsed.len(), 1);
         let last = t.messages.last().unwrap();
         assert_eq!(t.elapsed_for(last.id), Some("took 2:30"));
+    }
+
+    #[test]
+    fn turn_usage_sums_own_streams_onto_the_final_line() {
+        let known = |n: i64| serde_json::json!({"n": n, "known": true});
+        let mut t = Transcript::new();
+        // Turn 1: a tool loop (two streams) plus a child's stream.
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "fix it"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"sessionId": "root", "turnId": "t1"})));
+        t.apply_envelope(&env(
+            "usage.reported",
+            serde_json::json!({"sessionId": "root", "input": known(1000), "output": known(50)}),
+        ));
+        t.apply_envelope(&env(
+            "usage.reported",
+            serde_json::json!({"sessionId": "kid", "input": known(9999), "output": known(9999)}),
+        ));
+        t.apply_envelope(&env(
+            "usage.reported",
+            serde_json::json!({"sessionId": "root", "input": known(1500), "output": known(150)}),
+        ));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "done"})));
+        assert!(t.turn_usage.is_empty(), "nothing until the turn completes");
+        t.apply_envelope(&env("turn.completed", serde_json::json!({"turnId": "t1"})));
+        let last = t.messages.last().unwrap().id;
+        let u = t.usage_for(last).expect("footer on final line");
+        assert_eq!(u.label().as_deref(), Some("2.5k in · 200 out"));
+        assert_eq!(u.streams, 2);
+        assert_eq!(t.turn_usage.len(), 1);
+        // Turn 2: usage not reported — no footer, and turn 1's sums do
+        // not leak into it.
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "again"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"sessionId": "root", "turnId": "t2"})));
+        t.apply_envelope(&env(
+            "usage.reported",
+            serde_json::json!({"sessionId": "root", "input": {"known": false}, "output": {"known": false}}),
+        ));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "ok"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({"turnId": "t2"})));
+        let last2 = t.messages.last().unwrap().id;
+        assert_ne!(last, last2);
+        assert!(t.usage_for(last2).is_none());
+        assert_eq!(t.turn_usage.len(), 1);
     }
 
     #[test]
