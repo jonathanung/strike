@@ -99,6 +99,50 @@ struct ArtifactList {
     artifacts: Vec<ArtifactMeta>,
 }
 
+/// Explicit page size for the artifacts list (issue #1456, Q1 recommended
+/// default): the server's own default, so small lists are unchanged and
+/// "Show more" only appears where rows previously vanished silently.
+const ARTIFACT_PAGE_SIZE: usize = 100;
+
+/// Registered built-in artifact types offered by the type filter.
+/// This must match the store's `ValidType` set exactly: the server
+/// rejects an unknown `type` filter with an error, so offering a type
+/// that is not registered yet (e.g. `session_report`, mentioned in
+/// #1456 as arriving with #1444 but not registered on this main)
+/// would break the list instead of filtering it.
+const ARTIFACT_TYPES: &[&str] = &["plan", "contract", "findings", "patch", "test_report"];
+
+/// Build the server-filtered artifacts list path. `type` is only sent
+/// when a filter is selected; `limit`/`offset` are always explicit so
+/// paging is honest rather than relying on the server's silent cap.
+fn artifacts_list_path(root: &str, type_filter: &str, limit: usize, offset: usize) -> String {
+    let mut path = format!(
+        "/v1/artifacts?actorSession={}&actorRoot={}&limit={}&offset={}",
+        crate::api::js_encode(root),
+        crate::api::js_encode(root),
+        limit,
+        offset
+    );
+    if !type_filter.is_empty() {
+        path.push_str(&format!("&type={}", crate::api::js_encode(type_filter)));
+    }
+    path
+}
+
+/// A page is possibly truncated only when it came back exactly full;
+/// the API returns no total, so nothing stronger may be claimed.
+fn artifact_page_has_more(returned: usize, limit: usize) -> bool {
+    limit > 0 && returned == limit
+}
+
+/// Append a "Show more" page, skipping ids already listed. The list is
+/// ordered by updatedAt desc, so an artifact updated between page loads
+/// shifts the offset window and would otherwise be listed twice.
+fn append_artifact_page(cur: &mut Vec<ArtifactMeta>, page: Vec<ArtifactMeta>) {
+    let seen: std::collections::HashSet<String> = cur.iter().map(|a| a.id.clone()).collect();
+    cur.extend(page.into_iter().filter(|a| !seen.contains(&a.id)));
+}
+
 #[derive(Clone, Deserialize, Default)]
 struct ArtifactDetail {
     id: String,
@@ -252,6 +296,9 @@ pub fn StoragePanel(
     let selected = RwSignal::new(String::new());
     let pin_loading = RwSignal::new(false);
     let artifact_loading = RwSignal::new(false);
+    let artifact_type_filter = RwSignal::new(String::new());
+    let artifact_has_more = RwSignal::new(false);
+    let artifact_loading_more = RwSignal::new(false);
     let artifact_label = RwSignal::new(String::new());
     let list_loading = RwSignal::new(false);
     let list_epoch = RwSignal::new(LoadEpoch::new());
@@ -278,7 +325,8 @@ pub fn StoragePanel(
             root.get_untracked(),
             scope.get_untracked(),
         );
-        let key = format!("{tab_now}|{scope_now}|{root_now}");
+        let filter_now = artifact_type_filter.get_untracked();
+        let key = format!("{tab_now}|{scope_now}|{root_now}|{filter_now}");
         let gen = begin(list_epoch);
         list_loading.set(true);
         if list_key.get_untracked() != key {
@@ -294,6 +342,8 @@ pub fn StoragePanel(
             artifact_label.set(String::new());
             pin_loading.set(false);
             artifact_loading.set(false);
+            artifact_has_more.set(false);
+            artifact_loading_more.set(false);
             let _ = begin(pin_epoch);
             let _ = begin(artifact_epoch);
             list_key.set(key.clone());
@@ -305,7 +355,7 @@ pub fn StoragePanel(
             } else if tab_now == "knowledge" {
                 load_knowledge(&b, &t, &scope_now).await
             } else if tab_now == "artifacts" {
-                load_artifacts(&b, &t, &root_now).await
+                load_artifacts(&b, &t, &root_now, &filter_now, ARTIFACT_PAGE_SIZE, 0).await
             } else {
                 return;
             };
@@ -323,6 +373,10 @@ pub fn StoragePanel(
                     } else if tab_now == "knowledge" {
                         pins.set(loaded.pins);
                     } else {
+                        artifact_has_more.set(artifact_page_has_more(
+                            loaded.artifacts.len(),
+                            ARTIFACT_PAGE_SIZE,
+                        ));
                         artifacts.set(loaded.artifacts);
                     }
                     list_key.set(key);
@@ -337,11 +391,61 @@ pub fn StoragePanel(
 
     Effect::new(move |_| {
         let tab = tab.get();
-        let _ = (scope.get(), root.get(), storage_rev.get());
+        let _ = (
+            scope.get(),
+            root.get(),
+            storage_rev.get(),
+            artifact_type_filter.get(),
+        );
         if tab == "memory" || tab == "knowledge" || tab == "artifacts" {
             reload();
         }
     });
+
+    // Append the next artifacts page. This is a continuation of the
+    // current list load, not a new selection: snapshot the list epoch
+    // token instead of beginning a new load, so a filter/tab change
+    // that begins a real reload drops a stale append.
+    let load_more_artifacts = move || {
+        if artifact_loading_more.get_untracked()
+            || list_loading.get_untracked()
+            || !artifact_has_more.get_untracked()
+        {
+            return;
+        }
+        let offset = artifacts.get_untracked().len();
+        let (b, t, root_now) = (
+            base.get_untracked(),
+            token.get_untracked(),
+            root.get_untracked(),
+        );
+        let filter_now = artifact_type_filter.get_untracked();
+        let gen = list_epoch.with_untracked(|epoch| epoch.token());
+        artifact_loading_more.set(true);
+        spawn_local(async move {
+            let result =
+                load_artifacts(&b, &t, &root_now, &filter_now, ARTIFACT_PAGE_SIZE, offset).await;
+            if !list_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                artifact_loading_more.set(false);
+                return;
+            }
+            artifact_loading_more.set(false);
+            match result {
+                Ok(loaded) => {
+                    error.set(String::new());
+                    artifact_has_more.set(artifact_page_has_more(
+                        loaded.artifacts.len(),
+                        ARTIFACT_PAGE_SIZE,
+                    ));
+                    artifacts.update(|cur| append_artifact_page(cur, loaded.artifacts));
+                }
+                // Keep the rows already shown and the Show more control
+                // (has_more stays true) so the user can retry; surface
+                // the failure instead of silently dropping the page.
+                Err(e) => error.set(e),
+            }
+        });
+    };
 
     let save_memory = move || {
         let key = key_in.get_untracked().trim().to_string();
@@ -808,10 +912,37 @@ pub fn StoragePanel(
             </Show>
             <Show when=move || tab.get() == "artifacts">
                 <p class="hint">"Version is the CAS token. Older bodies stay on the same artifact, up to the last 20. Content is scrubbed before it is stored."</p>
-                <Show when=move || artifacts.get().is_empty() && error.get().is_empty() && !list_loading.get()>
+                <div class="chips" role="group" aria-label="Artifact type filter">
+                    <button type="button" class=move || if artifact_type_filter.get().is_empty() { "chip on" } else { "chip" }
+                        on:click=move |_| artifact_type_filter.set(String::new())>"All"</button>
+                    {ARTIFACT_TYPES.iter().copied().map(|kind| {
+                        view! {
+                            <button type="button" class=move || if artifact_type_filter.get() == kind { "chip on" } else { "chip" }
+                                on:click=move |_| artifact_type_filter.set(kind.to_string())>{kind}</button>
+                        }
+                    }).collect_view()}
+                </div>
+                <Show when=move || !artifacts.get().is_empty()>
+                    <p class="hint">{move || {
+                        let n = artifacts.get().len();
+                        if artifact_has_more.get() {
+                            format!("Showing {n} artifacts — more available")
+                        } else {
+                            format!("Showing {n} artifacts")
+                        }
+                    }}</p>
+                </Show>
+                <Show when=move || artifacts.get().is_empty() && artifact_type_filter.get().is_empty() && error.get().is_empty() && !list_loading.get()>
                     <div class="empty-state">
                         <strong>"No artifacts for this session"</strong>
                         <p>"When an agent writes a findings, patch, or test report, it shows up here."</p>
+                    </div>
+                </Show>
+                <Show when=move || artifacts.get().is_empty() && !artifact_type_filter.get().is_empty() && error.get().is_empty() && !list_loading.get()>
+                    <div class="empty-state">
+                        <strong>"No artifacts of this type — clear filter"</strong>
+                        <p>{move || format!("Nothing of type {} for this session.", artifact_type_filter.get())}</p>
+                        <button type="button" class="secondary" on:click=move |_| artifact_type_filter.set(String::new())>"Clear filter"</button>
                     </div>
                 </Show>
                 <ul class="plain">
@@ -831,6 +962,12 @@ pub fn StoragePanel(
                         }
                     }).collect_view()}
                 </ul>
+                <Show when=move || artifact_has_more.get() && !artifacts.get().is_empty()>
+                    <button type="button" class="secondary" prop:disabled=move || artifact_loading_more.get()
+                        on:click=move |_| load_more_artifacts()>
+                        {move || if artifact_loading_more.get() { "Loading…" } else { "Show more" }}
+                    </button>
+                </Show>
                 <Show when=move || artifact_loading.get()>
                     <p class="hint">{move || format!("Loading {}…", artifact_label.get())}</p>
                 </Show>
@@ -932,15 +1069,18 @@ async fn load_knowledge(base: &str, token: &str, scope: &str) -> Result<Loaded, 
     })
 }
 
-async fn load_artifacts(base: &str, token: &str, root: &str) -> Result<Loaded, String> {
+async fn load_artifacts(
+    base: &str,
+    token: &str,
+    root: &str,
+    type_filter: &str,
+    limit: usize,
+    offset: usize,
+) -> Result<Loaded, String> {
     if root.is_empty() {
         return Err("No live session yet. Artifacts are listed for the open session.".into());
     }
-    let path = format!(
-        "/v1/artifacts?actorSession={}&actorRoot={}",
-        crate::api::js_encode(root),
-        crate::api::js_encode(root)
-    );
+    let path = artifacts_list_path(root, type_filter, limit, offset);
     let list = get_json::<ArtifactList>(base, token, &path).await?;
     Ok(Loaded {
         artifacts: list.artifacts,
@@ -1060,6 +1200,54 @@ mod tests {
         assert!(global.body.contains("global"));
         // Unknown scopes fall back to the panel's default (project).
         assert!(memory_delete_confirm("k", "").body.contains("project"));
+    }
+
+    #[test]
+    fn artifacts_path_is_unfiltered_by_default_with_explicit_paging() {
+        let path = artifacts_list_path("root 1", "", ARTIFACT_PAGE_SIZE, 0);
+        assert!(path.starts_with("/v1/artifacts?"), "{path}");
+        assert!(path.contains("limit=100"), "{path}");
+        assert!(path.contains("offset=0"), "{path}");
+        assert!(!path.contains("type="), "{path}");
+    }
+
+    #[test]
+    fn artifacts_path_passes_type_to_the_server() {
+        let path = artifacts_list_path("root1", "findings", ARTIFACT_PAGE_SIZE, 200);
+        assert!(path.contains("type=findings"), "{path}");
+        assert!(path.contains("offset=200"), "{path}");
+    }
+
+    #[test]
+    fn has_more_only_when_page_came_back_exactly_full() {
+        assert!(artifact_page_has_more(100, 100));
+        assert!(!artifact_page_has_more(99, 100));
+        assert!(!artifact_page_has_more(0, 100));
+        assert!(!artifact_page_has_more(0, 0));
+    }
+
+    #[test]
+    fn filter_offers_all_registered_built_in_types() {
+        // Exactly the store's ValidType set on this main; the server
+        // errors on an unregistered type filter.
+        assert_eq!(
+            ARTIFACT_TYPES,
+            ["plan", "contract", "findings", "patch", "test_report"]
+        );
+        assert_eq!(ARTIFACT_PAGE_SIZE, 100);
+    }
+
+    #[test]
+    fn show_more_append_skips_ids_already_listed() {
+        let meta = |id: &str| ArtifactMeta {
+            id: id.into(),
+            ..Default::default()
+        };
+        let mut cur = vec![meta("a"), meta("b")];
+        // "b" shifted into the next window after an update between loads.
+        append_artifact_page(&mut cur, vec![meta("b"), meta("c")]);
+        let ids: Vec<&str> = cur.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b", "c"]);
     }
 
     #[test]
