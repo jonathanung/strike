@@ -67,7 +67,7 @@ func TestUserInputImmediatelyAfterTurnCompletedStartsNextTurn(t *testing.T) {
 	eng.ops = make(chan protocol.Op)
 	eng.events = make(chan protocol.Event)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	defer stopEngineAndDrain(t, cancel, eng.events)
 	go eng.Run(ctx)
 
 	receiveEngineEvent(t, eng.events, func(event protocol.Event) bool {
@@ -124,7 +124,7 @@ func TestFinishingTurnJoinsBeforeProcessingNextOp(t *testing.T) {
 	eng.turnCancel = turnCancel
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	defer stopEngineAndDrain(t, cancel, eng.events)
 	go eng.Run(ctx)
 	receiveEngineEvent(t, eng.events, func(event protocol.Event) bool {
 		_, ok := event.(protocol.AgentSelected)
@@ -180,6 +180,30 @@ func TestFinishingTurnJoinsBeforeProcessingNextOp(t *testing.T) {
 // long enough never to fire on slow scheduling, short enough that a genuine
 // deadlock still fails inside the package timeout.
 const orderingWait = 30 * time.Second
+
+// stopEngineAndDrain cancels Run and drains events until Run closes them.
+// These tests swap in an unbuffered events channel and stop reading once
+// their assertions pass; without a drain, the still-running turn blocks
+// forever emitting its terminal event, so Run (and the engine, provider, and
+// 500k held cancels) leaked into every later -count rep until the -race
+// binary was OOM-killed (#1660). Failing here when Events never closes
+// guards that Run actually exits on cancel.
+func stopEngineAndDrain(t *testing.T, cancel context.CancelFunc, events <-chan protocol.Event) {
+	t.Helper()
+	cancel()
+	deadline := time.NewTimer(orderingWait)
+	defer deadline.Stop()
+	for {
+		select {
+		case _, ok := <-events:
+			if !ok {
+				return
+			}
+		case <-deadline.C:
+			t.Fatal("engine Run did not close Events after cancel")
+		}
+	}
+}
 
 func receiveEngineEvent(t *testing.T, events <-chan protocol.Event, match func(protocol.Event) bool) protocol.Event {
 	t.Helper()

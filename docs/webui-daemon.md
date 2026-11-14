@@ -187,6 +187,39 @@ nix develop -c make build
 
 Foreground instead of a service manager: `./strike serve --auth --token-file ~/.strike/daemon.token`.
 
+### The committed bundle is built in CI
+
+The Go binary embeds `internal/frontend/server/static/`, so `webui/`
+changes need a rebuilt bundle. You don't have to build it yourself.
+`.github/workflows/webui-bundle.yml` runs on any same-repo PR that touches
+`webui/**` or `internal/frontend/server/static/**`. It does this:
+
+1. Runs `make webui-build`. It uses Rust stable `wasm32-unknown-unknown`,
+   matching the fenix stable the dev shell resolves, plus trunk 0.21.14 (the
+   nixpkgs pin). trunk fetches wasm-opt `version_131` from
+   `webui/Trunk.toml`.
+2. Fails if conflict markers are left in the static dir or
+   `scripts/check-webui-bundle.mjs` fails.
+3. If the bundle changed, it pushes `ci(webui): rebuild bundle` as
+   `github-actions[bot]` to the PR branch, never to `main`.
+4. Dispatches `ci.yml` on the branch. `GITHUB_TOKEN` pushes don't fire
+   `pull_request`, so this gives the new head SHA its checks.
+   Branches cut before this workflow existed have no dispatch trigger in
+   their `ci.yml`. For those it only warns: merge `origin/main` first.
+
+On a bundle merge conflict, take either side of the static files and push
+the merge. CI rebuilds the bundle on top. To rebuild by hand, run
+`gh workflow run webui-bundle.yml -f ref=<branch>`. Pull before you push
+again, because the bot commit lands on your branch. Forks are skipped
+because their tokens can't push back.
+
+When the PR head is a bot commit, `gh pr checks` and the PR rollup show no
+checks. GitHub parks the bot-triggered `pull_request` runs as
+`action_required`, and the dispatched run isn't attached to the PR. Read
+the real result from the commit:
+`gh api repos/jonathanung/strike/commits/<sha>/check-runs -q '.check_runs[]|.name+" "+.conclusion'`
+or `gh run list --commit <sha>`.
+
 ## Several workspaces, one daemon
 
 One `strike serve` process can hold several live roots at once. Each root

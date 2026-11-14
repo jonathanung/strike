@@ -67,6 +67,9 @@ type CheckResult struct {
 	Output     string `json:"output,omitempty"`
 	Error      string `json:"error,omitempty"`
 	DurationMs int64  `json:"duration_ms,omitempty"`
+	// Triage is automatic Go test failure triage (focused reruns). Nil when
+	// triage is disabled or the failure was not a focusable go test failure.
+	Triage *TriageReport `json:"triage,omitempty"`
 }
 
 // Result is the harness-owned verification report.
@@ -101,6 +104,9 @@ type Runner struct {
 	Timeout time.Duration
 	// CmdRunner overrides command execution (tests).
 	CmdRunner func(ctx context.Context, workDir, command string) (exitCode int, output string, err error)
+	// Triage enables focused go test reruns for failed cmd gates and keeps
+	// per-gate history across Run calls. Nil disables triage.
+	Triage *Triage
 	// Now overrides the clock (tests).
 	Now func() time.Time
 }
@@ -221,6 +227,10 @@ func (r *Runner) runOne(ctx context.Context, g Gate, in Input) CheckResult {
 
 	switch g.Kind {
 	case KindCmd:
+		if r.Triage != nil {
+			r.runTriagedCmd(ctx, &cr, g.Value)
+			return cr
+		}
 		code, output, err := r.runCmd(ctx, g.Value)
 		cr.Output = trimOutput(output)
 		cr.ExitCode = code
@@ -359,8 +369,11 @@ func summarize(res Result) string {
 }
 
 func trimOutput(s string) string {
+	return trimTo(s, 4096)
+}
+
+func trimTo(s string, max int) string {
 	s = strings.TrimSpace(s)
-	const max = 4096
 	if len(s) > max {
 		return s[:max] + "…"
 	}
@@ -400,6 +413,9 @@ func FailedCheckLines(res Result) []string {
 			}
 		}
 		out = append(out, line)
+		for _, t := range TriageLines(c) {
+			out = append(out, "triage: "+t)
+		}
 	}
 	return out
 }
