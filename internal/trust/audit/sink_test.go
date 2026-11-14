@@ -272,6 +272,18 @@ func TestObserveAllFamilies(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// script_run (schedule clock + HTTP lifecycle handlers; direct Record)
+	if err := s.Record(audit.FamilyScriptRun, "", "", "", "", audit.ScriptRunPayload{
+		ScheduleID:  "sched1",
+		Status:      "armed",
+		Decision:    "armed",
+		Command:     "make build",
+		CommandHash: "deadbeef",
+		Dir:         "/repo",
+		ClientIP:    "127.0.0.1",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	out := filepath.Join(t.TempDir(), "all.json")
 	if err := s.ExportBundle(out); err != nil {
@@ -296,6 +308,7 @@ func TestObserveAllFamilies(t *testing.T) {
 		"admission":       false,
 		"secret_ref_use":  false,
 		"serve_op":        false,
+		"script_run":      false,
 	}
 	var bundle struct {
 		Records []struct {
@@ -343,5 +356,207 @@ func TestObserveIgnoresTranscript(t *testing.T) {
 	_ = json.Unmarshal(data, &bundle)
 	if bundle.Count != 0 {
 		t.Fatalf("count = %d, want 0 for non-security events", bundle.Count)
+	}
+}
+
+// TestRecordScriptRunRedacted is the S2 negative test from
+// docs/design/script-schedules.md: credential-shaped sentinels placed in
+// Command, OutputTail and Error never reach the segment file, while the
+// correlation (ids, commandHash) and run metadata survive unchanged.
+func TestRecordScriptRunRedacted(t *testing.T) {
+	const (
+		ghToken = "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+		bearer  = "Bearer supersecrettokenvalue123"
+	)
+	exit := 1
+	started := time.Date(2026, 11, 14, 7, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name    string
+		payload any // struct or map (both arrive via Sink.Record)
+	}{
+		{
+			name: "struct",
+			payload: audit.ScriptRunPayload{
+				ScheduleID:  "sched-1",
+				RunID:       "run-1",
+				Status:      "failed",
+				Decision:    "allow",
+				Mode:        "bash",
+				Sandbox:     "strict/applied",
+				Command:     "curl -H 'Authorization: " + bearer + "' https://x " + ghToken,
+				CommandHash: "0123456789abcdef",
+				Dir:         "/home/u/" + ghToken,
+				StartedAt:   started,
+				EndedAt:     started.Add(2 * time.Second),
+				ExitCode:    &exit,
+				Timeout:     "30s",
+				OutputTail:  "pushing with " + ghToken + "\nauth: " + bearer,
+				Error:       "exit 1: " + bearer + " rejected, token " + ghToken,
+			},
+		},
+		{
+			name: "map",
+			payload: map[string]any{
+				"scheduleId":  "sched-1",
+				"runId":       "run-1",
+				"status":      "failed",
+				"command":     "echo " + ghToken,
+				"commandHash": "0123456789abcdef",
+				"dir":         "/repo",
+				"exitCode":    1,
+				"outputTail":  bearer,
+				"error":       ghToken,
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			s, err := audit.Open(audit.Options{Dir: dir})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Record(audit.FamilyScriptRun, "", "", "", "", tc.payload); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			entries, _ := os.ReadDir(dir)
+			if len(entries) != 1 {
+				t.Fatalf("segments = %d, want 1", len(entries))
+			}
+			data, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := string(data)
+			for _, leak := range []string{ghToken, "supersecrettokenvalue123"} {
+				if strings.Contains(raw, leak) {
+					t.Fatalf("sentinel %q leaked into segment: %s", leak, raw)
+				}
+			}
+			var rec struct {
+				Family  string                 `json:"family"`
+				Payload audit.ScriptRunPayload `json:"payload"`
+			}
+			if err := json.Unmarshal(data, &rec); err != nil {
+				t.Fatalf("segment line not JSON: %v\n%s", err, raw)
+			}
+			if rec.Family != audit.FamilyScriptRun {
+				t.Fatalf("family = %q, want %q", rec.Family, audit.FamilyScriptRun)
+			}
+			p := rec.Payload
+			if p.ScheduleID != "sched-1" || p.RunID != "run-1" || p.Status != "failed" {
+				t.Fatalf("ids/status changed: %+v", p)
+			}
+			if p.CommandHash != "0123456789abcdef" {
+				t.Fatalf("commandHash = %q, want unchanged", p.CommandHash)
+			}
+			if p.ExitCode == nil || *p.ExitCode != 1 {
+				t.Fatalf("exitCode = %v, want 1", p.ExitCode)
+			}
+			// Scrubbed fields keep their non-secret shape (prefix survives, secret replaced).
+			if !strings.HasPrefix(p.Command, "curl") && !strings.HasPrefix(p.Command, "echo") {
+				t.Fatalf("command prefix lost: %q", p.Command)
+			}
+			if !strings.Contains(raw, "[REDACTED") {
+				t.Fatalf("expected redaction marker in segment: %s", raw)
+			}
+			if tc.name == "struct" {
+				if !p.StartedAt.Equal(started) || !p.EndedAt.Equal(started.Add(2*time.Second)) {
+					t.Fatalf("timestamps changed: %v %v", p.StartedAt, p.EndedAt)
+				}
+				if p.Mode != "bash" || p.Sandbox != "strict/applied" || p.Timeout != "30s" || p.Decision != "allow" {
+					t.Fatalf("metadata changed: %+v", p)
+				}
+				if !strings.HasPrefix(p.Dir, "/home/u/") {
+					t.Fatalf("dir prefix lost: %q", p.Dir)
+				}
+			}
+		})
+	}
+}
+
+// TestRecordScriptRunLifecycleOmitsZero: lifecycle records (no run) carry no
+// runId, timestamps or exit code on disk, and unknown fields are dropped.
+func TestRecordScriptRunLifecycleOmitsZero(t *testing.T) {
+	dir := t.TempDir()
+	s, err := audit.Open(audit.Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Record(audit.FamilyScriptRun, "", "", "", "", map[string]any{
+		"scheduleId":  "sched-2",
+		"status":      "deleted",
+		"clientIp":    "10.0.0.7",
+		"command":     "true",
+		"commandHash": "abc",
+		"dir":         "/repo",
+		"rawBody":     "must not persist",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("segments = %d, want 1", len(entries))
+	}
+	data, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec struct {
+		Payload map[string]json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(data, &rec); err != nil {
+		t.Fatal(err)
+	}
+	for _, absent := range []string{"runId", "startedAt", "endedAt", "exitCode", "outputTail", "error", "rawBody"} {
+		if _, ok := rec.Payload[absent]; ok {
+			t.Errorf("lifecycle record should omit %q: %s", absent, data)
+		}
+	}
+	for key, want := range map[string]string{"scheduleId": `"sched-2"`, "status": `"deleted"`, "clientIp": `"10.0.0.7"`, "commandHash": `"abc"`} {
+		if got := string(rec.Payload[key]); got != want {
+			t.Errorf("%s = %s, want %s", key, got, want)
+		}
+	}
+}
+
+// TestRecordScriptRunMalformedPayloadErrors: a payload that does not decode
+// into ScriptRunPayload is rejected rather than written truncated.
+func TestRecordScriptRunMalformedPayloadErrors(t *testing.T) {
+	dir := t.TempDir()
+	s, err := audit.Open(audit.Options{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	err = s.Record(audit.FamilyScriptRun, "", "", "", "", map[string]any{
+		"scheduleId": "sched-3",
+		"status":     "finished",
+		"startedAt":  1763100000, // unix int, not RFC 3339
+		"exitCode":   0,
+	})
+	if err == nil {
+		t.Fatal("Record accepted a payload with a non-RFC3339 startedAt")
+	}
+	if !strings.Contains(err.Error(), "script_run") {
+		t.Fatalf("error = %v, want script_run context", err)
+	}
+	// Open pre-creates the active segment; a failed Record must leave it empty.
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("segments = %d, want 1 (Open pre-creates the active segment)", len(entries))
+	}
+	data, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("segment written despite decode error: %s", data)
 	}
 }

@@ -35,6 +35,7 @@ const expectedUsage = `Usage:
   strike eval <command> [arguments]
   strike restore [options]
   strike workflow <command> [arguments]
+  strike trust [grant|status|revoke|list] [--dir <path>]
   strike version
   strike upgrade
 
