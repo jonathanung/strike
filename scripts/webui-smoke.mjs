@@ -1214,6 +1214,20 @@ try {
   }
 
   // Close the model menu (and any error note) before the navbar pass.
+  // #1512: the rejected freeform pick keeps Switch model's prompt open,
+  // so the first Escape steps back to the palette root and the second
+  // closes the palette. Escape until the dialog is gone.
+  for (let i = 0; i < 3; i++) {
+    const open = await evalValue(`Boolean(document.querySelector("[data-nav='palette-dialog']"))`);
+    if (!open) break;
+    await send("Runtime.evaluate", {
+      expression: `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
+    });
+    await delay(250);
+  }
+  if (await evalValue(`Boolean(document.querySelector("[data-nav='palette-dialog']"))`)) {
+    throw new Error("Escape did not close the palette after the rejected model pick");
+  }
   await send("Runtime.evaluate", {
     expression: `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
   });
