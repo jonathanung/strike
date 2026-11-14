@@ -831,22 +831,26 @@ impl Transcript {
     /// Sweep on `turn.completed`: rows in the completing turn still
     /// marked `running` never got their `tool.end` / `child.end`, so
     /// they settle as `no result`. Rows that received an end keep their
-    /// `done`/`failed` badge. A row carrying a *different* turnId than
-    /// the completing turn is left alone — it belongs to another (live)
-    /// turn, not to the turn that just ended.
+    /// `done`/`failed` badge. A row tagged with the completing turnId
+    /// settles wherever it sits — a mid-turn `user.message` (steer,
+    /// child notice, mailbox) moves `turn_start` past it. Untagged
+    /// (legacy) rows settle only inside the tracked turn range. A row
+    /// carrying a *different* turnId belongs to another turn and is
+    /// left alone.
     fn sweep_orphaned_at_turn_end(&mut self, completed_turn_id: &str) {
         let start = self.turn_range_start();
-        for msg in self.messages.iter_mut().skip(start) {
+        for (idx, msg) in self.messages.iter_mut().enumerate() {
             if msg.badge != "running" || !matches!(msg.role, Role::Tool | Role::Child) {
                 continue;
             }
-            if !completed_turn_id.is_empty()
-                && !msg.turn_id.is_empty()
-                && msg.turn_id != completed_turn_id
-            {
-                continue;
+            let ours = if completed_turn_id.is_empty() || msg.turn_id.is_empty() {
+                idx >= start
+            } else {
+                msg.turn_id == completed_turn_id
+            };
+            if ours {
+                Self::settle_row(msg);
             }
-            Self::settle_row(msg);
         }
     }
 
@@ -867,12 +871,6 @@ impl Transcript {
         }
     }
 
-    /// Settle every still-running tool/child row. Load/replay entry
-    /// point (#1506): call after a stored transcript has been fully
-    /// applied for a session that is NOT in a live turn, so a log that
-    /// ends mid-tool does not render a forever-running row in an idle
-    /// session. Never call this for a live turn — use the turn-boundary
-    /// sweeps, which key off turn state, not age or timers.
     /// Any tool/child row still marked `running`? Lets callers skip a
     /// signal write when there is nothing to settle.
     pub fn has_running_tools(&self) -> bool {
@@ -881,6 +879,12 @@ impl Transcript {
             .any(|m| m.badge == "running" && matches!(m.role, Role::Tool | Role::Child))
     }
 
+    /// Settle every still-running tool/child row. Load/replay entry
+    /// point (#1506): call after a stored transcript has been fully
+    /// applied for a session that is NOT in a live turn, so a log that
+    /// ends mid-tool does not render a forever-running row in an idle
+    /// session. Never call this for a live turn — use the turn-boundary
+    /// sweeps, which key off turn state, not age or timers.
     pub fn settle_orphaned_tools(&mut self) {
         for msg in self.messages.iter_mut() {
             if msg.badge == "running" && matches!(msg.role, Role::Tool | Role::Child) {
@@ -2262,6 +2266,21 @@ mod tests {
             .find(|m| m.call_id == "b")
             .expect("live row");
         assert_eq!(live.badge, "no result");
+    }
+
+    #[test]
+    fn orphan_swept_at_turn_end_after_mid_turn_user_message() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "go", "turnId": "t1"})));
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "a", "name": "bash", "turnId": "t1", "args": {"command": "sleep 9"}}),
+        ));
+        // Steer / child notice / mailbox inject a user.message mid-turn.
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "also this"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({"turnId": "t1"})));
+        let row = t.messages.iter().find(|m| m.call_id == "a").expect("row");
+        assert_eq!(row.badge, "no result");
     }
 
     #[test]
