@@ -282,6 +282,7 @@ func settingsPatchFields(body settingsPatchBody) []string {
 	add("deferTools", body.DeferTools)
 	add("sessionWorktree", body.SessionWorktree)
 	add("autoupdate", body.Autoupdate)
+	add("keepAwake", body.KeepAwake)
 	add("permissionAutoApproveSeconds", body.PermissionAutoApproveSeconds)
 	add("maxChildDepth", body.MaxChildDepth)
 	add("compactionStrategy", body.CompactionStrategy)
