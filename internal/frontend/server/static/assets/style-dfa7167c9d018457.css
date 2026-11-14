@@ -2228,6 +2228,13 @@ select.mode, .daemon select {
   font-size: var(--type-sm);
   font-weight: 650;
 }
+/* feature:transcript-expand-all begin */
+.sx-fold-toolbar { margin-top: 2px; }
+.sx-fold-count {
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+/* feature:transcript-expand-all end */
 .sx-actions {
   margin-left: auto;
   display: flex;
@@ -2537,6 +2544,31 @@ select.mode, .daemon select {
   border-top: 1px solid var(--border-muted);
 }
 .sched-history h3 { margin: 0 0 var(--space-2); font-size: var(--type-md); }
+/* feature:scheduler-presets begin */
+/* Scheduler presets (#1495): one checkbox row per catalog preset under the
+   schedule layout; rows stay full-width tap targets on phones. */
+.sched-presets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.sched-presets h3 { margin: 0; font-size: var(--type-md); }
+.sched-preset {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border-muted);
+}
+.sched-preset label { display: flex; flex-direction: column; gap: var(--space-1); cursor: pointer; }
+.sched-preset .name { font-weight: 600; }
+.sched-preset .meta { color: var(--muted); font-size: var(--type-sm); }
+.sched-preset input:disabled + label { cursor: default; opacity: 0.7; }
+@media (max-width: 800px) {
+  .sched-preset { min-height: 44px; }
+}
+/* feature:scheduler-presets end */
 button.linkish {
   background: none;
   border: none;
@@ -3075,12 +3107,33 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 .eyebrow { margin: 0; color: var(--sharp); font-size: var(--type-sm); font-weight: 650; }
 .onboarding-body { padding: 16px; min-width: 0; }
 .telemetry { margin: 0 0 8px; }
-.onboarding-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.onboarding-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px -16px -16px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border-top: var(--border-width) solid var(--rule);
+}
+.onboarding-spacer { flex: 1 1 auto; }
+.onboarding-steps { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; counter-reset: onboarding-step; }
+.onboarding-steps li { counter-increment: onboarding-step; color: var(--muted); font-size: var(--type-sm); }
+.onboarding-steps li::before { content: counter(onboarding-step) ". "; }
+.onboarding-steps li.on { color: var(--ink); font-weight: 650; }
+.onboarding-step h3 { margin: 0 0 8px; color: var(--ink); font-size: 16px; }
+.onboarding-step[hidden] { display: none; }
+.onboarding-files { margin: 8px 0; }
+.onboarding-files > summary { cursor: pointer; color: var(--muted); font-size: var(--type-sm); }
+.onboarding-note { margin: 12px 0 0; font-size: var(--type-sm); }
 .onboarding-body .file-groups { max-height: 220px; overflow: auto; margin: 8px 0; padding-right: 4px; }
 .onboarding-body [data-providers-root] { margin: 8px 0 12px; }
 @media (max-width: 800px) {
   .onboarding-card { grid-template-columns: 1fr; }
   .onboarding-lead { border-right: 0; border-bottom: var(--border-width) solid var(--rule); }
+  .onboarding-steps { flex-direction: row; flex-wrap: wrap; gap: 4px 12px; margin-top: 10px; }
   .onboarding-body .file-groups { max-height: 160px; }
   .theme-grid { grid-template-columns: 1fr; }
   .settings-page { padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }

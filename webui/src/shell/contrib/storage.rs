@@ -1,6 +1,6 @@
 //! Durable storage (#1271): palette commands for the Memory, Knowledge,
-//! and Artifacts side-panel tabs and for the session memory mode. The
-//! panels themselves live in `crate::storage` and are rendered by
+//! Artifacts, and Decisions (#1485) side-panel tabs and for the session
+//! memory mode. The panels themselves live in `crate::storage` and are rendered by
 //! `main.rs` when their side tab is active; this file only registers the
 //! commands with the shell, following docs/webui-shell.md. The performers
 //! are bound by `main.rs` in `App`, because only the page owns the
@@ -52,6 +52,23 @@ pub fn install(reg: &mut ShellHook) {
         order: 90,
         run: Rc::new(|args| crate::shell::dispatch("panel-artifacts", args)),
         visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
+    });
+    // Decision ledger (#1485): listed only when the daemon advertises the
+    // `ledger` bootstrap capability, so an older daemon shows no tab.
+    reg.command(Command {
+        id: "panel-decisions",
+        group: Group::Session,
+        label: "Decisions",
+        detail: "Decisions, assumptions, and constraints agents recorded",
+        shortcut: "",
+        keywords: &["storage", "ledger", "assumptions", "constraints"],
+        argument: None,
+        order: 92,
+        run: Rc::new(|args| crate::shell::dispatch("panel-decisions", args)),
+        visible: Some(Rc::new(crate::storage::ledger_capable)),
         enabled: None,
         confirm: None,
         choices: None,
