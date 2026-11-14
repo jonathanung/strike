@@ -27,10 +27,11 @@ func ProjectScope(workDir string, trusted bool) string {
 	return workDir
 }
 
-// ProjectExecutable is one repo-supplied process definition (MCP server, LSP
-// server, or external harness) as it would be launched. Env and headers are
-// deliberately omitted — they may carry secrets and the user approves the
-// command, not its environment.
+// ProjectExecutable is one repo-supplied process or endpoint definition (MCP
+// server, LSP server, external harness, or provider base URL) as it would be
+// used. Env, headers and key names are deliberately omitted — they may carry
+// secrets and the user approves the command or destination, not its
+// environment.
 type ProjectExecutable struct {
 	Name    string   `json:"name"`
 	Command string   `json:"command,omitempty"`
@@ -82,10 +83,15 @@ type ProjectSurfaces struct {
 	MCP             []ProjectExecutable `json:"mcp,omitempty"`
 	LSP             []ProjectExecutable `json:"lsp,omitempty"`
 	Harnesses       []ProjectExecutable `json:"harnesses,omitempty"`
-	Hooks           []ProjectHook       `json:"hooks,omitempty"`
-	Agents          []ProjectFile       `json:"agents,omitempty"`
-	Skills          []ProjectFile       `json:"skills,omitempty"`
-	Workflows       []ProjectFile       `json:"workflows,omitempty"`
+	// Providers are custom providers and builtin endpoint overlays from
+	// .strike/providers.jsonc or config providers[] — name + base URL only
+	// (never keys, env names or headers). Once trusted these decide where the
+	// user's credentials are sent.
+	Providers []ProjectExecutable `json:"providers,omitempty"`
+	Hooks     []ProjectHook       `json:"hooks,omitempty"`
+	Agents    []ProjectFile       `json:"agents,omitempty"`
+	Skills    []ProjectFile       `json:"skills,omitempty"`
+	Workflows []ProjectFile       `json:"workflows,omitempty"`
 	// Plugins are project-scope plugin ids under .strike/plugins (their
 	// lockfile, including any trust record, lives inside the repo).
 	Plugins []string `json:"plugins,omitempty"`
@@ -101,13 +107,15 @@ type ProjectSurfaces struct {
 // would gate.
 func (s ProjectSurfaces) Empty() bool {
 	return len(s.ConfigFiles) == 0 && len(s.ConfigKeys) == 0 && s.PermissionRules == 0 &&
-		len(s.MCP) == 0 && len(s.LSP) == 0 && len(s.Harnesses) == 0 && len(s.Hooks) == 0 &&
+		len(s.MCP) == 0 && len(s.LSP) == 0 && len(s.Harnesses) == 0 && len(s.Providers) == 0 && len(s.Hooks) == 0 &&
 		len(s.Agents) == 0 && len(s.Skills) == 0 && len(s.Workflows) == 0 &&
 		len(s.Plugins) == 0 && len(s.Steering) == 0 && len(s.Errors) == 0
 }
 
 // Summary is a one-line count of the gated surfaces, e.g.
-// "2 MCP servers, 1 hook, 3 agents, 1 steering file".
+// "2 config files, 2 MCP servers, 1 hook, 3 agents, 1 steering file". It
+// counts every field Empty consults, so it never reads "no repo-supplied
+// config" while Empty is false.
 func (s ProjectSurfaces) Summary() string {
 	var parts []string
 	add := func(n int, singular, plural string) {
@@ -118,11 +126,13 @@ func (s ProjectSurfaces) Summary() string {
 			parts = append(parts, fmt.Sprintf("%d %s", n, plural))
 		}
 	}
+	add(len(s.ConfigFiles), "config file", "config files")
 	add(len(s.ConfigKeys), "config override", "config overrides")
 	add(s.PermissionRules, "permission rule", "permission rules")
 	add(len(s.MCP), "MCP server", "MCP servers")
 	add(len(s.LSP), "LSP server", "LSP servers")
 	add(len(s.Harnesses), "harness", "harnesses")
+	add(len(s.Providers), "provider", "providers")
 	add(len(s.Hooks), "hook", "hooks")
 	add(len(s.Agents), "agent", "agents")
 	add(len(s.Skills), "skill", "skills")
@@ -172,6 +182,7 @@ func EnumerateProjectSurfaces(workDir, root string) ProjectSurfaces {
 			out.MCP = append(out.MCP, mcpExecutables(layer.MCP.Servers)...)
 			out.LSP = append(out.LSP, lspExecutables(layer.LSP.Servers)...)
 			out.Harnesses = append(out.Harnesses, harnessExecutables(layer.Harnesses)...)
+			out.Providers = append(out.Providers, customProviderExecutables(layer.Providers)...)
 		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		warn(cfgPath, err)
@@ -189,7 +200,28 @@ func EnumerateProjectSurfaces(workDir, root string) ProjectSurfaces {
 		}
 		break // same first-existing rule as loadMCPFileLayer
 	}
-	for _, p := range firstPresent(providersFileCandidates(dir), keybindsFileCandidates(dir), containerFileCandidates(dir)) {
+	for _, p := range providersFileCandidates(dir) {
+		pf, err := ReadProvidersFile(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		out.ConfigFiles = append(out.ConfigFiles, p)
+		if err != nil {
+			warn(p, err)
+		} else {
+			out.Providers = append(out.Providers, customProviderExecutables(pf.Customs)...)
+			names := make([]string, 0, len(pf.Endpoints))
+			for name := range pf.Endpoints {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				out.Providers = append(out.Providers, ProjectExecutable{Name: name, URL: pf.Endpoints[name].BaseURL})
+			}
+		}
+		break // same first-existing rule as loadProvidersFileLayer
+	}
+	for _, p := range firstPresent(keybindsFileCandidates(dir), containerFileCandidates(dir)) {
 		out.ConfigFiles = append(out.ConfigFiles, p)
 	}
 
@@ -308,6 +340,16 @@ func harnessExecutables(hs map[string]HarnessConfig) []ProjectExecutable {
 	for _, name := range names {
 		h := hs[name]
 		out = append(out, ProjectExecutable{Name: name, Command: h.Command, Args: append([]string(nil), h.Args...)})
+	}
+	return out
+}
+
+// customProviderExecutables lists custom providers as name + base URL in file
+// order (keys, env names and headers are never included).
+func customProviderExecutables(ps []CustomProvider) []ProjectExecutable {
+	out := make([]ProjectExecutable, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, ProjectExecutable{Name: p.Name, URL: p.BaseURL})
 	}
 	return out
 }

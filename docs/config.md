@@ -58,7 +58,8 @@ builtin + global config:
 
 - `./.strike/config` scalars (`systemPrompt`, `permissionMode`, `sandbox`, …)
   and its `permissions[]` / `hooks[]` entries
-- `./.strike/mcp.jsonc` servers, project LSP servers, project `harnesses`
+- `./.strike/mcp.jsonc` servers, `./.strike/providers.jsonc` custom providers and
+  endpoint overlays (where credentials get sent), project LSP servers, project `harnesses`
   (no process is spawned — the gate runs before admission, not after)
 - project agents (`.strike/agents`, `.claude/agents`, `.opencode/agent(s)`),
   skills, workflows, and project-scope plugins (`./.strike/plugins`, whose

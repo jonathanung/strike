@@ -796,6 +796,19 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			}
 			sessionID = info.ID
 		}
+		// Every root transcript (first, /new, rpc, unattended/scheduled spawn,
+		// resume) records that repo config was skipped as untrusted, so a
+		// headless run is never silently reconfigured — or silently
+		// un-configured (#1352).
+		if wsTrust.inert() {
+			_ = bound.Append(protocol.AdmissionDecided{
+				Correlation: protocol.Correlation{SessionID: sessionID},
+				Surface:     "workspace",
+				Target:      wsTrust.root,
+				Action:      string(admission.ActionBlock),
+				Reason:      wsTrust.reason(),
+			})
+		}
 
 		// Bind tool CWD to a per-session git worktree when configured / forced.
 		// Project-scoped state stays on projectIdentity.Key (launch repo).
@@ -1186,18 +1199,6 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				Findings:    findings,
 			})
 		}
-	}
-	// Record on the transcript that repo config was skipped as untrusted so
-	// headless/scheduled runs are never silently reconfigured — or silently
-	// un-configured (#1352).
-	if first != nil && first.id != "" && wsTrust.inert() {
-		_ = first.bound.Append(protocol.AdmissionDecided{
-			Correlation: protocol.Correlation{SessionID: first.id},
-			Surface:     "workspace",
-			Target:      wsTrust.root,
-			Action:      string(admission.ActionBlock),
-			Reason:      wsTrust.reason(),
-		})
 	}
 
 	// External language servers (stdio JSON-RPC). RootDir/CWD is the launch

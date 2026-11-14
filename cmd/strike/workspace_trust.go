@@ -104,6 +104,7 @@ func writeProjectSurfaces(w io.Writer, s config.ProjectSurfaces) {
 	section("MCP servers", execLines(s.MCP))
 	section("LSP servers", execLines(s.LSP))
 	section("Harnesses", execLines(s.Harnesses))
+	section("Providers", execLines(s.Providers))
 	hookLines := make([]string, 0, len(s.Hooks))
 	for _, h := range s.Hooks {
 		if h.Command != "" {
