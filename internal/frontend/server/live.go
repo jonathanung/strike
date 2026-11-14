@@ -471,6 +471,9 @@ type StatusSnapshot struct {
 	// LastEventAt is unix milliseconds of the last user-visible event.
 	// Reads and status polls do not bump it.
 	LastEventAt int64 `json:"lastEventAt,omitempty"`
+	// ProviderAuthFailed is set when the latest turn ended on a provider_auth
+	// EngineError (#1546); cleared when the next turn starts.
+	ProviderAuthFailed bool `json:"providerAuthFailed,omitempty"`
 	// TurnState is the canonical status id for this root, including child
 	// attention. Computed by Status; not stored.
 	TurnState string `json:"turnState,omitempty"`
@@ -737,13 +740,14 @@ func (l *Live) Status() StatusSnapshot {
 	}
 	running, waiting, blocked := childAttention(l.team)
 	out.TurnState = protocol.ClassifyLive(protocol.LiveStatusInput{
-		Busy:              out.Busy,
-		PermissionPending: out.PermissionPending,
-		QuestionPending:   out.QuestionPending,
-		StopReason:        out.StopReason,
-		ChildRunning:      running,
-		ChildWaiting:      waiting,
-		ChildBlocked:      blocked,
+		Busy:               out.Busy,
+		PermissionPending:  out.PermissionPending,
+		QuestionPending:    out.QuestionPending,
+		StopReason:         out.StopReason,
+		ChildRunning:       running,
+		ChildWaiting:       waiting,
+		ChildBlocked:       blocked,
+		ProviderAuthFailed: out.ProviderAuthFailed,
 	})
 	return out
 }
@@ -939,8 +943,13 @@ func (l *Live) applyStatus(ev protocol.Event) {
 	case protocol.TurnStarted:
 		l.status.Busy = true
 		l.status.StopReason = ""
+		l.status.ProviderAuthFailed = false
 		l.status.TurnSince = time.Now().UnixMilli()
 		l.noteActivityLocked()
+	case protocol.EngineError:
+		if e.Code == protocol.ErrorCodeProviderAuth {
+			l.status.ProviderAuthFailed = true
+		}
 	case protocol.TurnCompleted:
 		l.status.Busy = false
 		l.status.StopReason = e.StopReason

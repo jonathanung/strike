@@ -86,6 +86,9 @@ pub struct Message {
     pub keep_events: i32,
     pub retry_text: String,
     pub copy_text: String,
+    /// Provider whose credential was rejected, on a `provider_auth` notice
+    /// (#1546). Drives the Open Providers action; empty everywhere else.
+    pub reconnect: String,
     /// Envelope time of the event that created this message, epoch ms.
     /// 0 means unknown (old log line without a parseable `time`).
     pub at_ms: f64,
@@ -474,6 +477,7 @@ impl Transcript {
                     keep_events: -1,
                     retry_text: text,
                     copy_text: shown,
+                    reconnect: String::new(),
                     at_ms,
                 });
                 self.turn_start = Some(id);
@@ -515,6 +519,7 @@ impl Transcript {
                     keep_events: -1,
                     retry_text: retry,
                     copy_text: body,
+                    reconnect: String::new(),
                     at_ms,
                 });
             }
@@ -552,6 +557,7 @@ impl Transcript {
                     keep_events: -1,
                     retry_text: String::new(),
                     copy_text: copy,
+                    reconnect: String::new(),
                     at_ms,
                 });
             }
@@ -607,6 +613,7 @@ impl Transcript {
                         keep_events: -1,
                         retry_text: String::new(),
                         copy_text: face.copy,
+                        reconnect: String::new(),
                         at_ms,
                     });
                 }
@@ -645,6 +652,32 @@ impl Transcript {
                 if code == "composer_notice" {
                     self.trigger_note = message.clone();
                 }
+                if code == PROVIDER_AUTH_CODE {
+                    // #1546: the daemon classified a rejected credential.
+                    // Headline says what happened; the vendor text is
+                    // secondary detail; Retry re-sends the failed prompt
+                    // only when the user presses it.
+                    let provider = field_str(&data, "provider");
+                    let retry = self.current_retry();
+                    self.push(Message {
+                        id: 0,
+                        role: Role::Notice,
+                        title: "Authentication failed".into(),
+                        body: provider_auth_headline(&provider),
+                        badge: code,
+                        detail: message.clone(),
+                        key: String::new(),
+                        call_id: String::new(),
+                        diff: None,
+                        chips: Vec::new(),
+                        keep_events: -1,
+                        retry_text: retry,
+                        copy_text: message,
+                        reconnect: provider,
+                        at_ms,
+                    });
+                    return;
+                }
                 self.push(Message {
                     id: 0,
                     role: Role::Notice,
@@ -659,6 +692,7 @@ impl Transcript {
                     keep_events: -1,
                     retry_text: String::new(),
                     copy_text: String::new(),
+                    reconnect: String::new(),
                     at_ms,
                 });
             }
@@ -695,6 +729,7 @@ impl Transcript {
                     keep_events: -1,
                     retry_text: String::new(),
                     copy_text: permission,
+                    reconnect: String::new(),
                     at_ms,
                 });
             }
@@ -902,6 +937,7 @@ impl Transcript {
             keep_events: -1,
             retry_text: String::new(),
             copy_text: summary,
+            reconnect: String::new(),
             at_ms,
         });
     }
@@ -1823,9 +1859,94 @@ fn clip(text: &str, max: usize) -> String {
     short
 }
 
+/// `engine.error` code for a provider rejecting the saved credential
+/// mid-session (#1546). Classified daemon-side; never inferred here from
+/// message text.
+pub const PROVIDER_AUTH_CODE: &str = "provider_auth";
+
+/// Display name for a provider id in the auth-failure headline.
+fn provider_display(provider: &str) -> String {
+    match provider.trim() {
+        "anthropic" => "Anthropic".into(),
+        "openai" => "OpenAI".into(),
+        "google" => "Google".into(),
+        "xai" => "xAI".into(),
+        "deepseek" => "DeepSeek".into(),
+        "kimi" => "Kimi".into(),
+        other => other.to_string(),
+    }
+}
+
+/// Headline for a `provider_auth` notice: what happened, in the user's
+/// terms, without the vendor's raw error text.
+pub fn provider_auth_headline(provider: &str) -> String {
+    let name = provider_display(provider);
+    if name.is_empty() {
+        "Provider authentication failed — the saved credential was rejected.".into()
+    } else {
+        format!("{name} authentication failed — the saved credential was rejected.")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_auth_error_renders_actionable_notice() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "fix the bug"})));
+        t.apply_envelope(&env(
+            "engine.error",
+            serde_json::json!({
+                "message": "openai: invalid_request_error: Incorrect API key provided",
+                "code": "provider_auth",
+                "provider": "openai"
+            }),
+        ));
+        let m = t.messages.last().unwrap();
+        assert_eq!(m.role, Role::Notice);
+        assert_eq!(m.badge, PROVIDER_AUTH_CODE);
+        assert_eq!(m.reconnect, "openai");
+        assert_eq!(
+            m.body,
+            "OpenAI authentication failed — the saved credential was rejected."
+        );
+        assert!(m.detail.contains("Incorrect API key"));
+        assert_eq!(m.retry_text, "fix the bug");
+    }
+
+    #[test]
+    fn generic_engine_error_mentioning_401_stays_plain() {
+        // No client-side string matching: only the daemon's code makes
+        // a notice actionable.
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "engine.error",
+            serde_json::json!({"message": "openai: unexpected status 401: unauthorized"}),
+        ));
+        let m = t.messages.last().unwrap();
+        assert_eq!(m.title, "Notice");
+        assert!(m.reconnect.is_empty());
+        assert!(m.retry_text.is_empty());
+        assert!(m.body.contains("401"));
+    }
+
+    #[test]
+    fn provider_auth_headline_names_known_and_unknown_providers() {
+        assert_eq!(
+            provider_auth_headline("anthropic"),
+            "Anthropic authentication failed — the saved credential was rejected."
+        );
+        assert_eq!(
+            provider_auth_headline("my-gateway"),
+            "my-gateway authentication failed — the saved credential was rejected."
+        );
+        assert_eq!(
+            provider_auth_headline(""),
+            "Provider authentication failed — the saved credential was rejected."
+        );
+    }
 
     fn env(typ: &str, data: Value) -> String {
         serde_json::json!({"type": typ, "data": data}).to_string()

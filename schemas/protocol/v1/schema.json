@@ -1540,6 +1540,9 @@
         "parentSessionId": {
           "type": "string"
         },
+        "provider": {
+          "type": "string"
+        },
         "providerRequestId": {
           "type": "string"
         },
@@ -6937,7 +6940,7 @@
   "x-strike-event-count": 63,
   "x-strike-legacy-version": "1.0.0",
   "x-strike-op-count": 31,
-  "x-strike-protocol-version": "1.22.0",
+  "x-strike-protocol-version": "1.23.0",
   "x-strike-unknown-event": "valid",
   "x-strike-unknown-field": "ignore",
   "x-strike-unknown-op": "reject"
