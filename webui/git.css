@@ -151,3 +151,7 @@
   white-space: nowrap;
 }
 /* feature:git-show end */
+/* feature:git-panel-small begin */
+.git-copy-hash { align-self: flex-start; }
+.git-filter { flex: none; }
+/* feature:git-panel-small end */
