@@ -4634,7 +4634,7 @@ fn App() -> impl IntoView {
             />
         </Show>
         <Show when=move || mode.get() == "daemon" fallback=move || ()>
-            <DaemonPane gateway_detail=gateway_detail />
+            <DaemonPane gateway_detail=gateway_detail status=status />
         </Show>
         <Show when=move || mode.get() == "usage" || mode.get() == "audit" fallback=move || ()>
             <usage_audit::UsageAuditPages
@@ -5797,11 +5797,16 @@ fn App() -> impl IntoView {
 }
 
 #[component]
-fn DaemonPane(gateway_detail: RwSignal<String>) -> impl IntoView {
+fn DaemonPane(gateway_detail: RwSignal<String>, status: RwSignal<String>) -> impl IntoView {
     view! {
         <main class="daemon">
             <section class="card">
                 <h2 class="panel-title"><span class="icon-slot" aria-hidden="true" inner_html=icon("status")></span>"Daemon"</h2>
+                // Connection state and version ("Connected · v…" /
+                // "Unreachable"): this is their on-screen home now that the
+                // header prints neither (#1590 A6/A7); the brand mark only
+                // carries the same text as a tooltip.
+                <p class="hint" data-daemon-link="true">{move || status.get()}</p>
                 <p class="hint gw-detail">{move || {
                     let detail = gateway_detail.get();
                     if detail.is_empty() {
