@@ -17,6 +17,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 
 use crate::api::{self, delete_json, get_json, post_json_value};
+use load_guard::{begin_mint, commit_pair, LoadEpoch, PairPaint as GuardPaint};
 
 /// Page wiring for the shell command in `src/shell/contrib/gateway_qr.rs`.
 /// The shell boots before App's signals exist, so App installs them here.
@@ -232,6 +233,8 @@ pub(crate) fn GatewayQR(
         }),
     );
     let scan_note = RwSignal::new(String::new());
+    let pair_epoch = RwSignal::new(LoadEpoch::new());
+    let minting = RwSignal::new(false);
     let landed = RwSignal::new(false);
     let install_ready = RwSignal::new(false);
 
@@ -272,6 +275,8 @@ pub(crate) fn GatewayQR(
             device_note,
             blocked,
             restart,
+            pair_epoch,
+            minting,
         );
     });
     on_cleanup(halt_scan);
@@ -302,6 +307,7 @@ pub(crate) fn GatewayQR(
         }
         spawn_local(async move {
             let ok = crate::clipboard::copy_text(&text).await.is_ok();
+            copy_failed.set(!ok);
             let msg = if ok {
                 "Restart command copied."
             } else {
@@ -350,9 +356,14 @@ pub(crate) fn GatewayQR(
                             <p class="gq-blocked-title">"No QR to scan — a phone cannot open this gateway"</p>
                             <p>"Restart the gateway on an address your phone can reach, then reopen this dialog:"</p>
                             <code class="gq-cmd">{move || restart.get()}</code>
+                            <Show when=move || copy_failed.get()>
+                                <p class="gq-copy-fallback" role="alert">
+                                    "Copy didn't work in this browser. Select the restart command above and copy it manually."
+                                </p>
+                            </Show>
                             <div class="gq-actions">
                                 <button class="secondary" type="button" on:click=copy_restart>"Copy restart command"</button>
-                                <button class="secondary gq-new" type="button" on:click=move |_| { copy_failed.set(false); queue_pair(base, token, note, url, svg, warning, devices, device_note, blocked, restart); }>"Check again"</button>
+                                <button class="secondary gq-new" type="button" disabled=move || minting.get() on:click=move |_| { copy_failed.set(false); queue_pair(base, token, note, url, svg, warning, devices, device_note, blocked, restart, pair_epoch, minting); }>"Check again"</button>
                             </div>
                         </div>
                     </Show>
@@ -361,7 +372,7 @@ pub(crate) fn GatewayQR(
                         <input id="gq-url" readonly aria-label="Pairing URL" prop:value=move || url.get() />
                         <div class="gq-actions">
                             <button class="secondary" type="button" on:click=copy_url>"Copy URL"</button>
-                            <button class="secondary gq-new" type="button" on:click=move |_| { copy_failed.set(false); queue_pair(base, token, note, url, svg, warning, devices, device_note, blocked, restart); }>"New code"</button>
+                            <button class="secondary gq-new" type="button" disabled=move || minting.get() on:click=move |_| { copy_failed.set(false); queue_pair(base, token, note, url, svg, warning, devices, device_note, blocked, restart, pair_epoch, minting); }>"New code"</button>
                         </div>
                         <Show when=move || copy_failed.get()>
                             <p class="gq-copy-fallback" role="alert">
@@ -460,18 +471,42 @@ fn queue_pair(
     device_note: RwSignal<String>,
     blocked: RwSignal<bool>,
     restart: RwSignal<String>,
+    epoch: RwSignal<LoadEpoch>,
+    minting: RwSignal<bool>,
 ) {
     let (b, t) = (base.get_untracked(), token.get_untracked());
+    let mut current = epoch.get_untracked();
+    let mut flag = true;
+    let ticket = begin_mint(&mut current, &mut flag);
+    epoch.set(current);
+    minting.set(flag);
     spawn_local(async move {
         let paint = fetch_pair(&b, &t).await;
-        note.set(paint.note);
-        url.set(paint.url);
-        svg.set(paint.svg);
-        warning.set(paint.warning);
-        devices.set(paint.devices);
-        device_note.set(paint.device_note);
-        blocked.set(paint.blocked);
-        restart.set(paint.restart);
+        let (paint_blocked, paint_restart) = (paint.blocked, paint.restart);
+        let mut flag = minting.get_untracked();
+        if let Some(paint) = commit_pair(
+            &epoch.get_untracked(),
+            ticket,
+            &mut flag,
+            GuardPaint {
+                note: paint.note,
+                url: paint.url,
+                svg: paint.svg,
+                warning: paint.warning,
+                devices: paint.devices,
+                device_note: paint.device_note,
+            },
+        ) {
+            note.set(paint.note);
+            url.set(paint.url);
+            svg.set(paint.svg);
+            warning.set(paint.warning);
+            devices.set(paint.devices);
+            device_note.set(paint.device_note);
+            blocked.set(paint_blocked);
+            restart.set(paint_restart);
+            minting.set(flag);
+        }
     });
 }
 

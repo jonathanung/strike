@@ -336,13 +336,21 @@ type ConfigFiles interface {
 
 // Onboarding is global first-time setup state (installation-scoped, not
 // per-project). Interactive TUI may auto-open /ftue while unacknowledged;
-// exec/auth/serve/version/upgrade must not call this interface.
+// exec/auth/version/upgrade must not call this interface, and no caller
+// outside the TUI may call ShouldAutoOpen: it may persist the established-
+// install migration. strike serve uses only Acknowledged and Acknowledge
+// (#1552), which read/write the same ~/.strike/onboarding.json record
+// without running that migration.
 type Onboarding interface {
 	// ShouldAutoOpen reports whether an interactive TUI launch should open
 	// the setup wizard once. Established installs (sessions or real
 	// credentials) migrate to acknowledged without returning true. Safe to
 	// call repeatedly; may persist migration on first call.
 	ShouldAutoOpen() bool
+	// Acknowledged reports whether the daemon-side record already marks
+	// onboarding complete. It is a pure read of onboarding.json: no
+	// migration and no writes, so serve may call it on every page load.
+	Acknowledged() bool
 	// Acknowledge marks onboarding complete (finish or dismiss). Idempotent
 	// and safe under concurrent in-process callers.
 	Acknowledge() error
