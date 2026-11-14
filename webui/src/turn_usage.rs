@@ -33,6 +33,9 @@ pub struct TurnUsage {
     pub cache_creation: Option<i64>,
     pub estimated: bool,
     pub streams: u32,
+    /// Own-session streams that carried no known token count at all
+    /// (total-only vendors). The sums above are then partial.
+    pub unreported: u32,
 }
 
 fn add(slot: &mut Option<i64>, v: Option<i64>) {
@@ -55,6 +58,7 @@ impl TurnUsage {
         let cache_read = known_tokens(data.get("cacheRead"));
         let cache_creation = known_tokens(data.get("cacheCreation"));
         if input.is_none() && output.is_none() && cache_read.is_none() && cache_creation.is_none() {
+            self.unreported += 1;
             return;
         }
         add(&mut self.input, input);
@@ -84,6 +88,9 @@ impl TurnUsage {
         if self.estimated {
             s.push_str(" · est.");
         }
+        if self.unreported > 0 {
+            s.push_str(" · partial");
+        }
         Some(s)
     }
 
@@ -98,14 +105,19 @@ impl TurnUsage {
         };
         push("Input", self.input);
         push("Output", self.output);
-        push("Cache read", self.cache_read);
-        push("Cache write", self.cache_creation);
+        // The engine always sends cache counts as known (plain ints), so a
+        // zero here means "not broken out by the vendor", not a real 0.
+        push("Cache read", self.cache_read.filter(|n| *n > 0));
+        push("Cache write", self.cache_creation.filter(|n| *n > 0));
         let streams = if self.streams == 1 {
-            "1 model call".to_string()
+            "1 reported model call".to_string()
         } else {
-            format!("{} model calls", self.streams)
+            format!("{} reported model calls", self.streams)
         };
         parts.push(streams);
+        if self.unreported > 0 {
+            parts.push(format!("{} without token counts", self.unreported));
+        }
         parts.push(if self.estimated { "estimated".into() } else { "reported by provider".into() });
         format!("Turn tokens: {}", parts.join(" · "))
     }
@@ -134,18 +146,48 @@ mod tests {
         let d = u.detail();
         assert!(d.contains("Input 2000") && d.contains("Cache read 5000"), "{d}");
         assert!(!d.contains("Cache write"), "{d}");
-        assert!(d.contains("2 model calls") && d.contains("reported by provider"), "{d}");
+        assert!(d.contains("2 reported model calls") && d.contains("reported by provider"), "{d}");
+    }
+
+    #[test]
+    fn engine_shaped_cache_zeros_are_not_shown() {
+        // emitUsage always sends cache counts as known ints: 0 means the
+        // vendor did not break cache out, so the hover must not show it.
+        let mut u = TurnUsage::default();
+        u.absorb(
+            &json!({"input": known(1200), "output": known(300), "cacheRead": known(0), "cacheCreation": known(0), "used": known(1500), "source": "actual"}),
+            "",
+        );
+        let d = u.detail();
+        assert!(!d.contains("Cache"), "{d}");
+        assert_eq!(u.label().as_deref(), Some("1.2k in · 300 out"));
+        u.absorb(&json!({"input": known(10), "output": known(1), "cacheRead": known(900), "cacheCreation": known(0)}), "");
+        let d = u.detail();
+        assert!(d.contains("Cache read 900") && !d.contains("Cache write"), "{d}");
+    }
+
+    #[test]
+    fn streams_without_counts_mark_the_turn_partial() {
+        let mut u = TurnUsage::default();
+        u.absorb(&json!({"input": known(100), "output": known(10)}), "");
+        u.absorb(&json!({"input": {"known": false}, "output": {"known": false}, "used": known(5)}), "");
+        assert_eq!(u.streams, 1);
+        assert_eq!(u.unreported, 1);
+        assert_eq!(u.label().as_deref(), Some("100 in · 10 out · partial"));
+        let d = u.detail();
+        assert!(d.contains("1 reported model call") && d.contains("1 without token counts"), "{d}");
     }
 
     #[test]
     fn unknown_counts_are_not_zero() {
         let mut u = TurnUsage::default();
         u.absorb(&json!({"input": {"known": false}, "output": {"known": false}, "used": known(9)}), "");
-        assert_eq!(u, TurnUsage::default(), "a stream with nothing known is ignored");
-        assert_eq!(u.label(), None);
+        assert_eq!(u.label(), None, "a stream with nothing known shows no footer");
+        assert_eq!(u.streams, 0);
+        assert_eq!(u.unreported, 1);
         // Output only: input is not printed as 0.
         u.absorb(&json!({"output": known(40)}), "");
-        assert_eq!(u.label().as_deref(), Some("40 out"));
+        assert_eq!(u.label().as_deref(), Some("40 out · partial"));
         // A reported zero is a real zero.
         let mut z = TurnUsage::default();
         z.absorb(&json!({"input": known(0), "output": known(0)}), "");
