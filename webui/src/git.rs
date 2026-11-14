@@ -376,6 +376,9 @@ pub fn GitPanel(
     let bc_base = RwSignal::new(String::new());
     let bc_note = RwSignal::new(String::new());
     let bc_epoch = RwSignal::new(LoadEpoch::new());
+    // File diffs have their own epoch so a diff click never cancels a
+    // pending base change (and vice versa only via an explicit bump).
+    let bc_diff_epoch = RwSignal::new(LoadEpoch::new());
     let bc_file = RwSignal::new(String::new());
     let bc_diff = RwSignal::new(String::new());
     let bc_diff_truncated = RwSignal::new(false);
@@ -388,6 +391,10 @@ pub fn GitPanel(
     // #1450: fetch branch changes for the chosen (or detected) base.
     let load_branch_changes = move || {
         let gen = begin(bc_epoch);
+        // Drop the old comparison and any in-flight file diff: nothing
+        // from the previous base stays clickable while this loads.
+        let _ = begin(bc_diff_epoch);
+        bc.set(None);
         bc_note.set(String::new());
         bc_file.set(String::new());
         bc_diff.set(String::new());
@@ -414,12 +421,12 @@ pub fn GitPanel(
     };
     // Cumulative merge-base...HEAD diff of one branch file (#1450).
     let open_branch_file = move |path: String, against: String| {
+        let gen = begin(bc_diff_epoch);
         if bc_file.get_untracked() == path {
             bc_file.set(String::new());
             bc_diff.set(String::new());
             return;
         }
-        let gen = begin(bc_epoch);
         bc_file.set(path.clone());
         bc_diff.set(String::new());
         bc_diff_truncated.set(false);
@@ -432,7 +439,7 @@ pub fn GitPanel(
                 crate::api::js_encode(&path)
             );
             let res = get_json::<GitDiff>(&b, &t, &url).await;
-            if !bc_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+            if !bc_diff_epoch.with_untracked(|epoch| epoch.accept(gen)) {
                 return;
             }
             match res {
@@ -1045,8 +1052,10 @@ pub fn GitPanel(
             <Show when=move || show_branch.get()>
                 <section class="branch-changes" data-git-branch-changes="true" aria-label="Branch changes">
                     {move || {
-                        let current = bc.get().map(|c| c.branch).unwrap_or_default();
-                        let in_use = bc.get().map(|c| c.base).unwrap_or_default();
+                        // While loading, fall back to the head branch and
+                        // the user's pick so the picker never snaps back.
+                        let current = bc.get().map(|c| c.branch).unwrap_or_else(|| branch.get());
+                        let in_use = bc.get().map(|c| c.base).unwrap_or_else(|| bc_base.get());
                         let options = base_options(&branches.get(), &current, &in_use);
                         let selected = in_use.clone();
                         view! {

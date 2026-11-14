@@ -539,7 +539,48 @@ func TestGitBranchChangesRoute(t *testing.T) {
 	git2("add", ".")
 	git2("commit", "-m", "a")
 	git2("checkout", "-b", "work")
-	if code, got, raw := serve(repo2)("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateChooseBase || got.Base != "" {
+	call2 := serve(repo2)
+	if code, got, raw := call2("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateChooseBase || got.Base != "" {
 		t.Fatalf("choose base = %d %s", code, raw)
+	}
+	// Remote default: origin/HEAD -> origin/trunk is detected.
+	git2("update-ref", "refs/remotes/origin/trunk", "trunk")
+	git2("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+	write2("w.txt", "w\n")
+	git2("add", ".")
+	git2("commit", "-m", "work")
+	if code, got, raw := call2("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateOK || got.Base != "origin/trunk" || !got.BaseDetected || got.CommitsTotal != 1 {
+		t.Fatalf("origin/HEAD default = %d %s", code, raw)
+	}
+	// Dangling origin/HEAD (remote branch pruned): ask, do not 400.
+	git2("update-ref", "-d", "refs/remotes/origin/trunk")
+	if code, got, raw := call2("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateChooseBase {
+		t.Fatalf("dangling origin/HEAD = %d %s", code, raw)
+	}
+
+	// master is the fallback default when there is no main, and a tag
+	// named like the base never shadows the branch.
+	repo3, git3, write3 := newRepo("master")
+	write3("m.txt", "m\n")
+	git3("add", ".")
+	git3("commit", "-m", "m")
+	git3("checkout", "-b", "topic")
+	write3("t.txt", "t\n")
+	git3("add", ".")
+	git3("commit", "-m", "t")
+	git3("tag", "master", "HEAD")
+	if code, got, raw := serve(repo3)("/v1/git/branch-changes"); code != http.StatusOK || got.State != branchStateOK || got.Base != "master" || !got.BaseDetected || got.CommitsTotal != 1 {
+		t.Fatalf("master default = %d %s", code, raw)
+	}
+
+	// Literal pathspec: a bracketed path is not a glob.
+	write("app/[id]/page.tsx", "bracket\n")
+	write("app/i/page.tsx", "glob-match\n")
+	git("checkout", "-q", "-B", "paths", "main")
+	git("add", ".")
+	git("commit", "-m", "paths")
+	code, _, raw = call("/v1/git/branch-diff?base=main&path=" + url.QueryEscape("app/[id]/page.tsx"))
+	if code != http.StatusOK || !strings.Contains(raw, "+bracket") || strings.Contains(raw, "glob-match") {
+		t.Fatalf("literal pathspec = %d %s", code, raw)
 	}
 }

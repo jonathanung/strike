@@ -192,17 +192,10 @@ func (s *Server) handleGitLog(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit := gitLogDefault
-	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 {
-			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "limit must be a positive integer"})
-			return
-		}
-		if n > gitLogMax {
-			n = gitLogMax
-		}
-		limit = n
+	limit, err := parseGitLogLimit(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), gitReadTimeout)
 	defer cancel()
@@ -226,14 +219,10 @@ func (s *Server) handleGitBranchChanges(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
-	limit := gitLogDefault
-	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 {
-			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "limit must be a positive integer"})
-			return
-		}
-		limit = min(n, gitLogMax)
+	limit, err := parseGitLogLimit(r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), gitReadTimeout)
 	defer cancel()
@@ -243,6 +232,20 @@ func (s *Server) handleGitBranchChanges(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// parseGitLogLimit reads ?limit= for commit lists: default gitLogDefault,
+// clamped to gitLogMax, 400 on a non-positive or non-numeric value.
+func parseGitLogLimit(r *http.Request) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if raw == "" {
+		return gitLogDefault, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, errors.New("limit must be a positive integer")
+	}
+	return min(n, gitLogMax), nil
 }
 
 func (s *Server) handleGitBranchDiff(w http.ResponseWriter, r *http.Request) {
@@ -973,7 +976,7 @@ func parseLogLines(out []byte) []gitCommitJSON {
 // default; the panel then asks the user to choose (#1450 Q2).
 func defaultBaseBranch(ctx context.Context, cwd string) string {
 	for _, cand := range []string{"main", "master"} {
-		if _, _, err := gitRun(ctx, cwd, "rev-parse", "--verify", "--quiet", "refs/heads/"+cand); err == nil {
+		if resolveCommit(ctx, cwd, "refs/heads/"+cand) != "" {
 			return cand
 		}
 	}
@@ -981,7 +984,24 @@ func defaultBaseBranch(ctx context.Context, cwd string) string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	// A dangling origin/HEAD (remote branch pruned) is no default: ask.
+	name := strings.TrimSpace(string(out))
+	if name == "" || resolveCommit(ctx, cwd, "refs/remotes/"+name) == "" {
+		return ""
+	}
+	return name
+}
+
+// resolveBase resolves a base branch name preferring branch refs over a
+// same-named tag: refs/heads/<name>, then refs/remotes/<name>, then the
+// plain name (any other validated ref).
+func resolveBase(ctx context.Context, cwd, name string) string {
+	for _, ref := range []string{"refs/heads/" + name, "refs/remotes/" + name, name} {
+		if rev := resolveCommit(ctx, cwd, ref); rev != "" {
+			return rev
+		}
+	}
+	return ""
 }
 
 // resolveCommit returns the full hash of rev or "" when it does not name
@@ -1026,7 +1046,7 @@ func gitBranchChanges(ctx context.Context, cwd, base string, limit int) (gitBran
 		body.State = branchStateOnBase
 		return body, nil
 	}
-	baseRev := resolveCommit(ctx, cwd, body.Base)
+	baseRev := resolveBase(ctx, cwd, body.Base)
 	if baseRev == "" {
 		return gitBranchChangesJSON{}, errors.New("unknown base branch: " + body.Base)
 	}
@@ -1058,7 +1078,7 @@ func gitBranchChanges(ctx context.Context, cwd, base string, limit int) (gitBran
 // gitBranchDiff is one file's cumulative branch diff, merge-base...HEAD.
 func gitBranchDiff(ctx context.Context, cwd, base, rel string) (string, bool, error) {
 	head := resolveCommit(ctx, cwd, "HEAD")
-	baseRev := resolveCommit(ctx, cwd, base)
+	baseRev := resolveBase(ctx, cwd, base)
 	if head == "" || baseRev == "" {
 		return "", false, errors.New("unknown base branch: " + base)
 	}
@@ -1066,7 +1086,8 @@ func gitBranchDiff(ctx context.Context, cwd, base, rel string) (string, bool, er
 	if err != nil {
 		return "", false, errors.New("no common history with " + base)
 	}
-	out, stderr, err := gitRun(ctx, cwd, "diff", "--no-renames", strings.TrimSpace(string(mb)), head, "--", rel)
+	// --literal-pathspecs: "app/[id]/page.tsx" is a path, not a glob.
+	out, stderr, err := gitRun(ctx, cwd, "--literal-pathspecs", "diff", "--no-renames", strings.TrimSpace(string(mb)), head, "--", rel)
 	if err != nil {
 		return "", false, errors.New(gitErr("diff", err, stderr))
 	}
