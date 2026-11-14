@@ -4199,6 +4199,54 @@ try {
     throw new Error(`schedule duplicate saved state copy=${JSON.stringify(schedCopy)} orig=${JSON.stringify(schedOrig)}`);
   }
 
+  // Scheduler presets (#1495): the section lists the daemon catalog, Apply
+  // round-trips the checked ids through POST /v1/scheduler/presets, and the
+  // selection survives a reload (it is the daemon's persisted global state).
+  await waitFor(
+    "scheduler presets section with the cmake preset",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        text: (document.querySelector(".sched-presets") || {}).innerText || "",
+        box: !!document.getElementById("sched-preset-cmake"),
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: p.box && (p.text || "").includes("CMake"), ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    const box = document.getElementById("sched-preset-cmake");
+    if (!box.checked) box.click();
+    return box.checked;
+  })()`);
+  await evaluate(`document.getElementById("sched-presets-apply").click()`);
+  await waitFor(
+    "scheduler presets applied notice",
+    textProbe((body) => body.includes("Scheduler presets applied.")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const presetsAfter = await (
+    await fetch(`http://127.0.0.1:${port}/v1/scheduler/presets`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (!(presetsAfter.global?.Presets || []).includes("cmake")) {
+    throw new Error(`scheduler preset apply did not persist: ${JSON.stringify(presetsAfter.global)}`);
+  }
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await waitFor(
+    "app after reload for scheduler presets",
+    // The header Menu is gone (#1590); boot is "Run a command" like the other reloads.
+    textProbe((body) => body.includes("Run a command")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await runPalette("Schedule");
+  await waitFor(
+    "scheduler preset still checked after reload",
+    async () => ({
+      ok: (await evaluate(`(() => { const b = document.getElementById("sched-preset-cmake"); return !!b && b.checked; })()`)) === true,
+    }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
   if (strikeLog.includes(token)) {
     throw new Error("daemon log contains the smoke token");
   }
