@@ -49,7 +49,9 @@ pub enum MdAlign {
 pub enum MdBlock {
     Heading(u8, String),
     Paragraph(String),
-    Code(String),
+    /// Fenced code. `lang` is the fence info string as written (may be
+    /// empty); highlighting maps it through [`fence_language`] (#1575).
+    Code { lang: String, text: String },
     List(Vec<String>),
     Quote(String),
     Rule,
@@ -80,6 +82,84 @@ pub fn language_of(path: &str) -> &'static str {
         "sql" => "sql",
         _ => "text",
     }
+}
+
+/// Fences above this many lines or bytes stay plain (#1575): the
+/// transcript rebuilds every message on each streamed delta, so a huge
+/// pasted log must not become tens of thousands of spans. Mirrors the
+/// SourceView's `MAX_RENDER_LINES` cap.
+pub const FENCE_HIGHLIGHT_MAX_LINES: usize = 2000;
+pub const FENCE_HIGHLIGHT_MAX_BYTES: usize = 64 * 1024;
+
+/// Highlighter language for a Markdown fence info string (#1575): the
+/// first word (after any pandoc-style `{`/`.` prefix), lowercased,
+/// through the same table as file extensions ([`language_of`]) plus the
+/// common long names. Unknown → `"text"`.
+pub fn fence_language(info: &str) -> &'static str {
+    let word = info
+        .trim_start_matches(|c: char| c == '{' || c == '.')
+        .split(|c: char| c.is_whitespace() || c == ',' || c == '}')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match word.as_str() {
+        "" => "text",
+        "golang" => "go",
+        "rust" => "rust",
+        "javascript" => "js",
+        "typescript" => "ts",
+        "python" => "py",
+        "shell" => "sh",
+        _ => language_of(&format!("x.{word}")),
+    }
+}
+
+/// Per-line highlight tokens for a fenced block, or `None` when the
+/// fence language is unknown/plain or the block is over the size cap (it
+/// renders exactly as before). Lines split on `\n` only, so joining them
+/// back with `\n` reproduces `text`.
+pub fn fence_tokens(info: &str, text: &str) -> Option<Vec<Vec<Tok>>> {
+    let lang = fence_language(info);
+    if matches!(lang, "text" | "markdown") {
+        return None;
+    }
+    if text.len() > FENCE_HIGHLIGHT_MAX_BYTES
+        || text.bytes().filter(|b| *b == b'\n').count() >= FENCE_HIGHLIGHT_MAX_LINES
+    {
+        return None;
+    }
+    Some(text.split('\n').map(|line| highlight_line(lang, line)).collect())
+}
+
+/// Code body for a fence: the file SourceView's token spans (`ev-*`
+/// classes) when the language is known, else the plain text.
+pub fn highlighted_code(info: &str, text: &str) -> AnyView {
+    let Some(lines) = fence_tokens(info, text) else {
+        return text.to_string().into_any();
+    };
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(idx, toks)| {
+            let nl = if idx == 0 { "" } else { "\n" };
+            view! {
+                {nl}
+                {toks
+                    .into_iter()
+                    .map(|tok| {
+                        // Plain runs are bare text nodes, not empty spans.
+                        if tok.kind.is_empty() {
+                            tok.text.into_any()
+                        } else {
+                            let class = tok.kind;
+                            view! { <span class=class>{tok.text}</span> }.into_any()
+                        }
+                    })
+                    .collect_view()}
+            }
+        })
+        .collect_view()
+        .into_any()
 }
 
 pub fn lines_of(text: &str) -> Vec<&str> {
@@ -291,6 +371,202 @@ pub fn find_hits(text: &str, query: &str, opts: FindOptions) -> Vec<Hit> {
         }
     }
     hits
+}
+
+/// Byte index of the start of the line containing `byte` (clamped).
+fn line_start_of(text: &str, byte: usize) -> usize {
+    let byte = floor_boundary(text, byte);
+    text[..byte].rfind('\n').map(|i| i + 1).unwrap_or(0)
+}
+
+fn floor_boundary(text: &str, byte: usize) -> usize {
+    let mut byte = byte.min(text.len());
+    while byte > 0 && !text.is_char_boundary(byte) {
+        byte -= 1;
+    }
+    byte
+}
+
+/// Number of UTF-16 code units in `text[..byte]` — the offset space a
+/// textarea's `selectionStart`/`setSelectionRange` uses.
+pub fn byte_to_utf16(text: &str, byte: usize) -> usize {
+    let byte = floor_boundary(text, byte);
+    text[..byte].chars().map(|c| c.len_utf16()).sum()
+}
+
+/// 1-based (line, character column) for a byte offset in `text`.
+/// Column counts characters (not bytes or display cells), matching how
+/// users and agents quote positions (#1416 Q1 default).
+pub fn caret_ln_col(text: &str, byte: usize) -> (u32, u32) {
+    let byte = floor_boundary(text, byte);
+    let head = &text[..byte];
+    let line = head.matches('\n').count() as u32 + 1;
+    let col = head
+        .rsplit('\n')
+        .next()
+        .map(|tail| tail.chars().count() as u32 + 1)
+        .unwrap_or(1);
+    (line, col)
+}
+
+/// Indent unit detected from the file: a tab when most indented lines
+/// use tabs, otherwise the smallest leading-space run of two or more
+/// (so a file nested four deep still yields its one-level unit). Block
+/// comment continuations (` * text`) are ignored, and a 1-space run
+/// counts only when it is the only run. Fallback: two spaces (#1408 Q1
+/// default).
+pub fn detect_indent_unit(text: &str) -> String {
+    let (mut tab_lines, mut space_lines) = (0usize, 0usize);
+    let (mut best_multi, mut saw_single) = (None::<usize>, false);
+    for line in lines_of(text) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('*') {
+            continue;
+        }
+        if line.starts_with('\t') {
+            tab_lines += 1;
+            continue;
+        }
+        let spaces = line.len() - line.trim_start_matches(' ').len();
+        if spaces == 0 {
+            continue;
+        }
+        space_lines += 1;
+        if spaces == 1 {
+            saw_single = true;
+        } else {
+            best_multi = Some(best_multi.map_or(spaces, |b: usize| b.min(spaces)));
+        }
+    }
+    if tab_lines > space_lines {
+        return "\t".to_string();
+    }
+    match (best_multi, saw_single) {
+        (Some(n), _) => " ".repeat(n.min(8)),
+        (None, true) => " ".to_string(),
+        (None, false) => "  ".to_string(),
+    }
+}
+
+/// Apply Tab (`shift == false`) or Shift+Tab to `text` for the byte
+/// selection `start..end`. Returns the new text and byte selection, or
+/// `None` for an outdent that would change nothing (#1408).
+/// No selection + Tab inserts the unit at the caret (Q2 default); a
+/// selection, or any Shift+Tab, indents/outdents every line it spans.
+/// A selection ending exactly at a line start does not touch that line.
+pub fn apply_tab(
+    text: &str,
+    start: usize,
+    end: usize,
+    shift: bool,
+) -> Option<(String, usize, usize)> {
+    let start = floor_boundary(text, start);
+    let end = floor_boundary(text, end.max(start));
+    let unit = detect_indent_unit(text);
+    if !shift && start == end {
+        let mut out = String::with_capacity(text.len() + unit.len());
+        out.push_str(&text[..start]);
+        out.push_str(&unit);
+        out.push_str(&text[start..]);
+        let caret = start + unit.len();
+        return Some((out, caret, caret));
+    }
+    let first = line_start_of(text, start);
+    // Last spanned line: selection end, excluding a trailing line the
+    // selection only touches at its first byte.
+    let last_probe = if end > start && end > 0 && text.as_bytes()[end - 1] == b'\n' {
+        end - 1
+    } else {
+        end
+    };
+    let last = line_start_of(text, last_probe);
+    let spanned_end = text[last..]
+        .find('\n')
+        .map(|i| last + i)
+        .unwrap_or(text.len());
+    let mut new_start = start;
+    let mut new_end = end;
+    let mut out = String::with_capacity(text.len() + unit.len() * 4);
+    out.push_str(&text[..first]);
+    let mut line_off = first;
+    for (idx, line) in text[first..spanned_end].split('\n').enumerate() {
+        if idx > 0 {
+            out.push('\n');
+        }
+        if shift {
+            let removed = if line.starts_with('\t') {
+                1
+            } else if line.starts_with(' ') {
+                let spaces = line.len() - line.trim_start_matches(' ').len();
+                spaces.min(unit.len())
+            } else {
+                0
+            };
+            out.push_str(&line[removed..]);
+            if idx == 0 {
+                new_start = new_start.saturating_sub(removed).max(first);
+            }
+            // An end inside the removed whitespace moves back only to
+            // its line start, never into the previous line.
+            let shift_end = if line_off == last {
+                removed.min(end.saturating_sub(line_off))
+            } else {
+                removed
+            };
+            new_end = new_end.saturating_sub(shift_end);
+        } else {
+            out.push_str(&unit);
+            out.push_str(line);
+            if idx == 0 {
+                new_start += unit.len();
+            }
+            new_end += unit.len();
+        }
+        line_off += line.len() + 1;
+    }
+    out.push_str(&text[spanned_end..]);
+    if out == text {
+        return None;
+    }
+    new_start = new_start.min(out.len());
+    new_end = new_end.max(new_start).min(out.len());
+    Some((out, new_start, new_end))
+}
+
+/// Parse a go-to-line request against the loaded line count.
+/// Returns `(line, clamped)`; `None` for empty/non-numeric input or an
+/// empty file. Line 0 clamps to 1 (#1403).
+pub fn clamp_goto(input: &str, total_lines: usize) -> Option<(u32, bool)> {
+    if total_lines == 0 {
+        return None;
+    }
+    let parsed: u32 = input.trim().parse().ok()?;
+    if parsed == 0 {
+        return Some((1, true));
+    }
+    let total = total_lines as u32;
+    if parsed > total {
+        Some((total, true))
+    } else {
+        Some((parsed, false))
+    }
+}
+
+/// Byte offset of the start of 1-based `line` (clamped to the last line).
+pub fn line_start_byte(text: &str, line: u32) -> usize {
+    if line <= 1 {
+        return 0;
+    }
+    let mut seen = 1u32;
+    for (i, b) in text.bytes().enumerate() {
+        if b == b'\n' {
+            seen += 1;
+            if seen == line {
+                return i + 1;
+            }
+        }
+    }
+    text.len()
 }
 
 pub fn highlight_line(lang: &str, line: &str) -> Vec<Tok> {
@@ -726,7 +1002,8 @@ pub fn markdown_blocks(src: &str) -> Vec<MdBlock> {
             i += 1;
             continue;
         }
-        if trimmed.starts_with("```") {
+        if let Some(info) = trimmed.strip_prefix("```") {
+            let lang = info.trim().to_string();
             i += 1;
             let mut body = String::new();
             while i < lines.len() && !lines[i].trim().starts_with("```") {
@@ -739,7 +1016,7 @@ pub fn markdown_blocks(src: &str) -> Vec<MdBlock> {
             if i < lines.len() {
                 i += 1;
             }
-            blocks.push(MdBlock::Code(body));
+            blocks.push(MdBlock::Code { lang, text: body });
             continue;
         }
         if trimmed == "---" || trimmed == "***" {
@@ -966,15 +1243,60 @@ fn scroll_line_soon(line: u32) {
 }
 
 fn focus_search() {
+    focus_by_id("ev-search");
+}
+
+fn focus_goto() {
+    focus_by_id("ev-goto");
+}
+
+fn focus_by_id(id: &str) {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
-    let Some(el) = doc.get_element_by_id("ev-search") else {
+    let Some(el) = doc.get_element_by_id(id) else {
         return;
     };
     if let Some(html) = el.dyn_ref::<web_sys::HtmlElement>() {
         let _ = html.focus();
     }
+    if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
+        input.select();
+    }
+}
+
+fn focus_doc() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    if let Ok(Some(el)) = doc.query_selector(".ev-doc") {
+        if let Some(html) = el.dyn_ref::<web_sys::HtmlElement>() {
+            let _ = html.focus();
+        }
+    }
+}
+
+fn editor_textarea() -> Option<web_sys::HtmlTextAreaElement> {
+    let doc = web_sys::window()?.document()?;
+    doc.get_element_by_id("ev-editor")?.dyn_into::<web_sys::HtmlTextAreaElement>().ok()
+}
+
+/// Restore a byte selection on the editor textarea after Leptos has
+/// painted the new draft (deferred one tick, like `scroll_line_soon`).
+fn restore_selection_soon(text: String, start: usize, end: usize) {
+    let Some(w) = web_sys::window() else {
+        return;
+    };
+    let cb = Closure::<dyn FnMut()>::new(move || {
+        if let Some(ta) = editor_textarea() {
+            let _ = ta.focus();
+            let s = byte_to_utf16(&text, start) as u32;
+            let e = byte_to_utf16(&text, end) as u32;
+            let _ = ta.set_selection_range(s, e);
+        }
+    });
+    let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 0);
+    cb.forget();
 }
 
 #[derive(Deserialize)]
@@ -1081,7 +1403,7 @@ pub fn MarkdownView(text: String) -> impl IntoView {
                     }
                 }
                 MdBlock::Paragraph(text) => view! { <p><Inlines text=text /></p> }.into_any(),
-                MdBlock::Code(text) => view! { <pre>{text}</pre> }.into_any(),
+                MdBlock::Code { lang, text } => view! { <pre>{highlighted_code(&lang, &text)}</pre> }.into_any(),
                 MdBlock::Quote(text) => view! { <blockquote><Inlines text=text /></blockquote> }.into_any(),
                 MdBlock::List(items) => view! {
                     <ul>
@@ -1539,6 +1861,9 @@ pub fn DocumentPane(
     let diff_note = RwSignal::new(String::new());
     let reload_tick = RwSignal::new(0u32);
     let load_gen = RwSignal::new(0u32);
+    let cursor_pos = RwSignal::new((1u32, 1u32));
+    let goto_text = RwSignal::new(String::new());
+    let goto_note = RwSignal::new(String::new());
     let diff_gen = RwSignal::new(0u32);
     // Unsaved-edit guard (#1394): the navigation held back while a
     // dirty draft is open, whether applying it on Discard / after a
@@ -1677,6 +2002,9 @@ pub fn DocumentPane(
         editing.set(false);
         conflict.set(false);
         query.set(String::new());
+        cursor_pos.set((1, 1));
+        goto_text.set(String::new());
+        goto_note.set(String::new());
         // The diff belongs to the file it was fetched for (#1626): a
         // previous file's diff must never render under the new one,
         // not even while the new fetch is in flight or after it fails.
@@ -1860,6 +2188,69 @@ pub fn DocumentPane(
         });
     };
 
+    let do_goto = move || {
+        let raw = goto_text.get_untracked();
+        let is_editing = editing.get_untracked();
+        let text = if is_editing { draft.get_untracked() } else { content.get_untracked() };
+        let total = lines_of(&text).len();
+        if total == 0 {
+            goto_note.set("No lines loaded to go to.".into());
+            return;
+        }
+        let Some((line, clamped)) = clamp_goto(&raw, total) else {
+            goto_note.set("Enter a line number.".into());
+            return;
+        };
+        let suffix = if clamped { " (clamped)" } else { "" };
+        if is_editing {
+            let byte = line_start_byte(&text, line);
+            goto_note.set(format!("Line {line} of {total}{suffix}"));
+            cursor_pos.set(caret_ln_col(&text, byte));
+            restore_selection_soon(text, byte, byte);
+            return;
+        }
+        // SourceView raises its render window past `jump_line` (#1431),
+        // so a target beyond the first chunk still lands on a real row.
+        // An active search would win over `jump_line` in both the
+        // scroll effect and SourceView, and Markdown preview has no
+        // line rows, so the jump clears the query and shows source.
+        query.set(String::new());
+        preview.set(false);
+        goto_note.set(format!("Line {line} of {total}{suffix}"));
+        jump_line.set(line);
+    };
+
+    let sync_cursor = move || {
+        if let Some(ta) = editor_textarea() {
+            if let Ok(Some(end16)) = ta.selection_end() {
+                let text = draft.get_untracked();
+                let byte = crate::composer_triggers::utf16_to_byte(&text, end16 as usize);
+                cursor_pos.set(caret_ln_col(&text, byte));
+            }
+        }
+    };
+
+    let on_editor_keydown = move |ev: web_sys::KeyboardEvent| {
+        if ev.key() != "Tab" {
+            return;
+        }
+        ev.prevent_default();
+        ev.stop_propagation();
+        let Some(ta) = editor_textarea() else {
+            return;
+        };
+        let start16 = ta.selection_start().ok().flatten().unwrap_or(0) as usize;
+        let end16 = ta.selection_end().ok().flatten().unwrap_or(start16 as u32) as usize;
+        let text = draft.get_untracked();
+        let start = crate::composer_triggers::utf16_to_byte(&text, start16);
+        let end = crate::composer_triggers::utf16_to_byte(&text, end16);
+        if let Some((new_text, new_start, new_end)) = apply_tab(&text, start, end, ev.shift_key()) {
+            cursor_pos.set(caret_ln_col(&new_text, new_end));
+            draft.set(new_text.clone());
+            restore_selection_soon(new_text, new_start, new_end);
+        }
+    };
+
     // Guard Save arm (#1394): after the save flow settles, proceed
     // only when it actually landed — the draft is no longer dirty.
     // A conflict or an error leaves the draft dirty, so the held
@@ -1910,6 +2301,9 @@ pub fn DocumentPane(
         if cmd && key.eq_ignore_ascii_case("f") {
             ev.prevent_default();
             focus_search();
+        } else if cmd && key.eq_ignore_ascii_case("g") {
+            ev.prevent_default();
+            focus_goto();
         } else if cmd && key.eq_ignore_ascii_case("s") {
             ev.prevent_default();
             do_save();
@@ -2031,6 +2425,36 @@ pub fn DocumentPane(
                     aria-pressed=move || if whole_word.get() { "true" } else { "false" }
                     on:click=move |_| whole_word.update(|v| *v = !*v)
                 >"ab|"</button>
+                <input
+                    id="ev-goto"
+                    class="ev-goto"
+                    type="text"
+                    inputmode="numeric"
+                    placeholder="Line"
+                    aria-label="Go to line"
+                    prop:value=move || goto_text.get()
+                    on:input=move |ev| goto_text.set(event_target_value(&ev))
+                    on:keydown=move |ev: web_sys::KeyboardEvent| {
+                        if ev.key() == "Enter" {
+                            ev.prevent_default();
+                            ev.stop_propagation();
+                            do_goto();
+                        } else if ev.key() == "Escape" {
+                            // Dismiss the box only: Escape must not reach
+                            // the pane's edit-cancel and drop a draft.
+                            ev.prevent_default();
+                            ev.stop_propagation();
+                            goto_text.set(String::new());
+                            if editing.get_untracked() {
+                                focus_by_id("ev-editor");
+                            } else {
+                                focus_doc();
+                            }
+                        }
+                    }
+                />
+                <button type="button" class="secondary" data-ev-goto-go=true on:click=move |_| do_goto()>"Go"</button>
+                <span class="ev-goto-note" data-ev-goto-note="">{move || goto_note.get()}</span>
                 <button type="button" class="secondary" on:click=move |_| step(-1)>"Prev"</button>
                 <button type="button" class="secondary" on:click=move |_| step(1)>"Next"</button>
                 <button type="button" class="secondary" data-ev-back=true on:click=move |_| {
@@ -2191,11 +2615,18 @@ pub fn DocumentPane(
                 </Show>
                 <Show when=move || editing.get()>
                     <textarea
+                        id="ev-editor"
                         class="ev-editor"
                         aria-label="File editor"
                         spellcheck="false"
                         prop:value=move || draft.get()
-                        on:input=move |ev| draft.set(event_target_value(&ev))
+                        on:input=move |ev| {
+                            draft.set(event_target_value(&ev));
+                            sync_cursor();
+                        }
+                        on:keydown=on_editor_keydown
+                        on:keyup=move |_| sync_cursor()
+                        on:click=move |_| sync_cursor()
                     ></textarea>
                 </Show>
                 <Show when=move || show_diff.get()>
@@ -2206,6 +2637,12 @@ pub fn DocumentPane(
                 </Show>
             </div>
             <div class="ev-tools">
+                <Show when=move || editing.get()>
+                    <span class="ev-status" data-ev-cursor="">{move || {
+                        let (ln, col) = cursor_pos.get();
+                        format!("Ln {ln}, Col {col}")
+                    }}</span>
+                </Show>
                 <Show when=move || is_dirty(editing.get(), &draft.get(), &content.get())>
                     <span class="ev-dirty" data-ev-dirty=true>"Unsaved changes"</span>
                 </Show>
@@ -2219,6 +2656,7 @@ pub fn DocumentPane(
                         draft.set(content.get());
                         conflict.set(false);
                         preview.set(false);
+                        cursor_pos.set((1, 1));
                         editing.set(true);
                     }
                 >"Edit"</button>
@@ -2414,6 +2852,67 @@ mod tests {
     }
 
     #[test]
+    fn markdown_fence_keeps_its_language() {
+        let blocks = markdown_blocks("```rust title=x\nfn main() {}\n```\n");
+        assert_eq!(
+            blocks[0],
+            MdBlock::Code { lang: "rust title=x".into(), text: "fn main() {}".into() }
+        );
+    }
+
+    #[test]
+    fn fence_language_maps_info_strings() {
+        for (info, want) in [
+            ("go", "go"),
+            ("golang", "go"),
+            ("Rust", "rust"),
+            ("rs", "rust"),
+            ("rust,ignore", "rust"),
+            ("javascript", "js"),
+            ("tsx", "ts"),
+            ("python", "py"),
+            ("bash", "sh"),
+            ("shell", "sh"),
+            ("sql", "sql"),
+            ("", "text"),
+            ("mermaid", "text"),
+            ("{.python}", "py"),
+            ("{r}", "text"),
+        ] {
+            assert_eq!(fence_language(info), want, "info {info:?}");
+        }
+    }
+
+    #[test]
+    fn fence_tokens_highlight_known_and_skip_unknown() {
+        let text = "func main() {\n\treturn \"hi\" // done\n}\n";
+        let lines = fence_tokens("go", text).expect("go is known");
+        assert!(lines[0].iter().any(|t| t.kind == "ev-kw" && t.text == "func"));
+        assert!(lines[1].iter().any(|t| t.kind == "ev-str"));
+        assert!(lines[1].iter().any(|t| t.kind == "ev-com"));
+        // Rejoining reproduces the text byte-for-byte, trailing newline too.
+        let joined = lines
+            .iter()
+            .map(|l| l.iter().map(|t| t.text.as_str()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(joined, text);
+        assert!(fence_tokens("", text).is_none(), "no language stays plain");
+        assert!(fence_tokens("mermaid", text).is_none());
+        assert!(fence_tokens("markdown", text).is_none());
+    }
+
+    #[test]
+    fn oversized_fences_stay_plain() {
+        let many_lines = "x\n".repeat(FENCE_HIGHLIGHT_MAX_LINES);
+        assert!(fence_tokens("go", &many_lines).is_none());
+        let big = "a".repeat(FENCE_HIGHLIGHT_MAX_BYTES + 1);
+        assert!(fence_tokens("go", &big).is_none());
+        let fine = "func a() {}\n".repeat(10);
+        assert!(fence_tokens("go", &fine).is_some());
+    }
+
+    #[test]
     fn highlight_go_keywords_strings_and_comments() {
         let toks = highlight_line("go", "func main() { return \"hi\" } // note");
         assert!(toks.iter().any(|t| t.kind == "ev-kw" && t.text == "func"));
@@ -2429,7 +2928,7 @@ mod tests {
         assert!(matches!(blocks[0], MdBlock::Heading(1, ref t) if t == "Title"));
         assert!(matches!(blocks[1], MdBlock::Paragraph(ref t) if t.contains("**bold**")));
         assert!(matches!(blocks[2], MdBlock::List(ref items) if items.len() == 2));
-        assert!(matches!(blocks[3], MdBlock::Code(ref t) if t == "func"));
+        assert!(matches!(blocks[3], MdBlock::Code { ref lang, ref text } if lang.is_empty() && text == "func"));
         assert!(matches!(blocks[4], MdBlock::Quote(ref t) if t == "quoted"));
         let inline = inline_parse("**bold** and [x](javascript:alert(1)) [ok](https://example.com)");
         assert!(inline.iter().any(|p| matches!(p, Inline::Strong(t) if t == "bold")));
@@ -2577,6 +3076,100 @@ mod tests {
         assert_eq!(sha, "abc");
         assert_eq!(mt, "5");
         assert!(conflict_token("HTTP 400 {\"error\":\"nope\"}").is_none());
+    }
+
+    #[test]
+    fn tab_inserts_detected_unit_at_caret() {
+        // No indented lines yet: fallback is two spaces, inserted at caret.
+        let (out, s, e) = apply_tab("ab\ncd", 1, 1, false).unwrap();
+        assert_eq!(out, "a  b\ncd");
+        assert_eq!((s, e), (3, 3));
+        // File indented with four spaces: unit follows the file.
+        let (out, s, _) = apply_tab("x\n    y\nz", 0, 0, false).unwrap();
+        assert_eq!(out, "    x\n    y\nz");
+        assert_eq!(s, 4);
+        // Tab-indented file: unit is a literal tab (caret at line 2 start).
+        let (out, _, _) = apply_tab("\tx\ny", 3, 3, false).unwrap();
+        assert_eq!(out, "\tx\n\ty");
+    }
+
+    #[test]
+    fn indent_unit_ignores_comment_continuations_and_minority_tabs() {
+        let cases = [
+            ("a\n  b\n    c", "  "),
+            // JSDoc continuation lines (` * x`) do not make the unit 1.
+            ("/**\n * doc\n */\nf() {\n  x;\n}", "  "),
+            // One pasted tab line does not flip a space-indented file.
+            ("a\n    b\n    c\n\td", "    "),
+            ("a\n\tb\n\tc\n  d", "\t"),
+            // A lone 1-space run is honoured when it is the only run.
+            ("a\n b\n c", " "),
+            ("no indent", "  "),
+        ];
+        for (text, want) in cases {
+            assert_eq!(detect_indent_unit(text), want, "text {text:?}");
+        }
+    }
+
+    #[test]
+    fn tab_indents_selection_and_shift_tab_outdents() {
+        let text = "one\ntwo\nthree\n";
+        // Select all of lines 2-3 ("two\nthree", bytes 4..13).
+        let (out, s, e) = apply_tab(text, 4, 13, false).unwrap();
+        assert_eq!(out, "one\n  two\n  three\n");
+        assert_eq!(&out[s..e], "two\n  three");
+        let (back, _, _) = apply_tab(&out, s, e, true).unwrap();
+        assert_eq!(back, text);
+        // Selection ending at a line start does not indent that line.
+        let (out, _, _) = apply_tab(text, 0, 4, false).unwrap();
+        assert_eq!(out, "  one\ntwo\nthree\n");
+        // An end inside the last line's removed indent stops at that
+        // line's start instead of sliding into the previous line.
+        let (out, s, e) = apply_tab("  a\n  b", 0, 5, true).unwrap();
+        assert_eq!(out, "a\nb");
+        assert_eq!((s, e), (0, 2));
+        // Shift+Tab with no selection outdents only the caret line.
+        let (out, s, _) = apply_tab("  one\n  two\n", 8, 8, true).unwrap();
+        assert_eq!(out, "  one\ntwo\n");
+        assert_eq!(s, 6);
+        // Outdent at line start is a no-op.
+        assert!(apply_tab("one\ntwo", 0, 0, true).is_none());
+        assert!(apply_tab("one\ntwo", 4, 7, true).is_none());
+    }
+
+    #[test]
+    fn caret_ln_col_counts_characters() {
+        assert_eq!(caret_ln_col("", 0), (1, 1));
+        assert_eq!(caret_ln_col("abc", 0), (1, 1));
+        assert_eq!(caret_ln_col("abc", 3), (1, 4));
+        assert_eq!(caret_ln_col("ab\ncd", 3), (2, 1));
+        assert_eq!(caret_ln_col("ab\ncd", 5), (2, 3));
+        assert_eq!(caret_ln_col("ab\n", 3), (2, 1));
+        // Multi-byte: column and offsets are characters, not bytes.
+        let text = "éé\nx";
+        assert_eq!(caret_ln_col(text, 4), (1, 3));
+        assert_eq!(caret_ln_col(text, text.len()), (2, 2));
+        // Out-of-range offsets clamp.
+        assert_eq!(caret_ln_col("ab", 99), (1, 3));
+        assert_eq!(byte_to_utf16("éx", 2), 1);
+        assert_eq!(byte_to_utf16("éx", 3), 2);
+    }
+
+    #[test]
+    fn goto_clamps_and_line_starts() {
+        assert_eq!(clamp_goto("3", 5), Some((3, false)));
+        assert_eq!(clamp_goto(" 42 ", 5), Some((5, true)));
+        assert_eq!(clamp_goto("0", 5), Some((1, true)));
+        assert_eq!(clamp_goto("", 5), None);
+        assert_eq!(clamp_goto("x", 5), None);
+        assert_eq!(clamp_goto("3", 0), None);
+        let text = "a\nbb\nccc";
+        assert_eq!(line_start_byte(text, 1), 0);
+        assert_eq!(line_start_byte(text, 2), 2);
+        assert_eq!(line_start_byte(text, 3), 5);
+        assert_eq!(line_start_byte(text, 99), text.len());
+        assert_eq!(detect_indent_unit("a\n  b\n    c"), "  ");
+        assert_eq!(detect_indent_unit("plain"), "  ");
     }
 
     #[test]
