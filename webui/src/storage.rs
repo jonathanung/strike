@@ -1,5 +1,7 @@
 //! Memory, knowledge, and artifact panels. feature:storage
 
+use std::rc::Rc;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
@@ -209,6 +211,50 @@ struct ArtifactList {
     artifacts: Vec<ArtifactMeta>,
 }
 
+/// Explicit page size for the artifacts list (issue #1456, Q1 recommended
+/// default): the server's own default, so small lists are unchanged and
+/// "Show more" only appears where rows previously vanished silently.
+const ARTIFACT_PAGE_SIZE: usize = 100;
+
+/// Registered built-in artifact types offered by the type filter.
+/// This must match the store's `ValidType` set exactly: the server
+/// rejects an unknown `type` filter with an error, so offering a type
+/// that is not registered yet (e.g. `session_report`, mentioned in
+/// #1456 as arriving with #1444 but not registered on this main)
+/// would break the list instead of filtering it.
+const ARTIFACT_TYPES: &[&str] = &["plan", "contract", "findings", "patch", "test_report"];
+
+/// Build the server-filtered artifacts list path. `type` is only sent
+/// when a filter is selected; `limit`/`offset` are always explicit so
+/// paging is honest rather than relying on the server's silent cap.
+fn artifacts_list_path(root: &str, type_filter: &str, limit: usize, offset: usize) -> String {
+    let mut path = format!(
+        "/v1/artifacts?actorSession={}&actorRoot={}&limit={}&offset={}",
+        crate::api::js_encode(root),
+        crate::api::js_encode(root),
+        limit,
+        offset
+    );
+    if !type_filter.is_empty() {
+        path.push_str(&format!("&type={}", crate::api::js_encode(type_filter)));
+    }
+    path
+}
+
+/// A page is possibly truncated only when it came back exactly full;
+/// the API returns no total, so nothing stronger may be claimed.
+fn artifact_page_has_more(returned: usize, limit: usize) -> bool {
+    limit > 0 && returned == limit
+}
+
+/// Append a "Show more" page, skipping ids already listed. The list is
+/// ordered by updatedAt desc, so an artifact updated between page loads
+/// shifts the offset window and would otherwise be listed twice.
+fn append_artifact_page(cur: &mut Vec<ArtifactMeta>, page: Vec<ArtifactMeta>) {
+    let seen: std::collections::HashSet<String> = cur.iter().map(|a| a.id.clone()).collect();
+    cur.extend(page.into_iter().filter(|a| !seen.contains(&a.id)));
+}
+
 #[derive(Clone, Deserialize, Default)]
 struct ArtifactDetail {
     id: String,
@@ -231,6 +277,108 @@ struct FileBody {
     notice: String,
     #[serde(rename = "Skip", alias = "skip", default)]
     skip: bool,
+}
+
+/// Lower-cased, trimmed query shared by the storage list filters
+/// (#1461/#1469). An empty query matches everything.
+fn norm_query(raw: &str) -> String {
+    raw.trim().to_lowercase()
+}
+
+/// The author a memory row displays: the stored value, or "unknown"
+/// when the store left it blank (same fallback the row rendering uses).
+fn entry_author(entry: &MemoryEntry) -> &str {
+    if entry.author.is_empty() {
+        "unknown"
+    } else {
+        &entry.author
+    }
+}
+
+/// Memory filter (#1461): case-insensitive substring over key, value
+/// and tags, plus an exact author filter ("all" = no author filter).
+/// Pure over the already-loaded list — no server query is implied.
+fn memory_matches(entry: &MemoryEntry, query: &str, author: &str) -> bool {
+    if author != "all" && entry_author(entry) != author {
+        return false;
+    }
+    if query.is_empty() {
+        return true;
+    }
+    entry.key.to_lowercase().contains(query)
+        || entry.value.to_lowercase().contains(query)
+        || entry.tags.iter().any(|t| t.to_lowercase().contains(query))
+}
+
+fn filtered_memory(
+    entries: &[MemoryEntry],
+    raw_query: &str,
+    author: &str,
+) -> Vec<MemoryEntry> {
+    let query = norm_query(raw_query);
+    entries
+        .iter()
+        .filter(|e| memory_matches(e, &query, author))
+        .cloned()
+        .collect()
+}
+
+/// Knowledge filter (#1469): case-insensitive substring over the fields
+/// each pin row already renders — path, note and author.
+fn pin_matches(pin: &KnowledgePin, query: &str) -> bool {
+    query.is_empty()
+        || pin.path.to_lowercase().contains(query)
+        || pin.note.to_lowercase().contains(query)
+        || pin.author.to_lowercase().contains(query)
+}
+
+fn filtered_pins(pins: &[KnowledgePin], raw_query: &str) -> Vec<KnowledgePin> {
+    let query = norm_query(raw_query);
+    pins.iter()
+        .filter(|p| pin_matches(p, &query))
+        .cloned()
+        .collect()
+}
+
+/// Download extension + MIME for an artifact kind (#1453): Markdown
+/// kinds get `.md`, patches get `.patch`, everything else `.txt`.
+fn artifact_extension(kind: &str) -> (&'static str, &'static str) {
+    match kind.trim().to_lowercase().as_str() {
+        "markdown" | "md" | "plan" | "findings" | "test_report" | "contract" | "report"
+        | "session_report" => ("md", "text/markdown"),
+        "patch" | "diff" => ("patch", "text/plain"),
+        _ => ("txt", "text/plain"),
+    }
+}
+
+/// Filename stem from free text: keep alphanumerics, `-` and `_`,
+/// collapse every other run to one `-`, trim edge dashes, cap length.
+fn sanitize_filename_stem(raw: &str) -> String {
+    let mut stem = String::new();
+    for ch in raw.chars() {
+        if ch.is_alphanumeric() || ch == '-' || ch == '_' {
+            stem.push(ch);
+        } else if !stem.is_empty() && !stem.ends_with('-') {
+            stem.push('-');
+        }
+    }
+    let stem = stem.trim_matches('-');
+    stem.chars().take(80).collect::<String>().trim_matches('-').to_string()
+}
+
+/// Download filename for the displayed artifact version (#1453):
+/// sanitised title, falling back to kind + id when the title yields
+/// nothing usable — never a bare artifact id alone.
+fn artifact_download_name(title: &str, kind: &str, id: &str) -> String {
+    let mut stem = sanitize_filename_stem(title);
+    if stem.is_empty() {
+        stem = sanitize_filename_stem(&format!("{kind}-{id}"));
+    }
+    if stem.is_empty() {
+        stem = "artifact".to_string();
+    }
+    let (ext, _) = artifact_extension(kind);
+    format!("{stem}.{ext}")
 }
 
 #[component]
@@ -260,12 +408,24 @@ pub fn StoragePanel(
     let selected = RwSignal::new(String::new());
     let pin_loading = RwSignal::new(false);
     let artifact_loading = RwSignal::new(false);
+    let artifact_type_filter = RwSignal::new(String::new());
+    let artifact_has_more = RwSignal::new(false);
+    let artifact_loading_more = RwSignal::new(false);
     let artifact_label = RwSignal::new(String::new());
     let list_loading = RwSignal::new(false);
     let list_epoch = RwSignal::new(LoadEpoch::new());
     let pin_epoch = RwSignal::new(LoadEpoch::new());
     let artifact_epoch = RwSignal::new(LoadEpoch::new());
     let list_key = RwSignal::new(String::new());
+    // Client-only list filters (#1461/#1469): never persisted, so a
+    // returning visit never starts with entries silently hidden.
+    let memory_query = RwSignal::new(String::new());
+    let memory_author = RwSignal::new("all".to_string());
+    let knowledge_query = RwSignal::new(String::new());
+    // Copy feedback for the artifact detail actions (#1453), using the
+    // transcript copy-label idiom: None = "Copy", Some(true) = "Copied",
+    // Some(false) = "Copy failed".
+    let artifact_copy_state = RwSignal::new(None::<bool>);
     let exporting = RwSignal::new(false);
     let exported = RwSignal::new(String::new());
     // Memory import (#1541). `import_text` is the exact file/paste text;
@@ -287,7 +447,8 @@ pub fn StoragePanel(
             root.get_untracked(),
             scope.get_untracked(),
         );
-        let key = format!("{tab_now}|{scope_now}|{root_now}");
+        let filter_now = artifact_type_filter.get_untracked();
+        let key = format!("{tab_now}|{scope_now}|{root_now}|{filter_now}");
         let gen = begin(list_epoch);
         list_loading.set(true);
         if list_key.get_untracked() != key {
@@ -303,6 +464,8 @@ pub fn StoragePanel(
             artifact_label.set(String::new());
             pin_loading.set(false);
             artifact_loading.set(false);
+            artifact_has_more.set(false);
+            artifact_loading_more.set(false);
             let _ = begin(pin_epoch);
             let _ = begin(artifact_epoch);
             list_key.set(key.clone());
@@ -314,7 +477,7 @@ pub fn StoragePanel(
             } else if tab_now == "knowledge" {
                 load_knowledge(&b, &t, &scope_now).await
             } else if tab_now == "artifacts" {
-                load_artifacts(&b, &t, &root_now).await
+                load_artifacts(&b, &t, &root_now, &filter_now, ARTIFACT_PAGE_SIZE, 0).await
             } else {
                 return;
             };
@@ -332,6 +495,10 @@ pub fn StoragePanel(
                     } else if tab_now == "knowledge" {
                         pins.set(loaded.pins);
                     } else {
+                        artifact_has_more.set(artifact_page_has_more(
+                            loaded.artifacts.len(),
+                            ARTIFACT_PAGE_SIZE,
+                        ));
                         artifacts.set(loaded.artifacts);
                     }
                     list_key.set(key);
@@ -346,11 +513,61 @@ pub fn StoragePanel(
 
     Effect::new(move |_| {
         let tab = tab.get();
-        let _ = (scope.get(), root.get(), storage_rev.get());
+        let _ = (
+            scope.get(),
+            root.get(),
+            storage_rev.get(),
+            artifact_type_filter.get(),
+        );
         if tab == "memory" || tab == "knowledge" || tab == "artifacts" {
             reload();
         }
     });
+
+    // Append the next artifacts page. This is a continuation of the
+    // current list load, not a new selection: snapshot the list epoch
+    // token instead of beginning a new load, so a filter/tab change
+    // that begins a real reload drops a stale append.
+    let load_more_artifacts = move || {
+        if artifact_loading_more.get_untracked()
+            || list_loading.get_untracked()
+            || !artifact_has_more.get_untracked()
+        {
+            return;
+        }
+        let offset = artifacts.get_untracked().len();
+        let (b, t, root_now) = (
+            base.get_untracked(),
+            token.get_untracked(),
+            root.get_untracked(),
+        );
+        let filter_now = artifact_type_filter.get_untracked();
+        let gen = list_epoch.with_untracked(|epoch| epoch.token());
+        artifact_loading_more.set(true);
+        spawn_local(async move {
+            let result =
+                load_artifacts(&b, &t, &root_now, &filter_now, ARTIFACT_PAGE_SIZE, offset).await;
+            if !list_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                artifact_loading_more.set(false);
+                return;
+            }
+            artifact_loading_more.set(false);
+            match result {
+                Ok(loaded) => {
+                    error.set(String::new());
+                    artifact_has_more.set(artifact_page_has_more(
+                        loaded.artifacts.len(),
+                        ARTIFACT_PAGE_SIZE,
+                    ));
+                    artifacts.update(|cur| append_artifact_page(cur, loaded.artifacts));
+                }
+                // Keep the rows already shown and the Show more control
+                // (has_more stays true) so the user can retry; surface
+                // the failure instead of silently dropping the page.
+                Err(e) => error.set(e),
+            }
+        });
+    };
 
     let save_memory = move || {
         let key = key_in.get_untracked().trim().to_string();
@@ -633,6 +850,7 @@ pub fn StoragePanel(
         };
         artifact_label.set(label);
         detail.set(None);
+        artifact_copy_state.set(None);
         artifact_loading.set(true);
         error.set(String::new());
         let (b, t, root) = (
@@ -685,6 +903,7 @@ pub fn StoragePanel(
                     artifact_label.set(String::new());
                     pin_loading.set(false);
                     artifact_loading.set(false);
+                    artifact_copy_state.set(None);
                     key_in.set(String::new());
                     value_in.set(String::new());
                 }
@@ -831,14 +1050,62 @@ pub fn StoragePanel(
                 <Show when=move || !audit.get().is_empty()>
                     <p class="hint storage-path">"Audit " {move || audit.get()}</p>
                 </Show>
+                <div class="storage-filter">
+                    <input
+                        class="search storage-search storage-search-memory"
+                        type="search"
+                        placeholder="Search key, value, or tags"
+                        aria-label="Search memory entries"
+                        prop:value=move || memory_query.get()
+                        on:input=move |ev| memory_query.set(event_target_value(&ev))
+                    />
+                    <p class="hint storage-count" aria-live="polite">
+                        {move || {
+                            let all = entries.get();
+                            let visible = filtered_memory(&all, &memory_query.get(), &memory_author.get()).len();
+                            format!("{visible} of {} entries", all.len())
+                        }}
+                    </p>
+                </div>
+                {move || {
+                    let mut authors: Vec<String> = entries.get().iter().map(|e| entry_author(e).to_string()).collect();
+                    authors.sort();
+                    authors.dedup();
+                    if authors.is_empty() {
+                        // No rows yet: no author filter to offer (the
+                        // "Nothing stored" empty state below covers it).
+                        return view! { <span></span> }.into_any();
+                    }
+                    view! {
+                        <div class="chips" role="group" aria-label="Memory author filter">
+                            <button type="button" class=move || if memory_author.get() == "all" { "chip on" } else { "chip" }
+                                on:click=move |_| memory_author.set("all".into())>"All"</button>
+                            {authors.into_iter().map(|author| {
+                                let click_author = author.clone();
+                                let class_author = author.clone();
+                                view! {
+                                    <button type="button" class=move || if memory_author.get() == class_author { "chip on" } else { "chip" }
+                                        on:click=move |_| memory_author.set(click_author.clone())>{author.clone()}</button>
+                                }
+                            }).collect_view()}
+                        </div>
+                    }.into_any()
+                }}
                 <Show when=move || entries.get().is_empty() && error.get().is_empty() && !list_loading.get()>
                     <div class="empty-state">
                         <strong>"Nothing stored in this scope"</strong>
                         <p>"Save a key here. Tagged entries survive restarts and are read when a session starts."</p>
                     </div>
                 </Show>
+                <Show when=move || !entries.get().is_empty() && filtered_memory(&entries.get(), &memory_query.get(), &memory_author.get()).is_empty()>
+                    <div class="empty-state" data-memory-filtered-empty="true">
+                        <strong>"No memory entries match — clear search"</strong>
+                        <p>"No stored entry matches the current search and author filter. The Save form above still works."</p>
+                        <button type="button" class="secondary" on:click=move |_| { memory_query.set(String::new()); memory_author.set("all".into()); }>"Clear search"</button>
+                    </div>
+                </Show>
                 <ul class="plain">
-                    {move || entries.get().into_iter().map(|entry| {
+                    {move || filtered_memory(&entries.get(), &memory_query.get(), &memory_author.get()).into_iter().map(|entry| {
                         let key = entry.key.clone();
                         let key_fill = key.clone();
                         let value = entry.value.clone();
@@ -882,7 +1149,15 @@ pub fn StoragePanel(
                                     <span class="path">{format!("{author} · {tags}")}</span>
                                     <span class="path">{when}</span>
                                 </button>
-                                <button type="button" class="secondary" on:click=move |_| delete_memory(del.clone())>"Delete"</button>
+                                <button type="button" class="secondary" data-action="delete-memory" on:click=move |_| {
+                                    let del2 = del.clone();
+                                    if !crate::confirm::ask(
+                                        memory_delete_confirm(&del, &scope.get_untracked()),
+                                        Rc::new(move || delete_memory(del2.clone())),
+                                    ) {
+                                        error.set(crate::confirm::BUSY.into());
+                                    }
+                                }>"Delete"</button>
                             </li>
                         }
                     }).collect_view()}
@@ -898,14 +1173,38 @@ pub fn StoragePanel(
                 <Show when=move || !markdown.get().is_empty()>
                     <p class="hint storage-path">"Plain file " {move || markdown.get()}</p>
                 </Show>
+                <div class="storage-filter">
+                    <input
+                        class="search storage-search storage-search-knowledge"
+                        type="search"
+                        placeholder="Search path, note, or author"
+                        aria-label="Search knowledge pins"
+                        prop:value=move || knowledge_query.get()
+                        on:input=move |ev| knowledge_query.set(event_target_value(&ev))
+                    />
+                    <p class="hint storage-count" aria-live="polite">
+                        {move || {
+                            let all = pins.get();
+                            let visible = filtered_pins(&all, &knowledge_query.get()).len();
+                            format!("{visible} of {} pins", all.len())
+                        }}
+                    </p>
+                </div>
                 <Show when=move || pins.get().is_empty() && error.get().is_empty() && !list_loading.get()>
                     <div class="empty-state">
                         <strong>"No pinned paths"</strong>
                         <p>"Pin a doc or path the agent should know about across sessions."</p>
                     </div>
                 </Show>
+                <Show when=move || !pins.get().is_empty() && filtered_pins(&pins.get(), &knowledge_query.get()).is_empty()>
+                    <div class="empty-state" data-knowledge-filtered-empty="true">
+                        <strong>"No pins match — clear search"</strong>
+                        <p>"No pinned path matches the current search. The Pin form above still works."</p>
+                        <button type="button" class="secondary" on:click=move |_| knowledge_query.set(String::new())>"Clear search"</button>
+                    </div>
+                </Show>
                 <ul class="plain">
-                    {move || pins.get().into_iter().map(|pin| {
+                    {move || filtered_pins(&pins.get(), &knowledge_query.get()).into_iter().map(|pin| {
                         let path = pin.path.clone();
                         let path_open = path.clone();
                         let path_del = path.clone();
@@ -934,10 +1233,37 @@ pub fn StoragePanel(
             </Show>
             <Show when=move || tab.get() == "artifacts">
                 <p class="hint">"Version is the CAS token. Older bodies stay on the same artifact, up to the last 20. Content is scrubbed before it is stored."</p>
-                <Show when=move || artifacts.get().is_empty() && error.get().is_empty() && !list_loading.get()>
+                <div class="chips" role="group" aria-label="Artifact type filter">
+                    <button type="button" class=move || if artifact_type_filter.get().is_empty() { "chip on" } else { "chip" }
+                        on:click=move |_| artifact_type_filter.set(String::new())>"All"</button>
+                    {ARTIFACT_TYPES.iter().copied().map(|kind| {
+                        view! {
+                            <button type="button" class=move || if artifact_type_filter.get() == kind { "chip on" } else { "chip" }
+                                on:click=move |_| artifact_type_filter.set(kind.to_string())>{kind}</button>
+                        }
+                    }).collect_view()}
+                </div>
+                <Show when=move || !artifacts.get().is_empty()>
+                    <p class="hint">{move || {
+                        let n = artifacts.get().len();
+                        if artifact_has_more.get() {
+                            format!("Showing {n} artifacts — more available")
+                        } else {
+                            format!("Showing {n} artifacts")
+                        }
+                    }}</p>
+                </Show>
+                <Show when=move || artifacts.get().is_empty() && artifact_type_filter.get().is_empty() && error.get().is_empty() && !list_loading.get()>
                     <div class="empty-state">
                         <strong>"No artifacts for this session"</strong>
                         <p>"When an agent writes a findings, patch, or test report, it shows up here."</p>
+                    </div>
+                </Show>
+                <Show when=move || artifacts.get().is_empty() && !artifact_type_filter.get().is_empty() && error.get().is_empty() && !list_loading.get()>
+                    <div class="empty-state">
+                        <strong>"No artifacts of this type — clear filter"</strong>
+                        <p>{move || format!("Nothing of type {} for this session.", artifact_type_filter.get())}</p>
+                        <button type="button" class="secondary" on:click=move |_| artifact_type_filter.set(String::new())>"Clear filter"</button>
                     </div>
                 </Show>
                 <ul class="plain">
@@ -957,6 +1283,12 @@ pub fn StoragePanel(
                         }
                     }).collect_view()}
                 </ul>
+                <Show when=move || artifact_has_more.get() && !artifacts.get().is_empty()>
+                    <button type="button" class="secondary" prop:disabled=move || artifact_loading_more.get()
+                        on:click=move |_| load_more_artifacts()>
+                        {move || if artifact_loading_more.get() { "Loading…" } else { "Show more" }}
+                    </button>
+                </Show>
                 <Show when=move || artifact_loading.get()>
                     <p class="hint">{move || format!("Loading {}…", artifact_label.get())}</p>
                 </Show>
@@ -969,6 +1301,10 @@ pub fn StoragePanel(
                     let body = art.content.clone();
                     let heading = if art.title.is_empty() { art.kind.clone() } else { art.title.clone() };
                     let ident = format!("{} · v{}", art.id, art.version);
+                    let copy_body = body.clone();
+                    let dl_body = body.clone();
+                    let dl_name = artifact_download_name(&art.title, &art.kind, &art.id);
+                    let dl_mime = artifact_extension(&art.kind).1;
                     view! {
                         <div class="storage-detail">
                             <strong>{heading}</strong>
@@ -981,12 +1317,47 @@ pub fn StoragePanel(
                                     view! { <button type="button" class=klass on:click=move |_| open_artifact(id_v.clone(), v)>{format!("v{v}")}</button> }
                                 }).collect_view()}
                             </div>
+                            <div class="storage-detail-actions">
+                                <button type="button" class="secondary" title="Copy the displayed version's content"
+                                    on:click=move |_| {
+                                        let text = copy_body.clone();
+                                        spawn_local(async move {
+                                            let ok = crate::clipboard::copy_text(&text).await.is_ok();
+                                            artifact_copy_state.set(Some(ok));
+                                            crate::clipboard::after_ms(2_000, move || artifact_copy_state.set(None));
+                                        });
+                                    }>
+                                    {move || crate::clipboard::transcript_copy_label(artifact_copy_state.get())}
+                                </button>
+                                <button type="button" class="secondary" title="Download the displayed version's content"
+                                    on:click=move |_| {
+                                        crate::transcript_view::save_download(&dl_name, dl_mime, &dl_body);
+                                    }>
+                                    "Download"
+                                </button>
+                            </div>
                             <pre class="storage-preview">{body}</pre>
                         </div>
                     }
                 })}
             </Show>
         </div>
+    }
+}
+
+/// Confirm copy for Memory Delete (#1554). Deleting a memory entry is
+/// permanent with no undo or trash, so the shared confirm dialog
+/// (`crate::confirm`) gates it and names the entry and its scope.
+/// Knowledge Unpin stays single-click in this slice: a pin is a
+/// re-creatable path reference, not stored content.
+pub fn memory_delete_confirm(key: &str, scope: &str) -> crate::confirm::ConfirmRequest {
+    let scope_label = if scope == "global" { "global" } else { "project" };
+    crate::confirm::ConfirmRequest {
+        title: format!("Delete memory \u{201c}{key}\u{201d}?"),
+        body: format!(
+            "This permanently removes the {scope_label} memory entry \u{201c}{key}\u{201d}. It cannot be undone; re-creating it means retyping its value and tags."
+        ),
+        confirm_label: "Delete memory".into(),
     }
 }
 
@@ -1019,15 +1390,18 @@ async fn load_knowledge(base: &str, token: &str, scope: &str) -> Result<Loaded, 
     })
 }
 
-async fn load_artifacts(base: &str, token: &str, root: &str) -> Result<Loaded, String> {
+async fn load_artifacts(
+    base: &str,
+    token: &str,
+    root: &str,
+    type_filter: &str,
+    limit: usize,
+    offset: usize,
+) -> Result<Loaded, String> {
     if root.is_empty() {
         return Err("No live session yet. Artifacts are listed for the open session.".into());
     }
-    let path = format!(
-        "/v1/artifacts?actorSession={}&actorRoot={}",
-        crate::api::js_encode(root),
-        crate::api::js_encode(root)
-    );
+    let path = artifacts_list_path(root, type_filter, limit, offset);
     let list = get_json::<ArtifactList>(base, token, &path).await?;
     Ok(Loaded {
         artifacts: list.artifacts,
@@ -1122,6 +1496,152 @@ mod tests {
         assert_eq!(memory_import_count(r#"{"imported":3}"#), Some(3));
         assert_eq!(memory_import_count("{}"), None);
         assert_eq!(memory_import_count("nope"), None);
+    }
+
+    fn entry(key: &str, value: &str, tags: &[&str], author: &str) -> MemoryEntry {
+        MemoryEntry {
+            key: key.into(),
+            value: value.into(),
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+            author: author.into(),
+            updated_at: String::new(),
+        }
+    }
+
+    fn pin(path: &str, note: &str, author: &str) -> KnowledgePin {
+        KnowledgePin {
+            path: path.into(),
+            note: note.into(),
+            author: author.into(),
+        }
+    }
+
+    #[test]
+    fn memory_filter_matches_key_value_and_tags_case_insensitively() {
+        let entries = vec![
+            entry("theme", "Uses plain files", &["preference"], "operator"),
+            entry("deploy", "Ship on Fridays", &["project-convention"], "agent"),
+        ];
+        assert_eq!(filtered_memory(&entries, "THE", "all").len(), 1);
+        assert_eq!(filtered_memory(&entries, "fridays", "all").len(), 1);
+        assert_eq!(filtered_memory(&entries, "Preference", "all").len(), 1);
+        assert_eq!(filtered_memory(&entries, "  theme  ", "all").len(), 1);
+        assert_eq!(filtered_memory(&entries, "", "all").len(), 2);
+        assert!(filtered_memory(&entries, "nope", "all").is_empty());
+    }
+
+    #[test]
+    fn memory_filter_author_composes_with_search_and_uses_row_values() {
+        let entries = vec![
+            entry("a", "same value", &[], "operator"),
+            entry("b", "same value", &[], "agent"),
+            entry("c", "same value", &[], ""),
+        ];
+        assert_eq!(filtered_memory(&entries, "same", "agent").len(), 1);
+        assert_eq!(filtered_memory(&entries, "same", "operator").len(), 1);
+        // Blank stored authors filter under the displayed "unknown".
+        assert_eq!(filtered_memory(&entries, "same", "unknown").len(), 1);
+        assert_eq!(filtered_memory(&entries, "", "all").len(), 3);
+    }
+
+    #[test]
+    fn pin_filter_matches_path_note_and_author() {
+        let pins = vec![
+            pin("docs/theme.md", "Design source", "operator"),
+            pin("docs/api.md", "", "agent"),
+        ];
+        assert_eq!(filtered_pins(&pins, "THEME").len(), 1);
+        assert_eq!(filtered_pins(&pins, "design").len(), 1);
+        assert_eq!(filtered_pins(&pins, "agent").len(), 1);
+        assert_eq!(filtered_pins(&pins, "").len(), 2);
+        assert!(filtered_pins(&pins, "nope").is_empty());
+    }
+
+    #[test]
+    fn artifact_download_name_sanitises_title_and_picks_extension() {
+        assert_eq!(
+            artifact_download_name("My Plan: v2 / draft!", "plan", "a1"),
+            "My-Plan-v2-draft.md"
+        );
+        assert_eq!(
+            artifact_download_name("Fix thing", "patch", "a2"),
+            "Fix-thing.patch"
+        );
+        assert_eq!(
+            artifact_download_name("Notes", "findings", "a3"),
+            "Notes.md"
+        );
+        assert_eq!(
+            artifact_download_name("Blob", "mystery", "a4"),
+            "Blob.txt"
+        );
+        // Empty / unusable titles fall back to kind + id, never a bare id.
+        assert_eq!(artifact_download_name("", "findings", "a5"), "findings-a5.md");
+        assert_eq!(artifact_download_name("///", "plan", "a6"), "plan-a6.md");
+        assert_eq!(artifact_extension("test_report"), ("md", "text/markdown"));
+        assert_eq!(artifact_extension("patch"), ("patch", "text/plain"));
+        assert_eq!(artifact_extension("other"), ("txt", "text/plain"));
+    }
+
+    #[test]
+    fn memory_delete_confirm_names_key_scope_and_permanence() {
+        let req = memory_delete_confirm("smoke-pref", "project");
+        assert_eq!(req.confirm_label, "Delete memory");
+        assert!(req.title.contains("smoke-pref"));
+        assert!(req.body.contains("project"));
+        assert!(req.body.contains("cannot be undone"));
+        let global = memory_delete_confirm("k", "global");
+        assert!(global.body.contains("global"));
+        // Unknown scopes fall back to the panel's default (project).
+        assert!(memory_delete_confirm("k", "").body.contains("project"));
+    }
+
+    #[test]
+    fn artifacts_path_is_unfiltered_by_default_with_explicit_paging() {
+        let path = artifacts_list_path("root 1", "", ARTIFACT_PAGE_SIZE, 0);
+        assert!(path.starts_with("/v1/artifacts?"), "{path}");
+        assert!(path.contains("limit=100"), "{path}");
+        assert!(path.contains("offset=0"), "{path}");
+        assert!(!path.contains("type="), "{path}");
+    }
+
+    #[test]
+    fn artifacts_path_passes_type_to_the_server() {
+        let path = artifacts_list_path("root1", "findings", ARTIFACT_PAGE_SIZE, 200);
+        assert!(path.contains("type=findings"), "{path}");
+        assert!(path.contains("offset=200"), "{path}");
+    }
+
+    #[test]
+    fn has_more_only_when_page_came_back_exactly_full() {
+        assert!(artifact_page_has_more(100, 100));
+        assert!(!artifact_page_has_more(99, 100));
+        assert!(!artifact_page_has_more(0, 100));
+        assert!(!artifact_page_has_more(0, 0));
+    }
+
+    #[test]
+    fn filter_offers_all_registered_built_in_types() {
+        // Exactly the store's ValidType set on this main; the server
+        // errors on an unregistered type filter.
+        assert_eq!(
+            ARTIFACT_TYPES,
+            ["plan", "contract", "findings", "patch", "test_report"]
+        );
+        assert_eq!(ARTIFACT_PAGE_SIZE, 100);
+    }
+
+    #[test]
+    fn show_more_append_skips_ids_already_listed() {
+        let meta = |id: &str| ArtifactMeta {
+            id: id.into(),
+            ..Default::default()
+        };
+        let mut cur = vec![meta("a"), meta("b")];
+        // "b" shifted into the next window after an update between loads.
+        append_artifact_page(&mut cur, vec![meta("b"), meta("c")]);
+        let ids: Vec<&str> = cur.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b", "c"]);
     }
 
     #[test]
