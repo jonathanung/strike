@@ -268,6 +268,47 @@ pub fn draft_goal(
     })
 }
 
+/// Form fields prefilled by Duplicate (#1415). Run history, iterations and
+/// tokens-used are deliberately not part of this mapping: a duplicate starts
+/// clean through the existing create flow.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GoalFormFields {
+    pub description: String,
+    pub verification: String,
+    pub extra: String,
+    pub turns: String,
+    pub minutes: String,
+    pub tokens: String,
+    pub stall_after: String,
+    pub verify_fails: String,
+    pub autopilot: bool,
+    pub allow: String,
+    pub deny: String,
+}
+
+pub fn goal_form_fields(goal: &GoalView) -> GoalFormFields {
+    let mut checks = goal.criteria.iter().map(|c| {
+        if c.check.is_empty() {
+            c.description.clone()
+        } else {
+            c.check.clone()
+        }
+    });
+    GoalFormFields {
+        description: goal.description.clone(),
+        verification: checks.next().unwrap_or_default(),
+        extra: checks.collect::<Vec<_>>().join("\n"),
+        turns: goal.max_iterations.to_string(),
+        minutes: (goal.max_wall_clock_s / 60).max(0).to_string(),
+        tokens: goal.max_tokens.to_string(),
+        stall_after: goal.max_no_progress_iters.to_string(),
+        verify_fails: goal.max_verify_failures.to_string(),
+        autopilot: goal.autopilot,
+        allow: goal.allowed_tools.join(", "),
+        deny: goal.deny_tools.join(", "),
+    }
+}
+
 fn later(ms: i32, f: impl FnOnce() + 'static) {
     let Some(win) = web_sys::window() else {
         return;
@@ -278,6 +319,17 @@ fn later(ms: i32, f: impl FnOnce() + 'static) {
         ms,
     );
     cb.forget();
+}
+
+/// Empty-state line for the iteration log (#1586). "No iterations yet."
+/// is a fact the pane may only assert after a successful log load that
+/// returned zero rows; a failed load renders as a failure, not absence.
+fn log_empty_label(log_known: bool) -> &'static str {
+    if log_known {
+        "No iterations yet."
+    } else {
+        "Iteration log could not be loaded."
+    }
 }
 
 fn pull_list(
@@ -306,6 +358,7 @@ fn follow(
     token: RwSignal<String>,
     goals: RwSignal<Vec<GoalView>>,
     iterations: RwSignal<Vec<IterView>>,
+    log_known: RwSignal<bool>,
     note: RwSignal<String>,
     selected: RwSignal<String>,
     watch_gen: RwSignal<u32>,
@@ -313,7 +366,7 @@ fn follow(
 ) {
     let gen = watch_gen.get_untracked().wrapping_add(1);
     watch_gen.set(gen);
-    poll_goal(base, token, goals, iterations, note, selected, watch_gen, gen, id, 0, 1800);
+    poll_goal(base, token, goals, iterations, log_known, note, selected, watch_gen, gen, id, 0, 1800);
 }
 
 fn poll_goal(
@@ -321,6 +374,7 @@ fn poll_goal(
     token: RwSignal<String>,
     goals: RwSignal<Vec<GoalView>>,
     iterations: RwSignal<Vec<IterView>>,
+    log_known: RwSignal<bool>,
     note: RwSignal<String>,
     selected: RwSignal<String>,
     watch_gen: RwSignal<u32>,
@@ -344,7 +398,7 @@ fn poll_goal(
                 Err(e) => {
                     if watch_gen.get_untracked() == gen {
                         note.set(e);
-                        poll_goal(base, token, goals, iterations, note, selected, watch_gen, gen, id_for_fetch, 1000, left - 1);
+                        poll_goal(base, token, goals, iterations, log_known, note, selected, watch_gen, gen, id_for_fetch, 1000, left - 1);
                     }
                     return;
                 }
@@ -359,18 +413,33 @@ fn poll_goal(
                 .map(|g| g.status.clone())
                 .unwrap_or_default();
             goals.set(list.goals);
-            note.set(String::new());
             if !id_for_fetch.is_empty() && selected.get_untracked() == id_for_fetch {
                 let path = format!("/v1/goals/{}/log", crate::api::js_encode(&id_for_fetch));
-                if let Ok(log) = get_json::<GoalLog>(&b, &t, &path).await {
-                    if watch_gen.get_untracked() == gen && selected.get_untracked() == id_for_fetch {
-                        iterations.set(log.iterations);
+                // The note is cleared only once the log load has also
+                // succeeded (#1586): clearing it first erased the evidence
+                // of a failed log fetch, and the empty iterations then
+                // rendered as "No iterations yet.".
+                match get_json::<GoalLog>(&b, &t, &path).await {
+                    Ok(log) => {
+                        if watch_gen.get_untracked() == gen && selected.get_untracked() == id_for_fetch {
+                            iterations.set(log.iterations);
+                            log_known.set(true);
+                            note.set(String::new());
+                        }
+                    }
+                    Err(e) => {
+                        if watch_gen.get_untracked() == gen && selected.get_untracked() == id_for_fetch {
+                            log_known.set(false);
+                            note.set(format!("Iteration log could not be loaded: {e}"));
+                        }
                     }
                 }
+            } else {
+                note.set(String::new());
             }
             let live = matches!(status.as_str(), "pending" | "active");
             if live && selected.get_untracked() == id_for_fetch {
-                poll_goal(base, token, goals, iterations, note, selected, watch_gen, gen, id_for_fetch, 1000, left - 1);
+                poll_goal(base, token, goals, iterations, log_known, note, selected, watch_gen, gen, id_for_fetch, 1000, left - 1);
             }
         });
     });
@@ -395,6 +464,7 @@ fn draft_body(draft: &GoalDraft) -> Value {
 pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoView {
     let goals = RwSignal::new(Vec::<GoalView>::new());
     let iterations = RwSignal::new(Vec::<IterView>::new());
+    let log_known = RwSignal::new(false);
     let selected = RwSignal::new(String::new());
     let creating = RwSignal::new(true);
     let note = RwSignal::new(String::new());
@@ -411,6 +481,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
     let autopilot = RwSignal::new(false);
     let allow = RwSignal::new(String::new());
     let deny = RwSignal::new(String::new());
+    let duplicate_note = RwSignal::new(String::new());
     let watch_gen = RwSignal::new(0u32);
     // #1455: client-only list narrowing. Default "all" (Q1) — hiding goals
     // on first open would read as data loss. Not persisted (see PR notes).
@@ -429,7 +500,8 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
         creating.set(false);
         selected.set(id.clone());
         iterations.set(Vec::new());
-        follow(base, token, goals, iterations, note, selected, watch_gen, id);
+        log_known.set(false);
+        follow(base, token, goals, iterations, log_known, note, selected, watch_gen, id);
     });
 
     let start_run: Arc<dyn Fn(String) + Send + Sync> = Arc::new(move |id: String| {
@@ -439,7 +511,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
             if let Err(e) = post_json(&b, &t, &path, json!({})).await {
                 note.set(e);
             }
-            follow(base, token, goals, iterations, note, selected, watch_gen, id);
+            follow(base, token, goals, iterations, log_known, note, selected, watch_gen, id);
         });
     });
 
@@ -454,7 +526,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
             if let Err(e) = post_json(&b, &t, &path, json!({})).await {
                 note.set(e);
             }
-            follow(base, token, goals, iterations, note, selected, watch_gen, id);
+            follow(base, token, goals, iterations, log_known, note, selected, watch_gen, id);
         });
     });
 
@@ -508,7 +580,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                 busy.set(false);
                 selected.set(id.clone());
                 creating.set(false);
-                follow(base, token, goals, iterations, note, selected, watch_gen, id);
+                follow(base, token, goals, iterations, log_known, note, selected, watch_gen, id);
                 return;
             }
             busy.set(false);
@@ -517,7 +589,8 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
             description.set(String::new());
             verification.set(String::new());
             extra.set(String::new());
-            follow(base, token, goals, iterations, note, selected, watch_gen, id);
+            duplicate_note.set(String::new());
+            follow(base, token, goals, iterations, log_known, note, selected, watch_gen, id);
         });
     });
 
@@ -530,6 +603,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                         creating.set(true);
                         selected.set(String::new());
                         form_error.set(String::new());
+                        duplicate_note.set(String::new());
                         watch_gen.set(watch_gen.get_untracked().wrapping_add(1));
                     }>"New"</button>
                 </div>
@@ -608,6 +682,9 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                             <form id="goals-form" on:submit=move |ev| submit(ev)>
                                 <h2 class="goals-heading">"New goal"</h2>
                                 <p class="goals-lead">"Say what should be true, and the command that proves it. This page runs that check. It does not plan tool calls. Deny rules still block if a planner emits one."</p>
+                                <Show when=move || !duplicate_note.get().is_empty()>
+                                    <p class="hint" role="status">{move || duplicate_note.get()}</p>
+                                </Show>
                                 <label class="goals-field">
                                     <span>"Goal"</span>
                                     <textarea id="goals-desc" rows="3" prop:value=move || description.get() on:input=move |ev| description.set(event_target_value(&ev)) placeholder="Tests pass on the package you changed"></textarea>
@@ -676,6 +753,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                     let Some(g) = list.into_iter().find(|g| g.id == id) else {
                         return view! { <p class="hint">"That goal is gone."</p> }.into_any();
                     };
+                    let duplicate_source = g.clone();
                     let gid = g.id.clone();
                     let run_id = gid.clone();
                     let pause_id = gid.clone();
@@ -709,6 +787,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                     );
                     let criteria = g.criteria.clone();
                     let log_rows = iterations.get();
+                    let log_is_known = log_known.get();
                     let start = start.clone();
                     let ctrl = ctrl.clone();
                     view! {
@@ -746,7 +825,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                             <h3 class="panel-title">"Log"</h3>
                             <ol class="goals-log" id="goals-log">
                                 {if log_rows.is_empty() {
-                                    view! { <li class="hint">"No iterations yet."</li> }.into_any()
+                                    view! { <li class="hint">{log_empty_label(log_is_known)}</li> }.into_any()
                                 } else {
                                     view! {
                                         <span>
@@ -764,6 +843,25 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                                 }}
                             </ol>
                             <div class="goals-actions">
+                                <button type="button" class="secondary" id="goals-duplicate" on:click=move |_| {
+                                    let fields = goal_form_fields(&duplicate_source);
+                                    description.set(fields.description);
+                                    verification.set(fields.verification);
+                                    extra.set(fields.extra);
+                                    turns.set(fields.turns);
+                                    minutes.set(fields.minutes);
+                                    tokens.set(fields.tokens);
+                                    stall_after.set(fields.stall_after);
+                                    verify_fails.set(fields.verify_fails);
+                                    autopilot.set(fields.autopilot);
+                                    allow.set(fields.allow);
+                                    deny.set(fields.deny);
+                                    form_error.set(String::new());
+                                    duplicate_note.set("Duplicated from an existing goal. Run history, iterations and tokens used are not copied — this starts clean. Nothing is created until you run it.".into());
+                                    selected.set(String::new());
+                                    creating.set(true);
+                                    watch_gen.set(watch_gen.get_untracked().wrapping_add(1));
+                                }>"Duplicate"</button>
                                 {let start = start.clone();
                                 let run_id = run_id.clone();
                                 move || {
@@ -828,6 +926,12 @@ mod tests {
             "",
         )
         .unwrap()
+    }
+
+    #[test]
+    fn log_empty_label_requires_a_successful_load() {
+        assert_eq!(log_empty_label(true), "No iterations yet.");
+        assert_eq!(log_empty_label(false), "Iteration log could not be loaded.");
     }
 
     #[test]
@@ -934,6 +1038,57 @@ mod tests {
         // description, even though a paused goal exists.
         assert!(names("all", "paused").is_empty());
         assert!(names("all", "no-such-goal").is_empty());
+    }
+
+    #[test]
+    fn duplicate_maps_spec_to_form_fields() {
+        let goal = GoalView {
+            description: "ship it".into(),
+            criteria: vec![
+                CriterionView { check: "cmd: go test ./...".into(), ..Default::default() },
+                CriterionView { check: "predicate: built".into(), ..Default::default() },
+                CriterionView { check: "judge: tidy".into(), ..Default::default() },
+            ],
+            max_iterations: 12,
+            max_wall_clock_s: 2700,
+            max_tokens: 50000,
+            max_verify_failures: 4,
+            max_no_progress_iters: 2,
+            tokens_used: 9999,
+            last_iteration: 7,
+            autopilot: true,
+            allowed_tools: vec!["bash".into(), "edit".into()],
+            deny_tools: vec!["write".into()],
+            ..Default::default()
+        };
+        let fields = goal_form_fields(&goal);
+        assert_eq!(fields.description, "ship it");
+        assert_eq!(fields.verification, "cmd: go test ./...");
+        assert_eq!(fields.extra, "predicate: built\njudge: tidy");
+        assert_eq!(fields.turns, "12");
+        assert_eq!(fields.minutes, "45");
+        assert_eq!(fields.tokens, "50000");
+        assert_eq!(fields.verify_fails, "4");
+        assert_eq!(fields.stall_after, "2");
+        assert!(fields.autopilot);
+        assert_eq!(fields.allow, "bash, edit");
+        assert_eq!(fields.deny, "write");
+        // The mapping round-trips through the existing validation path.
+        let draft = draft_goal(
+            &fields.description, &fields.verification, &fields.extra, &fields.turns,
+            &fields.minutes, &fields.tokens, &fields.stall_after, &fields.verify_fails,
+            fields.autopilot, &fields.allow, &fields.deny,
+        ).unwrap();
+        assert_eq!(draft.criteria.len(), 3);
+        assert_eq!(draft.max_tokens, 50000);
+    }
+
+    #[test]
+    fn duplicate_with_no_criteria_leaves_checks_blank() {
+        let fields = goal_form_fields(&GoalView::default());
+        assert_eq!(fields.verification, "");
+        assert_eq!(fields.extra, "");
+        assert!(!fields.autopilot);
     }
 
     #[test]

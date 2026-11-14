@@ -126,6 +126,9 @@ func providerStatusDTO(p host.ProviderStatus) map[string]any {
 		"device":  p.Device,
 		"apiKey":  p.APIKey,
 	}
+	if p.KeyState != "" {
+		out["keyState"] = p.KeyState
+	}
 	if p.WireAPI != "" {
 		out["wireAPI"] = p.WireAPI
 	}
@@ -206,6 +209,56 @@ func (s *Server) handleAuthKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":       true,
 		"provider": providerStatusByName(s.opts.Services.Auth, body.Provider),
+	})
+}
+
+// handleAuthProbe runs a real credential probe (#1531): the daemon presents
+// the provider's stored API key to the provider itself and reports the
+// verdict distinctly — valid / invalid / unreachable / no-key / unsupported.
+// The outcome is data, so a completed probe always answers 200; only a
+// malformed request or an unknown provider is a 400.
+func (s *Server) handleAuthProbe(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Services == nil || s.opts.Services.Auth == nil {
+		capabilityUnavailable(w, "auth")
+		return
+	}
+	prober, ok := s.opts.Services.Auth.(host.KeyProber)
+	if !ok {
+		capabilityUnavailable(w, "key probe")
+		return
+	}
+	var body struct {
+		Provider string `json:"provider"`
+	}
+	if err := decodeBody(w, r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	provider := strings.TrimSpace(body.Provider)
+	if provider == "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "provider is required"})
+		return
+	}
+	known := false
+	for _, p := range s.opts.Services.Auth.Statuses() {
+		if strings.EqualFold(p.Name, provider) {
+			known = true
+			provider = p.Name
+			break
+		}
+	}
+	if !known {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "unknown provider"})
+		return
+	}
+	res := prober.ProbeAPIKey(r.Context(), provider)
+	s.noteAudit(usageaudit.ActionToken, "", "provider api key tested", map[string]string{"provider": provider, "result": res.Status})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":             true,
+		"provider":       provider,
+		"status":         res.Status,
+		"detail":         res.Detail,
+		"providerStatus": providerStatusByName(s.opts.Services.Auth, provider),
 	})
 }
 

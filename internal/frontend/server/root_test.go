@@ -77,8 +77,21 @@ func TestRootsListAndActivate(t *testing.T) {
 	if rr.ActiveID != "r1" {
 		t.Fatalf("activeId = %q, want r1", rr.ActiveID)
 	}
-	if rr.Roots[0].Agent != "build" {
-		t.Fatalf("agent = %q, want build", rr.Roots[0].Agent)
+	// List order is most-recently-active first at millisecond
+	// resolution, so which of r1/r2 sorts first depends on whether
+	// their Add calls landed in the same millisecond — find r1 by id
+	// instead of assuming it is first (#1417).
+	var r1 *RootSummary
+	for i := range rr.Roots {
+		if rr.Roots[i].ID == "r1" {
+			r1 = &rr.Roots[i]
+		}
+	}
+	if r1 == nil {
+		t.Fatalf("roots = %+v, want an r1 entry", rr.Roots)
+	}
+	if r1.Agent != "build" {
+		t.Fatalf("agent = %q, want build", r1.Agent)
 	}
 
 	// Activate r2
