@@ -678,6 +678,15 @@ pub(crate) fn SessionPanel(
                 return true;
             }
             if key == "Enter" {
+                // A focused button (row Copy ID / Archive, Open, …) gets
+                // its own native click; only bare panel focus opens the
+                // cursor row (#1414/#1454 keyboard path).
+                if target
+                    .as_ref()
+                    .is_some_and(|el| el.tag_name().eq_ignore_ascii_case("button"))
+                {
+                    return false;
+                }
                 if nav_len == 0 {
                     return false;
                 }
