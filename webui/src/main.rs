@@ -752,6 +752,7 @@ fn note_live_title(
 fn transcript_matches(
     list: &[ChatLine],
     query: &str,
+    opts: crate::editor::FindOptions,
 ) -> Vec<transcript_find::TMatch> {
     let rows: Vec<transcript_find::SearchLine<'_>> = list
         .iter()
@@ -761,7 +762,7 @@ fn transcript_matches(
             detail: &line.detail,
         })
         .collect();
-    transcript_find::matches_for_lines(&rows, query)
+    transcript_find::matches_for_lines(&rows, query, opts)
 }
 
 #[cfg(test)]
@@ -787,7 +788,11 @@ mod transcript_matches_tests {
         let body = format!("{}needle", "log line\n".repeat(40));
         assert!(body.chars().count() > 240);
         let list = vec![line("tool", "bash", &body, "")];
-        let hits = transcript_matches(&list, "needle");
+        let hits = transcript_matches(
+            &list,
+            "needle",
+            crate::editor::FindOptions::default(),
+        );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].line, 0);
         assert_eq!(hits[0].field, transcript_find::Field::Body);
@@ -802,7 +807,11 @@ mod transcript_matches_tests {
             "{\"path\": \"/tmp/needle.json\"}",
             "",
         )];
-        let hits = transcript_matches(&list, "needle.json");
+        let hits = transcript_matches(
+            &list,
+            "needle.json",
+            crate::editor::FindOptions::default(),
+        );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].field, transcript_find::Field::Body);
     }
@@ -814,7 +823,11 @@ mod transcript_matches_tests {
             line("tool", "bash", "tests ran", "FAIL needle-test panicked"),
             line("strike", "Strike", "done", ""),
         ];
-        let hits = transcript_matches(&list, "needle-test");
+        let hits = transcript_matches(
+            &list,
+            "needle-test",
+            crate::editor::FindOptions::default(),
+        );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].line, 1);
         assert_eq!(hits[0].field, transcript_find::Field::Detail);
@@ -827,7 +840,10 @@ mod transcript_matches_tests {
             line("tool", "bash", "{\"a\": 1}", "long folded output"),
             line("you", "You", "hello", ""),
         ];
-        assert!(transcript_matches(&list, "not-present").is_empty());
+        assert!(
+            transcript_matches(&list, "not-present", crate::editor::FindOptions::default())
+                .is_empty()
+        );
         assert_eq!(
             transcript_find::count_label("not-present", 0, 0),
             "No matches"
@@ -1264,6 +1280,10 @@ fn App() -> impl IntoView {
     // Escape / Close can restore it.
     let tf_open = RwSignal::new(false);
     let tf_query = RwSignal::new(String::new());
+    // Find options (#1409/#1419): per-bar, in-memory only, both off by
+    // default — independent from the editor bar's toggles.
+    let tf_match_case = RwSignal::new(false);
+    let tf_whole_word = RwSignal::new(false);
     let tf_idx = RwSignal::new(0usize);
     let tf_saved_scroll = RwSignal::new(0.0f64);
     let doc_path = RwSignal::new(String::new());
@@ -3940,7 +3960,14 @@ fn App() -> impl IntoView {
     };
     let tf_step = move |delta: i32| {
         let list = lines.get_untracked();
-        let hits = transcript_matches(&list, &tf_query.get_untracked());
+        let hits = transcript_matches(
+            &list,
+            &tf_query.get_untracked(),
+            crate::editor::FindOptions::new(
+                tf_match_case.get_untracked(),
+                tf_whole_word.get_untracked(),
+            ),
+        );
         if hits.is_empty() {
             return;
         }
@@ -4000,7 +4027,11 @@ fn App() -> impl IntoView {
             return;
         }
         let list = lines.get_untracked();
-        let hits = transcript_matches(&list, &q);
+        let hits = transcript_matches(
+            &list,
+            &q,
+            crate::editor::FindOptions::new(tf_match_case.get(), tf_whole_word.get()),
+        );
         if let Some(hit) = hits.get(transcript_find::clamped_idx(
             tf_idx.get_untracked(),
             hits.len(),
@@ -4021,7 +4052,11 @@ fn App() -> impl IntoView {
         let open = tf_open.get();
         let idx = tf_idx.get();
         let hits = if open && !q.is_empty() {
-            transcript_matches(&lines.get(), &q)
+            transcript_matches(
+                &lines.get(),
+                &q,
+                crate::editor::FindOptions::new(tf_match_case.get(), tf_whole_word.get()),
+            )
         } else {
             Vec::new()
         };
@@ -4959,9 +4994,27 @@ fn App() -> impl IntoView {
                             <span class="tf-count" data-tf-count="">{move || {
                                 let q = tf_query.get();
                                 let list = lines.get();
-                                let hits = transcript_matches(&list, &q);
+                                let hits = transcript_matches(&list, &q, crate::editor::FindOptions::new(tf_match_case.get(), tf_whole_word.get()));
                                 transcript_find::count_label(&q, hits.len(), tf_idx.get())
                             }}</span>
+                            <button
+                                type="button"
+                                class=move || if tf_match_case.get() { "chip on tf-find-toggle" } else { "chip tf-find-toggle" }
+                                data-tf-match-case="true"
+                                title="Match case"
+                                aria-label="Match case"
+                                aria-pressed=move || if tf_match_case.get() { "true" } else { "false" }
+                                on:click=move |_| { tf_match_case.update(|v| *v = !*v); tf_idx.set(0); }
+                            >"Aa"</button>
+                            <button
+                                type="button"
+                                class=move || if tf_whole_word.get() { "chip on tf-find-toggle" } else { "chip tf-find-toggle" }
+                                data-tf-whole-word="true"
+                                title="Whole word"
+                                aria-label="Whole word"
+                                aria-pressed=move || if tf_whole_word.get() { "true" } else { "false" }
+                                on:click=move |_| { tf_whole_word.update(|v| *v = !*v); tf_idx.set(0); }
+                            >"ab|"</button>
                             <button type="button" class="secondary" data-tf-prev="true" on:click=move |_| tf_step(-1)>"Prev"</button>
                             <button type="button" class="secondary" data-tf-next="true" on:click=move |_| tf_step(1)>"Next"</button>
                             <button type="button" class="secondary" data-tf-close="true" on:click=move |_| close_find()>"Close"</button>
