@@ -68,7 +68,11 @@ pub fn TranscriptPane(
     // they only write entries for folds present at click time, so a fold
     // streamed in afterwards has no entry and starts collapsed. Cleared
     // on session switch below (bulk state does not survive sessions).
-    let folds = RwSignal::new(HashMap::<u32, bool>::new());
+    let folds = FoldState {
+        map: RwSignal::new(HashMap::<u32, bool>::new()),
+        rev: RwSignal::new(0),
+        dismissed: RwSignal::new(None),
+    };
     let draft = RwSignal::new(String::new());
     let pinned = RwSignal::new(true);
     let cursor = RwSignal::new(None::<u32>);
@@ -91,7 +95,8 @@ pub fn TranscriptPane(
         cursor.set(None);
         cursor_session.set(String::new());
         rename_for.set(String::new());
-        folds.set(HashMap::new());
+        folds.map.set(HashMap::new());
+        folds.dismissed.set_untracked(None);
     });
     let scroller = NodeRef::<leptos::html::Div>::new();
     let scroller_fx = scroller;
@@ -204,11 +209,11 @@ pub fn TranscriptPane(
 
     let expand_all_folds = move |_| {
         let ids = transcript.with_untracked(|t| fold_ids(&t.messages));
-        folds.update(|map| apply_bulk_fold(map, &ids, true));
+        folds.map.update(|map| apply_bulk_fold(map, &ids, true));
     };
     let collapse_all_folds = move |_| {
         let ids = transcript.with_untracked(|t| fold_ids(&t.messages));
-        folds.update(|map| apply_bulk_fold(map, &ids, false));
+        folds.map.update(|map| apply_bulk_fold(map, &ids, false));
     };
 
     let rename = handlers.rename;
@@ -459,8 +464,15 @@ pub fn TranscriptPane(
                 <p class="sx-note" role="alert">{move || note.get()}</p>
             </Show>
             {move || {
-                let count = transcript.with(|t| fold_ids(&t.messages).len());
-                let open_count = folds.with(|map| map.values().filter(|v| **v).count());
+                // Single-fold toggles bump `rev` (they do not notify the
+                // list); bulk actions notify `map`. Count only folds that
+                // exist now.
+                folds.rev.track();
+                let ids = transcript.with(|t| fold_ids(&t.messages));
+                let count = ids.len();
+                let open_count = folds
+                    .map
+                    .with(|map| ids.iter().filter(|id| fold_is_open(map, **id)).count());
                 if count == 0 {
                     view! { <span></span> }.into_any()
                 } else {
@@ -508,7 +520,7 @@ pub fn TranscriptPane(
                 </Show>
                 {move || {
                     let fv = find.get();
-                    let fold_map = folds.get();
+                    let fold_map = folds.map.get();
                     let snap = transcript.get();
                     let msgs = snap.messages.clone();
                     // A day separator precedes the first timed message of
@@ -776,6 +788,48 @@ fn apply_bulk_fold(overrides: &mut HashMap<u32, bool>, ids: &[u32], open: bool) 
     }
 }
 
+/// Fold signals shared by the list and each message (#1441).
+#[derive(Clone, Copy)]
+struct FoldState {
+    /// Recorded open state per message id. Bulk actions notify it;
+    /// single toggles write it untracked.
+    map: RwSignal<HashMap<u32, bool>>,
+    /// Bumped on single toggles so the toolbar count stays live.
+    rev: RwSignal<u32>,
+    /// The (message id, find match) whose forced-open fold the user
+    /// closed; only that exact pairing stays closed (#1576).
+    dismissed: RwSignal<Option<(u32, crate::transcript_find::TMatch)>>,
+}
+
+/// Rendered open state: the recorded/bulk state, plus the current find
+/// match's fold unless the user closed it while it was forced open. A
+/// recorded `false` never overrides the forced open (Collapse all must
+/// not stop find from revealing folded hits).
+fn resolve_fold_open(recorded: bool, find_forced: bool, dismissed: bool) -> bool {
+    recorded || (find_forced && !dismissed)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum FoldToggle {
+    /// DOM state equals the rendered state (our own re-render).
+    Ignore,
+    /// A user change: record it.
+    Record,
+    /// The user closed a find-forced fold: record closed and dismiss the
+    /// forced open for this match.
+    Dismiss,
+}
+
+fn fold_toggle_action(dom_open: bool, rendered_open: bool, find_forced: bool) -> FoldToggle {
+    if dom_open == rendered_open {
+        FoldToggle::Ignore
+    } else if find_forced && !dom_open {
+        FoldToggle::Dismiss
+    } else {
+        FoldToggle::Record
+    }
+}
+
 /// Record a single fold's native toggle. Returns without writing
 /// when the state already matches, so the `toggle` event fired by
 /// our own controlled re-render does not loop.
@@ -796,7 +850,7 @@ fn message_view(
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
     fold_open: bool,
-    folds: RwSignal<HashMap<u32, bool>>,
+    folds: FoldState,
 ) -> impl IntoView {
     let id = msg.id;
     let role = msg.role.class();
@@ -856,7 +910,11 @@ fn message_view(
     // toggles and Expand all / Collapse all) so the controlled `open`
     // attribute never closes a fold the user opened.
     let find_forced = cur_detail.is_some();
-    let fold_open = fold_open || find_forced;
+    let current_key = find_current.map(|m| (id, m));
+    let dismissed = find_forced
+        && current_key.is_some()
+        && folds.dismissed.get_untracked() == current_key;
+    let fold_open = resolve_fold_open(fold_open, find_forced, dismissed);
     let _ = (prose, retry_text, keep);
     let class = move || {
         let on = cursor.get() == Some(id);
@@ -949,11 +1007,21 @@ fn message_view(
                                 .ok()
                                 .and_then(|v| v.as_bool())
                                 .unwrap_or(fold_open);
-                            // Only a user change from the rendered state is
-                            // recorded: a find-forced open (#1576) must not
-                            // stick once the match moves on.
-                            if open != fold_open {
-                                folds.update(|map| record_fold_toggle(map, id, open));
+                            // Untracked: the DOM already shows the user's
+                            // state, so the list is not rebuilt (keeps
+                            // focus, selection and inner scroll); the next
+                            // natural re-render reads the map.
+                            match fold_toggle_action(open, fold_open, find_forced) {
+                                FoldToggle::Ignore => {}
+                                FoldToggle::Record => {
+                                    folds.map.update_untracked(|map| record_fold_toggle(map, id, open));
+                                    folds.rev.update(|n| *n = n.wrapping_add(1));
+                                }
+                                FoldToggle::Dismiss => {
+                                    folds.map.update_untracked(|map| record_fold_toggle(map, id, false));
+                                    folds.dismissed.set_untracked(current_key);
+                                    folds.rev.update(|n| *n = n.wrapping_add(1));
+                                }
                             }
                         }
                     >
@@ -1208,6 +1276,28 @@ mod tests {
         // Session switch resets by clearing the map.
         map.clear();
         assert!(!fold_is_open(&map, 1));
+    }
+
+    #[test]
+    fn find_forced_fold_can_be_closed_and_collapse_all_does_not_hide_hits() {
+        // Collapse all recorded false: the current match still opens.
+        assert!(resolve_fold_open(false, true, false));
+        // Recorded open (Expand all), user closes the forced fold:
+        // dismiss, and the fold renders closed.
+        assert_eq!(fold_toggle_action(false, true, true), FoldToggle::Dismiss);
+        assert!(!resolve_fold_open(false, true, true));
+        // Own re-render toggles are ignored.
+        assert_eq!(fold_toggle_action(true, true, true), FoldToggle::Ignore);
+        assert_eq!(fold_toggle_action(false, false, false), FoldToggle::Ignore);
+        // Plain user toggles are recorded; reopening a dismissed fold
+        // records open.
+        assert_eq!(fold_toggle_action(true, false, false), FoldToggle::Record);
+        assert_eq!(fold_toggle_action(false, true, false), FoldToggle::Record);
+        assert_eq!(fold_toggle_action(true, false, true), FoldToggle::Record);
+        assert!(resolve_fold_open(true, true, true));
+        // No find: recorded state rules.
+        assert!(!resolve_fold_open(false, false, false));
+        assert!(resolve_fold_open(true, false, false));
     }
 
     #[test]
