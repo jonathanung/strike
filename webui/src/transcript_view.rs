@@ -70,7 +70,6 @@ pub fn TranscriptPane(
     // on session switch below (bulk state does not survive sessions).
     let folds = FoldState {
         map: RwSignal::new(HashMap::<u32, bool>::new()),
-        rev: RwSignal::new(0),
         dismissed: RwSignal::new(None),
     };
     let draft = RwSignal::new(String::new());
@@ -464,15 +463,25 @@ pub fn TranscriptPane(
                 <p class="sx-note" role="alert">{move || note.get()}</p>
             </Show>
             {move || {
-                // Single-fold toggles bump `rev` (they do not notify the
-                // list); bulk actions notify `map`. Count only folds that
-                // exist now.
-                folds.rev.track();
+                // Count what is visibly open among the folds that exist
+                // now: recorded state plus the fold find forces open
+                // (#1576), unless the user dismissed that one.
                 let ids = transcript.with(|t| fold_ids(&t.messages));
                 let count = ids.len();
-                let open_count = folds
-                    .map
-                    .with(|map| ids.iter().filter(|id| fold_is_open(map, **id)).count());
+                let forced = find.with(|fv| {
+                    fv.current
+                        .filter(|m| m.field == crate::transcript_find::Field::Detail)
+                        .and_then(|m| transcript.with(|t| t.messages.get(m.line).map(|x| (x.id, m))))
+                });
+                let dismissed = folds.dismissed.get_untracked();
+                let open_count = folds.map.with(|map| {
+                    ids.iter()
+                        .filter(|id| {
+                            let f = forced.is_some_and(|(fid, _)| fid == **id);
+                            resolve_fold_open(fold_is_open(map, **id), f, f && dismissed == forced)
+                        })
+                        .count()
+                });
                 if count == 0 {
                     view! { <span></span> }.into_any()
                 } else {
@@ -791,11 +800,12 @@ fn apply_bulk_fold(overrides: &mut HashMap<u32, bool>, ids: &[u32], open: bool) 
 /// Fold signals shared by the list and each message (#1441).
 #[derive(Clone, Copy)]
 struct FoldState {
-    /// Recorded open state per message id. Bulk actions notify it;
-    /// single toggles write it untracked.
+    /// Recorded open state per message id. Every write notifies, so
+    /// each render's `open` matches the DOM: tachys diffs a static
+    /// attribute against its previous render value, and a user toggle
+    /// that skipped the rebuild would leave that value stale and make
+    /// the next bulk action a no-op on the DOM.
     map: RwSignal<HashMap<u32, bool>>,
-    /// Bumped on single toggles so the toolbar count stays live.
-    rev: RwSignal<u32>,
     /// The (message id, find match) whose forced-open fold the user
     /// closed; only that exact pairing stays closed (#1576).
     dismissed: RwSignal<Option<(u32, crate::transcript_find::TMatch)>>,
@@ -1036,13 +1046,11 @@ fn message_view(
                                 .ok()
                                 .and_then(|v| v.as_bool())
                                 .unwrap_or(fold_open);
-                            // Untracked: the DOM already shows the user's
-                            // state, so the list is not rebuilt (keeps
-                            // focus, selection and inner scroll); the next
-                            // natural re-render reads the map.
                             // Decided against live map/dismissed state, not
-                            // the render-time `fold_open`, which goes stale
-                            // once a toggle skips the rebuild.
+                            // the render-time `fold_open`. A real change
+                            // notifies `map` so the rendered `open` is
+                            // re-synced with the DOM (see `FoldState`);
+                            // our own re-render's toggle writes nothing.
                             let mut dismissed = folds.dismissed.get_untracked();
                             let mut changed = false;
                             folds.map.update_untracked(|map| {
@@ -1057,7 +1065,7 @@ fn message_view(
                             });
                             if changed {
                                 folds.dismissed.set_untracked(dismissed);
-                                folds.rev.update(|n| *n = n.wrapping_add(1));
+                                folds.map.notify();
                             }
                         }
                     >
