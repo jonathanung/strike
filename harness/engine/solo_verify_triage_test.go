@@ -25,7 +25,7 @@ func TestSoloVerifyTriageAcrossTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "go"), []byte("#!/bin/sh\necho \"fake go $*\"\nexit 1\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "go"), []byte("#!/bin/sh\necho \"fake go $*\"\nprintf -- '--- FAIL: TestBroken (0.00s)\\nFAIL\\texample.com/mod/pkg/a\\t0.01s\\n'\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))

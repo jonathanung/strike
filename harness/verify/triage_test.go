@@ -330,3 +330,25 @@ func TestTriageConcurrentSameGateKeepsHistory(t *testing.T) {
 		t.Fatalf("attempts=%d exhausted=%v", len(st.Attempts), st.Exhausted)
 	}
 }
+
+func TestTriageEnvironmentalFocusedFailureRunsFullGate(t *testing.T) {
+	t.Parallel()
+	dir := goWorkspace(t)
+	tri := &Triage{}
+	tri.store(triageKey(dir, "make test"), TriageReport{FocusedCommand: focusedA, Attempts: []TriageAttempt{{Command: focusedA}}})
+	var calls []string
+	r := &Runner{WorkDir: dir, Triage: tri, CmdRunner: func(_ context.Context, _, command string) (int, string, error) {
+		calls = append(calls, command)
+		if command == focusedA {
+			return 127, "sh: go: not found", nil
+		}
+		return 0, "ok", nil
+	}}
+	res := r.Run(context.Background(), []Gate{{Kind: KindCmd, Value: "make test"}}, Input{Claimed: true})
+	if !res.Passed || !reflect.DeepEqual(calls, []string{focusedA, "make test"}) {
+		t.Fatalf("passed=%v calls=%q", res.Passed, calls)
+	}
+	if tr := res.Checks[0].Triage; tr == nil || len(tr.Attempts) != 2 || tr.Attempts[1].Passed || tr.FullGateSkipped {
+		t.Fatalf("triage=%+v", tr)
+	}
+}

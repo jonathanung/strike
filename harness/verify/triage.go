@@ -320,17 +320,20 @@ func triageKey(workDir, command string) string {
 
 // runTriagedCmd runs a cmd gate with focused-rerun triage. When a previous
 // run left a focused command and budget remains, that narrow target runs
-// first: still failing skips the broad gate; passing falls through to the
-// full gate (the required verification). A full-gate failure is parsed and
+// first: still failing with a go test failure skips the broad gate; passing
+// (or an unrecognized failure) falls through to the full gate (the required
+// verification). A full-gate failure is parsed and
 // reproduced once with the focused command while budget remains.
 func (r *Runner) runTriagedCmd(ctx context.Context, cr *CheckResult, command string) {
 	key := triageKey(r.WorkDir, command)
 	defer r.Triage.lockKey(key)()
 	rep, had := r.Triage.load(key)
 	if had && rep.FocusedCommand != "" && len(rep.Attempts) < MaxFocusedAttempts {
-		att := r.focusedAttempt(ctx, rep.FocusedCommand)
+		att, raw := r.focusedAttempt(ctx, rep.FocusedCommand)
 		rep.Attempts = append(rep.Attempts, att)
-		if !att.Passed {
+		// Skip the broad gate only on a recognizable go test failure; an
+		// environmental failure (missing go, spawn error) falls through.
+		if !att.Passed && att.ExitCode > 0 && len(ParseGoTestFailures(raw)) > 0 {
 			rep.FullGateSkipped = true
 			rep.Exhausted = len(rep.Attempts) >= MaxFocusedAttempts
 			r.Triage.store(key, rep)
@@ -385,7 +388,8 @@ func (r *Runner) runTriagedCmd(ctx context.Context, cr *CheckResult, command str
 		return
 	}
 	if rep.FocusedCommand != "" && len(rep.Attempts) < MaxFocusedAttempts {
-		rep.Attempts = append(rep.Attempts, r.focusedAttempt(ctx, rep.FocusedCommand))
+		att, _ := r.focusedAttempt(ctx, rep.FocusedCommand)
+		rep.Attempts = append(rep.Attempts, att)
 	}
 	rep.Exhausted = rep.FocusedCommand != "" && len(rep.Attempts) >= MaxFocusedAttempts
 	r.Triage.store(key, rep)
@@ -393,7 +397,9 @@ func (r *Runner) runTriagedCmd(ctx context.Context, cr *CheckResult, command str
 	cr.Triage = &out
 }
 
-func (r *Runner) focusedAttempt(ctx context.Context, command string) TriageAttempt {
+// focusedAttempt runs command and returns the trimmed attempt plus the raw
+// output (for parsing).
+func (r *Runner) focusedAttempt(ctx context.Context, command string) (TriageAttempt, string) {
 	code, output, err := r.runCmd(ctx, command)
 	att := TriageAttempt{Command: command, ExitCode: code, Output: trimTo(output, maxAttemptOutput)}
 	switch {
@@ -404,7 +410,7 @@ func (r *Runner) focusedAttempt(ctx context.Context, command string) TriageAttem
 	default:
 		att.Error = fmt.Sprintf("exit %d", code)
 	}
-	return att
+	return att, output
 }
 
 // TriageLines summarizes a check's triage for blockers: the focused rerun
