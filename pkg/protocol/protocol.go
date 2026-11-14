@@ -941,6 +941,39 @@ type VerificationCheck struct {
 	Output     string `json:"output,omitempty"`
 	Error      string `json:"error,omitempty"`
 	DurationMs int64  `json:"durationMs,omitempty"`
+	// Triage is automatic go test failure triage for a failed cmd gate:
+	// parsed failing packages/tests, the focused rerun command, and the
+	// bounded attempt history. Value stays the exact original command.
+	Triage *VerificationTriage `json:"triage,omitempty"`
+}
+
+// VerificationFailure is one failing Go package parsed from gate output.
+type VerificationFailure struct {
+	Package string   `json:"package"`
+	Dir     string   `json:"dir,omitempty"`
+	Tests   []string `json:"tests,omitempty"`
+	Source  string   `json:"source,omitempty"`
+}
+
+// VerificationAttempt is one focused rerun in a gate's triage history.
+type VerificationAttempt struct {
+	Command  string `json:"command"`
+	Passed   bool   `json:"passed"`
+	ExitCode int    `json:"exitCode,omitempty"`
+	Output   string `json:"output,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+// VerificationTriage reports focused reruns for a failed cmd gate (#1178).
+// OriginalOutput keeps the last full-gate failure output even when a later
+// run skipped the full gate because the focused rerun still failed.
+type VerificationTriage struct {
+	Failures        []VerificationFailure `json:"failures,omitempty"`
+	FocusedCommand  string                `json:"focusedCommand,omitempty"`
+	OriginalOutput  string                `json:"originalOutput,omitempty"`
+	Attempts        []VerificationAttempt `json:"attempts,omitempty"`
+	FullGateSkipped bool                  `json:"fullGateSkipped,omitempty"`
+	Exhausted       bool                  `json:"exhausted,omitempty"`
 }
 
 // VerificationEnv is audit metadata for a verification run (cwd, session, models).
@@ -1332,7 +1365,9 @@ type PermissionDecided struct {
 // redacted by timeline export.
 type AdmissionDecided struct {
 	Correlation
-	// Surface is mcp|skill|plugin.
+	// Surface is mcp|skill|plugin|workspace. "workspace" records that an
+	// untrusted workspace's repo config was skipped at assembly (#1352);
+	// Target is the workspace root.
 	Surface string `json:"surface"`
 	// Target is the server name, skill name, or plugin id.
 	Target string `json:"target"`
@@ -1637,6 +1672,9 @@ type EngineError struct {
 	// Code is an optional stable machine code (e.g. queue_full). Empty when
 	// the error is free-text only.
 	Code string `json:"code,omitempty"`
+	// Provider names the provider whose credential was rejected when Code is
+	// provider_auth (#1546). Empty otherwise. Never carries key material.
+	Provider string `json:"provider,omitempty"`
 }
 
 // Usage source labels on UsageReported.

@@ -569,6 +569,22 @@ Go `TurnCompleted`.
 | `verification.checks[].output` | string | yes |
 | `verification.checks[].error` | string | yes |
 | `verification.checks[].durationMs` | number | yes |
+| `verification.checks[].triage` | object | yes |
+| `verification.checks[].triage.failures` | array of object | yes |
+| `verification.checks[].triage.failures[].package` | string |  |
+| `verification.checks[].triage.failures[].dir` | string | yes |
+| `verification.checks[].triage.failures[].tests` | array of string | yes |
+| `verification.checks[].triage.failures[].source` | string | yes |
+| `verification.checks[].triage.focusedCommand` | string | yes |
+| `verification.checks[].triage.originalOutput` | string | yes |
+| `verification.checks[].triage.attempts` | array of object | yes |
+| `verification.checks[].triage.attempts[].command` | string |  |
+| `verification.checks[].triage.attempts[].passed` | bool |  |
+| `verification.checks[].triage.attempts[].exitCode` | number | yes |
+| `verification.checks[].triage.attempts[].output` | string | yes |
+| `verification.checks[].triage.attempts[].error` | string | yes |
+| `verification.checks[].triage.fullGateSkipped` | bool | yes |
+| `verification.checks[].triage.exhausted` | bool | yes |
 | `verification.env` | object |  |
 | `verification.env.workDir` | string | yes |
 | `verification.env.sessionId` | string | yes |
@@ -620,6 +636,22 @@ Go `VerificationCompleted`.
 | `report.checks[].output` | string | yes |
 | `report.checks[].error` | string | yes |
 | `report.checks[].durationMs` | number | yes |
+| `report.checks[].triage` | object | yes |
+| `report.checks[].triage.failures` | array of object | yes |
+| `report.checks[].triage.failures[].package` | string |  |
+| `report.checks[].triage.failures[].dir` | string | yes |
+| `report.checks[].triage.failures[].tests` | array of string | yes |
+| `report.checks[].triage.failures[].source` | string | yes |
+| `report.checks[].triage.focusedCommand` | string | yes |
+| `report.checks[].triage.originalOutput` | string | yes |
+| `report.checks[].triage.attempts` | array of object | yes |
+| `report.checks[].triage.attempts[].command` | string |  |
+| `report.checks[].triage.attempts[].passed` | bool |  |
+| `report.checks[].triage.attempts[].exitCode` | number | yes |
+| `report.checks[].triage.attempts[].output` | string | yes |
+| `report.checks[].triage.attempts[].error` | string | yes |
+| `report.checks[].triage.fullGateSkipped` | bool | yes |
+| `report.checks[].triage.exhausted` | bool | yes |
 | `report.env` | object |  |
 | `report.env.workDir` | string | yes |
 | `report.env.sessionId` | string | yes |
@@ -887,6 +919,7 @@ Go `EngineError`.
 | `depth` | number | yes |
 | `message` | string |  |
 | `code` | string | yes |
+| `provider` | string | yes |
 
 #### `child.started`
 
@@ -993,6 +1026,22 @@ Go `ChildCompleted`.
 | `verification.checks[].output` | string | yes |
 | `verification.checks[].error` | string | yes |
 | `verification.checks[].durationMs` | number | yes |
+| `verification.checks[].triage` | object | yes |
+| `verification.checks[].triage.failures` | array of object | yes |
+| `verification.checks[].triage.failures[].package` | string |  |
+| `verification.checks[].triage.failures[].dir` | string | yes |
+| `verification.checks[].triage.failures[].tests` | array of string | yes |
+| `verification.checks[].triage.failures[].source` | string | yes |
+| `verification.checks[].triage.focusedCommand` | string | yes |
+| `verification.checks[].triage.originalOutput` | string | yes |
+| `verification.checks[].triage.attempts` | array of object | yes |
+| `verification.checks[].triage.attempts[].command` | string |  |
+| `verification.checks[].triage.attempts[].passed` | bool |  |
+| `verification.checks[].triage.attempts[].exitCode` | number | yes |
+| `verification.checks[].triage.attempts[].output` | string | yes |
+| `verification.checks[].triage.attempts[].error` | string | yes |
+| `verification.checks[].triage.fullGateSkipped` | bool | yes |
+| `verification.checks[].triage.exhausted` | bool | yes |
 | `verification.env` | object |  |
 | `verification.env.workDir` | string | yes |
 | `verification.env.sessionId` | string | yes |

@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -364,5 +365,191 @@ func TestGitAttachOnlyRejectsMutations(t *testing.T) {
 	bare.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/v1/git/status", nil))
 	if res.Code != http.StatusNotImplemented {
 		t.Fatalf("attach-only status = %d %s", res.Code, res.Body.String())
+	}
+}
+
+func TestSafeGitRef(t *testing.T) {
+	for _, bad := range []string{"", "-p", "--output=/tmp/x", "a..b", "HEAD@{1}", "HEAD~1", "HEAD^", "a b", "x:y", "a\nb", strings.Repeat("a", 201)} {
+		if _, err := safeGitRef(bad); err == nil {
+			t.Errorf("ref %q accepted", bad)
+		}
+	}
+	for _, good := range []string{"0123456789abcdef0123456789abcdef01234567", "main", "v1.2.3", "feature/x"} {
+		if got, err := safeGitRef(" " + good + " "); err != nil || got != good {
+			t.Errorf("safeGitRef(%q) = %q %v", good, got, err)
+		}
+	}
+}
+
+func TestParseShowNumstatZ(t *testing.T) {
+	out := []byte("\n3\t1\tsrc/a.go\x00-\t-\timg.png\x000\t2\tdocs/old.md\x00")
+	got := parseShowNumstatZ(out)
+	want := []gitShowFileJSON{
+		{Path: "src/a.go", Added: 3, Deleted: 1},
+		{Path: "img.png", Binary: true},
+		{Path: "docs/old.md", Deleted: 2},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("files = %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("file %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if files := parseShowNumstatZ(nil); files == nil || len(files) != 0 {
+		t.Fatalf("empty numstat = %#v, want empty non-nil slice", files)
+	}
+}
+
+// TestGitShowRoute inspects real commits (#1484): a multi-file commit
+// with a long body, a merge (diffed against its first parent), the patch
+// cap, and refused refs.
+func TestGitShowRoute(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(name, body string) {
+		t.Helper()
+		p := filepath.Join(repo, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init", "-b", "main")
+	write("alpha.txt", "one\n")
+	git("add", ".")
+	git("commit", "-m", "initial")
+	root := git("rev-parse", "HEAD")
+
+	write("alpha.txt", "one\ntwo\n")
+	write("src/beta.go", "package beta\n")
+	git("add", ".")
+	longBody := strings.Repeat("Explains the change in detail.\n", 40)
+	git("commit", "-m", "multi-file change", "-m", longBody)
+	multi := git("rev-parse", "HEAD")
+
+	git("checkout", "-b", "side")
+	write("side.txt", "side\n")
+	git("add", ".")
+	git("commit", "-m", "side work")
+	git("checkout", "main")
+	write("gamma.txt", "g\n")
+	git("add", ".")
+	git("commit", "-m", "main work")
+	git("merge", "--no-ff", "-m", "merge side", "side")
+	merge := git("rev-parse", "HEAD")
+
+	write("big.txt", strings.Repeat("0123456789abcdef0123456789abcdef\n", gitDiffCap/32+100))
+	git("add", ".")
+	git("commit", "-m", "big file")
+	big := git("rev-parse", "HEAD")
+
+	live := NewLive("s1", repo, nil, make(chan protocol.Op, 1))
+	srv, err := New(Options{SessionDir: t.TempDir(), Live: live})
+	if err != nil {
+		t.Fatal(err)
+	}
+	show := func(ref string) (int, gitShowJSON, string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/git/show?ref="+url.QueryEscape(ref), nil)
+		res := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(res, req)
+		var body gitShowJSON
+		if res.Code == http.StatusOK {
+			if err := json.Unmarshal(res.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode: %v\n%s", err, res.Body.String())
+			}
+		}
+		return res.Code, body, res.Body.String()
+	}
+
+	code, got, raw := show(multi)
+	if code != http.StatusOK {
+		t.Fatalf("show multi = %d %s", code, raw)
+	}
+	if got.Hash != multi || got.Subject != "multi-file change" || got.Author != "Test" || got.Date == "" {
+		t.Fatalf("metadata = %+v", got)
+	}
+	if got.Body != strings.TrimRight(longBody, "\n") {
+		t.Fatalf("body = %q", got.Body)
+	}
+	if len(got.Parents) != 1 || got.Parents[0] != root {
+		t.Fatalf("parents = %v, want [%s]", got.Parents, root)
+	}
+	paths := map[string]gitShowFileJSON{}
+	for _, f := range got.Files {
+		paths[f.Path] = f
+	}
+	if len(got.Files) != 2 || got.FilesTotal != 2 || paths["alpha.txt"].Added != 1 || paths["src/beta.go"].Added != 1 {
+		t.Fatalf("files = %+v", got.Files)
+	}
+	if !strings.Contains(got.Patch, "+two") || !strings.Contains(got.Patch, "src/beta.go") || got.Truncated {
+		t.Fatalf("patch = %q truncated=%v", got.Patch, got.Truncated)
+	}
+
+	// Short hashes from the log resolve to the full hash.
+	if code, got, raw := show(multi[:7]); code != http.StatusOK || got.Hash != multi {
+		t.Fatalf("short hash = %d %s", code, raw)
+	}
+
+	code, got, raw = show(merge)
+	if code != http.StatusOK {
+		t.Fatalf("show merge = %d %s", code, raw)
+	}
+	if len(got.Parents) != 2 {
+		t.Fatalf("merge parents = %v", got.Parents)
+	}
+	if len(got.Files) != 1 || got.Files[0].Path != "side.txt" || !strings.Contains(got.Patch, "+side") {
+		t.Fatalf("merge vs first parent: files=%+v patch=%q", got.Files, got.Patch)
+	}
+
+	code, got, raw = show(root)
+	if code != http.StatusOK || len(got.Parents) != 0 || len(got.Files) != 1 || got.Files[0].Path != "alpha.txt" {
+		t.Fatalf("root commit = %d %+v %s", code, got, raw)
+	}
+
+	code, got, raw = show(big)
+	if code != http.StatusOK || !got.Truncated || len(got.Patch) != gitDiffCap {
+		t.Fatalf("big commit = %d truncated=%v len=%d %s", code, got.Truncated, len(got.Patch), raw[:min(len(raw), 200)])
+	}
+
+	pwned := filepath.Join(t.TempDir(), "pwned")
+	for _, bad := range []string{"", "--output=" + pwned, "-p", "HEAD~1", "main..side", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"} {
+		if code, _, raw := show(bad); code != http.StatusBadRequest {
+			t.Errorf("ref %q = %d %s, want 400", bad, code, raw)
+		}
+	}
+	if _, err := os.Stat(pwned); err == nil {
+		t.Fatal("option-looking ref was executed")
+	}
+
+	// A commit touching more paths than gitShowFilesMax lists the cap
+	// and reports the real total.
+	for i := 0; i < gitShowFilesMax+5; i++ {
+		write(fmt.Sprintf("many/f%03d.txt", i), "x\n")
+	}
+	git("add", ".")
+	git("commit", "-m", "many files")
+	code, got, raw = show(git("rev-parse", "HEAD"))
+	if code != http.StatusOK || len(got.Files) != gitShowFilesMax || got.FilesTotal != gitShowFilesMax+5 {
+		t.Fatalf("many files = %d files=%d total=%d %s", code, len(got.Files), got.FilesTotal, raw[:min(len(raw), 200)])
 	}
 }
