@@ -10,13 +10,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/jonathanung/strike/harness/permission"
 	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/internal/persist/workspace"
+	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/product/update"
 	"github.com/jonathanung/strike/internal/product/version"
 )
@@ -47,6 +46,11 @@ type cliOptions struct {
 	// workspaces is set by strike serve so new roots bind the registry.
 	// Nil for the TUI and headless exec, which keep the process directory.
 	workspaces *workspace.Store
+	// serveTokenFile / serveCwd are set by strike serve: every session gets
+	// a managed deny ceiling for the token file (tokenFileDenyRules). Kept
+	// as strings so cliOptions stays comparable. Empty elsewhere.
+	serveTokenFile string
+	serveCwd       string
 }
 
 type optionSpec struct {
@@ -399,31 +403,9 @@ func parseCLIOptions(args []string) (cliOptions, error) {
 // "off"/"none"/"disable"/empty/"0" → -1 (disabled). Duration strings and plain
 // integer seconds are accepted. Returns seconds for ResolveTurnTimeout.
 func parseTurnTimeoutFlag(value string) (int, error) {
-	v := strings.ToLower(strings.TrimSpace(value))
-	switch v {
-	case "", "off", "none", "disable", "disabled", "0":
-		return -1, nil
-	}
-	// Plain integer seconds (no unit).
-	if n, err := strconv.Atoi(v); err == nil {
-		if n < 0 {
-			return -1, nil
-		}
-		if n == 0 {
-			return -1, nil
-		}
-		return n, nil
-	}
-	d, err := time.ParseDuration(v)
+	secs, err := config.ParseTurnTimeoutSeconds(value)
 	if err != nil {
 		return 0, fmt.Errorf("invalid --turn-timeout %q (want duration like 30m/1h/1800s, or off)", value)
-	}
-	if d <= 0 {
-		return -1, nil
-	}
-	secs := int(d / time.Second)
-	if secs < 1 {
-		secs = 1
 	}
 	return secs, nil
 }

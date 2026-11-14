@@ -14,16 +14,19 @@ use crate::api::{get_json, patch_json, post_json, post_op};
 use crate::approvals::{
     autonomy_confirm, begin_autonomy_change, begin_session_mode, countdown_seconds,
     decision_choices, global_confirm, hint_line, is_dangerous, notes_from_envelope,
-    rule_add_confirm, rule_remove_confirm, session_confirm, validate_rule_draft, workspace_confirm,
+    rule_add_confirm, rule_prefill, rule_remove_confirm, session_confirm, validate_rule_draft,
+    workspace_confirm,
     Ask, AuditDocument, AuditLine, ConfirmKind, ModeChange, PendingConfirm, PermNote, RuleRecord,
     RulesDocument, SettingsBits,
 };
+use crate::permissions_explain::PermissionsExplain;
 use crate::model::{autonomies, autonomy_label, mode_label, permission_modes, Workspace};
 use crate::outcome::{self, AUTO_SECONDS_UNKNOWN};
 use crate::rule_author::{
     daemon_reason, pattern_hint, rule_sentence, scope_explainer, RuleFeedback, RuleMatchTester,
     EXAMPLES,
 };
+use crate::sandbox_explain::SandboxSection;
 
 /// Initial audit fetch size (#1438): the panel starts at the daemon's
 /// default page and only fetches more when the user asks.
@@ -284,6 +287,7 @@ pub fn ApprovalHost(
     let pattern = RwSignal::new(String::new());
     let action = RwSignal::new("deny".to_string());
     let rule_feedback = RwSignal::new(RuleFeedback::None);
+    let pattern_input = NodeRef::<leptos::html::Input>::new();
     let global_choice = RwSignal::new("default".to_string());
     let workspace_choice = RwSignal::new("default".to_string());
     Effect::new(move |_| {
@@ -373,6 +377,7 @@ pub fn ApprovalHost(
                         <h3>"This session"</h3>
                         <p class="hint">{move || format!("Live mode: {}", mode_label(&perm_mode.get()))}</p>
                     </section>
+                    <SandboxSection base=base token=token/>
                     <section>
                         <h3>"Global default"</h3>
                         <p class="hint">{move || {
@@ -431,13 +436,30 @@ pub fn ApprovalHost(
                                 let sentence = rule_sentence(&rule.scope, &rule.permission, &rule.pattern, &rule.action);
                                 let shown = format!("{} · {} · {} · {}", rule.scope, rule.permission, rule.pattern, rule.action);
                                 let remove = rule.clone();
+                                let dup = rule.clone();
                                 view! {
                                     <li class="approvals-rule">
                                         <span class="rule-text">
                                             <span class="rule-sentence" data-rule-sentence="true">{sentence}</span>
                                             <span class="hint">{shown}</span>
                                         </span>
-                                        <button type="button" class="secondary" on:click=move |_| remove_rule(remove.clone(), confirm, base, token, status, panel_error, rules, rule_feedback)>"Remove"</button>
+                                        <span class="approvals-rule-actions">
+                                            <button type="button" class="secondary" data-rule-duplicate="true" title="Copy this rule into the form below" on:click=move |_| {
+                                                // Prefill only (#1433): seed the four
+                                                // form signals verbatim and focus the
+                                                // pattern field. Nothing is submitted;
+                                                // the existing Add path (validation +
+                                                // dangerous-add confirm) creates the rule.
+                                                let draft = rule_prefill(&dup);
+                                                scope.set(draft.scope);
+                                                perm_name.set(draft.permission);
+                                                pattern.set(draft.pattern);
+                                                action.set(draft.action);
+                                                rule_feedback.set(RuleFeedback::None);
+                                                focus_pattern(pattern_input);
+                                            }>"Duplicate"</button>
+                                            <button type="button" class="secondary" on:click=move |_| remove_rule(remove.clone(), confirm, base, token, status, panel_error, rules, rule_feedback)>"Remove"</button>
+                                        </span>
                                     </li>
                                 }
                             }).collect_view()}
@@ -477,6 +499,7 @@ pub fn ApprovalHost(
                             <input
                                 aria-label="Pattern"
                                 placeholder="pattern, such as rm * or *.go"
+                                node_ref=pattern_input
                                 prop:value=move || pattern.get()
                                 on:input=move |ev| pattern.set(event_target_value(&ev))
                             />
@@ -497,6 +520,7 @@ pub fn ApprovalHost(
                         </Show>
                         <RuleMatchTester base=base token=token perm_mode=perm_mode known=Signal::derive(move || rules.get().known) />
                     </section>
+                    <PermissionsExplain base=base token=token />
                     <section>
                         <h3>"Audit"</h3>
                         <p class="hint">{move || {
@@ -539,6 +563,24 @@ pub fn ApprovalHost(
             </div>
         </Show>
     }
+}
+
+/// Move focus to the pattern field after a Duplicate prefill (#1433, Q2:
+/// the pattern is the field most often changed). Deferred a tick so the
+/// click's own focus change does not win.
+fn focus_pattern(pattern_input: NodeRef<leptos::html::Input>) {
+    let closure = Closure::once(move || {
+        if let Some(el) = pattern_input.get() {
+            let _ = el.focus();
+        }
+    });
+    if let Some(window) = web_sys::window() {
+        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            closure.as_ref().unchecked_ref(),
+            0,
+        );
+    }
+    closure.forget();
 }
 
 fn reload_panel(
@@ -1061,9 +1103,14 @@ fn ApprovalCard(
     let command = ask.preview.command.clone();
     let removed = ask.preview.removed.clone();
     let added = ask.preview.added.clone();
+    let full_removed = ask.preview.full_removed.clone();
+    let full_added = ask.preview.full_added.clone();
     let truncated = ask.preview.truncated;
     let show_command = !command.is_empty();
     let show_diff = !removed.is_empty() || !added.is_empty();
+    // Per-card diff expansion (#1430): collapsed by default, independent
+    // per card.
+    let diff_expanded = RwSignal::new(false);
     // Decision facts (#1507): the daemon-stamped working directory and one
     // consequence line per scope, computed from the ask payload only.
     let work_dir_line = if ask.work_dir.is_empty() {
@@ -1080,7 +1127,7 @@ fn ApprovalCard(
         .collect();
 
     view! {
-        <article class="approvals-card" aria-live="polite">
+        <article class="approvals-card" aria-live="polite" data-pending-ask="true" tabindex="-1">
             <header>
                 <span class="badge badge-blocked">"Needs you"</span>
                 <span class="who">{permission.clone()}</span>
@@ -1089,14 +1136,29 @@ fn ApprovalCard(
             <Show when=move || show_command>
                 <pre class="approvals-command">{command.clone()}</pre>
             </Show>
-            <Show when=move || show_diff>
+            <Show when=move || show_diff && !diff_expanded.get()>
                 <pre class="approvals-diff">
                     {removed.iter().map(|line| view! { <span class="del">{"- "}{line.clone()}{"\n"}</span> }).collect_view()}
                     {added.iter().map(|line| view! { <span class="add">{"+ "}{line.clone()}{"\n"}</span> }).collect_view()}
                 </pre>
             </Show>
+            <Show when=move || show_diff && diff_expanded.get()>
+                <pre class="approvals-diff approvals-diff-expanded">
+                    {full_removed.iter().map(|line| view! { <span class="del">{"- "}{line.clone()}{"\n"}</span> }).collect_view()}
+                    {full_added.iter().map(|line| view! { <span class="add">{"+ "}{line.clone()}{"\n"}</span> }).collect_view()}
+                </pre>
+            </Show>
             <Show when=move || truncated>
                 <p class="hint">"Diff preview is shortened."</p>
+                <button
+                    type="button"
+                    class="secondary"
+                    data-approval-diff-expand=""
+                    aria-expanded=move || if diff_expanded.get() { "true" } else { "false" }
+                    on:click=move |_| diff_expanded.update(|v| *v = !*v)
+                >
+                    {move || if diff_expanded.get() { "Show less" } else { "Show full diff" }}
+                </button>
             </Show>
             <Show when=move || show_work_dir>
                 <p class="approvals-fact">{work_dir_line.clone()}</p>
