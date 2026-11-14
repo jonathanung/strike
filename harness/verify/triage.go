@@ -369,8 +369,10 @@ func (r *Runner) runTriagedCmd(ctx context.Context, cr *CheckResult, command str
 		return
 	}
 	if err != nil {
-		// Spawn/timeout failure: nothing to parse; keep any prior history.
+		// Spawn/timeout failure: nothing to parse; keep any prior history
+		// (including this run's focused attempt, so it counts toward the cap).
 		if had {
+			r.Triage.store(key, rep)
 			out := cloneTriage(rep)
 			cr.Triage = &out
 		}

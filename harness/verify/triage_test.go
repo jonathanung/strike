@@ -295,14 +295,19 @@ func TestTriageCmdErrorKeepsHistory(t *testing.T) {
 	t.Parallel()
 	dir := goWorkspace(t)
 	tri := &Triage{}
-	tri.store(triageKey(dir, "make test"), TriageReport{Attempts: []TriageAttempt{{Command: focusedA}}})
+	tri.store(triageKey(dir, "make test"), TriageReport{FocusedCommand: focusedA, Attempts: []TriageAttempt{{Command: focusedA}}})
 	r := &Runner{WorkDir: dir, Triage: tri, CmdRunner: func(context.Context, string, string) (int, string, error) {
 		return -1, "", context.DeadlineExceeded
 	}}
 	res := r.Run(context.Background(), []Gate{{Kind: KindCmd, Value: "make test"}}, Input{Claimed: true})
 	c := res.Checks[0]
-	if c.Passed || c.Triage == nil || len(c.Triage.Attempts) != 1 || !strings.Contains(c.Error, "deadline") {
+	// The focused pre-check errored (not a go test failure) so the full gate
+	// ran and errored too; both runs' attempts persist toward the cap.
+	if c.Passed || c.Triage == nil || len(c.Triage.Attempts) != 2 || !strings.Contains(c.Error, "deadline") {
 		t.Fatalf("%+v triage=%+v", c, c.Triage)
+	}
+	if st, _ := tri.load(triageKey(dir, "make test")); len(st.Attempts) != 2 {
+		t.Fatalf("pre-check attempt not persisted: %+v", st)
 	}
 }
 
