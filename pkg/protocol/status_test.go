@@ -23,6 +23,8 @@ func TestClassifyLivePriority(t *testing.T) {
 		{name: "child waiting wins over running", in: LiveStatusInput{ChildRunning: true, ChildWaiting: true}, want: StatusWaiting},
 		{name: "blocked child", in: LiveStatusInput{ChildBlocked: true}, want: StatusBlocked},
 		{name: "running wins over blocked", in: LiveStatusInput{Busy: true, ChildBlocked: true}, want: StatusRunning},
+		{name: "provider auth failure blocks", in: LiveStatusInput{StopReason: "error", ProviderAuthFailed: true}, want: StatusBlocked},
+		{name: "running wins over provider auth", in: LiveStatusInput{Busy: true, ProviderAuthFailed: true}, want: StatusRunning},
 		{name: "failed stop", in: LiveStatusInput{StopReason: "provider_error"}, want: StatusFailed},
 		{name: "budget", in: LiveStatusInput{StopReason: "budget_exhausted"}, want: StatusFailed},
 		{name: "canceled", in: LiveStatusInput{StopReason: "canceled"}, want: StatusStopped},

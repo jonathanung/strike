@@ -1,5 +1,7 @@
-// Unauthenticated phone dialog. Echo serve has no --auth, so the dialog
-// states the loopback opt-in and does not mint a pairing code.
+// Unauthenticated phone dialog. Echo serve has no --auth and listens on
+// loopback, so the dialog states the loopback opt-in, mints no pairing
+// code, and shows no scannable QR or copyable URL (#1522) — only the
+// restart command for a phone-reachable bind.
 import { delay } from "../browser.mjs";
 
 export async function scenario(ctx) {
@@ -31,85 +33,75 @@ export async function scenario(ctx) {
     await press("Enter");
   }
   const phoneDialog = await waitUntil(
-    `document.body && document.body.innerText.includes("A phone cannot open") && document.querySelector(".gq-qr svg")`,
+    `document.body && document.body.innerText.includes("A phone cannot open") && Boolean(document.querySelector(".gq-blocked"))`,
     8000,
     "phone dialog",
   );
-  check(Boolean(phoneDialog), "phone dialog missing opt-in or QR");
+  check(Boolean(phoneDialog), "phone dialog missing opt-in or loopback-blocked notice");
   const phoneFields = await page.evaluate(`(() => {
-    const field = document.querySelector("#gq-url");
-    const shown = document.querySelector(".gq-url")?.innerText || "";
-    const value = field ? field.value : "";
     const body = document.body ? document.body.innerText : "";
     return {
-      value,
-      shown,
+      qr: Boolean(document.querySelector(".gq-qr svg")),
+      url: Boolean(document.querySelector("#gq-url")),
+      restart: document.querySelector(".gq-cmd")?.innerText || "",
       bodyHasTokenQuery: body.includes("?token="),
       bodyHasPair: body.includes("#pair="),
     };
   })()`);
+  check(phoneFields && !phoneFields.qr, "loopback gateway still rendered a scannable QR");
+  check(phoneFields && !phoneFields.url, "loopback gateway still rendered a copyable pairing URL");
   check(
-    phoneFields &&
-      !String(phoneFields.value).includes("?token=") &&
-      !String(phoneFields.value).includes("#pair="),
-    "phone URL value leaked a secret",
-  );
-  check(
-    phoneFields &&
-      !String(phoneFields.shown).includes("?token=") &&
-      !String(phoneFields.shown).includes("#pair="),
-    "phone URL text leaked a secret",
+    phoneFields && phoneFields.restart.includes("strike daemon install"),
+    "loopback-blocked dialog did not offer the restart command",
   );
   check(
     phoneFields && !phoneFields.bodyHasTokenQuery && !phoneFields.bodyHasPair,
     "phone dialog body leaked a secret",
   );
   await shoot("shell-phone", ["desk1024", "desk1440", "mobile"]);
-  // Clipboard honesty (#1582): force the Clipboard API to reject, click
-  // Copy URL, and the dialog must NOT claim "Pairing URL copied." — it
-  // must show the manual-copy fallback instead. Then let the write
-  // resolve and confirm the fallback clears.
+  // Clipboard honesty (#1582): a rejected write of the restart command
+  // must say so, never claim it was copied.
   await page.evaluate(`Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText: () => Promise.reject(new Error("denied")) },
   })`);
   const copyBtn = await page.evaluate(`(() => {
     const b = [...document.querySelectorAll(".gq-dialog button")]
-      .find((x) => x.textContent.trim() === "Copy URL");
+      .find((x) => x.textContent.trim() === "Copy restart command");
     if (b) b.click();
     return Boolean(b);
   })()`);
-  check(Boolean(copyBtn), "Copy URL button missing from the phone dialog");
-  const fallback = await waitUntil(
-    `Boolean(document.querySelector(".gq-copy-fallback"))`,
+  check(Boolean(copyBtn), "Copy restart command button missing from the phone dialog");
+  const failed = await waitUntil(
+    `Boolean(document.querySelector(".gq-blocked .gq-copy-fallback"))`,
     4000,
-    "clipboard failure fallback",
+    "clipboard failure note",
   );
-  check(Boolean(fallback), "rejected clipboard write did not show the manual-copy fallback");
-  const claimedCopied = await page.evaluate(
-    `document.body.innerText.includes("Pairing URL copied.")`,
+  check(Boolean(failed), "rejected clipboard write did not report the failure");
+  check(
+    !(await page.evaluate(`document.body.innerText.includes("Restart command copied.")`)),
+    "dialog claimed 'Restart command copied.' after a rejected write",
   );
-  check(!claimedCopied, "dialog claimed 'Pairing URL copied.' after a rejected write");
   await shoot("gateway-copy-failed", ["desk1440", "mobile"]);
   await page.evaluate(`Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText: () => Promise.resolve() },
   })`);
   await page.evaluate(`[...document.querySelectorAll(".gq-dialog button")]
-    .find((x) => x.textContent.trim() === "Copy URL")?.click()`);
+    .find((x) => x.textContent.trim() === "Copy restart command")?.click()`);
   const fallbackGone = await waitUntil(
     `!document.querySelector(".gq-copy-fallback")`,
     4000,
     "clipboard success clears fallback",
   );
   check(Boolean(fallbackGone), "successful copy did not clear the failure fallback");
-  await click("button.gq-new", "New code");
+  await click("button.gq-new", "Check again");
   const noCode = await waitUntil(
-    `document.body && document.body.innerText.includes("No pairing code")`,
+    `document.body && document.body.innerText.includes("No pairing code") && Boolean(document.querySelector(".gq-blocked"))`,
     4000,
     "no pairing code",
   );
-  check(Boolean(noCode), "New code did not explain that no pairing code was minted");
+  check(Boolean(noCode), "Check again did not keep the no-code, no-QR explanation");
   await press("Escape");
   const phoneClosed = await waitUntil(
     `!document.querySelector(".gq-dialog")`,
