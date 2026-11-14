@@ -40,7 +40,7 @@ Usage notes:
 - Explain non-trivial commands that change the user's system before running them.
 - Independent commands may be issued as parallel tool calls; chain dependent commands with && in one call.
 - Each invocation starts at the session working directory (workspace/worktree root). A cd inside one call does not affect later bash or other tools — use (cd subdir && …) or && in the same command when you need a subdirectory.
-- Optional timeoutMs (default 120000, max 600000). Output is capped at ~16KB and truncated with a byte-total note.
+- Optional timeoutMs (default 120000, max 600000). Output is capped at ~16KB and truncated with a byte-total note; when the full output is saved, the note names a file you can page with read offset/limit.
 - Do not use bash to communicate with the user; send a normal assistant message instead.`
 }
 
@@ -157,6 +157,7 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 		Env:       env,
 		Timeout:   timeout,
 		MaxOutput: bashMaxOutput,
+		SpillMax:  bashSpillMax(tc),
 		Combine:   true,
 		Sandbox:   policy,
 	}, obs)
@@ -167,6 +168,13 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	output := proc.Output
 	if proc.Truncated {
 		output += fmt.Sprintf("\n… (output truncated, %d bytes total)", proc.BytesSeen)
+		full := proc.Full
+		if full != "" && proc.BytesSeen > len(full) {
+			full += fmt.Sprintf("\n… (spill truncated, %d bytes total)\n", proc.BytesSeen)
+		}
+		if hint := spillOverflow(tc, "bash", full); hint != "" {
+			output += "\n" + hint
+		}
 	}
 	exitCode := proc.ExitCode
 	var errCode string
@@ -229,6 +237,15 @@ func (bashTool) Execute(ctx context.Context, args json.RawMessage, tc *Context) 
 	}
 	meta, _ := json.Marshal(metaFields)
 	return Result{Title: a.Command, Output: output, Metadata: meta, ErrorCode: errCode}, nil
+}
+
+// bashSpillMax retains overflow for spillOverflow only when session scratch
+// is available; otherwise RunProcess discards it as before.
+func bashSpillMax(tc *Context) int {
+	if tc == nil || strings.TrimSpace(tc.SessionTempDir) == "" {
+		return 0
+	}
+	return spillMaxBytes
 }
 
 // acquireBashLease acquires process (+ build/test when classified) pools.
