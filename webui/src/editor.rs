@@ -84,12 +84,21 @@ pub fn language_of(path: &str) -> &'static str {
     }
 }
 
+/// Fences above this many lines or bytes stay plain (#1575): the
+/// transcript rebuilds every message on each streamed delta, so a huge
+/// pasted log must not become tens of thousands of spans. Mirrors the
+/// SourceView's `MAX_RENDER_LINES` cap.
+pub const FENCE_HIGHLIGHT_MAX_LINES: usize = 2000;
+pub const FENCE_HIGHLIGHT_MAX_BYTES: usize = 64 * 1024;
+
 /// Highlighter language for a Markdown fence info string (#1575): the
-/// first word, lowercased, through the same table as file extensions
-/// ([`language_of`]) plus the common long names. Unknown → `"text"`.
+/// first word (after any pandoc-style `{`/`.` prefix), lowercased,
+/// through the same table as file extensions ([`language_of`]) plus the
+/// common long names. Unknown → `"text"`.
 pub fn fence_language(info: &str) -> &'static str {
     let word = info
-        .split(|c: char| c.is_whitespace() || c == ',' || c == '{')
+        .trim_start_matches(|c: char| c == '{' || c == '.')
+        .split(|c: char| c.is_whitespace() || c == ',' || c == '}')
         .next()
         .unwrap_or("")
         .to_ascii_lowercase();
@@ -105,11 +114,17 @@ pub fn fence_language(info: &str) -> &'static str {
 }
 
 /// Per-line highlight tokens for a fenced block, or `None` when the
-/// fence language is unknown/plain (it renders exactly as before). Lines
-/// split on `\n` only, so joining them back with `\n` reproduces `text`.
+/// fence language is unknown/plain or the block is over the size cap (it
+/// renders exactly as before). Lines split on `\n` only, so joining them
+/// back with `\n` reproduces `text`.
 pub fn fence_tokens(info: &str, text: &str) -> Option<Vec<Vec<Tok>>> {
     let lang = fence_language(info);
     if matches!(lang, "text" | "markdown") {
+        return None;
+    }
+    if text.len() > FENCE_HIGHLIGHT_MAX_BYTES
+        || text.bytes().filter(|b| *b == b'\n').count() >= FENCE_HIGHLIGHT_MAX_LINES
+    {
         return None;
     }
     Some(text.split('\n').map(|line| highlight_line(lang, line)).collect())
@@ -131,8 +146,13 @@ pub fn highlighted_code(info: &str, text: &str) -> AnyView {
                 {toks
                     .into_iter()
                     .map(|tok| {
-                        let class = tok.kind;
-                        view! { <span class=class>{tok.text}</span> }
+                        // Plain runs are bare text nodes, not empty spans.
+                        if tok.kind.is_empty() {
+                            tok.text.into_any()
+                        } else {
+                            let class = tok.kind;
+                            view! { <span class=class>{tok.text}</span> }.into_any()
+                        }
                     })
                     .collect_view()}
             }
@@ -2289,6 +2309,8 @@ mod tests {
             ("sql", "sql"),
             ("", "text"),
             ("mermaid", "text"),
+            ("{.python}", "py"),
+            ("{r}", "text"),
         ] {
             assert_eq!(fence_language(info), want, "info {info:?}");
         }
@@ -2311,6 +2333,16 @@ mod tests {
         assert!(fence_tokens("", text).is_none(), "no language stays plain");
         assert!(fence_tokens("mermaid", text).is_none());
         assert!(fence_tokens("markdown", text).is_none());
+    }
+
+    #[test]
+    fn oversized_fences_stay_plain() {
+        let many_lines = "x\n".repeat(FENCE_HIGHLIGHT_MAX_LINES);
+        assert!(fence_tokens("go", &many_lines).is_none());
+        let big = "a".repeat(FENCE_HIGHLIGHT_MAX_BYTES + 1);
+        assert!(fence_tokens("go", &big).is_none());
+        let fine = "func a() {}\n".repeat(10);
+        assert!(fence_tokens("go", &fine).is_some());
     }
 
     #[test]
