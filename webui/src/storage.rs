@@ -133,6 +133,14 @@ fn artifact_page_has_more(returned: usize, limit: usize) -> bool {
     limit > 0 && returned == limit
 }
 
+/// Append a "Show more" page, skipping ids already listed. The list is
+/// ordered by updatedAt desc, so an artifact updated between page loads
+/// shifts the offset window and would otherwise be listed twice.
+fn append_artifact_page(cur: &mut Vec<ArtifactMeta>, page: Vec<ArtifactMeta>) {
+    let seen: std::collections::HashSet<String> = cur.iter().map(|a| a.id.clone()).collect();
+    cur.extend(page.into_iter().filter(|a| !seen.contains(&a.id)));
+}
+
 #[derive(Clone, Deserialize, Default)]
 struct ArtifactDetail {
     id: String,
@@ -316,7 +324,7 @@ pub fn StoragePanel(
                         loaded.artifacts.len(),
                         ARTIFACT_PAGE_SIZE,
                     ));
-                    artifacts.update(|cur| cur.extend(loaded.artifacts));
+                    artifacts.update(|cur| append_artifact_page(cur, loaded.artifacts));
                 }
                 // Keep the rows already shown and the Show more control
                 // (has_more stays true) so the user can retry; surface
@@ -895,6 +903,19 @@ mod tests {
             ["plan", "contract", "findings", "patch", "test_report"]
         );
         assert_eq!(ARTIFACT_PAGE_SIZE, 100);
+    }
+
+    #[test]
+    fn show_more_append_skips_ids_already_listed() {
+        let meta = |id: &str| ArtifactMeta {
+            id: id.into(),
+            ..Default::default()
+        };
+        let mut cur = vec![meta("a"), meta("b")];
+        // "b" shifted into the next window after an update between loads.
+        append_artifact_page(&mut cur, vec![meta("b"), meta("c")]);
+        let ids: Vec<&str> = cur.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["a", "b", "c"]);
     }
 
     #[test]
