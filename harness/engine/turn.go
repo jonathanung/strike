@@ -1904,6 +1904,19 @@ func (e *Engine) failTurn(ctx context.Context, err error, corr protocol.Correlat
 		e.completeTurn(ctx, finishing, corr, "loop_detected")
 		return
 	}
+	if name, ok := provider.AuthFailure(err); ok {
+		// #1546: name the rejected credential so frontends can offer a
+		// reconnect path instead of a generic notice. Message stays the
+		// vendor text as secondary detail; Provider is a name only.
+		e.emit(protocol.EngineError{
+			Correlation: corr,
+			Message:     err.Error(),
+			Code:        protocol.ErrorCodeProviderAuth,
+			Provider:    name,
+		})
+		e.completeTurn(ctx, finishing, corr, "error")
+		return
+	}
 	e.emit(protocol.EngineError{Correlation: corr, Message: err.Error()})
 	e.completeTurn(ctx, finishing, corr, "error")
 }

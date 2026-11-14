@@ -84,6 +84,41 @@ pub fn language_of(path: &str) -> &'static str {
     }
 }
 
+/// The local filename for a Download of the open file (#1420): the
+/// basename of the workspace-relative path as displayed, falling back
+/// to a plain name when the path has no usable final segment.
+pub fn download_filename(path: &str) -> String {
+    let base = path.rsplit('/').next().unwrap_or("").trim();
+    if base.is_empty() {
+        "download.txt".to_string()
+    } else {
+        base.to_string()
+    }
+}
+
+/// What a Download saves (#1420): in Edit mode the current buffer —
+/// what you see is what you get — never the stale on-disk content.
+/// Returns the text and whether it carries unsaved changes, so the
+/// status line can say so instead of downloading silently.
+pub fn download_buffer(editing: bool, content: &str, draft: &str) -> (String, bool) {
+    if editing {
+        (draft.to_string(), draft != content)
+    } else {
+        (content.to_string(), false)
+    }
+}
+
+/// The text a Copy path click puts on the clipboard (#1410): the
+/// workspace-relative path as displayed, in `path:line` form when a
+/// jump target (go-to-line or current find hit) is active.
+pub fn path_for_copy(path: &str, line: u32) -> String {
+    if line > 0 {
+        format!("{path}:{line}")
+    } else {
+        path.to_string()
+    }
+}
+
 /// Fences above this many lines or bytes stay plain (#1575): the
 /// transcript rebuilds every message on each streamed delta, so a huge
 /// pasted log must not become tens of thousands of spans. Mirrors the
@@ -227,7 +262,49 @@ pub fn diff_hidden(full: &str, max_chars: usize) -> (usize, usize) {
     (hidden_chars, hidden_lines)
 }
 
-pub fn find_hits(text: &str, query: &str) -> Vec<Hit> {
+/// Options for the shared find matcher (#1409 match-case, #1419
+/// whole-word). Both default off, which is the historical behaviour:
+/// case-insensitive substring matching. One struct threads through the
+/// editor and transcript find (`transcript_find` reuses `find_hits`),
+/// so the two bars can never drift into separate matchers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FindOptions {
+    pub case_sensitive: bool,
+    pub whole_word: bool,
+}
+
+impl FindOptions {
+    pub fn new(case_sensitive: bool, whole_word: bool) -> Self {
+        Self {
+            case_sensitive,
+            whole_word,
+        }
+    }
+}
+
+/// A word character for whole-word boundaries (#1419): exactly
+/// `[A-Za-z0-9_]`, nothing wider (punctuation, whitespace, and
+/// non-ASCII letters all count as boundaries).
+pub fn is_word_char(c: char) -> bool {
+    matches!(c, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_')
+}
+
+/// Pure whole-word predicate: the hit at `start..end` in `line` counts
+/// only when the characters immediately before and after it (if any)
+/// are not word characters.
+pub fn is_whole_word_at(line: &str, start: usize, end: usize) -> bool {
+    let before_ok = line[..start.min(line.len())]
+        .chars()
+        .next_back()
+        .map_or(true, |c| !is_word_char(c));
+    let after_ok = line[end.min(line.len())..]
+        .chars()
+        .next()
+        .map_or(true, |c| !is_word_char(c));
+    before_ok && after_ok
+}
+
+pub fn find_hits(text: &str, query: &str, opts: FindOptions) -> Vec<Hit> {
     if query.is_empty() {
         return Vec::new();
     }
@@ -236,14 +313,44 @@ pub fn find_hits(text: &str, query: &str) -> Vec<Hit> {
     let query_ascii = query.is_ascii();
     let mut hits = Vec::new();
     for (idx, line) in lines_of(text).into_iter().enumerate() {
+        // Case-sensitive matching never lowercases, so it never needs
+        // the fold fallback below: `str::find` gives exact byte offsets
+        // for ASCII and non-ASCII alike.
+        if opts.case_sensitive && (!query_ascii || !line.is_ascii()) {
+            for (start, _) in line.match_indices(query) {
+                let end = start + query.len();
+                if opts.whole_word && !is_whole_word_at(line, start, end) {
+                    continue;
+                }
+                hits.push(Hit {
+                    line: (idx as u32) + 1,
+                    start,
+                    end,
+                });
+                if hits.len() >= MAX_HITS {
+                    return hits;
+                }
+            }
+            continue;
+        }
         // Greek and Cyrillic fold without changing the byte length, so a
         // length check never left the ASCII fast path and missed them.
         // The fast path is only for pure ASCII. Anything else is a
         // whole-line hit: one match per line, start and end left at 0
         // (`marked_pieces` already treats that as the whole line).
-        if !query_ascii || !line.is_ascii() {
+        // Whole-word with an ASCII query stays on the byte path even
+        // for a non-ASCII line (an em dash or curly quote in prose):
+        // ASCII query bytes can only match ASCII bytes, so offsets
+        // stay exact and boundaries checkable. Sending those lines to
+        // the fold fallback would drop every hit on them.
+        let byte_path = query_ascii && (line.is_ascii() || opts.whole_word);
+        if !byte_path {
             let folded = line.to_lowercase();
-            if folded.contains(&q_lower) {
+            // Fold fallback: per-hit offsets cannot be trusted, so in
+            // whole-word mode the hit's boundaries cannot be verified
+            // and it is dropped, not counted (#1419 Q2) — counting it
+            // would make the count a lie.
+            if !opts.whole_word && folded.contains(&q_lower) {
                 hits.push(Hit {
                     line: (idx as u32) + 1,
                     start: 0,
@@ -251,23 +358,41 @@ pub fn find_hits(text: &str, query: &str) -> Vec<Hit> {
                 });
             }
         } else {
+            // Pure-ASCII fast path. Case-sensitive compares the raw
+            // query bytes; case-insensitive compares against the
+            // lowercased query, as before.
+            let needle: &[u8] = if opts.case_sensitive {
+                query.as_bytes()
+            } else {
+                q_bytes
+            };
             let bytes = line.as_bytes();
-            if bytes.len() < q_bytes.len() || q_bytes.is_empty() {
+            if bytes.len() < needle.len() || needle.is_empty() {
                 continue;
             }
             let mut i = 0;
-            while i + q_bytes.len() <= bytes.len() {
-                let same = bytes[i..i + q_bytes.len()]
-                    .iter()
-                    .zip(q_bytes)
-                    .all(|(a, b)| a.to_ascii_lowercase() == *b);
+            while i + needle.len() <= bytes.len() {
+                let same = if opts.case_sensitive {
+                    &bytes[i..i + needle.len()] == needle
+                } else {
+                    bytes[i..i + needle.len()]
+                        .iter()
+                        .zip(needle)
+                        .all(|(a, b)| a.to_ascii_lowercase() == *b)
+                };
                 if same {
+                    if opts.whole_word && !is_whole_word_at(line, i, i + needle.len()) {
+                        // Not a whole word: advance one byte so a
+                        // later whole-word hit on this line is found.
+                        i += 1;
+                        continue;
+                    }
                     hits.push(Hit {
                         line: (idx as u32) + 1,
                         start: i,
-                        end: i + q_bytes.len(),
+                        end: i + needle.len(),
                     });
-                    i += q_bytes.len().max(1);
+                    i += needle.len().max(1);
                     if hits.len() >= MAX_HITS {
                         return hits;
                     }
@@ -913,6 +1038,9 @@ pub fn markdown_blocks(src: &str) -> Vec<MdBlock> {
             continue;
         }
         if let Some(info) = trimmed.strip_prefix("```") {
+            // The fence info string is the language label (#1421); the
+            // transcript parser keeps it and MarkdownView used to drop
+            // it, which is why its fences had neither label nor Copy.
             let lang = info.trim().to_string();
             i += 1;
             let mut body = String::new();
@@ -1298,6 +1426,43 @@ fn Inlines(text: String) -> impl IntoView {
         .collect_view()
 }
 
+/// One fenced code block in rendered Markdown (#1421), with the same
+/// fence chrome as the transcript's `Block::Code`: a bar with the
+/// language label (hidden when the fence has no info string) and a
+/// Copy button on the shared clipboard helper, with the transcript's
+/// transient label feedback — one copy behaviour crate-wide, so the
+/// two renderers cannot drift on this affordance again.
+#[component]
+fn MdCodeBlock(lang: String, text: String) -> impl IntoView {
+    let copy_state = RwSignal::new(None::<bool>);
+    let copy = text.clone();
+    let has_lang = !lang.is_empty();
+    // Known fence languages get the file viewer's token spans (#1575);
+    // Copy still copies the raw fence text.
+    let code = highlighted_code(&lang, &text);
+    view! {
+        <div class="sx-fence ev-fence">
+            <div class="sx-fence-bar">
+                {has_lang.then(|| view! { <span class="sx-lang">{lang.clone()}</span> })}
+                <button
+                    type="button"
+                    class="sx-quiet ev-copy-code"
+                    data-ev-copy-code=true
+                    on:click=move |_| {
+                        let text = copy.clone();
+                        spawn_local(async move {
+                            let ok = crate::clipboard::copy_text(&text).await.is_ok();
+                            copy_state.set(Some(ok));
+                            crate::clipboard::after_ms(2_000, move || copy_state.set(None));
+                        });
+                    }
+                >{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
+            </div>
+            <pre class="sx-code">{code}</pre>
+        </div>
+    }
+}
+
 #[component]
 pub fn MarkdownView(text: String) -> impl IntoView {
     let blocks = markdown_blocks(&text);
@@ -1313,7 +1478,7 @@ pub fn MarkdownView(text: String) -> impl IntoView {
                     }
                 }
                 MdBlock::Paragraph(text) => view! { <p><Inlines text=text /></p> }.into_any(),
-                MdBlock::Code { lang, text } => view! { <pre>{highlighted_code(&lang, &text)}</pre> }.into_any(),
+                MdBlock::Code { lang, text } => view! { <MdCodeBlock lang=lang text=text /> }.into_any(),
                 MdBlock::Quote(text) => view! { <blockquote><Inlines text=text /></blockquote> }.into_any(),
                 MdBlock::List(items) => view! {
                     <ul>
@@ -1759,6 +1924,10 @@ pub fn DocumentPane(
     let saving = RwSignal::new(false);
     let conflict = RwSignal::new(false);
     let query = RwSignal::new(String::new());
+    // Find options (#1409/#1419): per-bar, in-memory only, both off by
+    // default (today's case-insensitive substring behaviour).
+    let match_case = RwSignal::new(false);
+    let whole_word = RwSignal::new(false);
     let hits = RwSignal::new(Vec::<Hit>::new());
     let hit_idx = RwSignal::new(0usize);
     let preview = RwSignal::new(false);
@@ -1851,7 +2020,8 @@ pub fn DocumentPane(
     Effect::new(move |_| {
         let text = if editing.get() { draft.get() } else { content.get() };
         let q = query.get();
-        hits.set(find_hits(&text, &q));
+        let opts = FindOptions::new(match_case.get(), whole_word.get());
+        hits.set(find_hits(&text, &q, opts));
         hit_idx.set(0);
     });
 
@@ -2239,10 +2409,13 @@ pub fn DocumentPane(
             if path.is_empty() {
                 return Err("Open a file first.".into());
             }
-            if let Some(win) = web_sys::window() {
-                let _ = win.navigator().clipboard().write_text(&path);
-            }
-            notice.set("Copied the path.".into());
+            // Await the write through the shared helper (#1410): the
+            // old fire-and-forget call claimed "Copied the path." even
+            // when the browser rejected the write.
+            spawn_local(async move {
+                let ok = crate::clipboard::copy_text(&path).await.is_ok();
+                notice.set(crate::clipboard::path_copy_feedback(ok).into());
+            });
             Ok(())
         }),
     );
@@ -2253,10 +2426,10 @@ pub fn DocumentPane(
             if text.is_empty() {
                 return Err("Open a file first.".into());
             }
-            if let Some(win) = web_sys::window() {
-                let _ = win.navigator().clipboard().write_text(&text);
-            }
-            notice.set("Copied the file.".into());
+            spawn_local(async move {
+                let ok = crate::clipboard::copy_text(&text).await.is_ok();
+                notice.set(crate::clipboard::file_copy_feedback(ok).into());
+            });
             Ok(())
         }),
     );
@@ -2281,6 +2454,35 @@ pub fn DocumentPane(
                     if p.is_empty() { path.get() } else { p }
                 }}</span>
                 <span class="hint">{move || language_of(&loaded_path.get())}</span>
+                <button
+                    type="button"
+                    class="secondary"
+                    data-ev-copy-path=true
+                    disabled=move || loaded_path.get().is_empty()
+                    title="Copy the open file's path"
+                    on:click=move |_| {
+                        let p = loaded_path.get_untracked();
+                        if p.is_empty() {
+                            return;
+                        }
+                        // Same effective line the scroll effect uses:
+                        // the current find hit while searching, else
+                        // the go-to-line jump target (#1410 Q2).
+                        let line = if query.get_untracked().is_empty() {
+                            jump_line.get_untracked()
+                        } else {
+                            hits.get_untracked()
+                                .get(hit_idx.get_untracked())
+                                .map(|h| h.line)
+                                .unwrap_or(0)
+                        };
+                        let text = path_for_copy(&p, line);
+                        spawn_local(async move {
+                            let ok = crate::clipboard::copy_text(&text).await.is_ok();
+                            status.set(crate::clipboard::path_copy_feedback(ok).into());
+                        });
+                    }
+                >"Copy path"</button>
                 <input
                     id="ev-search"
                     class="ev-search"
@@ -2312,6 +2514,24 @@ pub fn DocumentPane(
                         format!("{}/{}", hit_idx.get() + 1, n)
                     }
                 }}</span>
+                <button
+                    type="button"
+                    class=move || if match_case.get() { "chip on ev-find-toggle" } else { "chip ev-find-toggle" }
+                    data-ev-match-case="true"
+                    title="Match case"
+                    aria-label="Match case"
+                    aria-pressed=move || if match_case.get() { "true" } else { "false" }
+                    on:click=move |_| match_case.update(|v| *v = !*v)
+                >"Aa"</button>
+                <button
+                    type="button"
+                    class=move || if whole_word.get() { "chip on ev-find-toggle" } else { "chip ev-find-toggle" }
+                    data-ev-whole-word="true"
+                    title="Whole word"
+                    aria-label="Whole word"
+                    aria-pressed=move || if whole_word.get() { "true" } else { "false" }
+                    on:click=move |_| whole_word.update(|v| *v = !*v)
+                >"ab|"</button>
                 <input
                     id="ev-goto"
                     class="ev-goto"
@@ -2536,6 +2756,39 @@ pub fn DocumentPane(
                 <button
                     type="button"
                     class="secondary"
+                    data-ev-download=true
+                    disabled=move || loaded_path.get().is_empty() || binary.get()
+                    title="Download a copy of the open file"
+                    on:click=move |_| {
+                        let p = loaded_path.get_untracked();
+                        if p.is_empty() {
+                            return;
+                        }
+                        // Download what is loaded (#1420): the full
+                        // content is already client-side, past the
+                        // 2,000-line render cap; in Edit mode that is
+                        // the current buffer, unsaved changes included,
+                        // and the status line says so.
+                        let (text, unsaved) = download_buffer(
+                            editing.get_untracked(),
+                            &content.get_untracked(),
+                            &draft.get_untracked(),
+                        );
+                        crate::transcript_view::save_download(
+                            &download_filename(&p),
+                            "text/plain;charset=utf-8",
+                            &text,
+                        );
+                        status.set(if unsaved {
+                            "Downloaded the current buffer, including unsaved changes.".into()
+                        } else {
+                            "Downloaded.".into()
+                        });
+                    }
+                >"Download"</button>
+                <button
+                    type="button"
+                    class="secondary"
                     data-ev-edit=true
                     disabled=move || !writable.get() || editing.get()
                     title=move || if write_block.get().is_empty() { "Edit this file".into() } else { write_block.get() }
@@ -2601,13 +2854,13 @@ mod tests {
 
     #[test]
     fn search_is_case_insensitive_and_numbered() {
-        let hits = find_hits("Alpha\nbeta alpha\n", "alpha");
+        let hits = find_hits("Alpha\nbeta alpha\n", "alpha", FindOptions::default());
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].line, 1);
         assert_eq!(hits[1].line, 2);
         assert!(hits[1].start > 0);
-        assert!(find_hits("abc", "").is_empty());
-        assert!(find_hits("abc", "z").is_empty());
+        assert!(find_hits("abc", "", FindOptions::default()).is_empty());
+        assert!(find_hits("abc", "z", FindOptions::default()).is_empty());
         // Byte positions on the ASCII path stay per-occurrence.
         assert_eq!(hits[0].start, 0);
         assert_eq!(hits[0].end, 5);
@@ -2623,7 +2876,7 @@ mod tests {
             ("А\n", "а"),
             ("а\n", "А"),
         ] {
-            let hits = find_hits(line, query);
+            let hits = find_hits(line, query, FindOptions::default());
             assert_eq!(hits.len(), 1, "line {line:?} query {query:?}");
             assert_eq!(hits[0].line, 1);
             assert_eq!(hits[0].start, 0);
@@ -2631,15 +2884,111 @@ mod tests {
         }
         // Capital sharp S (U+1E9E) folds to ß and changes the byte length.
         for (line, query) in [("ẞ\n", "ß"), ("ß\n", "ẞ")] {
-            let hits = find_hits(line, query);
+            let hits = find_hits(line, query, FindOptions::default());
             assert_eq!(hits.len(), 1, "line {line:?} query {query:?}");
             assert_eq!(hits[0].end, 0);
         }
         // İ folds to i + combining dot. The query and the line both fold.
-        let hits = find_hits("İstanbul\n", "İ");
+        let hits = find_hits("İstanbul\n", "İ", FindOptions::default());
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].end, 0);
-        assert!(find_hits("plain ascii\n", "Σ").is_empty());
+        assert!(find_hits("plain ascii\n", "Σ", FindOptions::default()).is_empty());
+    }
+
+    #[test]
+    fn search_match_case_only_hits_exact_case() {
+        let opts = FindOptions::new(true, false);
+        let hits = find_hits("Token token TOKEN Token\n", "Token", opts);
+        assert_eq!(hits.len(), 2);
+        assert_eq!((hits[0].start, hits[0].end), (0, 5));
+        assert_eq!((hits[1].start, hits[1].end), (18, 23));
+        assert!(find_hits("token\n", "Token", opts).is_empty());
+        // Default (off) still folds case, as before #1409.
+        assert_eq!(
+            find_hits("Token token TOKEN\n", "Token", FindOptions::default()).len(),
+            3
+        );
+    }
+
+    #[test]
+    fn search_match_case_does_not_regress_unicode_fold_path() {
+        let opts = FindOptions::new(true, false);
+        // Exact non-ASCII hits get exact offsets (no fold involved).
+        let hits = find_hits("İstanbul\n", "İ", opts);
+        assert_eq!(hits.len(), 1);
+        assert_eq!((hits[0].start, hits[0].end), (0, "İ".len()));
+        // A differently-cased fold partner is NOT a case-sensitive hit,
+        // while the default matcher still finds it via the fold path.
+        assert!(find_hits("Σ\n", "σ", opts).is_empty());
+        assert!(find_hits("ẞ\n", "ß", opts).is_empty());
+        assert_eq!(find_hits("ẞ\n", "ß", FindOptions::default()).len(), 1);
+        assert_eq!(find_hits("Σ sigma\n", "Σ", opts).len(), 1);
+    }
+
+    #[test]
+    fn whole_word_predicate_boundaries() {
+        assert!(is_whole_word_at("token", 0, 5));
+        assert!(is_whole_word_at("a token here", 2, 7));
+        assert!(is_whole_word_at("(token).", 1, 6));
+        assert!(is_whole_word_at("token,", 0, 5));
+        // Underscore and digits are word chars: not boundaries.
+        assert!(!is_whole_word_at("my_token", 3, 8));
+        assert!(!is_whole_word_at("token2", 0, 5));
+        assert!(!is_whole_word_at("tokens", 0, 5));
+        assert!(!is_whole_word_at("2token", 1, 6));
+        assert!(is_word_char('_') && is_word_char('9') && is_word_char('Z'));
+        assert!(!is_word_char('-') && !is_word_char(' '));
+    }
+
+    #[test]
+    fn search_whole_word_only_hits_whole_words() {
+        let opts = FindOptions::new(false, true);
+        let hits = find_hits("token tokens tokenize mytoken token.\n", "token", opts);
+        assert_eq!(hits.len(), 2);
+        assert_eq!((hits[0].start, hits[0].end), (0, 5));
+        assert_eq!((hits[1].start, hits[1].end), (30, 35));
+        // Whole-word composes with match-case.
+        let both = FindOptions::new(true, true);
+        assert_eq!(
+            find_hits("Token token TOKEN tokens\n", "token", both).len(),
+            1
+        );
+        assert_eq!(
+            find_hits("Token token TOKEN tokens\n", "token", opts).len(),
+            3
+        );
+    }
+
+    #[test]
+    fn search_whole_word_drops_fold_fallback_hits() {
+        // The fold fallback (whole-line marker) cannot verify
+        // boundaries, so whole-word mode drops it (#1419 Q2) while the
+        // default mode keeps counting it.
+        let opts = FindOptions::new(false, true);
+        assert!(find_hits("ẞ\n", "ß", opts).is_empty());
+        assert!(find_hits("İstanbul\n", "İ", opts).is_empty());
+        // Case-sensitive mode never uses the fallback: an exact
+        // whole-word non-ASCII hit is still found with real offsets.
+        let both = FindOptions::new(true, true);
+        let hits = find_hits("say İ now\n", "İ", both);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].start, 4);
+    }
+
+    #[test]
+    fn search_whole_word_ascii_query_on_non_ascii_line() {
+        // An ASCII query on a line with non-ASCII prose is not a fold
+        // case: whole-word still finds it with exact offsets.
+        let opts = FindOptions::new(false, true);
+        let line = "café — Token tokens token\n";
+        let hits = find_hits(line, "token", opts);
+        assert_eq!(hits.len(), 2);
+        let first = line.find("Token").unwrap();
+        assert_eq!((hits[0].start, hits[0].end), (first, first + 5));
+        assert_eq!(&line[hits[1].start..hits[1].end], "token");
+        assert!(hits[1].start > first + 6);
+        // é is not an ASCII word char, so it is a boundary (#1419).
+        assert_eq!(find_hits("éa é\n", "a", opts).len(), 1);
     }
 
     #[test]
@@ -2725,6 +3074,58 @@ mod tests {
         assert!(inline.iter().any(|p| matches!(p, Inline::Strong(t) if t == "bold")));
         assert!(inline.iter().any(|p| matches!(p, Inline::Link { href, .. } if href == "https://example.com")));
         assert!(!inline.iter().any(|p| matches!(p, Inline::Link { href, .. } if href.contains("javascript"))));
+    }
+
+    #[test]
+    fn markdown_fence_keeps_its_language() {
+        let blocks = markdown_blocks("```rust\nfn main() {}\n```\n\n```\nplain\n```\n");
+        match &blocks[0] {
+            MdBlock::Code { lang, text } => {
+                assert_eq!(lang, "rust");
+                assert_eq!(text, "fn main() {}");
+            }
+            other => panic!("expected code, got {other:?}"),
+        }
+        match &blocks[1] {
+            MdBlock::Code { lang, text } => {
+                assert!(lang.is_empty());
+                assert_eq!(text, "plain");
+            }
+            other => panic!("expected code, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn download_filename_is_the_basename() {
+        assert_eq!(download_filename("webui/src/editor.rs"), "editor.rs");
+        assert_eq!(download_filename("README.md"), "README.md");
+        assert_eq!(download_filename("a/b/"), "download.txt");
+        assert_eq!(download_filename(""), "download.txt");
+    }
+
+    #[test]
+    fn download_buffer_prefers_the_edit_buffer_and_flags_unsaved() {
+        assert_eq!(
+            download_buffer(false, "disk", "draft"),
+            ("disk".to_string(), false)
+        );
+        assert_eq!(
+            download_buffer(true, "disk", "disk"),
+            ("disk".to_string(), false)
+        );
+        assert_eq!(
+            download_buffer(true, "disk", "edited"),
+            ("edited".to_string(), true)
+        );
+    }
+
+    #[test]
+    fn path_for_copy_adds_line_only_with_a_jump_target() {
+        assert_eq!(path_for_copy("webui/src/editor.rs", 0), "webui/src/editor.rs");
+        assert_eq!(
+            path_for_copy("webui/src/editor.rs", 42),
+            "webui/src/editor.rs:42"
+        );
     }
 
     #[test]

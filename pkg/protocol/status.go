@@ -120,6 +120,10 @@ type LiveStatusInput struct {
 	ChildRunning      bool
 	ChildWaiting      bool
 	ChildBlocked      bool
+	// ProviderAuthFailed is an unretried provider_auth EngineError on the
+	// latest turn (#1546): the session is blocked on the user fixing a
+	// credential, not cleanly stopped.
+	ProviderAuthFailed bool
 }
 
 // ClassifyLive maps one live root onto a status id.
@@ -130,7 +134,7 @@ func ClassifyLive(in LiveStatusInput) string {
 	if in.Busy || in.ChildRunning {
 		return StatusRunning
 	}
-	if in.ChildBlocked {
+	if in.ChildBlocked || in.ProviderAuthFailed {
 		return StatusBlocked
 	}
 	switch NormalizeStop(in.StopReason) {

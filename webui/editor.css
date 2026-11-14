@@ -190,12 +190,25 @@
 .ev-md .md-table .md-center { text-align: center; }
 .ev-md .md-table .md-right { text-align: right; }
 /* feature:markdown-tables end */
+/* feature:md-code-copy begin */
+.ev-md .ev-fence { margin: 0.5em 0; }
+.ev-md .ev-fence .ev-copy-code { margin-left: auto; }
+/* feature:md-code-copy end */
 /* feature:editor-render-window begin */
 .ev-codeview > button.secondary { margin: 0 0 8px 8px; }
 /* feature:editor-render-window end */
 /* feature:agent-diff-expand begin */
 .ev-diff > button.secondary { margin: 0 0 8px 8px; }
 /* feature:agent-diff-expand end */
+/* feature:find-match-case begin */
+/* Find toggles (#1409 Aa match-case, #1419 ab| whole-word): compact
+   chips in the editor find bar; `.on` (from the shared chip style)
+   carries the pressed look, aria-pressed carries it for AT. */
+.ev-find-toggle { flex: 0 0 auto; font-family: ui-monospace, monospace; }
+/* feature:find-match-case end */
+/* feature:whole-word-find begin */
+.ev-find-toggle[aria-pressed="true"] { font-weight: 700; }
+/* feature:whole-word-find end */
 /* feature:editor-unsaved-guard begin */
 .ev-unsaved-guard {
   display: flex;
