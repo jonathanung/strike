@@ -1169,6 +1169,95 @@ pub fn markdown_blocks(src: &str) -> Vec<MdBlock> {
     blocks
 }
 
+/// One entry of a Markdown document's heading outline (#1446): level,
+/// display text (inline markup stripped), and the DOM id the rendered
+/// heading carries so the outline can scroll to it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OutlineEntry {
+    pub level: u8,
+    pub text: String,
+    pub id: String,
+}
+
+/// Fewest headings worth an outline (#1446 Q2): a one-heading document
+/// gains nothing from a table of contents.
+pub const OUTLINE_MIN_HEADINGS: usize = 2;
+
+/// Below this viewport width the outline starts collapsed (#1446 Q1),
+/// matching the phone breakpoint in mobile.css.
+pub const OUTLINE_RAIL_MIN_WIDTH: f64 = 720.0;
+
+/// URL-ish slug for a heading id: lowercase alphanumerics, every other
+/// run of characters collapsed to one `-`, no leading/trailing dash,
+/// and a plain fallback when nothing alphanumeric is left.
+pub fn heading_slug(text: &str) -> String {
+    let mut out = String::new();
+    let mut dash = false;
+    for c in text.chars() {
+        if c.is_alphanumeric() {
+            out.extend(c.to_lowercase());
+            dash = false;
+        } else if !out.is_empty() && !dash {
+            out.push('-');
+            dash = true;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    if out.is_empty() {
+        "section".to_string()
+    } else {
+        out
+    }
+}
+
+/// A heading's visible text with inline markup (`**`, backticks,
+/// links) removed, the same parse the rendered heading uses.
+pub fn heading_plain_text(text: &str) -> String {
+    inline_parse(text)
+        .into_iter()
+        .map(|part| match part {
+            Inline::Text(t) | Inline::Code(t) | Inline::Strong(t) | Inline::Em(t) => t,
+            Inline::Link { text, .. } => text,
+        })
+        .collect()
+}
+
+/// The outline of already-parsed blocks (#1446): every heading in
+/// document order. Ids are `ev-h-<slug>`; a repeat gets the first free
+/// numeric suffix (`-2`, `-3`, …, #1446 Q3), so ids stay unique even
+/// when a heading's own text ends in a number.
+pub fn outline_entries(blocks: &[MdBlock]) -> Vec<OutlineEntry> {
+    let mut used = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for block in blocks {
+        let MdBlock::Heading(level, raw) = block else {
+            continue;
+        };
+        let text = heading_plain_text(raw);
+        let base = format!("ev-h-{}", heading_slug(&text));
+        let mut id = base.clone();
+        let mut n = 1;
+        while !used.insert(id.clone()) {
+            n += 1;
+            id = format!("{base}-{n}");
+        }
+        out.push(OutlineEntry {
+            level: *level,
+            text,
+            id,
+        });
+    }
+    out
+}
+
+/// Whether the outline starts expanded at this viewport width; an
+/// unknown width (0) keeps the desktop default.
+pub fn outline_open_default(width: f64) -> bool {
+    width <= 0.0 || width >= OUTLINE_RAIL_MIN_WIDTH
+}
+
 fn heading_level(line: &str) -> Option<usize> {
     let n = line.chars().take_while(|c| *c == '#').count();
     if (1..=3).contains(&n) && line.as_bytes().get(n) == Some(&b' ') {
@@ -1323,6 +1412,23 @@ fn scroll_line_soon(line: u32) {
         0,
     );
     cb.forget();
+}
+
+/// Scroll a rendered Markdown heading into view (#1446 outline click).
+fn scroll_to_id(id: &str) {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    if let Some(el) = doc.get_element_by_id(id) {
+        el.scroll_into_view();
+    }
+}
+
+fn viewport_width() -> f64 {
+    web_sys::window()
+        .and_then(|w| w.inner_width().ok())
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0)
 }
 
 fn focus_search() {
@@ -1508,18 +1614,27 @@ fn MdCodeBlock(lang: String, text: String) -> impl IntoView {
     }
 }
 
+/// Rendered Markdown. With `outline` (the document viewer, #1446) the
+/// headings carry ids and a heading outline renders beside the text
+/// once there are at least `OUTLINE_MIN_HEADINGS`; the transcript's
+/// table path leaves it off and renders exactly as before.
 #[component]
-pub fn MarkdownView(text: String) -> impl IntoView {
+pub fn MarkdownView(text: String, #[prop(optional)] outline: bool) -> impl IntoView {
     let blocks = markdown_blocks(&text);
-    view! {
-        <div class="ev-md">
-            {blocks.into_iter().map(|block| match block {
+    let entries = if outline { outline_entries(&blocks) } else { Vec::new() };
+    let ids: Vec<String> = entries.iter().map(|e| e.id.clone()).collect();
+    let mut heading_idx = 0usize;
+    let children = blocks
+        .into_iter()
+        .map(|block| match block {
                 MdBlock::Heading(level, text) => {
+                    let id = ids.get(heading_idx).cloned();
+                    heading_idx += 1;
                     let inner = view! { <Inlines text=text /> };
                     match level {
-                        1 => view! { <h1>{inner}</h1> }.into_any(),
-                        2 => view! { <h2>{inner}</h2> }.into_any(),
-                        _ => view! { <h3>{inner}</h3> }.into_any(),
+                        1 => view! { <h1 id=id>{inner}</h1> }.into_any(),
+                        2 => view! { <h2 id=id>{inner}</h2> }.into_any(),
+                        _ => view! { <h3 id=id>{inner}</h3> }.into_any(),
                     }
                 }
                 MdBlock::Paragraph(text) => view! { <p><Inlines text=text /></p> }.into_any(),
@@ -1558,9 +1673,48 @@ pub fn MarkdownView(text: String) -> impl IntoView {
                         </div>
                     }.into_any()
                 }
-            }).collect_view()}
+            })
+        .collect_view();
+    if !outline {
+        return view! { <div class="ev-md">{children}</div> }.into_any();
+    }
+    let show = entries.len() >= OUTLINE_MIN_HEADINGS;
+    let open = outline_open_default(viewport_width());
+    let nav = show.then(|| {
+        view! {
+            <details class="ev-outline" data-ev-outline=true open=open>
+                <summary>"Outline"</summary>
+                <ol>
+                    {entries
+                        .into_iter()
+                        .map(|entry| {
+                            let target = entry.id.clone();
+                            let label = entry.text.clone();
+                            let cls = format!("ev-outline-l{}", entry.level);
+                            view! {
+                                <li class=cls>
+                                    <button
+                                        type="button"
+                                        class="ev-outline-link"
+                                        data-ev-outline-target=entry.id
+                                        title=label
+                                        on:click=move |_| scroll_to_id(&target)
+                                    >{entry.text}</button>
+                                </li>
+                            }
+                        })
+                        .collect_view()}
+                </ol>
+            </details>
+        }
+    });
+    view! {
+        <div class="ev-md-doc">
+            {nav}
+            <div class="ev-md ev-md-scroll" data-ev-md-scroll=true>{children}</div>
         </div>
     }
+    .into_any()
 }
 
 #[component]
@@ -2768,7 +2922,7 @@ pub fn DocumentPane(
             </Show>
             <div class="ev-body">
                 <Show when=move || !binary.get() && !loading.get() && preview.get()>
-                    {move || view! { <MarkdownView text=content.get() /> }}
+                    {move || view! { <MarkdownView text=content.get() outline=true /> }}
                 </Show>
                 <Show when=move || !binary.get() && !loading.get() && !preview.get() && !editing.get()>
                     {move || view! {
@@ -3162,6 +3316,50 @@ mod tests {
         assert!(toks.iter().any(|t| t.kind == "ev-com" && t.text.contains("note")));
         let joined: String = toks.iter().map(|t| t.text.as_str()).collect();
         assert_eq!(joined, "func main() { return \"hi\" } // note");
+    }
+
+    #[test]
+    fn heading_slug_handles_punctuation_and_unicode() {
+        assert_eq!(heading_slug("Getting Started"), "getting-started");
+        assert_eq!(heading_slug("  API / v2 (beta)!  "), "api-v2-beta");
+        assert_eq!(heading_slug("Café Ünïcode"), "café-ünïcode");
+        assert_eq!(heading_slug("--- ??? ---"), "section");
+        assert_eq!(heading_slug(""), "section");
+    }
+
+    #[test]
+    fn outline_entries_keep_order_strip_markup_and_dedupe_ids() {
+        let blocks = markdown_blocks(
+            "# Intro\n\ntext\n\n## **Bold** `code` [link](https://example.com)\n\n### Setup\n\n## Setup\n\n## Setup 2\n\n## Setup\n\n```\n# not a heading\n```\n",
+        );
+        let outline = outline_entries(&blocks);
+        let got: Vec<(u8, &str, &str)> = outline
+            .iter()
+            .map(|e| (e.level, e.text.as_str(), e.id.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (1, "Intro", "ev-h-intro"),
+                (2, "Bold code link", "ev-h-bold-code-link"),
+                (3, "Setup", "ev-h-setup"),
+                (2, "Setup", "ev-h-setup-2"),
+                // Its own slug is taken by the duplicate above, so it
+                // moves on to the next free suffix.
+                (2, "Setup 2", "ev-h-setup-2-2"),
+                (2, "Setup", "ev-h-setup-3"),
+            ]
+        );
+    }
+
+    #[test]
+    fn outline_thresholds() {
+        assert_eq!(OUTLINE_MIN_HEADINGS, 2);
+        assert!(outline_entries(&markdown_blocks("plain text only\n")).is_empty());
+        assert!(outline_open_default(0.0));
+        assert!(outline_open_default(1440.0));
+        assert!(outline_open_default(720.0));
+        assert!(!outline_open_default(390.0));
     }
 
     #[test]

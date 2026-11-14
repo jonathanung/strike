@@ -27,6 +27,7 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
   const sample = join(repoDir, "editor-smoke.txt");
   const other = join(repoDir, "editor-other.txt");
   const long = join(repoDir, "editor-long.txt");
+  const outlineMd = join(repoDir, "editor-outline.md");
   const md = join(repoDir, "editor-md.md");
   await writeFile(sample, "alpha beta\nsecond line\nthird line\nfourth line\nfifth line\n");
   await writeFile(
@@ -919,6 +920,14 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       `(() => document.querySelector("#ev-line-4500") ? "ok" : "hit row beyond the window")()`,
       "long file hit row auto-raised",
     );
+    // A plain-text file shows no outline (#1446).
+    const plainOutline = await evalValue(
+      send,
+      `(() => document.querySelector("[data-ev-outline]") ? "outline on plain text" : "ok")()`,
+    );
+    if (plainOutline !== "ok") {
+      throw new Error(plainOutline);
+    }
 
     // Download (#1420): the saved copy is the whole file, past the
     // 2,000-line render cap — select-all on the read view cannot do
@@ -983,6 +992,80 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       "md fence copy feedback",
     );
 
+    // Markdown outline (#1446): nested headings listed in document
+    // order with unique ids, and clicking the last entry scrolls the
+    // rendered pane to that heading.
+    const filler = Array.from({ length: 60 }, (_, i) => `Paragraph ${i + 1} of filler text.`).join("\n\n");
+    await writeFile(
+      outlineMd,
+      `# Design\n\n${filler}\n\n## Goals\n\n${filler}\n\n### Non-goals\n\n${filler}\n\n## Goals\n\n${filler}\n\n## Open questions\n\n${filler}\n`,
+    );
+    await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("textarea") ? "ok" : "no composer")()`,
+      "composer before outline file",
+    );
+    const outlineTab = await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Files"); if (!b) return "no files tab"; b.click(); return "ok"; })()`,
+    );
+    if (outlineTab !== "ok") {
+      throw new Error(`files tab click (outline): ${outlineTab}`);
+    }
+    await waitFor(
+      send,
+      `(() => document.querySelector('[data-ev-open="editor-outline.md"]') ? "ok" : "no outline file row")()`,
+      "open button for editor-outline.md",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-open="editor-outline.md"]').click(); return "ok"; })()`,
+    );
+    const wantOutline = [
+      "Design|ev-h-design",
+      "Goals|ev-h-goals",
+      "Non-goals|ev-h-non-goals",
+      "Goals|ev-h-goals-2",
+      "Open questions|ev-h-open-questions",
+    ].join(";");
+    await waitFor(
+      send,
+      `(() => {
+        const nav = document.querySelector("[data-ev-outline]");
+        if (!nav) return "no outline";
+        const got = [...nav.querySelectorAll("[data-ev-outline-target]")]
+          .map((b) => b.textContent.trim() + "|" + b.getAttribute("data-ev-outline-target"))
+          .join(";");
+        return got === ${JSON.stringify(wantOutline)} ? "ok" : got;
+      })()`,
+      "outline entries in order",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const nav = document.querySelector("[data-ev-outline]");
+        nav.open = true;
+        const links = nav.querySelectorAll("[data-ev-outline-target]");
+        links[links.length - 1].click();
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const pane = document.querySelector("[data-ev-md-scroll]");
+        const h = document.getElementById("ev-h-open-questions");
+        if (!pane || !h) return "no pane or heading";
+        const top = h.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+        return pane.scrollTop > 0 && top >= -2 && top < pane.clientHeight ? "ok" : "scrollTop=" + pane.scrollTop + " top=" + top;
+      })()`,
+      "outline click scrolled to heading",
+    );
+
     await evalValue(
       send,
       `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
@@ -1028,6 +1111,7 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
     await rm(sample, { force: true });
     await rm(other, { force: true });
     await rm(long, { force: true });
+    await rm(outlineMd, { force: true });
     await rm(md, { force: true });
   }
 }

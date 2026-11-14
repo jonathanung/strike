@@ -241,3 +241,52 @@
 }
 .ev-dirty { color: var(--warning); font-size: var(--type-sm); }
 /* feature:editor-unsaved-guard end */
+/* feature:document-outline begin */
+/* Heading outline (#1446): a rail beside the rendered Markdown on
+   desktop; under the phone breakpoint it stacks above the text and
+   starts collapsed (the open attribute is chosen at render). */
+.ev-md-doc { flex: 1; min-height: 0; display: flex; }
+.ev-md-doc > .ev-md-scroll { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+.ev-outline {
+  flex: 0 0 auto;
+  width: 200px;
+  max-width: 34%;
+  overflow: auto;
+  padding: 8px;
+  border-right: 1px solid var(--border-muted);
+  font-size: var(--type-sm);
+}
+.ev-outline:not([open]) { width: auto; }
+.ev-outline summary { cursor: pointer; color: var(--muted); }
+.ev-outline ol { list-style: none; margin: 6px 0 0; padding: 0; }
+.ev-outline-link {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 2px 4px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ev-outline-link:hover { background: var(--raised); }
+.ev-outline-link:focus-visible { outline: 1px solid var(--border-focus); outline-offset: -1px; }
+.ev-outline-l2 .ev-outline-link { padding-left: 14px; }
+.ev-outline-l3 .ev-outline-link { padding-left: 24px; color: var(--muted); }
+@media (max-width: 720px) {
+  .ev-md-doc { flex-direction: column; }
+  .ev-outline {
+    width: auto;
+    max-width: none;
+    max-height: 40%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-muted);
+  }
+}
+/* feature:document-outline end */
