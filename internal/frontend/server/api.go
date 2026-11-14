@@ -185,7 +185,9 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		c.ConfigFiles = h.ConfigFiles != nil
 		c.Themes = h.Themes != nil
 		// Capabilities describe browser surfaces, not merely host interfaces.
-		// Roots, project init, and telemetry remain false until exposed.
+		// Project init is exposed via /v1/init (#1581) and needs a mutable
+		// live daemon; telemetry remains false until exposed.
+		c.ProjectInit = s.projectInitCapable()
 		for _, skill := range h.Skills {
 			skills = append(skills, map[string]any{"name": skill.Name, "description": skill.Description})
 		}

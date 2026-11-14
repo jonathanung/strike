@@ -119,6 +119,7 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/models` | mode | `{ "models": [...] }` (`?provider=` optional). Echo (offline default) is **200** with a synthetic `echo` model, not 502. Catalog fetch / empty models.dev lists for API providers are **502**. |
 | `GET` | `/v1/sessions` | **yes** | Durable session list (roots only) + `liveId` |
 | `GET`/`POST` | `/v1/diag` | **yes** | Redacted prompt/config diagnostic bundle (JSON download; live only; `?root=` when multi-root). Bootstrap capability `diag`. **503** when unsupported (attach-only / no live). |
+| `GET`/`POST` | `/v1/init` | **yes** | Project init (#1581): `GET` previews `{path, exists}` for AGENTS.md in the root's working directory (`?root=` when multi-root); `POST` writes it via host `ProjectInit`. **409** when AGENTS.md already exists (never overwrites; TUI `/init` confirms replace). **403** attach-only / `--read-only`; **501** without the host service; **404** unknown `?root=`. Bootstrap capability `projectInit`. |
 | `GET` | `/v1/sessions` | **yes** | Session list + `liveId` |
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
 | `GET` | `/v1/sessions/{id}/children` | **yes** | Child/subagent sessions under a root |

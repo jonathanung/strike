@@ -30,6 +30,7 @@ mod schedule;
 mod model;
 mod notify;
 mod outcome;
+mod project_init;
 mod onboarding;
 mod park;
 mod steer_queue;
@@ -1056,6 +1057,8 @@ fn App() -> impl IntoView {
     let status = RwSignal::new("connecting…".to_string());
     // Bootstrap capability `diag` (#1489): gates Download diagnostics.
     let diag_capable = RwSignal::new(false);
+    // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
+    let project_init_capable = RwSignal::new(false);
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -1652,6 +1655,7 @@ fn App() -> impl IntoView {
                                     live_busy_root.set(root);
                                 }
                                 diag_capable.set(boot.capabilities.diag);
+                                project_init_capable.set(boot.capabilities.project_init);
                                 skills.set(boot.skills);
                                 commands.set(boot.composer_commands);
                                 if !catalog_once.get_untracked() {
@@ -4539,6 +4543,7 @@ fn App() -> impl IntoView {
                 mode=mode
                 status=status
                 diag_capable=diag_capable
+                project_init_capable=project_init_capable
                 root=active_root
                 theme=theme_id
                 scheme=scheme_id
