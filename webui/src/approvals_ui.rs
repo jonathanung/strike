@@ -213,6 +213,10 @@ pub fn ApprovalHost(
         }
     });
 
+    // Declared before the keyboard listener: Enter-to-accept reports
+    // rule-add outcomes through it as well (#1509).
+    let rule_feedback = RwSignal::new(RuleFeedback::None);
+
     {
         let listener = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
             let key = ev.key();
@@ -220,7 +224,7 @@ pub fn ApprovalHost(
                 if key == "Enter" {
                     ev.prevent_default();
                     ev.stop_propagation();
-                    accept_pending(confirm, base, token, root, perm_mode, status, panel_error, rules, stored_audit, auto_seconds, auto_exclude, audit_limit);
+                    accept_pending(confirm, base, token, root, perm_mode, status, panel_error, rules, stored_audit, auto_seconds, auto_exclude, audit_limit, rule_feedback);
                 } else if key == "Escape" {
                     ev.prevent_default();
                     ev.stop_propagation();
@@ -286,7 +290,6 @@ pub fn ApprovalHost(
     let perm_name = RwSignal::new("bash".to_string());
     let pattern = RwSignal::new(String::new());
     let action = RwSignal::new("deny".to_string());
-    let rule_feedback = RwSignal::new(RuleFeedback::None);
     let pattern_input = NodeRef::<leptos::html::Input>::new();
     let global_choice = RwSignal::new("default".to_string());
     let workspace_choice = RwSignal::new("default".to_string());
