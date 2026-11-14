@@ -221,25 +221,26 @@ pub fn TaskRunner(
     let run_loading = RwSignal::new(false);
 
     // #1548: Schedule-style session open, built here because this page
-    // already holds active_root. A failed activation (child pruned,
-    // gateway restarted) is reported on the status line instead of
-    // silently landing on an empty chat.
+    // already holds active_root. Like Schedule, activate first and switch
+    // only on success: a failed activation (child pruned, not a live root,
+    // gateway restarted) stays on this page with the error on the status
+    // line instead of stranding the user on an empty chat.
     let open_child = move |id: String| {
         if id.is_empty() {
             return;
         }
         let (b, t) = (base.get_untracked(), token.get_untracked());
-        active_root.set(id.clone());
-        // Bypasses `activate_root` in main.rs, so persist the viewed
-        // session here too (#1391), as Schedule does.
-        crate::session_restore::persist(&id);
-        mode.set("chat".into());
-        status.set(format!("Opened {id}"));
         spawn_local(async move {
-            if let Err(e) =
-                post_json_value(&b, &t, &activate_path(&id), serde_json::json!({})).await
-            {
-                status.set(format!("open child session failed: {e}"));
+            match post_json_value(&b, &t, &activate_path(&id), serde_json::json!({})).await {
+                Ok(_) => {
+                    active_root.set(id.clone());
+                    // Bypasses `activate_root` in main.rs, so persist the
+                    // viewed session here too (#1391), as Schedule does.
+                    crate::session_restore::persist(&id);
+                    mode.set("chat".into());
+                    status.set(format!("Opened {id}"));
+                }
+                Err(e) => status.set(format!("open child session failed: {e}")),
             }
         });
     };
