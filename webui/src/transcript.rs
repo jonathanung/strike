@@ -873,6 +873,14 @@ impl Transcript {
     /// ends mid-tool does not render a forever-running row in an idle
     /// session. Never call this for a live turn — use the turn-boundary
     /// sweeps, which key off turn state, not age or timers.
+    /// Any tool/child row still marked `running`? Lets callers skip a
+    /// signal write when there is nothing to settle.
+    pub fn has_running_tools(&self) -> bool {
+        self.messages
+            .iter()
+            .any(|m| m.badge == "running" && matches!(m.role, Role::Tool | Role::Child))
+    }
+
     pub fn settle_orphaned_tools(&mut self) {
         for msg in self.messages.iter_mut() {
             if msg.badge == "running" && matches!(msg.role, Role::Tool | Role::Child) {
@@ -2170,7 +2178,9 @@ mod tests {
             .find(|m| m.call_id == "a")
             .expect("orphan row");
         assert_eq!(row.badge, "running");
+        assert!(t.has_running_tools());
         t.settle_orphaned_tools();
+        assert!(!t.has_running_tools());
         let row = t
             .messages
             .iter()
@@ -2184,6 +2194,15 @@ mod tests {
             .find(|m| m.call_id == "b")
             .expect("done row");
         assert_eq!(done.badge, "done");
+        // A late tool.end (stale idle raced a live call) heals the row.
+        let mut healed = t.clone();
+        healed.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "a", "name": "bash", "output": "ok"}),
+        ));
+        let row = healed.messages.iter().find(|m| m.call_id == "a").unwrap();
+        assert_eq!(row.badge, "done");
+        assert!(!row.detail.contains("Turn ended before"));
         // Settling is idempotent: the note is not appended twice.
         t.settle_orphaned_tools();
         let row = t

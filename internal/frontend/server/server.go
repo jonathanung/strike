@@ -405,6 +405,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/models", s.handleModels)
 	s.mux.HandleFunc("GET /v1/history", s.handleHistory)
 	s.mux.HandleFunc("POST /v1/history", s.handleHistory)
+	s.mux.HandleFunc("GET /v1/onboarding", s.handleOnboarding)
+	s.mux.HandleFunc("POST /v1/onboarding/acknowledge", s.handleOnboardingAcknowledge)
 	s.mux.HandleFunc("GET /v1/settings", s.handleSettings)
 	s.mux.HandleFunc("GET /v1/themes", s.handleThemesList)
 	s.mux.HandleFunc("GET /v1/themes/{id}", s.handleThemeGet)

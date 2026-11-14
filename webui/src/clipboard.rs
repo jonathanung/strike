@@ -7,12 +7,8 @@
 //! checking (#1582). [`copy_text`] awaits the Promise and reports failure
 //! with a generic, user-facing message — never a raw browser error string
 //! (#1535). Every copy surface goes through here instead of adding another
-//! fire-and-forget call site.
-//!
-//! NOTE: draft PR #1676 (`muse/copy-affordances`, for #1555/#1580) adds
-//! this same module with the same `copy_text` / `COPY_FAILED` / `after_ms`
-//! API for its new copy buttons. Whichever PR lands second should keep one
-//! copy of those three items and merge the feedback helpers below into it.
+//! fire-and-forget call site: pairing (#1582), transcript (#1582),
+//! local-files paths (#1555) and the Git panel diff (#1580).
 
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
@@ -81,6 +77,31 @@ pub fn transcript_copy_label(state: Option<bool>) -> &'static str {
     }
 }
 
+/// A diff is copyable only when it holds real diff text: not empty and
+/// not the "No diff." placeholder the Git panel renders for an empty diff.
+pub fn diff_copyable(text: &str) -> bool {
+    !text.trim().is_empty() && text != "No diff."
+}
+
+/// Feedback line for a diff copy attempt. A truncated diff never claims a
+/// complete copy: the partial nature stays in the feedback itself.
+pub fn diff_copy_feedback(truncated: bool, ok: bool) -> String {
+    match (ok, truncated) {
+        (true, true) => "Diff copied. Diff truncated — the copy is partial.".to_string(),
+        (true, false) => "Diff copied.".to_string(),
+        (false, _) => COPY_FAILED.to_string(),
+    }
+}
+
+/// Button label for a path copy attempt: idle, success, or failure.
+pub fn path_copy_label(ok: Option<bool>) -> &'static str {
+    match ok {
+        None => "Copy",
+        Some(true) => "Copied",
+        Some(false) => "Copy failed",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,5 +130,40 @@ mod tests {
         assert_eq!(transcript_copy_label(None), "Copy");
         assert_eq!(transcript_copy_label(Some(true)), "Copied");
         assert_eq!(transcript_copy_label(Some(false)), "Copy failed");
+    }
+
+    #[test]
+    fn diff_copyable_rejects_empty_and_placeholder() {
+        assert!(!diff_copyable(""));
+        assert!(!diff_copyable("  \n "));
+        assert!(!diff_copyable("No diff."));
+    }
+
+    #[test]
+    fn diff_copyable_accepts_real_diff() {
+        assert!(diff_copyable("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"));
+    }
+
+    #[test]
+    fn truncated_copy_feedback_never_claims_complete() {
+        let msg = diff_copy_feedback(true, true);
+        assert!(msg.contains("truncated"), "{msg}");
+        assert!(msg.contains("partial"), "{msg}");
+        assert_eq!(diff_copy_feedback(false, true), "Diff copied.");
+    }
+
+    #[test]
+    fn failed_copy_feedback_is_generic_not_a_browser_error() {
+        let msg = diff_copy_feedback(false, false);
+        assert_eq!(msg, COPY_FAILED);
+        assert!(!msg.contains("NotAllowedError"), "{msg}");
+        assert!(!msg.contains("DOMException"), "{msg}");
+    }
+
+    #[test]
+    fn path_copy_labels_cover_idle_success_and_failure() {
+        assert_eq!(path_copy_label(None), "Copy");
+        assert_eq!(path_copy_label(Some(true)), "Copied");
+        assert_eq!(path_copy_label(Some(false)), "Copy failed");
     }
 }
