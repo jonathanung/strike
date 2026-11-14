@@ -79,12 +79,17 @@ func (e *apiError) Error() string {
 // pending, else healthy. No runs at all is pending (CI may not have started).
 // Transport and API errors are unreachable, never healthy.
 func (g *GitHub) Check(ctx context.Context, repo, sha string) (state, detail string) {
+	tokenFn := g.Token
+	if tokenFn == nil {
+		tokenFn = DefaultToken
+	}
+	token := tokenFn(ctx)
 	var runs checkRunsPage
-	if err := g.get(ctx, fmt.Sprintf("/repos/%s/commits/%s/check-runs?per_page=100", repo, sha), &runs); err != nil {
+	if err := g.get(ctx, token, fmt.Sprintf("/repos/%s/commits/%s/check-runs?per_page=100", repo, sha), &runs); err != nil {
 		return StateUnreachable, "check runs: " + err.Error()
 	}
 	var statuses combinedStatus
-	if err := g.get(ctx, fmt.Sprintf("/repos/%s/commits/%s/status?per_page=100", repo, sha), &statuses); err != nil {
+	if err := g.get(ctx, token, fmt.Sprintf("/repos/%s/commits/%s/status?per_page=100", repo, sha), &statuses); err != nil {
 		return StateUnreachable, "commit status: " + err.Error()
 	}
 	var failing, pending []string
@@ -152,7 +157,7 @@ func runState(status, conclusion string) string {
 	}
 }
 
-func (g *GitHub) get(ctx context.Context, path string, dst any) error {
+func (g *GitHub) get(ctx context.Context, token, path string, dst any) error {
 	base := strings.TrimRight(g.BaseURL, "/")
 	if base == "" {
 		base = DefaultGitHubAPI
@@ -163,12 +168,8 @@ func (g *GitHub) get(ctx context.Context, path string, dst any) error {
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	tokenFn := g.Token
-	if tokenFn == nil {
-		tokenFn = DefaultToken
-	}
-	if tok := tokenFn(ctx); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	client := g.Client
 	if client == nil {
