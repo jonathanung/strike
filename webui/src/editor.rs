@@ -49,7 +49,9 @@ pub enum MdAlign {
 pub enum MdBlock {
     Heading(u8, String),
     Paragraph(String),
-    Code(String),
+    /// Fenced code. `lang` is the fence info string as written (may be
+    /// empty); highlighting maps it through [`fence_language`] (#1575).
+    Code { lang: String, text: String },
     List(Vec<String>),
     Quote(String),
     Rule,
@@ -80,6 +82,63 @@ pub fn language_of(path: &str) -> &'static str {
         "sql" => "sql",
         _ => "text",
     }
+}
+
+/// Highlighter language for a Markdown fence info string (#1575): the
+/// first word, lowercased, through the same table as file extensions
+/// ([`language_of`]) plus the common long names. Unknown → `"text"`.
+pub fn fence_language(info: &str) -> &'static str {
+    let word = info
+        .split(|c: char| c.is_whitespace() || c == ',' || c == '{')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match word.as_str() {
+        "" => "text",
+        "golang" => "go",
+        "javascript" => "js",
+        "typescript" => "ts",
+        "python" => "py",
+        "shell" => "sh",
+        _ => language_of(&format!("x.{word}")),
+    }
+}
+
+/// Per-line highlight tokens for a fenced block, or `None` when the
+/// fence language is unknown/plain (it renders exactly as before). Lines
+/// split on `\n` only, so joining them back with `\n` reproduces `text`.
+pub fn fence_tokens(info: &str, text: &str) -> Option<Vec<Vec<Tok>>> {
+    let lang = fence_language(info);
+    if matches!(lang, "text" | "markdown") {
+        return None;
+    }
+    Some(text.split('\n').map(|line| highlight_line(lang, line)).collect())
+}
+
+/// Code body for a fence: the file SourceView's token spans (`ev-*`
+/// classes) when the language is known, else the plain text.
+pub fn highlighted_code(info: &str, text: &str) -> AnyView {
+    let Some(lines) = fence_tokens(info, text) else {
+        return text.to_string().into_any();
+    };
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(idx, toks)| {
+            let nl = if idx == 0 { "" } else { "\n" };
+            view! {
+                {nl}
+                {toks
+                    .into_iter()
+                    .map(|tok| {
+                        let class = tok.kind;
+                        view! { <span class=class>{tok.text}</span> }
+                    })
+                    .collect_view()}
+            }
+        })
+        .collect_view()
+        .into_any()
 }
 
 pub fn lines_of(text: &str) -> Vec<&str> {
@@ -636,7 +695,8 @@ pub fn markdown_blocks(src: &str) -> Vec<MdBlock> {
             i += 1;
             continue;
         }
-        if trimmed.starts_with("```") {
+        if let Some(info) = trimmed.strip_prefix("```") {
+            let lang = info.trim().to_string();
             i += 1;
             let mut body = String::new();
             while i < lines.len() && !lines[i].trim().starts_with("```") {
@@ -649,7 +709,7 @@ pub fn markdown_blocks(src: &str) -> Vec<MdBlock> {
             if i < lines.len() {
                 i += 1;
             }
-            blocks.push(MdBlock::Code(body));
+            blocks.push(MdBlock::Code { lang, text: body });
             continue;
         }
         if trimmed == "---" || trimmed == "***" {
@@ -991,7 +1051,7 @@ pub fn MarkdownView(text: String) -> impl IntoView {
                     }
                 }
                 MdBlock::Paragraph(text) => view! { <p><Inlines text=text /></p> }.into_any(),
-                MdBlock::Code(text) => view! { <pre>{text}</pre> }.into_any(),
+                MdBlock::Code { lang, text } => view! { <pre>{highlighted_code(&lang, &text)}</pre> }.into_any(),
                 MdBlock::Quote(text) => view! { <blockquote><Inlines text=text /></blockquote> }.into_any(),
                 MdBlock::List(items) => view! {
                     <ul>
@@ -2205,6 +2265,55 @@ mod tests {
     }
 
     #[test]
+    fn markdown_fence_keeps_its_language() {
+        let blocks = markdown_blocks("```rust title=x\nfn main() {}\n```\n");
+        assert_eq!(
+            blocks[0],
+            MdBlock::Code { lang: "rust title=x".into(), text: "fn main() {}".into() }
+        );
+    }
+
+    #[test]
+    fn fence_language_maps_info_strings() {
+        for (info, want) in [
+            ("go", "go"),
+            ("golang", "go"),
+            ("Rust", "rust"),
+            ("rs", "rust"),
+            ("rust,ignore", "rust"),
+            ("javascript", "js"),
+            ("tsx", "ts"),
+            ("python", "py"),
+            ("bash", "sh"),
+            ("shell", "sh"),
+            ("sql", "sql"),
+            ("", "text"),
+            ("mermaid", "text"),
+        ] {
+            assert_eq!(fence_language(info), want, "info {info:?}");
+        }
+    }
+
+    #[test]
+    fn fence_tokens_highlight_known_and_skip_unknown() {
+        let text = "func main() {\n\treturn \"hi\" // done\n}\n";
+        let lines = fence_tokens("go", text).expect("go is known");
+        assert!(lines[0].iter().any(|t| t.kind == "ev-kw" && t.text == "func"));
+        assert!(lines[1].iter().any(|t| t.kind == "ev-str"));
+        assert!(lines[1].iter().any(|t| t.kind == "ev-com"));
+        // Rejoining reproduces the text byte-for-byte, trailing newline too.
+        let joined = lines
+            .iter()
+            .map(|l| l.iter().map(|t| t.text.as_str()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(joined, text);
+        assert!(fence_tokens("", text).is_none(), "no language stays plain");
+        assert!(fence_tokens("mermaid", text).is_none());
+        assert!(fence_tokens("markdown", text).is_none());
+    }
+
+    #[test]
     fn highlight_go_keywords_strings_and_comments() {
         let toks = highlight_line("go", "func main() { return \"hi\" } // note");
         assert!(toks.iter().any(|t| t.kind == "ev-kw" && t.text == "func"));
@@ -2220,7 +2329,7 @@ mod tests {
         assert!(matches!(blocks[0], MdBlock::Heading(1, ref t) if t == "Title"));
         assert!(matches!(blocks[1], MdBlock::Paragraph(ref t) if t.contains("**bold**")));
         assert!(matches!(blocks[2], MdBlock::List(ref items) if items.len() == 2));
-        assert!(matches!(blocks[3], MdBlock::Code(ref t) if t == "func"));
+        assert!(matches!(blocks[3], MdBlock::Code { ref lang, ref text } if lang.is_empty() && text == "func"));
         assert!(matches!(blocks[4], MdBlock::Quote(ref t) if t == "quoted"));
         let inline = inline_parse("**bold** and [x](javascript:alert(1)) [ok](https://example.com)");
         assert!(inline.iter().any(|p| matches!(p, Inline::Strong(t) if t == "bold")));
