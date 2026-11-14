@@ -2596,6 +2596,32 @@ try {
       { timeout: STEP_MS, interval: 200 },
     );
   }
+  // Find options (#1409/#1419): both toggle chips exist, start
+  // unpressed, and flip aria-pressed when clicked — in the transcript
+  // bar here; the editor bar carries the same chips (host-tested
+  // matcher, UAT covers its counts).
+  const tfChips = await evaluate(`(() => JSON.stringify({
+    aa: !!document.querySelector("[data-tf-match-case]"),
+    ww: !!document.querySelector("[data-tf-whole-word]"),
+    aaPressed: document.querySelector("[data-tf-match-case]")?.getAttribute("aria-pressed"),
+    wwPressed: document.querySelector("[data-tf-whole-word]")?.getAttribute("aria-pressed"),
+  }))()`);
+  const chips = JSON.parse(tfChips || "{}");
+  if (!chips.aa || !chips.ww || chips.aaPressed !== "false" || chips.wwPressed !== "false") {
+    throw new Error(`find toggle chips missing or not default-off: ${tfChips}`);
+  }
+  await evaluate(`document.querySelector("[data-tf-match-case]").click()`);
+  await evaluate(`document.querySelector("[data-tf-whole-word]").click()`);
+  const tfChipsOn = await evaluate(`(() => JSON.stringify({
+    aaPressed: document.querySelector("[data-tf-match-case]")?.getAttribute("aria-pressed"),
+    wwPressed: document.querySelector("[data-tf-whole-word]")?.getAttribute("aria-pressed"),
+  }))()`);
+  const chipsOn = JSON.parse(tfChipsOn || "{}");
+  if (chipsOn.aaPressed !== "true" || chipsOn.wwPressed !== "true") {
+    throw new Error(`find toggle chips did not press: ${tfChipsOn}`);
+  }
+  await evaluate(`document.querySelector("[data-tf-match-case]").click()`);
+  await evaluate(`document.querySelector("[data-tf-whole-word]").click()`);
   await tfType("zz-no-match-zz");
   await waitFor(
     "zero matches reported plainly, with no marks",
@@ -2753,6 +2779,98 @@ try {
         return true;
       })()`);
     }
+  }
+  // Commit detail (#1484): the daemon show route returns the real
+  // commit, and clicking a log row renders its header, files and patch.
+  const showLogRes = await fetch(`http://127.0.0.1:${port}/v1/git/log?limit=1`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!showLogRes.ok) {
+    throw new Error(`git log route failed: HTTP ${showLogRes.status} (commit detail unchecked)`);
+  }
+  const headCommit = ((await showLogRes.json()).commits || [])[0];
+  if (headCommit) {
+    const showRes = await fetch(
+      `http://127.0.0.1:${port}/v1/git/show?ref=${encodeURIComponent(headCommit.hash)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!showRes.ok) {
+      throw new Error(`git show route: HTTP ${showRes.status} ${await showRes.text()}`);
+    }
+    const shown = await showRes.json();
+    if (shown.hash !== headCommit.hash || !Array.isArray(shown.files)) {
+      throw new Error(`git show payload mismatch: ${JSON.stringify(shown).slice(0, 300)}`);
+    }
+    const badRef = await fetch(`http://127.0.0.1:${port}/v1/git/show?ref=--output%3D%2Ftmp%2Fx`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (badRef.status !== 400) {
+      throw new Error(`git show accepted an option-looking ref: HTTP ${badRef.status}`);
+    }
+    const toggleLog = `(() => {
+      const panel = document.getElementById("git-panel");
+      panel.focus();
+      panel.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true }));
+      return true;
+    })()`;
+    await evaluate(toggleLog);
+    await waitFor(
+      "git log rows are clickable commit buttons",
+      async () => {
+        const n = await evaluate(`document.querySelectorAll("[data-git-commit]").length`);
+        return { ok: n > 0, n };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await evaluate(`(() => { document.querySelector("[data-git-commit]").click(); return true; })()`);
+    await waitFor(
+      "git commit detail renders header, files and patch",
+      async () => {
+        const raw = await evaluate(`JSON.stringify((() => {
+          const d = document.querySelector("[data-git-commit-detail]");
+          if (!d) return null;
+          return {
+            hash: d.getAttribute("data-git-commit-detail"),
+            text: d.textContent || "",
+            patch: !!d.querySelector("pre.git-diff"),
+            files: d.querySelectorAll(".git-commit-files li").length,
+          };
+        })())`);
+        const got = JSON.parse(raw || "null");
+        const ok = !!got &&
+          got.hash === headCommit.hash &&
+          got.text.includes(headCommit.hash) &&
+          got.patch &&
+          got.files === shown.files.length;
+        return { ok, got: got && { ...got, text: got.text.slice(0, 120) } };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    // Clicking the open commit closes the detail.
+    await evaluate(`(() => { document.querySelector("[data-git-commit]").click(); return true; })()`);
+    await waitFor(
+      "clicking the open commit closes the detail",
+      async () => {
+        const n = await evaluate(`document.querySelectorAll("[data-git-commit-detail]").length`);
+        return { ok: n === 0, n };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    // Enter on a focused commit row must keep the button's native
+    // activation: the panel's Enter-opens-diff shortcut may not swallow
+    // it (a synthetic keydown cannot click, so assert it stays
+    // un-prevented).
+    const enterPrevented = await evaluate(`(() => {
+      const b = document.querySelector("[data-git-commit]");
+      b.focus();
+      const ev = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      b.dispatchEvent(ev);
+      return ev.defaultPrevented;
+    })()`);
+    if (enterPrevented !== false) {
+      throw new Error(`Enter on a commit row was swallowed by the panel shortcut (defaultPrevented=${enterPrevented})`);
+    }
+    await evaluate(toggleLog);
   }
   // Branch switcher regression (#1314): the rendered <select> value must
   // equal the daemon's current branch once the options exist. The defect
@@ -3714,6 +3832,37 @@ try {
   if (!triggersText.includes("New trigger") || !triggersText.includes("Delivery log")) {
     throw new Error(`triggers page missing: ${triggersText.slice(0, 400)}`);
   }
+
+  // #1486: create a trigger so the show-once secret and the hook URL
+  // render, then Copy secret must produce a visible outcome — the copied
+  // confirmation, or the manual-fallback notice when the harness denies
+  // clipboard permission. A silent click is the failure this guards.
+  await evaluate(`(() => {
+    const el = document.querySelector("#trigger-name");
+    if (!el) return false;
+    const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+    proto.set.call(el, "smoke-copy");
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, data: "smoke-copy" }));
+    return el.value === "smoke-copy";
+  })()`);
+  await evaluate(`(() => {
+    document.querySelector(".triggers-detail form button.primary")?.click();
+    return true;
+  })()`);
+  await waitFor(
+    "trigger copy buttons",
+    textProbe((t) => t.includes("Copy secret") && t.includes("Copy hook URL")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    [...document.querySelectorAll("button")].find((b) => b.innerText.trim() === "Copy secret")?.click();
+    return true;
+  })()`);
+  await waitFor(
+    "trigger copy outcome",
+    textProbe((t) => t.includes("Signing secret copied.") || t.includes("Copy failed")),
+    { timeout: WAIT_MS, interval: 250 },
+  );
 
   await send("Runtime.evaluate", {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
