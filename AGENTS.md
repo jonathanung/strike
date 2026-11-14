@@ -74,6 +74,7 @@ service/theme token).
 | `internal/product/auth` | 0600 ~/.strike/auth.json store; flow helpers re-exported from `harness/providers/auth` |
 | `internal/product/config` | global/project JSON + agents/skills markdown |
 | `internal/trust/audit` | Durable retention-bounded security audit sink (`~/.strike/audit/`) |
+| `internal/trust/workspacetrust` | Per-workspace trust store (`~/.strike/workspace-trust.json`); untrusted repos load no project config (#1352, `strike trust`) |
 | `internal/persist/session` | JSONL event log append/replay + concurrent Manager |
 | `internal/persist/history` | project-scoped prompt history |
 | `internal/persist/memory` | project-scoped durable key/value memory |
