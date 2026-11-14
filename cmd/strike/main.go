@@ -46,6 +46,9 @@ type cliOptions struct {
 	// workspaces is set by strike serve so new roots bind the registry.
 	// Nil for the TUI and headless exec, which keep the process directory.
 	workspaces *workspace.Store
+	// managedDeny is extra managed deny ceiling for every session (strike
+	// serve: the --token-file path). Nil elsewhere.
+	managedDeny permission.Ruleset
 }
 
 type optionSpec struct {
