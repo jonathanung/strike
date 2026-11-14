@@ -317,6 +317,14 @@ func TestWorkspaceWriteFilePreservesExistingMode(t *testing.T) {
 	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// os.WriteFile masks the create mode with the process umask, so under a
+	// stricter umask (007) the fixture lands as 0750 and the assertion below
+	// fails for environment reasons, not product ones (#1610). Pin the
+	// fixture's mode explicitly so the test measures only whether
+	// workspaceWriteFile preserves the mode it finds.
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := workspaceWriteFile(root, "script.sh", []byte("#!/bin/sh\necho hi\n")); err != nil {
 		t.Fatal(err)
 	}

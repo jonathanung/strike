@@ -308,7 +308,13 @@ const (
 	// DecisionProject remembers the grant for this session and appends it to
 	// the project config so future sessions in the same workdir inherit it.
 	DecisionProject Decision = "project"
-	DecisionReject  Decision = "reject"
+	// DecisionFolder remembers a session-only grant for the folder the
+	// asked file lives in (write/edit asks only). The folder pattern is
+	// derived by the daemon from the ask's own patterns — the reply never
+	// carries client-supplied patterns — and covers the folder subtree.
+	// Older daemons treat it as an approve-once reply and record nothing.
+	DecisionFolder Decision = "folder"
+	DecisionReject Decision = "reject"
 )
 
 // Op is a client -> engine submission.
@@ -380,6 +386,36 @@ type Steer struct {
 	Images    []ImageAttachment `json:"images,omitempty"`
 	SessionID string            `json:"sessionId,omitempty"`
 	TurnID    string            `json:"turnId,omitempty"`
+}
+
+// InputQueueEdit replaces the text of one pending user-input item. The id
+// comes from InputQueued. Empty text is rejected when the item has no images;
+// cancel the item to remove it. Images already on the item are kept.
+type InputQueueEdit struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+
+// InputQueueCancel removes one pending user-input item.
+type InputQueueCancel struct {
+	ID string `json:"id"`
+}
+
+// InputQueueReorder sets the pending FIFO. IDs must list every current item
+// once. The engine does not fill in a position the client omitted.
+type InputQueueReorder struct {
+	IDs []string `json:"ids"`
+}
+
+// InputQueueSendNow promotes one pending user-input item out of the FIFO.
+// While a turn is active the item becomes a steer into that turn: it is
+// delivered at the next safe boundary with a TurnSteered acknowledgement,
+// or falls back to the next turn if the turn ends first, like any steer.
+// While idle the item starts as a turn immediately. Removing the item from
+// the queue is the claim, so an id that already left the queue (drained,
+// cancelled, or promoted) is rejected instead of delivered twice.
+type InputQueueSendNow struct {
+	ID string `json:"id"`
 }
 
 // SelectModel switches the active provider (and optionally model). An empty
@@ -491,6 +527,10 @@ func (PermissionReply) isOp()         {}
 func (QuestionReply) isOp()           {}
 func (Interrupt) isOp()               {}
 func (Steer) isOp()                   {}
+func (InputQueueEdit) isOp()          {}
+func (InputQueueCancel) isOp()        {}
+func (InputQueueReorder) isOp()       {}
+func (InputQueueSendNow) isOp()       {}
 func (SelectModel) isOp()             {}
 func (SelectAgent) isOp()             {}
 func (SetEffort) isOp()               {}
@@ -1239,6 +1279,14 @@ type PermissionAsked struct {
 	// Empty means the grant uses Patterns. Recorded for session resume.
 	Always   []string        `json:"always,omitempty"`
 	Metadata json.RawMessage `json:"metadata,omitempty"`
+	// WorkDir is the resolved working directory the tool call runs in,
+	// stamped by the permission service from the owning engine so the
+	// decider can see where the action happens. Empty when unknown.
+	WorkDir string `json:"workDir,omitempty"`
+	// ProjectRulePath is the file a DecisionProject grant appends the
+	// remembered rule to. Empty when this gateway does not persist
+	// project grants to disk.
+	ProjectRulePath string `json:"projectRulePath,omitempty"`
 }
 
 type PermissionResolved struct {
@@ -1358,6 +1406,20 @@ type TurnSteered struct {
 	// TargetTurnID is the turn that was steered (empty when queued_fallback
 	// after the turn already ended).
 	TargetTurnID string `json:"targetTurnId,omitempty"`
+}
+
+// InputQueueItem is one user.input waiting for the active turn to finish.
+type InputQueueItem struct {
+	ID   string `json:"id"`
+	Text string `json:"text,omitempty"`
+}
+
+// InputQueued is the full pending user-input FIFO after a change: enqueue,
+// drain, edit, cancel, reorder, steer queued-fallback, or a budget drop.
+// Items is empty when the queue is clear. Replay uses the latest snapshot.
+type InputQueued struct {
+	Correlation
+	Items []InputQueueItem `json:"items"`
 }
 
 type TurnCompleted struct {
@@ -2068,6 +2130,7 @@ func (AdmissionDecided) isEvent()        {}
 func (QuestionAsked) isEvent()           {}
 func (QuestionResolved) isEvent()        {}
 func (TurnSteered) isEvent()             {}
+func (InputQueued) isEvent()             {}
 func (TurnCompleted) isEvent()           {}
 func (VerificationStarted) isEvent()     {}
 func (VerificationCompleted) isEvent()   {}

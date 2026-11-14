@@ -109,6 +109,24 @@ function chipBox(page, label) {
   })()`);
 }
 
+async function assertSteerQueueCommand(page, where, check) {
+  await page.evaluate(`document.querySelector("[data-nav='phone-more']")?.click()`);
+  await delay(200);
+  const row = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-command-id="enter.toggle"]');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { text: el.innerText || "", height: r.height, right: r.right, inner: window.innerWidth };
+  })()`);
+  check(Boolean(row) && row.text.includes("Steer") && row.text.includes("Queue"), `Toggle Enter behaviour missing at ${where}`);
+  if (row) {
+    check(row.height >= 44, `enter toggle height ${row.height} < 44 at ${where}`);
+    check(row.right <= row.inner + 1, `enter toggle right ${row.right} past viewport ${row.inner} at ${where}`);
+  }
+  await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
+  await delay(150);
+}
+
 function onScreen(box, label, check) {
   check(Boolean(box), `${label} is missing`);
   if (!box) return;
@@ -144,9 +162,8 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   check(manifest.includes("manifest.webmanifest"), "manifest link missing");
   const theme = await page.evaluate(`document.querySelector('meta[name="theme-color"]')?.content || ""`);
   check(theme === "#14131c", `theme-color ${theme} is not the dark ground token #14131c`);
-  for (const label of ["Send", "Steer", "Queue"]) {
-    onScreen(await chipBox(page, label), `${label} at 390`, check);
-  }
+  onScreen(await chipBox(page, "Send"), "Send at 390", check);
+  await assertSteerQueueCommand(page, "390", check);
   const composer = await page.evaluate(`(() => {
     const el = document.querySelector(".composer");
     if (!el) return false;
@@ -157,8 +174,7 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
 
   // Phone header (#1490 slice 2): one compact row (<=56px), a >=44px
   // overflow button, and no floating action buttons left in the bar.
-  // The sheet holds Run a command / Gateways / Phone and closes on a
-  // backdrop tap.
+  // The phone header button opens the command palette as a full-height sheet.
   const header = await page.evaluate(`(() => {
     const el = document.querySelector(".page-header");
     if (!el) return null;
@@ -175,24 +191,29 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   check(header && header.moreH >= 44 && header.moreW >= 44, `phone overflow button ${header && header.moreW}x${header && header.moreH} under 44px`);
   check(header && !header.floating, "phone header still renders floating action buttons inline");
   await page.evaluate(`document.querySelector("[data-nav='phone-more']")?.click()`);
-  await delay(150);
+  await delay(200);
   const sheet = await page.evaluate(`(() => {
-    const el = document.querySelector("[data-nav='phone-menu']");
-    return el ? (el.innerText || "") : "";
+    const el = document.querySelector("[data-nav='palette-dialog']");
+    if (!el) return null;
+    const row = el.querySelector(".palette-row");
+    const box = el.getBoundingClientRect();
+    const rowBox = row ? row.getBoundingClientRect() : null;
+    return {
+      text: el.innerText || "",
+      height: box.height,
+      row: rowBox ? rowBox.height : 0,
+    };
   })()`);
-  check(sheet.includes("Run a command"), "phone overflow sheet is missing Run a command");
-  check(sheet.includes("Gateways"), "phone overflow sheet is missing Gateways");
-  check(sheet.includes("Phone"), "phone overflow sheet is missing Phone");
+  check(sheet && sheet.text.includes("Open session"), "phone palette is missing Open session");
+  check(sheet && sheet.height >= 600, `phone palette is not full height (${sheet && sheet.height})`);
+  check(sheet && sheet.row >= 44, `phone palette row is under 44px (${sheet && sheet.row})`);
   await shot(page, recorder, shotDir, shots, "phone-header-menu-390");
-  await page.evaluate(`document.querySelector("[data-nav='phone-menu-backdrop']")?.click()`);
+  await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
   await delay(120);
-  // The sheet stays mounted (data-open toggles visibility, like the
-  // desktop menu), so closed means hidden, not absent from the DOM.
-  const sheetClosed = await page.evaluate(`(() => {
-    const el = document.querySelector("[data-nav='phone-menu']");
-    return Boolean(el) && el.dataset.open === "0" && getComputedStyle(el).display === "none";
-  })()`);
-  check(sheetClosed, "phone overflow sheet did not close on backdrop tap");
+  const sheetClosed = await page.evaluate(
+    `!document.querySelector("[data-nav='palette-dialog']")`,
+  );
+  check(sheetClosed, "phone palette did not close on backdrop tap");
   await shot(page, recorder, shotDir, shots, "phone-chat-390");
 
   // Sheet slot lifecycle (#1527): the sheet must hold the ONLY gateway
@@ -212,12 +233,12 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   const slotCounts = () =>
     page.evaluate(`(() => ({
       bells: document.querySelectorAll(".notify-bell").length,
-      gwBtns: document.querySelectorAll(".gw-btn").length,
+      gwBtns: document.querySelectorAll("[data-gateway-host]").length,
     }))()`);
   const closedCounts = await slotCounts();
   check(
     closedCounts.bells === 1 && closedCounts.gwBtns === 1,
-    `sheet closed: expected 1 bell and 1 Gateways button, got ${closedCounts.bells}/${closedCounts.gwBtns}`,
+    `sheet closed: expected 1 bell and 1 gateway host, got ${closedCounts.bells}/${closedCounts.gwBtns}`,
   );
   for (let i = 0; i < 5; i++) {
     await page.evaluate(`document.querySelector("[data-nav='phone-more']")?.click()`);
@@ -225,18 +246,18 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
     const openCounts = await slotCounts();
     check(
       openCounts.bells === 1 && openCounts.gwBtns === 1,
-      `sheet open ${i + 1}: expected 1 bell and 1 Gateways button, got ${openCounts.bells}/${openCounts.gwBtns}`,
+      `sheet open ${i + 1}: expected 1 bell and 1 gateway host, got ${openCounts.bells}/${openCounts.gwBtns}`,
     );
-    await page.evaluate(`document.querySelector("[data-nav='phone-menu-backdrop']")?.click()`);
+    await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
     await delay(120);
   }
   // Alt+W parity: each press must toggle the switcher exactly once.
   // Leaked listeners toggle the shared open signal again, so after an
   // odd number of cycles a press would land back where it started.
   const expanded0 = await page.evaluate(
-    `document.querySelector(".gw-btn")?.getAttribute("aria-expanded") || "missing"`,
+    `document.querySelector("[data-gateway-host]")?.getAttribute("data-open") || "missing"`,
   );
-  check(expanded0 !== "missing", "Gateways button missing after sheet cycles");
+  check(expanded0 !== "missing", "gateway host missing after sheet cycles");
   const altW = () =>
     page.evaluate(
       `document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "w", altKey: true, bubbles: true, cancelable: true }))`,
@@ -244,7 +265,7 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   await altW();
   await delay(150);
   const expanded1 = await page.evaluate(
-    `document.querySelector(".gw-btn")?.getAttribute("aria-expanded") || "missing"`,
+    `document.querySelector("[data-gateway-host]")?.getAttribute("data-open") || "missing"`,
   );
   check(
     expanded1 !== "missing" && expanded1 !== expanded0,
@@ -254,10 +275,10 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   await altW();
   await delay(150);
   const expanded2 = await page.evaluate(
-    `document.querySelector(".gw-btn")?.getAttribute("aria-expanded") || "missing"`,
+    `document.querySelector("[data-gateway-host]")?.getAttribute("data-open") || "missing"`,
   );
   check(expanded2 === expanded0, `second Alt+W did not toggle back (${expanded1} -> ${expanded2})`);
-  await page.evaluate(`document.querySelector("[data-nav='phone-menu-backdrop']")?.click()`);
+  await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
   await delay(120);
 
   // The palette's Notifications command must still reach the live bell
@@ -309,9 +330,8 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   await delay(120);
   const narrow = await page.evaluate(`document.body && document.body.dataset.phone === "1"`);
   check(narrow, "360×740 did not set data-phone=1");
-  for (const label of ["Send", "Steer", "Queue"]) {
-    onScreen(await chipBox(page, label), `${label} at 360`, check);
-  }
+  onScreen(await chipBox(page, "Send"), "Send at 360", check);
+  await assertSteerQueueCommand(page, "360", check);
   const header360 = await page.evaluate(`(() => {
     const el = document.querySelector(".page-header");
     return el ? el.getBoundingClientRect().height : 0;
@@ -332,36 +352,28 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   await shot(page, recorder, shotDir, shots, "phone-sessions-390");
 
   check(await clickNav(page, "Chat"), "no Chat phone-nav button");
-  const opened = await page.evaluate(`(() => {
-    const btn = [...document.querySelectorAll(".composer-bar button")].find((n) => (n.innerText || "").includes("Approval"));
-    if (!btn) return false;
-    btn.click();
-    return true;
-  })()`);
-  check(opened, "approval chip missing on the phone composer");
-  await delay(150);
-  const menu = await page.evaluate(`Boolean(document.querySelector(".composer .menu")) && (document.querySelector(".composer .menu").innerText || "").includes("Yolo")`);
-  check(menu, "approval menu did not open on the phone");
+  const approvalH = await minControl(page, "[data-approval-status]");
+  check(approvalH >= 44, `approval status height ${approvalH} < 44`);
+  const approvalText = await page.evaluate(`document.querySelector("[data-approval-status]")?.textContent || ""`);
+  check(approvalText.includes("Approval ·"), "approval status missing on the phone composer");
+  await page.evaluate(`document.querySelector("[data-nav='phone-more']")?.click()`);
+  await delay(200);
+  const yolo = await page.evaluate(`Boolean(document.querySelector('[data-command-id="mode-yolo"]'))`);
+  check(yolo, "Set approval mode: Yolo missing from the phone palette");
   await shot(page, recorder, shotDir, shots, "phone-approval-390");
-  await page.evaluate(`(() => {
-    if (!document.querySelector(".composer .menu")) return;
-    const chip = [...document.querySelectorAll(".composer-bar button")].find((n) => (n.innerText || "").includes("Approval"));
-    chip?.click();
-  })()`);
+  await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
   await delay(100);
 
-  const model = await page.evaluate(`(() => {
-    const btn = document.querySelector("[data-model-chip]");
-    if (!btn) return false;
-    btn.click();
-    return true;
-  })()`);
-  check(model, "model chip missing on the phone composer");
-  await delay(250);
-  const modelOpen = await page.evaluate(`Boolean(document.querySelector("[data-model-menu]"))`);
-  check(modelOpen, "model menu did not open on the phone");
+  const modelText = await page.evaluate(`document.querySelector("[data-model-status]")?.textContent || ""`);
+  check(modelText.includes("Model ·"), "model status missing on the phone composer");
+  const modelH = await minControl(page, "[data-model-status]");
+  check(modelH >= 44, `model status height ${modelH} < 44`);
+  await page.evaluate(`document.querySelector("[data-nav='phone-more']")?.click()`);
+  await delay(200);
+  const modelCmd = await page.evaluate(`Boolean(document.querySelector('[data-command-id="switch-model"]'))`);
+  check(modelCmd, "Switch model missing from the phone palette");
   await shot(page, recorder, shotDir, shots, "phone-model-390");
-  await page.evaluate(`document.querySelector("[data-model-chip]")?.click()`);
+  await page.evaluate(`document.querySelector(".palette-backdrop")?.click()`);
 
   // Keyboard path: shrink the visual viewport the way iOS does when the
   // keyboard opens. Headless Chrome has no software keyboard.
@@ -438,10 +450,10 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   await shot(page, recorder, shotDir, shots, "phone-changes-390");
 
   check(await clickNav(page, "Daemon"), "no Daemon phone-nav button");
-  const daemon = await page.evaluate(`document.body && (document.body.innerText.includes("Gateways") || document.body.innerText.includes("Base URL"))`);
-  check(daemon, "daemon pane did not show the gateway form");
-  const daemonH = await minControl(page, ".daemon input");
-  check(daemonH >= 44, `daemon input height ${daemonH} < 44`);
+  const daemon = await page.evaluate(`document.body && document.body.innerText.includes("Daemon")`);
+  check(daemon, "daemon pane did not show");
+  const daemonH = await minControl(page, "[data-nav='phone-more']");
+  check(daemonH >= 44, `phone commands button height ${daemonH} < 44`);
   await shot(page, recorder, shotDir, shots, "phone-daemon-390");
   check(await clickNav(page, "Chat"), "could not return to chat");
 

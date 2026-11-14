@@ -144,6 +144,7 @@ var browserProtocolOps = []string{
 	"compact", "context.controls", "inspect.prompt", "interrupt", "permission.reply", "question.reply",
 	"rewind", "select.agent", "select.model", "set.autonomy", "set.effort",
 	"set.fast", "set.permission_mode", "steer", "user.input",
+	"input.queue_edit", "input.queue_cancel", "input.queue_reorder", "input.queue_send_now",
 	"workflow.start", "workflow.stop",
 }
 
@@ -1526,6 +1527,8 @@ func (s *Server) handleLiveEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.streamDone():
+			return
 		case <-ticker.C:
 			n, err := s.writeEventsFrom(ctx, w, flusher, path, offset)
 			if err == nil && n > offset {
@@ -1685,6 +1688,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-s.streamDone():
 			return
 		case <-errCh:
 			return

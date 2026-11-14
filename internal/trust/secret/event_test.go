@@ -176,3 +176,26 @@ func TestRedactEventUnknownEvent(t *testing.T) {
 		t.Fatalf("data leaked token: %s", got.Data)
 	}
 }
+
+func TestRedactEventInputQueued(t *testing.T) {
+	tok := "ghp_abcdefghijklmnopqrstuvwxyz0123456789"
+	ev := secret.RedactEvent(protocol.InputQueued{
+		Items: []protocol.InputQueueItem{
+			{ID: "q1", Text: "token " + tok},
+			{ID: "q2", Text: "plain"},
+		},
+	})
+	got, ok := ev.(protocol.InputQueued)
+	if !ok {
+		t.Fatalf("type %T", ev)
+	}
+	if got.Items[0].ID != "q1" || got.Items[1].ID != "q2" {
+		t.Fatalf("ids changed: %+v", got.Items)
+	}
+	if strings.Contains(got.Items[0].Text, tok) {
+		t.Fatalf("queued text leaked: %q", got.Items[0].Text)
+	}
+	if got.Items[1].Text != "plain" {
+		t.Fatalf("plain item = %q", got.Items[1].Text)
+	}
+}

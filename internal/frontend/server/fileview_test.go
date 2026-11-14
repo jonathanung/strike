@@ -39,6 +39,10 @@ func (scriptedPerms) DiffPresets(string, string) (host.PermissionDiff, error) {
 
 func (scriptedPerms) Presets() []host.PermissionPresetInfo { return nil }
 
+func (scriptedPerms) SessionFolderGrants() []host.PermissionFolderGrant { return nil }
+
+func (scriptedPerms) RevokeSessionFolderGrant(int) bool { return false }
+
 type staticRoots struct {
 	roots []string
 }

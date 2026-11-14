@@ -78,6 +78,19 @@ pub fn save(key: &str, value: &str) {
     }
 }
 
+pub fn current_font() -> String {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|doc| doc.document_element())
+        .and_then(|el| el.get_attribute("data-font"))
+        .map(|font| normalize_font(&font))
+        .unwrap_or_else(|| "md".into())
+}
+
+pub fn set_density(density: &str) {
+    apply_type(&current_font(), density);
+}
+
 pub fn apply_type(font: &str, density: &str) {
     let font = normalize_font(font);
     let density = normalize_density(density);
@@ -136,7 +149,9 @@ pub fn export_browser_json() -> String {
 pub fn download(filename: &str, body: &str) {
     let Some(win) = web_sys::window() else { return };
     let Some(doc) = win.document() else { return };
-    let Ok(el) = doc.create_element("a") else { return };
+    let Ok(el) = doc.create_element("a") else {
+        return;
+    };
     let href = format!(
         "data:application/json;charset=utf-8,{}",
         crate::api::js_encode(body)

@@ -586,8 +586,9 @@ button.link { text-align: left; width: 100%; }
   margin: 0 0 2px;
   padding: 8px 10px;
   background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 12px;
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
 }
 .composer textarea {
   flex: 1;
@@ -599,6 +600,24 @@ button.link { text-align: left; width: 100%; }
   border-radius: var(--radius-sm);
   padding: 8px 10px;
 }
+/* feature:composer-autogrow begin */
+/* #1411: JS sets the textarea height from scrollHeight, clamped to the
+   44px/160px bounds above. The manual resize handle is removed — it would
+   fight the auto height on every keystroke — and past the 160px cap the
+   textarea scrolls internally instead. No transition: instant sizing
+   avoids input lag and reduced-motion concerns. flex:none is load-bearing:
+   the base rule's `flex: 1` gives the textarea a 0% flex basis inside the
+   column-flex composer form, and a flex item's main size then ignores its
+   height property entirely — the JS-set height computed but never
+   rendered (verified in UAT: style height 160px, rendered height 56px).
+   With flex:none the inline height drives the box; width still comes from
+   the form's default align-items:stretch. */
+.composer textarea {
+  flex: none;
+  resize: none;
+  overflow-y: auto;
+}
+/* feature:composer-autogrow end */
 .composer form { display: flex; flex-direction: column; gap: var(--space-2); }
 .composer-bar {
   display: flex;
@@ -610,6 +629,10 @@ button.link { text-align: left; width: 100%; }
 .composer-bar .chip { flex: 0 0 auto; max-width: 180px; }
 .composer-bar .send { margin-left: auto; height: var(--control); border-radius: 999px; padding: 0 var(--space-3); flex: 0 0 auto; }
 .composer .hint { margin: 0; font-size: var(--type-sm); }
+/* feature:composer-draft-size begin */
+.draft-size-warn { margin: 0; font-size: var(--type-sm); color: var(--warning); }
+.draft-size-warn.critical { color: var(--danger); }
+/* feature:composer-draft-size end */
 .activity-head { display: flex; justify-content: space-between; align-items: center; }
 .activity-head h2 { margin: 8px 0; }
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-2); margin-bottom: var(--space-2); }
@@ -914,7 +937,12 @@ button.link { text-align: left; width: 100%; }
   height: auto;
   min-height: 36px;
 }
-.palette-row.on, .palette-row:hover { background: var(--raised); }
+.palette-row.on, .palette-row:hover {
+  background: var(--sharp);
+  color: var(--on-sharp);
+  border: 2px solid var(--ink);
+}
+.palette-row.on .path, .palette-row:hover .path { color: var(--on-sharp); }
 .palette-backdrop {
   position: fixed;
   inset: 0;
@@ -927,13 +955,83 @@ button.link { text-align: left; width: 100%; }
 .palette {
   width: min(560px, 92vw);
   background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 12px;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 4px 4px 0 var(--ink);
   padding: 10px;
   max-height: 70vh;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+.palette-row.on {
+  background: var(--sharp);
+  color: var(--on-sharp);
+  border: 2px solid var(--ink);
+}
+.palette-empty {
+  margin: 12px 4px;
+  font-weight: 650;
+}
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--ground) 72%, transparent);
+}
+.confirm-dialog {
+  width: min(440px, calc(100vw - 32px));
+  background: var(--surface);
+  color: var(--ink);
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 4px 4px 0 var(--ink);
+  padding: 16px;
+}
+.confirm-dialog h2 { margin: 0 0 8px; }
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.confirm-actions button { min-height: 44px; }
+.shell-alive {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  z-index: 30;
+}
+.shell-alive .gw-btn,
+.shell-alive .notify-bell,
+.shell-alive .gq-open,
+.shell-alive .nav-menu-item,
+.shell-alive .segmented,
+.shell-alive [data-layout] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  border: 0;
+  box-shadow: none;
+}
+.shell-alive .gw-pop {
+  position: fixed;
+  top: 56px;
+  right: 12px;
+  width: min(420px, calc(100vw - 24px));
+  height: auto;
+  clip: auto;
+  overflow: auto;
 }
 .palette-list { overflow: auto; min-height: 0; }
 .palette-section { margin: 10px 4px 4px; }
@@ -1090,6 +1188,9 @@ select.mode, .daemon select {
   word-break: break-all;
 }
 .gq-dialog input { width: 100%; }
+/* feature:clipboard-honesty begin */
+.gq-copy-fallback { color: var(--warning); white-space: pre-wrap; }
+/* feature:clipboard-honesty end */
 /* White plate so a camera can read the modules on a dark theme. */
 .gq-qr {
   background: #ffffff;
@@ -1460,6 +1561,9 @@ select.mode, .daemon select {
   background: var(--border-muted);
 }
 .ss-gutter-running { background: var(--accent-alt); }
+/* feature:needs-you begin */
+.ss-gutter-waiting { background: var(--warning); }
+/* feature:needs-you end */
 .ss-gutter-unread { background: var(--acid); }
 .ss-gutter-blocked { background: var(--warning); }
 .ss-gutter-failed { background: var(--signal); }
@@ -1889,6 +1993,30 @@ select.mode, .daemon select {
   }
 }
 /* feature:side-chat end */
+/* feature:sidechat-mirror begin */
+.side-chat-mirror-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.side-chat-mirror-head .hint { margin: 0; }
+.side-chat-mirror-more { flex: 0 0 auto; }
+.side-chat-event-toggle {
+  display: inline;
+  height: auto;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.side-chat-event-toggle:hover { text-decoration: underline; }
+/* feature:sidechat-mirror end */
 /* feature:markdown-tables begin */
 .bubble .ev-md { padding: 0; }
 .bubble .md-table-wrap { max-width: 100%; }
@@ -2398,6 +2526,24 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 .approvals-diff .add { color: var(--diff-add); }
 .approvals-diff .del { color: var(--diff-del); }
 .approvals-count { color: var(--warning); margin: var(--space-2) 0 0; }
+.approvals-fact {
+  margin: var(--space-2) 0 0;
+  color: var(--ink);
+  font-size: var(--type-sm);
+  overflow-wrap: anywhere;
+}
+.approvals-scopes {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--ink);
+  font-size: var(--type-sm);
+  line-height: 1.4;
+}
+.approvals-scopes li { overflow-wrap: anywhere; }
 .approvals-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2417,6 +2563,9 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   align-items: center;
   justify-content: center;
   padding: var(--space-4);
+}
+.approvals-confirm {
+  z-index: 40;
 }
 .approvals-dialog,
 .approvals-panel {
@@ -2539,6 +2688,26 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   font-size: 12px;
 }
 .term-check input { width: auto; height: auto; margin: 0; }
+/* #1520: shown only while the user is scrolled away from the tail.
+   Blocky retro tokens: square corners, 2px border, hard offset shadow,
+   yellow accent block. */
+.term-jump {
+  align-self: flex-end;
+  background: var(--sharp);
+  color: #1a1528;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  box-shadow: 3px 3px 0 var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.term-jump:active {
+  box-shadow: 0 0 0 var(--ink);
+  transform: translate(3px, 3px);
+}
 /* feature:terminal end */
 
 /* feature:phone-reading begin */
@@ -2692,6 +2861,11 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 .file-meta { display: flex; gap: 8px; align-items: baseline; margin-top: 2px; }
 .exist { color: var(--muted); font-size: var(--type-sm); }
 .exist.on { color: var(--success); }
+/* feature:localfiles-copy-path begin */
+.file-item { display: flex; gap: 8px; align-items: flex-start; }
+.file-item .file-main { flex: 1; min-width: 0; }
+.file-copy { flex: 0 0 auto; min-height: 44px; min-width: 44px; padding: 4px 10px; }
+/* feature:localfiles-copy-path end */
 .shortcut-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .shortcut-list li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 .shortcut-list span { color: var(--muted); }
@@ -2738,3 +2912,13 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   .settings-page { padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)); }
 }
 /* feature:onboarding-settings end */
+/* feature:files-refresh begin */
+.files-head, .changes-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.files-head .hint, .changes-head .hint { margin: 0; }
+/* feature:files-refresh end */

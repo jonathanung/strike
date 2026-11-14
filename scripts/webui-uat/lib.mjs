@@ -8,8 +8,6 @@ export const SHELL_LABELS = [
   "Files",
   "Changes",
   "Approval",
-  "Steer",
-  "Queue",
   "Send",
   "Connected",
 ];

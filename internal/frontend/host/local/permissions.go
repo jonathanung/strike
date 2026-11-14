@@ -11,10 +11,12 @@ import (
 
 // Permissions adapts permission explain/presets/diff onto host.Permissions.
 type Permissions struct {
-	mu      sync.Mutex
-	layers  []permission.LabeledLayer
-	live    func(permission, pattern string) permission.DetailedExplanation
-	sandbox func() permission.SandboxExplainBits
+	mu           sync.Mutex
+	layers       []permission.LabeledLayer
+	live         func(permission, pattern string) permission.DetailedExplanation
+	sandbox      func() permission.SandboxExplainBits
+	folderList   func() []permission.FolderGrant
+	folderRevoke func(index int) bool
 }
 
 // NewPermissions builds a host adapter from base evaluation layers.
@@ -40,6 +42,56 @@ func (p *Permissions) SetLive(fn func(permission, pattern string) permission.Det
 	p.mu.Lock()
 	p.live = fn
 	p.mu.Unlock()
+}
+
+// SetFolderGrants installs callbacks for the live session's folder grants
+// (list + revoke), bound to the same engine as SetLive. Nil clears either.
+func (p *Permissions) SetFolderGrants(list func() []permission.FolderGrant, revoke func(index int) bool) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.folderList = list
+	p.folderRevoke = revoke
+	p.mu.Unlock()
+}
+
+// SessionFolderGrants implements host.Permissions.
+func (p *Permissions) SessionFolderGrants() []host.PermissionFolderGrant {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	list := p.folderList
+	p.mu.Unlock()
+	if list == nil {
+		return nil
+	}
+	grants := list()
+	out := make([]host.PermissionFolderGrant, len(grants))
+	for i, g := range grants {
+		out[i] = host.PermissionFolderGrant{
+			Index:      i,
+			Permission: g.Permission,
+			Folder:     g.Folder,
+			Pattern:    g.DisplayPattern(),
+		}
+	}
+	return out
+}
+
+// RevokeSessionFolderGrant implements host.Permissions.
+func (p *Permissions) RevokeSessionFolderGrant(index int) bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	revoke := p.folderRevoke
+	p.mu.Unlock()
+	if revoke == nil {
+		return false
+	}
+	return revoke(index)
 }
 
 // SetSandboxBits installs a callback that supplies sandbox dial + network.allow

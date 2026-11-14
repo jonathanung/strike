@@ -36,7 +36,9 @@ func (e *Engine) turnActive() bool {
 }
 
 // pendingUserInput is one mid-turn buffered prompt (text + optional images).
+// id is stable for InputQueued and the edit/cancel/reorder ops.
 type pendingUserInput struct {
+	id      string
 	text    string
 	display string
 	images  []protocol.ImageAttachment
@@ -382,10 +384,174 @@ func (e *Engine) enqueuePrepared(op protocol.UserInput, display string) {
 		return
 	}
 	e.pendingUserInputs = append(e.pendingUserInputs, pendingUserInput{
+		id:      newInputQueueID(),
 		text:    op.Text,
 		display: display,
 		images:  append([]protocol.ImageAttachment(nil), op.Images...),
 	})
+	e.emitInputQueued()
+}
+
+func newInputQueueID() string {
+	return rand.Text()
+}
+
+func (e *Engine) emitInputQueued() {
+	items := make([]protocol.InputQueueItem, 0, len(e.pendingUserInputs))
+	for _, it := range e.pendingUserInputs {
+		items = append(items, protocol.InputQueueItem{ID: it.id, Text: it.text})
+	}
+	e.emit(protocol.InputQueued{Correlation: e.sessionCorr(), Items: items})
+}
+
+func (e *Engine) emitQueueError(msg string) {
+	e.emit(protocol.EngineError{
+		Correlation: e.sessionCorr(),
+		Message:     msg,
+		Code:        protocol.ErrorCodeInvalidArgs,
+	})
+}
+
+// handleInputQueueEdit replaces one queued item's text. Images stay.
+func (e *Engine) handleInputQueueEdit(op protocol.InputQueueEdit) {
+	id := strings.TrimSpace(op.ID)
+	if id == "" {
+		e.emitQueueError("queue edit needs an id")
+		return
+	}
+	for i := range e.pendingUserInputs {
+		if e.pendingUserInputs[i].id != id {
+			continue
+		}
+		if strings.TrimSpace(op.Text) == "" && len(e.pendingUserInputs[i].images) == 0 {
+			e.emitQueueError("queue edit needs text; cancel the item to remove it")
+			return
+		}
+		e.pendingUserInputs[i].text = op.Text
+		e.emitInputQueued()
+		return
+	}
+	e.emitQueueError(fmt.Sprintf("queued item %q is not in the queue", id))
+}
+
+// handleInputQueueCancel removes one queued item.
+func (e *Engine) handleInputQueueCancel(op protocol.InputQueueCancel) {
+	id := strings.TrimSpace(op.ID)
+	if id == "" {
+		e.emitQueueError("queue cancel needs an id")
+		return
+	}
+	for i := range e.pendingUserInputs {
+		if e.pendingUserInputs[i].id != id {
+			continue
+		}
+		e.pendingUserInputs = append(e.pendingUserInputs[:i], e.pendingUserInputs[i+1:]...)
+		if len(e.pendingUserInputs) == 0 {
+			e.pendingUserInputs = nil
+		}
+		e.emitInputQueued()
+		return
+	}
+	e.emitQueueError(fmt.Sprintf("queued item %q is not in the queue", id))
+}
+
+// handleInputQueueReorder replaces the FIFO order. ids must be a permutation.
+func (e *Engine) handleInputQueueReorder(op protocol.InputQueueReorder) {
+	if len(op.IDs) != len(e.pendingUserInputs) {
+		e.emitQueueError("queue reorder must list every queued item once")
+		return
+	}
+	byID := make(map[string]pendingUserInput, len(e.pendingUserInputs))
+	for _, it := range e.pendingUserInputs {
+		byID[it.id] = it
+	}
+	next := make([]pendingUserInput, 0, len(op.IDs))
+	seen := make(map[string]struct{}, len(op.IDs))
+	for _, raw := range op.IDs {
+		id := strings.TrimSpace(raw)
+		if _, dup := seen[id]; dup {
+			e.emitQueueError("queue reorder lists an item more than once")
+			return
+		}
+		it, ok := byID[id]
+		if !ok {
+			e.emitQueueError(fmt.Sprintf("queued item %q is not in the queue", id))
+			return
+		}
+		seen[id] = struct{}{}
+		next = append(next, it)
+	}
+	e.pendingUserInputs = next
+	e.emitInputQueued()
+}
+
+// handleInputQueueSendNow promotes one queued item out of the FIFO.
+//
+// Busy: the item takes the pending-steer slot handleSteer fills, so it
+// lands at the next safe boundary with the usual TurnSteered
+// acknowledgement — or, if the turn ends first, falls back to the next
+// turn via fallbackSteerToQueue. A composer steer already waiting keeps
+// the slot: replacing it would drop that steer silently, so the op fails
+// in place and the item keeps its queue position.
+//
+// Idle: the item starts as a turn now, under the same guards as the FIFO
+// drain (startNextPendingUserInput).
+//
+// Removing the item from pendingUserInputs is the claim. Ops and the FIFO
+// drain are serialized on Run, so whichever runs first owns the item; a
+// send-now for an id that already left the queue is an error, never a
+// second delivery.
+func (e *Engine) handleInputQueueSendNow(ctx context.Context, op protocol.InputQueueSendNow) {
+	id := strings.TrimSpace(op.ID)
+	if id == "" {
+		e.emitQueueError("queue send now needs an id")
+		return
+	}
+	idx := -1
+	for i := range e.pendingUserInputs {
+		if e.pendingUserInputs[i].id == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		e.emitQueueError(fmt.Sprintf("queued item %q is not in the queue", id))
+		return
+	}
+	item := e.pendingUserInputs[idx]
+	if e.turnActive() {
+		if e.hasPendingSteer() {
+			e.emitQueueError("a steer is already waiting for this turn; try Send now again once it lands")
+			return
+		}
+		e.pendingUserInputs = append(e.pendingUserInputs[:idx], e.pendingUserInputs[idx+1:]...)
+		if len(e.pendingUserInputs) == 0 {
+			e.pendingUserInputs = nil
+		}
+		e.pendingSteerMu.Lock()
+		e.pendingSteer = &pendingSteer{
+			text:         item.text,
+			display:      item.display,
+			images:       append([]protocol.ImageAttachment(nil), item.images...),
+			targetTurnID: e.activeTurnID,
+		}
+		e.pendingSteerMu.Unlock()
+		e.emitInputQueued()
+		return
+	}
+	if e.prov == nil {
+		e.emitQueueError("no model selected — use /provider <anthropic|openai|xai|google|kimi|deepseek|echo> [model]")
+		return
+	}
+	if e.rejectUserInputIfBudgetExhausted() {
+		return
+	}
+	e.pendingUserInputs = append(e.pendingUserInputs[:idx], e.pendingUserInputs[idx+1:]...)
+	if len(e.pendingUserInputs) == 0 {
+		e.pendingUserInputs = nil
+	}
+	e.emitInputQueued()
+	e.startTurnShown(ctx, item.text, item.display, item.images)
 }
 
 // drainIdleFollowups starts at most one follow-up turn when idle: preferred
@@ -418,7 +584,11 @@ func (e *Engine) startNextPendingUserInput(ctx context.Context) bool {
 	}
 	if e.sessionBudget != nil && e.sessionBudget.Exhausted() {
 		// Drop queued input; surface the envelope stop once.
+		had := len(e.pendingUserInputs) > 0
 		e.pendingUserInputs = nil
+		if had {
+			e.emitInputQueued()
+		}
 		_ = e.rejectUserInputIfBudgetExhausted()
 		return false
 	}
@@ -427,6 +597,7 @@ func (e *Engine) startNextPendingUserInput(ctx context.Context) bool {
 	if len(e.pendingUserInputs) == 0 {
 		e.pendingUserInputs = nil
 	}
+	e.emitInputQueued()
 	e.startTurnShown(ctx, item.text, item.display, item.images)
 	return true
 }

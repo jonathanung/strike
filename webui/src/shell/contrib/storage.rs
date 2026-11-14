@@ -8,25 +8,27 @@
 
 use std::rc::Rc;
 
-use crate::shell::{Command, ShellHook};
+use crate::shell::{Group, Command, ShellHook};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "panel-memory",
-        section: "Commands",
-        section_order: 0,
+        group: Group::Session,
         label: "Memory",
         detail: "Inspect and edit durable memory",
         shortcut: "",
         keywords: &["storage", "remember"],
         argument: None,
-        order: 70,
+        order: 40,
         run: Rc::new(|args| crate::shell::dispatch("panel-memory", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.command(Command {
         id: "panel-knowledge",
-        section: "Commands",
-        section_order: 0,
+        group: Group::Session,
         label: "Knowledge",
         detail: "Pinned paths the agent reads at session start",
         shortcut: "",
@@ -34,11 +36,14 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 80,
         run: Rc::new(|args| crate::shell::dispatch("panel-knowledge", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.command(Command {
         id: "panel-artifacts",
-        section: "Commands",
-        section_order: 0,
+        group: Group::Session,
         label: "Artifacts",
         detail: "Versioned findings, patches, and reports",
         shortcut: "",
@@ -46,41 +51,87 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 90,
         run: Rc::new(|args| crate::shell::dispatch("panel-artifacts", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
+    });
+    reg.command(Command {
+        id: "panel-terminal",
+        group: Group::Session,
+        label: "Terminal",
+        detail: "Open the shell panel",
+        shortcut: "",
+        keywords: &["shell", "pty", "console"],
+        argument: None,
+        order: 95,
+        run: Rc::new(|args| crate::shell::dispatch("panel-terminal", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
+    });
+    reg.command(Command {
+        id: "terminal.kill-on-end",
+        group: Group::Session,
+        label: "Close new shells when the session ends",
+        detail: "Toggle whether a new shell dies with the session",
+        shortcut: "",
+        keywords: &["terminal", "pty", "shell", "preference"],
+        argument: None,
+        order: 96,
+        run: Rc::new(|args| {
+            let _ = crate::shell::dispatch("panel-terminal", "");
+            crate::park::dispatch_or_park("terminal.kill-on-end", args)
+        }),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.command(Command {
         id: "memory-normal",
-        section: "Settings",
-        section_order: 20,
-        label: "Memory: Normal",
+        group: Group::Settings,
+        label: "Set memory mode: Normal",
         detail: "This session reads and writes memory",
         shortcut: "",
-        keywords: &["storage", "mode"],
+        keywords: &["memory", "incognito", "temporary", "privacy"],
         argument: None,
         order: 60,
         run: Rc::new(|args| crate::shell::dispatch("memory-normal", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.command(Command {
         id: "memory-incognito",
-        section: "Settings",
-        section_order: 20,
-        label: "Memory: Incognito",
+        group: Group::Settings,
+        label: "Set memory mode: Incognito",
         detail: "This session reads memory and learns nothing",
         shortcut: "",
-        keywords: &["storage", "mode"],
+        keywords: &["memory", "incognito", "temporary", "privacy"],
         argument: None,
         order: 70,
         run: Rc::new(|args| crate::shell::dispatch("memory-incognito", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.command(Command {
         id: "memory-temporary",
-        section: "Settings",
-        section_order: 20,
-        label: "Memory: Temporary",
+        group: Group::Settings,
+        label: "Set memory mode: Temporary",
         detail: "This session has no memory",
         shortcut: "",
-        keywords: &["storage", "mode"],
+        keywords: &["memory", "incognito", "temporary", "privacy"],
         argument: None,
         order: 80,
         run: Rc::new(|args| crate::shell::dispatch("memory-temporary", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
 }

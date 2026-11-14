@@ -8,20 +8,23 @@
 
 use std::rc::Rc;
 
-use crate::shell::{Command, ShellHook, Shortcut};
+use crate::shell::{Group, Command, ShellHook, Shortcut};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "transcript-find.open",
-        section: "Apps",
-        section_order: 10,
+        group: Group::Session,
         label: "Find in transcript",
-        detail: "Search the open session's messages and tool titles, with match count and next/previous",
+        detail: "Search the open session's messages, tool titles and folded tool output, with match count and next/previous",
         shortcut: "Ctrl+F",
         keywords: &["find", "search", "transcript"],
         argument: None,
         order: 55,
         run: Rc::new(|args| crate::shell::dispatch("transcript-find.open", args)),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.shortcut(Shortcut {
         id: "transcript-find",

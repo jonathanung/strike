@@ -154,6 +154,15 @@ func TestSteerCancelRestartOnFinalStream(t *testing.T) {
 	eng.Ops() <- protocol.UserInput{Text: "go"}
 	_ = receiveRequest(t, prov.requests)
 	eng.Ops() <- protocol.Steer{Text: "redirect"}
+	// The steer takes effect only once the Run goroutine handles the op and
+	// parks it in the pending-steer slot; the buffered ops channel lets the
+	// send return long before that. Releasing the stream first lets the turn
+	// observe the final Done with no steer parked and complete unsteered
+	// (#1651). Ops are handled in FIFO order on the Run goroutine, so an
+	// inspect op queued behind the steer is answered only after the steer
+	// has been handled — wait for its response before releasing the stream.
+	eng.Ops() <- protocol.InspectEffectivePrompt{}
+	waitForEffectivePrompt(t, eng)
 	close(release)
 
 	var modes []string
@@ -181,6 +190,30 @@ func TestSteerCancelRestartOnFinalStream(t *testing.T) {
 			}
 		case <-guard.C:
 			t.Fatalf("timeout modes=%v", modes)
+		}
+	}
+}
+
+// waitForEffectivePrompt drains events until the engine answers an
+// InspectEffectivePrompt op. Tests use it as an op-ordering barrier: ops are
+// handled in FIFO order on the Run goroutine, so once the answer arrives,
+// every op queued before the inspect has been handled. Events skipped here
+// are startup/turn-start noise the caller does not assert on.
+func waitForEffectivePrompt(t *testing.T, eng *engine.Engine) {
+	t.Helper()
+	guard := time.NewTimer(10 * time.Second)
+	defer guard.Stop()
+	for {
+		select {
+		case ev, ok := <-eng.Events():
+			if !ok {
+				t.Fatal("events closed while waiting for op barrier")
+			}
+			if _, ok := ev.(protocol.EffectivePrompt); ok {
+				return
+			}
+		case <-guard.C:
+			t.Fatal("timeout waiting for op barrier")
 		}
 	}
 }

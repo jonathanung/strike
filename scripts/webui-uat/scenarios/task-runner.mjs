@@ -136,7 +136,16 @@ export async function runTaskRunnerPass({ page, baseURL, check, shoot, click, wa
   if (!happyId) return;
   await api(baseURL, "POST", `/v1/plans/${happyId}/run`, { action: "open", ownerRoot: owner });
 
-  await click(".segmented button", "Tasks");
+  await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
+  await waitUntil(`Boolean(document.querySelector('[data-nav="palette-dialog"] input'))`, 4000, "task palette");
+  await page.evaluate(`(() => {
+    const input = document.querySelector('[data-nav="palette-dialog"] input');
+    const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+    proto.set.call(input, "Task runner");
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "Task runner" }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    return true;
+  })()`);
   const board = await waitUntil(
     `document.querySelector("#task-runner") && document.body.innerText.includes("Review chain") && document.body.innerText.includes("Blocked chain")`,
     8000,

@@ -42,9 +42,9 @@ and for side-by-side stills. `--no-video` skips ffmpeg.
 1. Waits until the shell shows `Run a command` and `Activity`, and the dark
    Strike tokens are `--acid: #7c3aed` and `--ground: #14131c`
    (`scripts/webui-uat/fixtures/shell-dark.json`).
-2. Keyboard: Ctrl+K, type `plan`, Enter. The composer chip becomes
+2. Keyboard: Ctrl+K, type `plan`, Enter. The composer status becomes
    `Approval · Plan`.
-3. Opens the approval menu (Plan, Soft, Edits, Yolo) and Escape.
+3. Opens the command palette on the approval commands (including Yolo) and Escape.
 4. Opens Files and Changes.
 5. Types `uat-marker-alpha` and Send. The transcript must show that marker
    and the echo provider's `You said:`.

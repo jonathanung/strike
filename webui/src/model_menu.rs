@@ -32,12 +32,26 @@ pub struct LiveModelState {
     pub provider: String,
     pub model: String,
     pub effort: String,
+    /// Fast (priority-tier) preference (#1569). Only ever set from a
+    /// daemon `fast.selected` confirmation — never optimistically when
+    /// the toggle is clicked. The daemon's status snapshot carries no
+    /// fast field, so a fresh page starts off until a confirmation (the
+    /// daemon replays/emits one for the session) says otherwise.
+    pub fast: bool,
+    /// Session exit-gate policy (#1572), seeded from bootstrap/status in
+    /// `main.rs` and afterwards only from `autonomy.selected`
+    /// confirmations reduced here.
+    pub autonomy: String,
     pub context_used: i64,
     pub context_limit: i64,
     pub context_fit: String,
     pub note: String,
     /// Epoch millis. Engine errors and note clears apply only to events at
     /// or after this instant, so a session replay cannot surface an old error.
+    /// An envelope with no parseable time is not fresh. There is no lookback:
+    /// daemon stamps (`protocol.Wrap` uses `time.Now`) and the browser clock
+    /// (`Date.now` when the change is sent) are the same clock on a local
+    /// gateway, and the event is produced after this instant is armed.
     pub note_after: i64,
 }
 
@@ -110,6 +124,10 @@ const EFFORTS: &[(&str, &str)] = &[
     ),
     ("max", "maximum reasoning when correctness beats cost"),
 ];
+
+pub fn effort_levels() -> &'static [(&'static str, &'static str)] {
+    EFFORTS
+}
 
 pub fn parse_effort(value: &str) -> Option<String> {
     let normalized = value.trim().to_ascii_lowercase();
@@ -186,12 +204,18 @@ pub fn toggle_pin(pins: &mut Vec<String>, key: &str) {
 }
 
 /// "This session only" when the live pair differs from the saved default.
+/// `defaults_known` is true only after GET /v1/settings succeeded. A failed
+/// or not-yet-finished load must not be described as "no default saved".
 pub fn scope_label(
     provider: &str,
     model: &str,
     default_provider: &str,
     default_model: &str,
+    defaults_known: bool,
 ) -> &'static str {
+    if !defaults_known {
+        return "Global default unknown";
+    }
     let dp = default_provider.trim();
     let dm = default_model.trim();
     if dp.is_empty() && dm.is_empty() {
@@ -209,7 +233,7 @@ pub fn chip_label(model: &str) -> String {
     if model.is_empty() {
         "Model".into()
     } else {
-        model.to_string()
+        format!("Model · {model}")
     }
 }
 
@@ -548,7 +572,11 @@ pub fn parse_freeform(raw: &str, fallback_provider: &str) -> (String, String) {
 
 fn event_relevant(message: &str) -> bool {
     let m = message.to_ascii_lowercase();
-    m.contains("model") || m.contains("effort") || m.contains("provider")
+    m.contains("model")
+        || m.contains("effort")
+        || m.contains("provider")
+        || m.contains("fast")
+        || m.contains("autonomy")
 }
 
 fn under_warn_ratio(used: i64, limit: i64) -> bool {
@@ -569,9 +597,11 @@ pub fn reduce_envelope(mut state: LiveModelState, raw: &str) -> LiveModelState {
         .get("time")
         .and_then(|t| t.as_str())
         .and_then(rfc3339_millis);
+    // `t >= note_after`. A timeless envelope is not fresh: replayed events
+    // that omit `time` must not consume the guard or clear a live note.
     let fresh = match when {
-        Some(t) => state.note_after > 0 && t + 15_000 >= state.note_after,
-        None => state.note_after > 0,
+        Some(t) => state.note_after > 0 && t >= state.note_after,
+        None => false,
     };
     match typ {
         "model.selected" => {
@@ -591,6 +621,32 @@ pub fn reduce_envelope(mut state: LiveModelState, raw: &str) -> LiveModelState {
         "effort.selected" => {
             if let Some(level) = text(&data, "level") {
                 state.effort = level;
+            }
+            if fresh {
+                state.note.clear();
+                state.note_after = 0;
+            }
+        }
+        // Fast (#1569): the ONLY place fast state changes. Clicking the
+        // toggle posts `set.fast`; the displayed state waits for this
+        // daemon confirmation, exactly like the TUI.
+        "fast.selected" => {
+            if let Some(enabled) = data.get("enabled").and_then(|v| v.as_bool()) {
+                state.fast = enabled;
+            }
+            if fresh {
+                state.note.clear();
+                state.note_after = 0;
+            }
+        }
+        // Autonomy (#1572): same confirmation-only discipline. Unknown
+        // modes are dropped rather than rendered as a policy the daemon
+        // never reported.
+        "autonomy.selected" => {
+            if let Some(mode) = text(&data, "mode") {
+                if crate::model::autonomies().iter().any(|m| m.id == mode) {
+                    state.autonomy = mode;
+                }
             }
             if fresh {
                 state.note.clear();
@@ -743,6 +799,13 @@ fn days_from_civil(mut y: i64, m: i64, d: i64) -> Option<i64> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn chip_label_names_the_model() {
+        assert_eq!(chip_label(""), "Model");
+        assert_eq!(chip_label("  "), "Model");
+        assert_eq!(chip_label("echo"), "Model · echo");
+    }
+
     fn info(id: &str, provider: &str, name: &str) -> ModelInfo {
         ModelInfo {
             id: id.into(),
@@ -797,9 +860,24 @@ mod tests {
         assert_eq!(capability_line(&bare), "Capabilities not reported");
         assert_eq!(parse_freeform("nope/missing", "echo"), ("nope".into(), "missing".into()));
         assert_eq!(parse_freeform("custom-id", "echo"), ("echo".into(), "custom-id".into()));
-        assert_eq!(scope_label("echo", "echo", "", ""), "No global default saved");
-        assert_eq!(scope_label("echo", "echo", "echo", "echo"), "Matches the global default");
-        assert_eq!(scope_label("echo", "other", "echo", "echo"), "This session only");
+        assert_eq!(scope_label("echo", "echo", "", "", true), "No global default saved");
+        assert_eq!(
+            scope_label("echo", "echo", "echo", "echo", true),
+            "Matches the global default"
+        );
+        assert_eq!(scope_label("echo", "other", "echo", "echo", true), "This session only");
+        assert_eq!(
+            scope_label("echo", "echo", "", "", false),
+            "Global default unknown"
+        );
+        assert_ne!(
+            scope_label("echo", "echo", "", "", false),
+            "No global default saved"
+        );
+        assert_eq!(
+            scope_label("echo", "echo", "echo", "echo", false),
+            "Global default unknown"
+        );
     }
 
     #[test]
@@ -917,6 +995,81 @@ mod tests {
         );
         assert_eq!(state.model, "echo-2");
         assert!(state.note.is_empty());
+    }
+
+    #[test]
+    fn note_guard_rejects_the_lookback_window_and_timeless_envelopes() {
+        let at = rfc3339_millis("2026-10-26T12:00:00.000Z").unwrap();
+        let mut state = LiveModelState {
+            note_after: at,
+            note: "keep me".into(),
+            ..LiveModelState::default()
+        };
+        let before = r#"{"type":"engine.error","time":"2026-10-26T11:59:59.999Z","data":{"message":"unknown provider \"old\""}}"#;
+        state = reduce_envelope(state, before);
+        assert_eq!(state.note, "keep me");
+        assert_eq!(state.note_after, at, "a pre-change error must not consume the guard");
+
+        let inside_old_window = r#"{"type":"engine.error","time":"2026-10-26T11:59:50.000Z","data":{"message":"unknown provider \"recent\""}}"#;
+        state = reduce_envelope(state, inside_old_window);
+        assert_eq!(state.note, "keep me");
+        assert_eq!(state.note_after, at);
+
+        let timeless = r#"{"type":"engine.error","data":{"message":"unknown provider \"timeless\""}}"#;
+        state = reduce_envelope(state, timeless);
+        assert_eq!(state.note, "keep me");
+        assert_eq!(state.note_after, at);
+
+        let replayed_select = r#"{"type":"model.selected","time":"2026-10-26T11:59:50.000Z","data":{"provider":"echo","model":"replayed"}}"#;
+        state = reduce_envelope(state, replayed_select);
+        assert_eq!(state.model, "replayed");
+        assert_eq!(state.note, "keep me");
+        assert_eq!(state.note_after, at);
+
+        let exact = r#"{"type":"engine.error","time":"2026-10-26T12:00:00.000Z","data":{"message":"unknown provider \"now\""}}"#;
+        state = reduce_envelope(state, exact);
+        assert!(state.note.contains("unknown provider"));
+        assert_eq!(state.note_after, 0);
+
+        state.note_after = at;
+        state.note = "second".into();
+        let after = r#"{"type":"engine.error","time":"2026-10-26T12:00:00.001Z","data":{"message":"unknown model \"next\""}}"#;
+        state = reduce_envelope(state, after);
+        assert!(state.note.contains("unknown model"));
+        assert_eq!(state.note_after, 0);
+    }
+
+    #[test]
+    fn reducer_applies_fast_and_autonomy_only_from_confirmations() {
+        let mut state = LiveModelState::default();
+        assert!(!state.fast);
+        // A click sends the op but is not an envelope: nothing here flips
+        // state until the daemon's fast.selected lands.
+        state = reduce_envelope(
+            state,
+            r#"{"type":"fast.selected","data":{"enabled":true}}"#,
+        );
+        assert!(state.fast);
+        state = reduce_envelope(
+            state,
+            r#"{"type":"fast.selected","data":{"enabled":false}}"#,
+        );
+        assert!(!state.fast);
+        // A malformed confirmation changes nothing.
+        state = reduce_envelope(state, r#"{"type":"fast.selected","data":{}}"#);
+        assert!(!state.fast);
+
+        state = reduce_envelope(
+            state,
+            r#"{"type":"autonomy.selected","data":{"mode":"checks"}}"#,
+        );
+        assert_eq!(state.autonomy, "checks");
+        // Unknown modes never render as a gate policy.
+        state = reduce_envelope(
+            state,
+            r#"{"type":"autonomy.selected","data":{"mode":"yolo"}}"#,
+        );
+        assert_eq!(state.autonomy, "checks");
     }
 
     #[test]

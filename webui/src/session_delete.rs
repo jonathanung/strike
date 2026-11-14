@@ -16,6 +16,8 @@
 //! page closes that root as well, or the deleted session's row would
 //! resurrect on the next refresh.
 
+use std::rc::Rc;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::closure::Closure;
@@ -70,7 +72,8 @@ pub fn confirm_heading(label: &str) -> String {
     format!("Delete session \u{201c}{label}\u{201d}?")
 }
 
-pub const CONFIRM_BODY: &str = "This permanently removes the session's durable log and metadata. This cannot be undone.";
+pub const CONFIRM_BODY: &str =
+    "This permanently removes the session's durable log and metadata. This cannot be undone.";
 
 pub fn force_heading(label: &str) -> String {
     format!("Session \u{201c}{label}\u{201d} is active")
@@ -81,6 +84,26 @@ pub const FORCE_BODY: &str = "The daemon refused to delete it without force beca
 /// The open session after `deleted` is removed: `None` when the deleted
 /// session was the open one (the cockpit falls back to its empty/list
 /// state), otherwise the current open session, unchanged.
+/// Palette delete: an explicit argument wins, then the cursor session,
+/// then the open session.
+pub fn resolve_session_target<'a>(
+    argument: &'a str,
+    cursor: &'a str,
+    active: &'a str,
+) -> Result<&'a str, &'static str> {
+    let argument = argument.trim();
+    if !argument.is_empty() {
+        return Ok(argument);
+    }
+    if !cursor.is_empty() {
+        return Ok(cursor);
+    }
+    if !active.is_empty() {
+        return Ok(active);
+    }
+    Err("No session to delete.")
+}
+
 pub fn remaining_active(active: &str, deleted: &str) -> Option<String> {
     if active.is_empty() || active == deleted {
         None
@@ -89,8 +112,66 @@ pub fn remaining_active(active: &str, deleted: &str) -> Option<String> {
     }
 }
 
-/// Issue one DELETE for `id`. The error keeps the daemon's status and
-/// body so the caller can branch on 409 and surface the rest verbatim.
+/// Shared confirm, then DELETE. A 409 opens a second confirm before force.
+/// False means another confirmation is already open.
+pub fn prompt_delete(
+    target: DeleteTarget,
+    base: String,
+    token: String,
+    on_deleted: Rc<dyn Fn(String)>,
+    on_error: Rc<dyn Fn(String)>,
+) -> bool {
+    let label = target.label.clone();
+    crate::confirm::ask(
+        crate::confirm::ConfirmRequest {
+            title: confirm_heading(&label),
+            body: CONFIRM_BODY.into(),
+            confirm_label: "Delete".into(),
+        },
+        Rc::new(move || {
+            let target = target.clone();
+            let base = base.clone();
+            let token = token.clone();
+            let on_deleted = on_deleted.clone();
+            let on_error = on_error.clone();
+            spawn_local(async move {
+                match delete_session(&base, &token, &target.id, false).await {
+                    Ok(()) => on_deleted(target.id),
+                    Err(e) if is_conflict(e.status) => {
+                        let heading = force_heading(&target.label);
+                        let body = format!("{FORCE_BODY}\n\n{e}");
+                        let id = target.id.clone();
+                        let busy = on_error.clone();
+                        if !crate::confirm::ask(
+                            crate::confirm::ConfirmRequest {
+                                title: heading,
+                                body,
+                                confirm_label: "Force delete".into(),
+                            },
+                            Rc::new(move || {
+                                let base = base.clone();
+                                let token = token.clone();
+                                let id = id.clone();
+                                let on_deleted = on_deleted.clone();
+                                let on_error = on_error.clone();
+                                spawn_local(async move {
+                                    match delete_session(&base, &token, &id, true).await {
+                                        Ok(()) => on_deleted(id),
+                                        Err(e) => on_error(e.to_string()),
+                                    }
+                                });
+                            }),
+                        ) {
+                            busy(crate::confirm::BUSY.into());
+                        }
+                    }
+                    Err(e) => on_error(e.to_string()),
+                }
+            });
+        }),
+    )
+}
+
 pub async fn delete_session(
     base: &str,
     token: &str,
@@ -130,11 +211,12 @@ pub fn SessionDeleteDialog(
 
     // Escape cancels, like the other cockpit dialogs. The component is
     // mounted once for the page's lifetime, so the listener is too.
-    let on_key = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
-        if ev.key() == "Escape" && target.get_untracked().is_some() {
-            cancel();
-        }
-    });
+    let on_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if ev.key() == "Escape" && target.get_untracked().is_some() {
+                cancel();
+            }
+        });
     if let Some(w) = web_sys::window() {
         let _ = w.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
     }
@@ -252,6 +334,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn delete_target_prefers_argument_then_cursor_then_active() {
+        assert_eq!(
+            resolve_session_target("named", "cursor", "active"),
+            Ok("named")
+        );
+        assert_eq!(
+            resolve_session_target("  ", "cursor", "active"),
+            Ok("cursor")
+        );
+        assert_eq!(resolve_session_target("", "", "active"), Ok("active"));
+        assert_eq!(
+            resolve_session_target("", "", ""),
+            Err("No session to delete.")
+        );
+    }
+
+    #[test]
     fn delete_path_only_forces_when_asked() {
         assert_eq!(delete_path("abc", false), "/v1/sessions/abc");
         assert_eq!(delete_path("abc", true), "/v1/sessions/abc?force=true");
@@ -264,7 +363,10 @@ mod tests {
             delete_path("a b/c", true),
             "/v1/sessions/a%20b%2Fc?force=true"
         );
-        assert_eq!(delete_path("a?force=true", false), "/v1/sessions/a%3Fforce%3Dtrue");
+        assert_eq!(
+            delete_path("a?force=true", false),
+            "/v1/sessions/a%3Fforce%3Dtrue"
+        );
     }
 
     #[test]

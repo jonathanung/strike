@@ -117,8 +117,36 @@
     min-height: 44px;
   }
 
-  body[data-phone="1"] .segmented {
+  /* Only the header bar's segmented switches hide on phone (#1551):
+     the phone bar is one row, and layout/view live in the palette
+     instead. The hide is scoped to the header — a blanket
+     `.segmented { display: none }` here also hid every in-page
+     segmented control reusing the class, including the Settings
+     ChoiceRows (Scheme / Type size / Density), which measured 0x0
+     and could not be changed on a phone at all. In-page segmented
+     controls are content, not chrome, and stay visible by default;
+     a new in-page use of .segmented must not need an exception here. */
+  body[data-phone="1"] .page-header .segmented {
     display: none;
+  }
+
+  /* Segmented controls that are the content stay tappable on phone:
+     the phone sheet's switches (re-shown after the header hide above,
+     so the sheet wins even if its markup sits inside the header),
+     Settings appearance, and the Usage/Audit segment. */
+  body[data-phone="1"] .phone-menu .segmented,
+  body[data-phone="1"] .settings-page .segmented,
+  body[data-phone="1"] .usage-audit-shell .segmented {
+    display: flex;
+    height: auto;
+    min-height: 44px;
+  }
+
+  body[data-phone="1"] .settings-page .seg-choice,
+  body[data-phone="1"] .settings-page .seg-choice span,
+  body[data-phone="1"] .usage-audit-shell .segmented .seg {
+    min-height: 44px;
+    height: auto;
   }
 
   body[data-phone="1"] .command-pill kbd {
@@ -190,6 +218,14 @@
     padding-bottom: 2px;
   }
 
+  body[data-phone="1"] .composer-glance,
+  body[data-phone="1"] .sx-quiet,
+  body[data-phone="1"] .sx-jump,
+  body[data-phone="1"] .git-file,
+  body[data-phone="1"] .git-actions button,
+  body[data-phone="1"] .ev-bar button,
+  body[data-phone="1"] .ev-tools button,
+  body[data-phone="1"] .composer-plus .palette-row,
   body[data-phone="1"] .composer-bar .chip,
   body[data-phone="1"] .composer-bar .send,
   body[data-phone="1"] .ss-chips .chip,
@@ -204,7 +240,8 @@
   body[data-phone="1"] .side-tabs .chip,
   body[data-phone="1"] .notice button,
   body[data-phone="1"] button.primary,
-  body[data-phone="1"] button.secondary {
+  body[data-phone="1"] button.secondary,
+  body[data-phone="1"] .approvals-actions button {
     min-height: 44px;
   }
 
@@ -224,8 +261,23 @@
     min-height: 44px;
   }
 
-  body[data-phone="1"] .composer .menu,
-  body[data-phone="1"] .palette {
+  /* #1524: two out-of-header controls the 44px lists above missed.
+     The session multi-select checkbox was 14px; a 44px box with the
+     top margin trimmed (16px -> 7px) keeps it on the row's first
+     line inside the 58px row. The terminal tab toolbar chips
+     (New / Close and the tab chips) are plain 28px .chip buttons
+     outside .chips and .side-tabs, so neither rule reached them. */
+  body[data-phone="1"] .ss-check {
+    width: 44px;
+    height: 44px;
+    margin: 7px 0 0;
+  }
+
+  body[data-phone="1"] .term-bar .chip {
+    min-height: 44px;
+  }
+
+  body[data-phone="1"] .composer .menu {
     position: fixed;
     left: max(8px, env(safe-area-inset-left));
     right: max(8px, env(safe-area-inset-right));
@@ -235,15 +287,32 @@
     max-height: min(60vh, var(--vv-height, 60vh));
     z-index: 30;
     background: var(--surface);
-    border: 1px solid var(--rule);
-    border-radius: var(--radius);
+    border: 2px solid var(--ink);
+    border-radius: 0;
     overflow: auto;
   }
 
   body[data-phone="1"] .palette-backdrop {
-    align-items: flex-end;
-    padding-top: 0;
-    padding-bottom: calc(52px + env(safe-area-inset-bottom));
+    align-items: stretch;
+    padding: 0;
+  }
+
+  body[data-phone="1"] .palette {
+    position: fixed;
+    top: var(--vv-top, 0px);
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: var(--vv-height, 100dvh);
+    max-height: var(--vv-height, 100dvh);
+    border-radius: 0;
+    border-width: 2px;
+    z-index: 45;
+    box-shadow: none;
+  }
+
+  body[data-phone="1"] .palette .palette-row {
+    min-height: 44px;
   }
 
   /* Overlays as bottom sheets (#1490 slice 3; #1475, #1476). The
@@ -378,6 +447,19 @@
      clipped mid-word reads as "more this way" instead of a defect.
      End padding keeps the last chip clear of the fade once the row is
      scrolled fully across. */
+  body[data-phone="1"] .composer-chips .model-menu {
+    order: -1;
+    position: sticky;
+    left: 0;
+    z-index: 3;
+    flex: 0 0 auto;
+    background: var(--bg);
+  }
+
+  body[data-phone="1"] .composer-chips [data-model-chip] {
+    max-width: none;
+  }
+
   body[data-phone="1"] .composer-chips {
     padding-right: 24px;
     -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);

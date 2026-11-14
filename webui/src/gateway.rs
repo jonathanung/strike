@@ -16,6 +16,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::api::{api, auth_header};
+use crate::outcome;
 
 /// Page wiring for the shell slot in `src/shell/contrib/gateway.rs`.
 /// The shell boots before App's signals exist, so App installs them here
@@ -132,14 +133,24 @@ pub fn session_token(id: &str) -> String {
     token_map().get(id).cloned().unwrap_or_default()
 }
 
-pub fn persist_token(id: &str, token: &str) {
-    let mut map = token_map();
+/// Pure core of [`persist_token`]: an empty token deletes the entry, a
+/// non-empty one stores it. Removal paths (#1562) go through the empty
+/// case so a removed profile's credential leaves with the profile.
+fn updated_token_map(
+    mut map: HashMap<String, String>,
+    id: &str,
+    token: &str,
+) -> HashMap<String, String> {
     if token.is_empty() {
         map.remove(id);
     } else {
         map.insert(id.to_string(), token.to_string());
     }
-    write_token_map(&map);
+    map
+}
+
+pub fn persist_token(id: &str, token: &str) {
+    write_token_map(&updated_token_map(token_map(), id, token));
 }
 
 /// Moves a legacy localStorage token into this tab's session and deletes it.
@@ -269,10 +280,14 @@ pub fn classify_base(raw: &str) -> Result<bool, String> {
         if is_loopback_or_private_v4(v4) {
             return Ok(false);
         }
-        return Err("Public addresses are refused. Forward the daemon with strike connect or SSH.".into());
+        return Err(
+            "Public addresses are refused. Forward the daemon with strike connect or SSH.".into(),
+        );
     }
     if host.contains(':') {
-        let h = host.trim_matches(|c| c == '[' || c == ']').to_ascii_lowercase();
+        let h = host
+            .trim_matches(|c| c == '[' || c == ']')
+            .to_ascii_lowercase();
         if h == "::1" || h.starts_with("fc") || h.starts_with("fd") || h.starts_with("fe80:") {
             return Ok(false);
         }
@@ -437,6 +452,151 @@ async fn gateway_fetch(
     Ok((status, text))
 }
 
+thread_local! {
+    static ACTIVATE: RefCell<Option<Rc<dyn Fn(String, String)>>> = const { RefCell::new(None) };
+    static SAVED: RefCell<Vec<Profile>> = RefCell::new(Vec::new());
+    static GATEWAY_ROWS: RefCell<String> = RefCell::new(String::new());
+    static GATEWAY_SYNCED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn leak_str(text: String) -> &'static str {
+    Box::leak(text.into_boxed_str())
+}
+
+fn leak_words(fixed: &[&'static str], extra: &str) -> &'static [&'static str] {
+    let mut words: Vec<&'static str> = fixed.to_vec();
+    if !extra.is_empty() {
+        words.push(leak_str(extra.to_string()));
+    }
+    Box::leak(words.into_boxed_slice())
+}
+
+fn activate_gateway(id: &str) -> Result<(), String> {
+    let base = if id == "this" {
+        String::new()
+    } else {
+        SAVED.with(|slot| {
+            slot.borrow()
+                .iter()
+                .find(|row| row.id == id)
+                .map(|row| row.base.clone())
+                .unwrap_or_default()
+        })
+    };
+    let run = ACTIVATE.with(|slot| slot.borrow().clone());
+    let Some(run) = run else {
+        return Err("Gateways are not ready.".into());
+    };
+    run(id.to_string(), base);
+    Ok(())
+}
+
+fn forget_gateway(id: &str) -> Result<(), String> {
+    if id == "this" || id.is_empty() {
+        return Err("This gateway stays.".into());
+    }
+    persist_token(id, "");
+    let Some(run) = FORGET.with(|slot| slot.borrow().clone()) else {
+        return Err("Gateways are not ready.".into());
+    };
+    run(id.to_string());
+    Ok(())
+}
+
+thread_local! {
+    static FORGET: RefCell<Option<Rc<dyn Fn(String)>>> = const { RefCell::new(None) };
+}
+
+fn sync_gateway_rows() {
+    let profiles = SAVED.with(|slot| slot.borrow().clone());
+    let key = profiles
+        .iter()
+        .map(|row| format!("{}:{}", row.id, row.name))
+        .collect::<Vec<_>>()
+        .join("|");
+    let changed = GATEWAY_ROWS.with(|slot| {
+        if *slot.borrow() == key {
+            false
+        } else {
+            *slot.borrow_mut() = key;
+            true
+        }
+    });
+    let first = GATEWAY_SYNCED.with(|slot| {
+        let first = !slot.get();
+        slot.set(true);
+        first
+    });
+    if !changed && !first {
+        return;
+    }
+    let mut rows = vec![Profile {
+        id: "this".into(),
+        name: "This gateway".into(),
+        base: String::new(),
+        ssh: String::new(),
+        warn: false,
+    }];
+    rows.extend(profiles);
+    let mut switch = Vec::new();
+    let mut forget = Vec::new();
+    for row in rows {
+        let id = row.id.clone();
+        let name = row.name.clone();
+        let switch_id = leak_str(format!("gw.switch.{id}"));
+        let label = leak_str(format!("Switch to gateway: {name}"));
+        let words = leak_words(&["switch", "gateway", "remote"], &name);
+        let picked = id.clone();
+        switch.push(
+            crate::shell::Command::new(
+                switch_id,
+                crate::shell::Group::Gateway,
+                label,
+                "Use this gateway in the tab",
+                Rc::new(move |_| activate_gateway(&picked)),
+            )
+            .keywords(words)
+            .order(60),
+        );
+        if id != "this" {
+            let forget_id = leak_str(format!("gw.remove.{id}"));
+            let label = leak_str(format!("Gateways: Remove {name}"));
+            let words = leak_words(&["remove", "delete", "profile", "forget"], &name);
+            let picked = id.clone();
+            let named = name.clone();
+            forget.push(
+                crate::shell::Command::new(
+                    forget_id,
+                    crate::shell::Group::Gateway,
+                    label,
+                    "Forget this saved gateway",
+                    Rc::new(move |_| {
+                        let picked = picked.clone();
+                        let named = named.clone();
+                        if !crate::confirm::ask(
+                            crate::confirm::ConfirmRequest {
+                                title: format!("Remove {named}?"),
+                                body: "This browser forgets the gateway. Its token is dropped from this tab.".into(),
+                                confirm_label: "Remove".into(),
+                            },
+                            Rc::new(move || {
+                                let _ = forget_gateway(&picked);
+                            }),
+                        ) {
+                            return Err(crate::confirm::BUSY.into());
+                        }
+                        Ok(())
+                    }),
+                )
+                .keywords(words)
+                .order(70),
+            );
+        }
+    }
+    crate::shell::replace_prefixed("gw.switch.", switch);
+    crate::shell::replace_prefixed("gw.remove.", forget);
+}
+
 #[component]
 pub fn GatewaySwitcher(
     inline: bool,
@@ -570,8 +730,8 @@ pub fn GatewaySwitcher(
             // If registration failed the closure drops here and never fires.
         }
 
-        let on_key = Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(
-            move |ev: web_sys::KeyboardEvent| {
+        let on_key =
+            Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
                 if ev.alt_key()
                     && !ev.ctrl_key()
                     && !ev.meta_key()
@@ -580,8 +740,7 @@ pub fn GatewaySwitcher(
                     ev.prevent_default();
                     open.update(|v| *v = !*v);
                 }
-            },
-        );
+            });
         if let Some(w) = web_sys::window() {
             let _ = w.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
         }
@@ -628,15 +787,19 @@ pub fn GatewaySwitcher(
         });
     };
 
-    let reconnect = move |_| {
+    let reconnect = move || {
         gateway.set("reconnecting".into());
         detail.set("Reconnecting…".into());
         refresh();
         probe();
     };
 
-    let rotate = move |_| {
-        let (b, t, id) = (base.get(), token.get(), selected.get());
+    let rotate = move || {
+        let (b, t, id) = (
+            base.get_untracked(),
+            token.get_untracked(),
+            selected.get_untracked(),
+        );
         spawn_local(async move {
             match gateway_fetch("POST", &b, &t, "/v1/gateway/rotate", Some(json!({}))).await {
                 Ok((200, body)) => {
@@ -661,32 +824,83 @@ pub fn GatewaySwitcher(
         });
     };
 
-    let revoke = move |_| {
-        let (b, t) = (base.get(), token.get());
+    let revoke = move || {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             match gateway_fetch("DELETE", &b, &t, "/v1/gateway/grants", None).await {
                 Ok((200, _)) => {
-                    detail.set("Revoked short-lived grants. The host token file was not changed.".into());
+                    detail.set(
+                        "Revoked short-lived grants. The host token file was not changed.".into(),
+                    );
                     probe();
                 }
-                Ok((403, _)) => detail.set("Revoking every grant needs the host token, not a short-lived grant.".into()),
-                Ok((code, body)) => detail.set(redact_display(&format!("Revoke failed: HTTP {code} {}", error_text(&body)))),
+                Ok((403, _)) => detail.set(
+                    "Revoking every grant needs the host token, not a short-lived grant.".into(),
+                ),
+                Ok((code, body)) => detail.set(redact_display(&format!(
+                    "Revoke failed: HTTP {code} {}",
+                    error_text(&body)
+                ))),
                 Err(_) => detail.set("Could not reach the daemon to revoke grants.".into()),
             }
         });
     };
+    {
+        let rotate = rotate;
+        let revoke = revoke;
+        crate::shell::bind(
+            "gateway.rotate",
+            Rc::new(move |_| {
+                rotate();
+                Ok(())
+            }),
+        );
+        crate::shell::bind(
+            "gateway.revoke",
+            Rc::new(move |_| {
+                revoke();
+                Ok(())
+            }),
+        );
+        crate::shell::bind(
+            "gateway.reconnect",
+            Rc::new(move |_| {
+                reconnect();
+                Ok(())
+            }),
+        );
+    }
 
-    let logout_browser = move |_| {
+    let logout_browser = move || {
         let (b, t, id) = (base.get(), token.get(), selected.get());
         spawn_local(async move {
-            let _ = gateway_fetch("POST", &b, &t, "/v1/gateway/logout", Some(json!({}))).await;
-            token.set(String::new());
-            persist_token(&id, "");
-            forget_persisted_host_token();
-            detail.set("Logged out this browser. The host token file was not changed.".into());
-            gateway.set("unauthorized".into());
+            let result = gateway_fetch("POST", &b, &t, "/v1/gateway/logout", Some(json!({}))).await;
+            match outcome::logout_outcome(result) {
+                Ok(message) => {
+                    token.set(String::new());
+                    persist_token(&id, "");
+                    forget_persisted_host_token();
+                    detail.set(message.into());
+                    gateway.set("unauthorized".into());
+                }
+                Err(message) => detail.set(message),
+            }
         });
     };
+    crate::shell::bind(
+        "gateway.logout",
+        Rc::new(move |_| {
+            logout_browser();
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "gateway.add",
+        Rc::new(move |_| {
+            open.set(true);
+            Ok(())
+        }),
+    );
 
     let add_profile = move |_| {
         let (n, u, s) = (name.get(), url.get(), ssh.get());
@@ -725,12 +939,35 @@ pub fn GatewaySwitcher(
     };
 
     let remove_profile = move |id: String| {
+        // The token leaves with the profile (#1562). Without this the
+        // removed gateway's credential stays in the tab's token map for
+        // the tab's lifetime, and a re-added profile whose derived ID
+        // matches the old one silently resurrects it instead of prompting.
+        persist_token(&id, "");
         profiles.update(|list| list.retain(|p| p.id != id));
         save_profiles(&profiles.get());
         if selected.get_untracked() == id {
             selected.set("this".into());
+            base.set(String::new());
         }
     };
+    {
+        let pick = pick;
+        ACTIVATE.with(|slot| {
+            *slot.borrow_mut() = Some(Rc::new(move |id, profile_base| {
+                pick.update(|(gen, cur, dest)| {
+                    *gen = gen.wrapping_add(1);
+                    *cur = id;
+                    *dest = profile_base;
+                });
+            }));
+        });
+        FORGET.with(|slot| *slot.borrow_mut() = Some(Rc::new(remove_profile)));
+    }
+    Effect::new(move |_| {
+        SAVED.with(|slot| *slot.borrow_mut() = profiles.get());
+        sync_gateway_rows();
+    });
 
     let on_token = move |ev| {
         let value = event_target_value(&ev);
@@ -739,86 +976,18 @@ pub fn GatewaySwitcher(
         forget_persisted_host_token();
     };
 
-    let state_label = move || match gateway.get().as_str() {
-        "connected" => "Connected",
-        "unauthorized" => "Unauthorized",
-        "unreachable" => "Unreachable",
-        "reconnecting" => "Reconnecting",
-        _ => "Checking",
-    };
-    let state_class = move || match gateway.get().as_str() {
-        "connected" => "chip ok",
-        "unauthorized" | "unreachable" => "chip bad",
-        _ => "chip",
-    };
-
     let panel = move || {
         let _open = open.get();
-        let rows = {
-            let mut rows = vec![Profile {
-                id: "this".into(),
-                name: "This gateway".into(),
-                base: String::new(),
-                ssh: String::new(),
-                warn: false,
-            }];
-            rows.extend(profiles.get());
-            rows
-        };
-        let row_count = rows.len();
-        let cur = cursor.get().min(row_count.saturating_sub(1));
-        let select = choose;
-        let remove = remove_profile;
         view! {
             <div class="gw-head">
                 <h2 class="panel-title">"Gateways"</h2>
                 <span class="gw-head-end">
-                    <span class=state_class>{state_label}</span>
                     {(!inline).then(|| view! {
                         <button class="secondary" on:click=move |_| open.set(false)>"Close"</button>
                     })}
                 </span>
             </div>
             <p class="hint gw-detail" aria-live="polite">{move || detail.get()}</p>
-            <div class="gw-actions">
-                <button class="secondary" on:click=reconnect>"Reconnect"</button>
-                <button class="secondary" on:click=rotate>"Rotate token"</button>
-                <button class="secondary" on:click=revoke>"Revoke grants"</button>
-                <button class="secondary" on:click=logout_browser>"Log out browser"</button>
-            </div>
-            <ul class="plain gw-list">
-                {rows.into_iter().enumerate().map(|(i, row)| {
-                    let id = row.id.clone();
-                    let profile_base = row.base.clone();
-                    let select_id = id.clone();
-                    let select_base = profile_base.clone();
-                    let remove_id = id.clone();
-                    let label = row.name.clone();
-                    let meta = if row.base.is_empty() { "This page's daemon".to_string() } else { row.base.clone() };
-                    let ssh_hint = row.ssh.clone();
-                    let warn = row.warn;
-                    let on = selected.get() == id;
-                    let at_cursor = i == cur;
-                    view! {
-                        <li class=if on { "gw-row on" } else if at_cursor { "gw-row cursor" } else { "gw-row" }>
-                            <button class="gw-use" on:click=move |_| select(select_id.clone(), select_base.clone())>
-                                <span class="name">{label}</span>
-                                <span class="path">{meta}</span>
-                                {(!ssh_hint.is_empty()).then(|| {
-                                    let hint = ssh_hint.clone();
-                                    view! { <span class="path">{format!("strike connect {hint}")}</span> }
-                                })}
-                                {warn.then(|| view! { <span class="path">"Hostname is not a literal private address."</span> })}
-                            </button>
-                            {if id != "this" {
-                                view! { <button class="secondary" on:click=move |_| remove(remove_id.clone())>"Remove"</button> }.into_any()
-                            } else {
-                                ().into_any()
-                            }}
-                        </li>
-                    }
-                }).collect_view()}
-            </ul>
             <label>"Token for this gateway"</label>
             <input type="password" autocomplete="off" spellcheck="false" aria-label="Gateway token"
                 prop:value=move || token.get()
@@ -836,7 +1005,6 @@ pub fn GatewaySwitcher(
                 <button class="secondary" on:click=add_profile>"Save"</button>
             </div>
             <p class="hint">{move || form_note.get()}</p>
-            <p class="hint keys">"Alt+W opens this list. Arrow keys move. Enter selects. Esc closes."</p>
         }
     };
 
@@ -880,11 +1048,7 @@ pub fn GatewaySwitcher(
     let body_class = if inline { "gw-body" } else { "gw-pop" };
     let body_role = if inline { "region" } else { "dialog" };
     view! {
-        <div class=wrap>
-            <Show when=move || !inline>
-                <button class="gw-btn" title="Alt+W" aria-haspopup="dialog" aria-expanded=move || open.get().to_string()
-                    on:click=move |_| open.update(|v| *v = !*v)>"Gateways"</button>
-            </Show>
+        <div class=wrap data-gateway-host="true" data-open=move || if open.get() { "1" } else { "0" }>
             <Show when=move || !inline && open.get()>
                 <div class="gw-back" aria-hidden="true" on:click=move |_| open.set(false)></div>
             </Show>
@@ -898,5 +1062,36 @@ pub fn GatewaySwitcher(
                 </div>
             </Show>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_token_deletes_only_that_profiles_entry() {
+        // The #1562 delete path: removing one profile's token must not
+        // disturb any other profile's credential.
+        let mut map = HashMap::new();
+        map.insert("g1".to_string(), "dummy-token-one".to_string());
+        map.insert("g2".to_string(), "dummy-token-two".to_string());
+        let map = updated_token_map(map, "g1", "");
+        assert!(!map.contains_key("g1"));
+        assert_eq!(map.get("g2").map(String::as_str), Some("dummy-token-two"));
+    }
+
+    #[test]
+    fn non_empty_token_stores_and_overwrites() {
+        let map = updated_token_map(HashMap::new(), "g1", "dummy-token");
+        assert_eq!(map.get("g1").map(String::as_str), Some("dummy-token"));
+        let map = updated_token_map(map, "g1", "dummy-rotated");
+        assert_eq!(map.get("g1").map(String::as_str), Some("dummy-rotated"));
+    }
+
+    #[test]
+    fn deleting_a_token_that_was_never_stored_is_a_no_op() {
+        let map = updated_token_map(HashMap::new(), "gone", "");
+        assert!(map.is_empty());
     }
 }

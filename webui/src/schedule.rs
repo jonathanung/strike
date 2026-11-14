@@ -2,12 +2,71 @@
 //! creates, pauses, runs, edits, and deletes those entries and shows the
 //! session each run wrote.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use load_guard::{commit_load, Commit, ErrPolicy, LoadEpoch};
+
+use crate::load_epoch::begin;
+
 use crate::api::{self, get_json, patch_json, post_json_value};
+use crate::outcome;
+use crate::shell::Choice;
+
+thread_local! {
+    static RUN_CHOICES: RefCell<Vec<Choice>> = RefCell::new(Vec::new());
+    static HOLD_CHOICES: RefCell<Vec<Choice>> = RefCell::new(Vec::new());
+}
+
+pub fn run_choices() -> Vec<Choice> {
+    RUN_CHOICES.with(|rows| rows.borrow().clone())
+}
+
+pub fn hold_choices() -> Vec<Choice> {
+    HOLD_CHOICES.with(|rows| rows.borrow().clone())
+}
+
+fn publish_schedules(items: &[ScheduleItem]) {
+    let run = items
+        .iter()
+        .map(|item| Choice {
+            id: item.id.clone(),
+            label: if item.name.is_empty() {
+                item.id.clone()
+            } else {
+                item.name.clone()
+            },
+            detail: item.kind.clone(),
+        })
+        .collect();
+    let hold = items
+        .iter()
+        .map(|item| {
+            let name = if item.name.is_empty() {
+                item.id.clone()
+            } else {
+                item.name.clone()
+            };
+            let (verb, op) = if item.enabled {
+                ("Pause", "pause")
+            } else {
+                ("Resume", "resume")
+            };
+            Choice {
+                id: format!("{op}\t{}", item.id),
+                label: format!("{verb} {name}"),
+                detail: item.kind.clone(),
+            }
+        })
+        .collect();
+    RUN_CHOICES.with(|rows| *rows.borrow_mut() = run);
+    HOLD_CHOICES.with(|rows| *rows.borrow_mut() = hold);
+}
 
 #[derive(Clone, Default, Deserialize)]
 struct ScheduleItem {
@@ -94,6 +153,19 @@ struct WorkflowList {
     workflows: Vec<Named>,
 }
 
+/// Name for a duplicated schedule (#1462): append ` (copy)` once so the
+/// unsaved copy is distinguishable in the list once saved.
+pub fn duplicate_schedule_name(name: &str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        return "(copy)".into();
+    }
+    if name.ends_with("(copy)") {
+        return name.to_string();
+    }
+    format!("{name} (copy)")
+}
+
 fn browser_tz() -> String {
     js_sys::eval("Intl.DateTimeFormat().resolvedOptions().timeZone")
         .ok()
@@ -157,6 +229,7 @@ pub fn SchedulePage(
     let workflows = RwSignal::new(Vec::<Named>::new());
     let error = RwSignal::new(String::new());
     let notice = RwSignal::new(String::new());
+    let retry_open = RwSignal::new(String::new());
     let editing = RwSignal::new(String::new());
     let confirm_delete = RwSignal::new(String::new());
     let name = RwSignal::new(String::new());
@@ -174,39 +247,106 @@ pub fn SchedulePage(
     let overlap = RwSignal::new("skip".to_string());
     let missed = RwSignal::new("skip".to_string());
     let enabled = RwSignal::new(true);
+    // List refresh and history write different signals, so each has its own
+    // epoch. One counter would drop a list commit when history starts.
+    let list_epoch = RwSignal::new(LoadEpoch::new());
+    let history_epoch = RwSignal::new(LoadEpoch::new());
+    let history_error = RwSignal::new(String::new());
+    let history_loading = RwSignal::new(false);
+    let picker_note = RwSignal::new(String::new());
 
     let load_history = move |id: String| {
+        let gen = begin(history_epoch);
+        runs.set(Vec::new());
+        history_error.set(String::new());
         if id.is_empty() {
-            runs.set(Vec::new());
+            history_loading.set(false);
             return;
         }
+        history_loading.set(true);
         let (b, t) = (base.get_untracked(), token.get_untracked());
+        let history_epoch = history_epoch;
         spawn_local(async move {
             let path = format!("/v1/schedules/{}/history", api::js_encode(&id));
-            match get_json::<RunList>(&b, &t, &path).await {
-                Ok(list) => runs.set(list.runs),
-                Err(e) => error.set(e),
+            let fetched = get_json::<RunList>(&b, &t, &path).await;
+            let raw = fetched.as_ref().err().cloned();
+            let mapped = match fetched {
+                Ok(list) => Ok(list.runs),
+                Err(_) => Err("History failed to load for this schedule.".into()),
+            };
+            match history_epoch.with_untracked(|epoch| {
+                commit_load(epoch, gen, mapped, Vec::new(), ErrPolicy::Clear)
+            }) {
+                Commit::Drop => return,
+                Commit::Apply { value, error: hist } => {
+                    let failed = !hist.is_empty();
+                    runs.set(value);
+                    history_error.set(hist);
+                    history_loading.set(false);
+                    if failed {
+                        if let Some(raw) = raw {
+                            error.set(raw);
+                        }
+                    }
+                }
             }
         });
     };
 
     let refresh = move || {
+        let gen = begin(list_epoch);
         let (b, t) = (base.get_untracked(), token.get_untracked());
         let keep = editing.get_untracked();
+        let list_epoch = list_epoch;
+        let previous = items.get_untracked();
         spawn_local(async move {
-            match get_json::<ScheduleList>(&b, &t, "/v1/schedules").await {
-                Ok(list) => {
-                    items.set(list.schedules);
-                    error.set(String::new());
+            let schedules = get_json::<ScheduleList>(&b, &t, "/v1/schedules").await;
+            let mapped = schedules.map(|list| list.schedules);
+            match list_epoch
+                .with_untracked(|epoch| commit_load(epoch, gen, mapped, previous, ErrPolicy::Keep))
+            {
+                Commit::Drop => return,
+                Commit::Apply {
+                    value,
+                    error: list_error,
+                } => {
+                    if list_error.is_empty() {
+                        publish_schedules(&value);
+                    }
+                    items.set(value);
+                    error.set(list_error);
                 }
-                Err(e) => error.set(e),
             }
-            if let Ok(list) = get_json::<GoalList>(&b, &t, "/v1/goals").await {
-                goals.set(list.goals);
+            let goals_res = get_json::<GoalList>(&b, &t, "/v1/goals").await;
+            if !list_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
             }
-            if let Ok(list) = get_json::<WorkflowList>(&b, &t, "/v1/workflows").await {
-                workflows.set(list.workflows);
+            let goals_failed = match goals_res {
+                Ok(list) => {
+                    goals.set(list.goals);
+                    false
+                }
+                Err(_) => true,
+            };
+            let workflows_res = get_json::<WorkflowList>(&b, &t, "/v1/workflows").await;
+            if !list_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
             }
+            let workflows_failed = match workflows_res {
+                Ok(list) => {
+                    workflows.set(list.workflows);
+                    false
+                }
+                Err(_) => true,
+            };
+            let mut notes = Vec::new();
+            if goals_failed {
+                notes.push("Could not load goals — the picker may be incomplete.");
+            }
+            if workflows_failed {
+                notes.push("Could not load workflows — the picker may be incomplete.");
+            }
+            picker_note.set(notes.join(" "));
         });
         if !keep.is_empty() {
             load_history(keep);
@@ -214,6 +354,96 @@ pub fn SchedulePage(
     };
 
     refresh();
+
+    let run_saved = {
+        let base = base;
+        let token = token;
+        Rc::new(move |id: String| {
+            if id.is_empty() {
+                error.set("Save the schedule before running it.".into());
+                return;
+            }
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                match post_json_value(&b, &t, &format!("/v1/schedules/{id}/run"), json!({})).await {
+                    Ok(v) => {
+                        error.set(String::new());
+                        let sid = v
+                            .get("sessionId")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        if sid.is_empty() {
+                            notice.set("Run recorded.".into());
+                        } else {
+                            notice.set(format!("Started session {sid}."));
+                        }
+                        status.set(format!("Schedule {id} fired."));
+                        refresh();
+                    }
+                    Err(e) => {
+                        notice.set(String::new());
+                        error.set(e);
+                    }
+                }
+            });
+        })
+    };
+    let hold_saved = {
+        let base = base;
+        let token = token;
+        Rc::new(move |args: String| {
+            let (op, id) = args.split_once('\t').unwrap_or(("pause", args.as_str()));
+            let id = id.to_string();
+            if id.is_empty() {
+                return;
+            }
+            let path = format!("/v1/schedules/{id}/{op}");
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            let resumed = op == "resume";
+            spawn_local(async move {
+                match post_json_value(&b, &t, &path, json!({})).await {
+                    Ok(_) => {
+                        error.set(String::new());
+                        notice.set(
+                            if resumed {
+                                "Resumed. Missed fires stay missed.".into()
+                            } else {
+                                "Paused.".into()
+                            },
+                        );
+                        enabled.set(resumed);
+                        refresh();
+                    }
+                    Err(e) => error.set(e),
+                }
+            });
+        })
+    };
+    {
+        let run_bind = run_saved.clone();
+        let hold_bind = hold_saved.clone();
+        crate::shell::bind(
+            "schedule.run",
+            Rc::new(move |id| {
+                run_bind(id.to_string());
+                Ok(())
+            }),
+        );
+        crate::shell::bind(
+            "schedule.hold",
+            Rc::new(move |args| {
+                hold_bind(args.to_string());
+                Ok(())
+            }),
+        );
+        if let Some(id) = crate::park::take("schedule.run") {
+            run_saved(id);
+        }
+        if let Some(args) = crate::park::take("schedule.hold") {
+            hold_saved(args);
+        }
+    }
 
     let clear_form = move || {
         editing.set(String::new());
@@ -232,7 +462,10 @@ pub fn SchedulePage(
         overlap.set("skip".into());
         missed.set("skip".into());
         enabled.set(true);
+        let _ = begin(history_epoch);
         runs.set(Vec::new());
+        history_error.set(String::new());
+        history_loading.set(false);
         notice.set(String::new());
     };
 
@@ -266,6 +499,30 @@ pub fn SchedulePage(
         load_history(editing.get_untracked());
     };
 
+    // Duplicate (#1462): keep every loaded field, but turn the form into a
+    // new unsaved schedule. Clearing `editing` makes Save take the existing
+    // POST create path; history is dropped and the copy starts disabled so
+    // a copied cron never fires before review. Nothing is written until
+    // the operator presses Create.
+    let duplicate = move || {
+        if editing.get_untracked().is_empty() {
+            return;
+        }
+        name.set(duplicate_schedule_name(&name.get_untracked()));
+        editing.set(String::new());
+        confirm_delete.set(String::new());
+        enabled.set(false);
+        let _ = begin(history_epoch);
+        runs.set(Vec::new());
+        history_error.set(String::new());
+        history_loading.set(false);
+        error.set(String::new());
+        notice.set(
+            "Duplicated as a new schedule (copy). It starts paused/disabled — review the fields, then Create to save it. Nothing is saved yet."
+                .into(),
+        );
+    };
+
     let save = move || {
         let body = json!({
             "name": name.get_untracked(),
@@ -284,7 +541,11 @@ pub fn SchedulePage(
             "missed": missed.get_untracked(),
             "enabled": enabled.get_untracked(),
         });
-        let (b, t, id) = (base.get_untracked(), token.get_untracked(), editing.get_untracked());
+        let (b, t, id) = (
+            base.get_untracked(),
+            token.get_untracked(),
+            editing.get_untracked(),
+        );
         spawn_local(async move {
             let result = if id.is_empty() {
                 post_json_value(&b, &t, "/v1/schedules", body).await
@@ -297,7 +558,9 @@ pub fn SchedulePage(
                 Ok(v) => {
                     error.set(String::new());
                     if id.is_empty() {
-                        if let Some(new_id) = v.get("id").and_then(|s| s.as_str()).map(str::to_string) {
+                        if let Some(new_id) =
+                            v.get("id").and_then(|s| s.as_str()).map(str::to_string)
+                        {
                             if !new_id.is_empty() {
                                 editing.set(new_id.clone());
                                 load_history(new_id);
@@ -317,60 +580,6 @@ pub fn SchedulePage(
         });
     };
 
-    let run_now = move || {
-        let id = editing.get_untracked();
-        if id.is_empty() {
-            error.set("Save the schedule before running it.".into());
-            return;
-        }
-        let (b, t) = (base.get_untracked(), token.get_untracked());
-        spawn_local(async move {
-            match post_json_value(&b, &t, &format!("/v1/schedules/{id}/run"), json!({})).await {
-                Ok(v) => {
-                    error.set(String::new());
-                    let sid = v.get("sessionId").and_then(|s| s.as_str()).unwrap_or("").to_string();
-                    if sid.is_empty() {
-                        notice.set("Run recorded.".into());
-                    } else {
-                        notice.set(format!("Started session {sid}."));
-                    }
-                    refresh();
-                    load_history(id);
-                }
-                Err(e) => {
-                    notice.set(String::new());
-                    error.set(e);
-                    refresh();
-                }
-            }
-        });
-    };
-
-    let set_enabled = move |on: bool| {
-        let id = editing.get_untracked();
-        if id.is_empty() {
-            enabled.set(on);
-            return;
-        }
-        let (b, t) = (base.get_untracked(), token.get_untracked());
-        let path = if on {
-            format!("/v1/schedules/{id}/resume")
-        } else {
-            format!("/v1/schedules/{id}/pause")
-        };
-        spawn_local(async move {
-            match post_json_value(&b, &t, &path, json!({})).await {
-                Ok(_) => {
-                    enabled.set(on);
-                    error.set(String::new());
-                    notice.set(if on { "Resumed. Missed fires stay missed.".into() } else { "Paused.".into() });
-                    refresh();
-                }
-                Err(e) => error.set(e),
-            }
-        });
-    };
-
     let remove = move || {
         let id = editing.get_untracked();
         if id.is_empty() {
@@ -382,10 +591,11 @@ pub fn SchedulePage(
         }
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
-            let resp = gloo_net::http::Request::delete(&api::api(&b, &format!("/v1/schedules/{id}")))
-                .header("Authorization", &api::auth_header(&t))
-                .send()
-                .await;
+            let resp =
+                gloo_net::http::Request::delete(&api::api(&b, &format!("/v1/schedules/{id}")))
+                    .header("Authorization", &api::auth_header(&t))
+                    .send()
+                    .await;
             match resp {
                 Ok(resp) if resp.ok() => {
                     clear_form();
@@ -403,11 +613,26 @@ pub fn SchedulePage(
             return;
         }
         let (b, t) = (base.get_untracked(), token.get_untracked());
-        active_root.set(id.clone());
-        mode.set("chat".into());
-        status.set(format!("Opened {id}"));
+        error.set(String::new());
+        retry_open.set(String::new());
         spawn_local(async move {
-            let _ = post_json_value(&b, &t, &format!("/v1/roots/{id}/activate"), json!({})).await;
+            let result = post_json_value(&b, &t, &format!("/v1/roots/{id}/activate"), json!({}))
+                .await
+                .map(|_| ());
+            let decision = outcome::schedule_open(&id, result);
+            if decision.opened {
+                active_root.set(id.clone());
+                // This path bypasses `activate_root` in main.rs, so it
+                // must persist the viewed session itself (#1391).
+                crate::session_restore::persist(&id);
+                mode.set("chat".into());
+                status.set(decision.status);
+                error.set(String::new());
+                retry_open.set(String::new());
+            } else {
+                error.set(decision.error);
+                retry_open.set(id);
+            }
         });
     };
 
@@ -421,8 +646,14 @@ pub fn SchedulePage(
             <Show when=move || !error.get().is_empty()>
                 <p class="sched-error" role="alert">{move || error.get()}</p>
             </Show>
+            <Show when=move || !retry_open.get().is_empty()>
+                <button type="button" class="secondary" data-sched-retry="true" on:click=move |_| open_session(retry_open.get())>"Retry"</button>
+            </Show>
             <Show when=move || !notice.get().is_empty()>
                 <p class="sched-note" role="status">{move || notice.get()}</p>
+            </Show>
+            <Show when=move || !picker_note.get().is_empty()>
+                <p class="hint" role="status">{move || picker_note.get()}</p>
             </Show>
             <div class="sched-layout">
                 <div class="sched-list">
@@ -547,10 +778,7 @@ pub fn SchedulePage(
                     </label>
                     <div class="sched-actions">
                         <button type="submit" class="primary">{move || if editing.get().is_empty() { "Create" } else { "Save" }}</button>
-                        <button type="button" class="secondary" on:click=move |_| run_now()>"Run now"</button>
-                        <button type="button" class="secondary" on:click=move |_| set_enabled(!enabled.get_untracked())>
-                            {move || if enabled.get() { "Pause" } else { "Resume" }}
-                        </button>
+                        <button type="button" class="secondary" id="schedule-duplicate" disabled=move || editing.get().is_empty() on:click=move |_| duplicate()>"Duplicate"</button>
                         <button type="button" class="secondary" on:click=move |_| remove()>
                             {move || if confirm_delete.get() == editing.get() && !editing.get().is_empty() { "Confirm delete" } else { "Delete" }}
                         </button>
@@ -574,6 +802,12 @@ pub fn SchedulePage(
                             let rows = runs.get();
                             if editing.get().is_empty() {
                                 return view! { <p class="hint">"History appears after you select a schedule."</p> }.into_any();
+                            }
+                            if history_loading.get() {
+                                return view! { <p class="hint">"Loading history…"</p> }.into_any();
+                            }
+                            if !history_error.get().is_empty() {
+                                return view! { <p class="hint" role="alert">{history_error.get()}</p> }.into_any();
                             }
                             if rows.is_empty() {
                                 return view! { <p class="hint">"No runs yet."</p> }.into_any();
@@ -608,5 +842,18 @@ pub fn SchedulePage(
                 </form>
             </div>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duplicate_name_appends_copy_once() {
+        assert_eq!(duplicate_schedule_name("Morning"), "Morning (copy)");
+        assert_eq!(duplicate_schedule_name("Morning (copy)"), "Morning (copy)");
+        assert_eq!(duplicate_schedule_name(""), "(copy)");
+        assert_eq!(duplicate_schedule_name("  Standup  "), "Standup (copy)");
     }
 }

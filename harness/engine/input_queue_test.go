@@ -167,3 +167,85 @@ func TestUserInputQueueFullEmitsError(t *testing.T) {
 	}
 	close(release)
 }
+
+func TestInputQueueEditCancelReorderDrainsEditedFIFO(t *testing.T) {
+	release := make(chan struct{})
+	prov := newScriptedProvider(
+		streamStep{stream: func(ctx context.Context) <-chan provider.StreamEvent {
+			ch := make(chan provider.StreamEvent, 1)
+			go func() {
+				defer close(ch)
+				select {
+				case <-ctx.Done():
+				case <-release:
+					ch <- provider.StreamEvent{Type: provider.EventDone, StopReason: "end_turn"}
+				}
+			}()
+			return ch
+		}},
+		completedStep("edited-turn"),
+		completedStep("kept-turn"),
+	)
+	eng := newTestEngine(t, prov)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	eng.Ops() <- protocol.UserInput{Text: "hold"}
+	_ = receiveRequest(t, prov.requests)
+	eng.Ops() <- protocol.UserInput{Text: "alpha"}
+	eng.Ops() <- protocol.UserInput{Text: "beta"}
+
+	var snap protocol.InputQueued
+	ev := receiveEvent(t, eng.Events(), func(ev protocol.Event) bool {
+		q, ok := ev.(protocol.InputQueued)
+		if ok && len(q.Items) == 2 {
+			snap = q
+			return true
+		}
+		return false
+	})
+	if ev == nil {
+		t.Fatal("expected a two-item input.queued snapshot")
+	}
+	if snap.Items[0].Text != "alpha" || snap.Items[1].Text != "beta" {
+		t.Fatalf("queue = %#v", snap.Items)
+	}
+
+	eng.Ops() <- protocol.InputQueueEdit{ID: snap.Items[0].ID, Text: "alpha-edited"}
+	ev = receiveEvent(t, eng.Events(), func(ev protocol.Event) bool {
+		q, ok := ev.(protocol.InputQueued)
+		return ok && len(q.Items) == 2 && q.Items[0].Text == "alpha-edited"
+	})
+	if ev == nil {
+		t.Fatal("edit did not publish")
+	}
+	snap = ev.(protocol.InputQueued)
+
+	eng.Ops() <- protocol.InputQueueReorder{IDs: []string{snap.Items[1].ID, snap.Items[0].ID}}
+	ev = receiveEvent(t, eng.Events(), func(ev protocol.Event) bool {
+		q, ok := ev.(protocol.InputQueued)
+		return ok && len(q.Items) == 2 && q.Items[0].Text == "beta"
+	})
+	if ev == nil {
+		t.Fatal("reorder did not publish")
+	}
+	snap = ev.(protocol.InputQueued)
+
+	eng.Ops() <- protocol.InputQueueCancel{ID: snap.Items[0].ID}
+	ev = receiveEvent(t, eng.Events(), func(ev protocol.Event) bool {
+		q, ok := ev.(protocol.InputQueued)
+		return ok && len(q.Items) == 1 && q.Items[0].Text == "alpha-edited"
+	})
+	if ev == nil {
+		t.Fatal("cancel did not publish")
+	}
+
+	close(release)
+	_ = waitForTurnCompleted(t, eng.Events())
+	req := receiveRequest(t, prov.requests)
+	if len(req.Messages) == 0 || req.Messages[len(req.Messages)-1].Text != "alpha-edited" {
+		t.Fatalf("next turn = %#v, want alpha-edited", req.Messages)
+	}
+	_ = waitForTurnCompleted(t, eng.Events())
+}

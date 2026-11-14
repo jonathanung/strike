@@ -56,13 +56,25 @@ func TestPermissionRulesConfirmAndScopes(t *testing.T) {
 		t.Fatalf("project rule = %+v", view.Rules[1])
 	}
 
-	if err := DeletePermissionRule(work, "global", 0, false); !errors.Is(err, ErrConfirmRequired) {
+	if err := DeletePermissionRule(work, "global", 0, false, nil); !errors.Is(err, ErrConfirmRequired) {
 		t.Fatalf("delete deny without confirm = %v", err)
 	}
-	if err := DeletePermissionRule(work, "global", 0, true); err != nil {
+	shifted := &RuleIdentity{Permission: "bash", Pattern: "other", Action: "deny"}
+	if err := DeletePermissionRule(work, "global", 0, true, shifted); !errors.Is(err, ErrRuleListChanged) {
+		t.Fatalf("mismatched delete = %v", err)
+	}
+	view, err = ReadPermissionRules(work)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := DeletePermissionRule(work, "project", 0, false); err != nil {
+	if len(view.Rules) != 2 {
+		t.Fatalf("rules after mismatched delete = %+v", view.Rules)
+	}
+	match := &RuleIdentity{Permission: "bash", Pattern: "rm *", Action: "deny"}
+	if err := DeletePermissionRule(work, "global", 0, true, match); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeletePermissionRule(work, "project", 0, false, nil); err != nil {
 		t.Fatalf("delete allow = %v", err)
 	}
 	view, err = ReadPermissionRules(work)

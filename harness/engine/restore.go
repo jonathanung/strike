@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/jonathanung/strike/harness/permission"
@@ -39,6 +40,11 @@ type Restored struct {
 	// AlwaysGrants are session DecisionAlways rules still in force after the
 	// last agent switch (SetAgentRules clears grants).
 	AlwaysGrants permission.Ruleset
+	// FolderGrants are session DecisionFolder grants still in force after
+	// the last agent switch, re-derived from the asks they resolved. Their
+	// rules are seeded separately (Service.SeedFolderGrants), not via
+	// AlwaysGrants.
+	FolderGrants []permission.FolderGrant
 	// PlanHandoff is the last protocol.PlanHandoff (approved plan identity).
 	PlanHandoff PlanHandoffState
 }
@@ -64,6 +70,7 @@ type pendingAsk struct {
 	permission string
 	patterns   []string
 	always     []string
+	metadata   json.RawMessage
 }
 
 // Restore reduces root-session protocol events into engine history and
@@ -104,6 +111,7 @@ func restoreEvents(events []protocol.Event, keep func(protocol.Event) bool) Rest
 	var cur *reqAccum
 	asks := map[string]pendingAsk{}
 	var grants permission.Ruleset
+	var folderGrants []permission.FolderGrant
 
 	flush := func() {
 		if cur == nil {
@@ -195,6 +203,7 @@ func restoreEvents(events []protocol.Event, keep func(protocol.Event) bool) Rest
 			// Matches permission.Service.SetAgentRules: agent switch clears
 			// session always-grants so prior role grants cannot widen.
 			grants = nil
+			folderGrants = nil
 		case protocol.EffortSelected:
 			r.Effort = e.Level
 		case protocol.FastSelected:
@@ -256,11 +265,23 @@ func restoreEvents(events []protocol.Event, keep func(protocol.Event) bool) Rest
 				permission: e.Permission,
 				patterns:   append([]string(nil), e.Patterns...),
 				always:     append([]string(nil), e.Always...),
+				metadata:   e.Metadata,
 			}
 		case protocol.PermissionResolved:
 			ask, ok := asks[e.RequestID]
 			delete(asks, e.RequestID)
-			if !ok || e.Decision != protocol.DecisionAlways {
+			if !ok {
+				continue
+			}
+			if e.Decision == protocol.DecisionFolder {
+				// Re-derive with the same daemon-side function Reply used;
+				// an ask that no longer derives records nothing.
+				if g, derived := permission.DeriveFolderGrant(ask.permission, ask.patterns, ask.metadata); derived {
+					folderGrants = append(folderGrants, g)
+				}
+				continue
+			}
+			if e.Decision != protocol.DecisionAlways {
 				continue
 			}
 			patterns := ask.always
@@ -282,6 +303,7 @@ func restoreEvents(events []protocol.Event, keep func(protocol.Event) bool) Rest
 	flush()
 	r.Messages = msgs
 	r.AlwaysGrants = grants
+	r.FolderGrants = folderGrants
 	return r
 }
 

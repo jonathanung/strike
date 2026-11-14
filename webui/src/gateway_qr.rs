@@ -17,6 +17,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 
 use crate::api::{self, delete_json, get_json, post_json_value};
+use load_guard::{begin_mint, commit_pair, LoadEpoch, PairPaint as GuardPaint};
 
 /// Page wiring for the shell command in `src/shell/contrib/gateway_qr.rs`.
 /// The shell boots before App's signals exist, so App installs them here.
@@ -168,6 +169,18 @@ fn store_prompt(ev: JsValue) {
     SCAN.with(|slot| slot.borrow_mut().prompt = Some(ev));
 }
 
+thread_local! {
+    static INSTALL_READY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub fn install_ready() -> bool {
+    INSTALL_READY.with(|slot| slot.get())
+}
+
+fn set_install_ready(ready: bool) {
+    INSTALL_READY.with(|slot| slot.set(ready));
+}
+
 fn call_install_prompt() {
     let ev = SCAN.with(|slot| slot.borrow().prompt.clone());
     let Some(ev) = ev else {
@@ -194,7 +207,26 @@ pub(crate) fn GatewayQR(
     let warning = RwSignal::new(String::new());
     let devices = RwSignal::new(Vec::<DeviceRow>::new());
     let device_note = RwSignal::new(String::new());
+    crate::shell::bind(
+        "app.install",
+        Rc::new(|_| {
+            if !install_ready() {
+                return Err("This browser has not offered to install Strike.".into());
+            }
+            call_install_prompt();
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
+        "pair.revoke-all",
+        Rc::new(move |_| {
+            revoke_all(base, token, devices, device_note);
+            Ok(())
+        }),
+    );
     let scan_note = RwSignal::new(String::new());
+    let pair_epoch = RwSignal::new(LoadEpoch::new());
+    let minting = RwSignal::new(false);
     let landed = RwSignal::new(false);
     let install_ready = RwSignal::new(false);
 
@@ -203,6 +235,7 @@ pub(crate) fn GatewayQR(
             ev.prevent_default();
             store_prompt(ev.into());
             install_ready.set(true);
+            set_install_ready(true);
         });
         let _ = win
             .add_event_listener_with_callback("beforeinstallprompt", cb.as_ref().unchecked_ref());
@@ -223,19 +256,38 @@ pub(crate) fn GatewayQR(
             halt_scan();
             return;
         }
-        queue_pair(base, token, note, url, svg, warning, devices, device_note);
+        queue_pair(
+            base,
+            token,
+            note,
+            url,
+            svg,
+            warning,
+            devices,
+            device_note,
+            pair_epoch,
+            minting,
+        );
     });
     on_cleanup(halt_scan);
 
+    // Set when a Copy URL attempt was rejected by the browser (#1582):
+    // the dialog then shows the manual-copy fallback instead of the old
+    // unconditional "Pairing URL copied." claim.
+    let copy_failed = RwSignal::new(false);
     let copy_url = move |_| {
         let text = url.get_untracked();
         if text.is_empty() {
             return;
         }
-        if let Some(win) = web_sys::window() {
-            let _ = win.navigator().clipboard().write_text(&text);
-        }
-        status.set("Pairing URL copied.".into());
+        spawn_local(async move {
+            let ok = crate::clipboard::copy_text(&text).await.is_ok();
+            copy_failed.set(!ok);
+            status.set(crate::clipboard::pairing_copy_feedback(ok).into());
+            if !ok {
+                select_pairing_url();
+            }
+        });
     };
 
     view! {
@@ -243,10 +295,18 @@ pub(crate) fn GatewayQR(
             <div class="gq-landing" role="status">
                 <p>"Paired with this gateway. Add Strike to the home screen to open it again."</p>
                 <div class="gq-actions">
-                    <Show when=move || install_ready.get()>
-                        <button class="secondary gq-install" type="button" on:click=move |_| call_install_prompt()>"Install"</button>
-                    </Show>
-                    <button class="secondary gq-revoke-self" type="button" on:click=move |_| revoke_self(base, token, status, landed, refresh)>"Revoke this browser"</button>
+                    <button class="secondary gq-revoke-self" type="button" on:click=move |_| {
+                        if !crate::confirm::ask(
+                            crate::confirm::ConfirmRequest {
+                                title: "Revoke this browser?".into(),
+                                body: "This browser's grant stops working. Pair again to come back.".into(),
+                                confirm_label: "Revoke this browser".into(),
+                            },
+                            Rc::new(move || revoke_self(base, token, status, landed, refresh)),
+                        ) {
+                            status.set(crate::confirm::BUSY.into());
+                        }
+                    }>"Revoke this browser"</button>
                 </div>
             </div>
         </Show>
@@ -265,12 +325,16 @@ pub(crate) fn GatewayQR(
                     </div>
                     <p class="gq-note">{move || note.get()}</p>
                     <div class="gq-qr" inner_html=move || svg.get()></div>
-                    <p class="gq-url">{move || url.get()}</p>
                     <input id="gq-url" readonly aria-label="Pairing URL" prop:value=move || url.get() />
                     <div class="gq-actions">
                         <button class="secondary" type="button" on:click=copy_url>"Copy URL"</button>
-                        <button class="secondary gq-new" type="button" on:click=move |_| queue_pair(base, token, note, url, svg, warning, devices, device_note)>"New code"</button>
+                        <button class="secondary gq-new" type="button" disabled=move || minting.get() on:click=move |_| { copy_failed.set(false); queue_pair(base, token, note, url, svg, warning, devices, device_note, pair_epoch, minting); }>"New code"</button>
                     </div>
+                    <Show when=move || copy_failed.get()>
+                        <p class="gq-copy-fallback" role="alert">
+                            "Copy didn't work in this browser. The pairing URL above is selected — copy it manually, then open it on your phone to pair."
+                        </p>
+                    </Show>
                     <p class="gq-warn">{move || warning.get()}</p>
                     <h3 class="gq-sub">"Paired browsers"</h3>
                     <p class="hint">{move || device_note.get()}</p>
@@ -278,6 +342,7 @@ pub(crate) fn GatewayQR(
                         {move || devices.get().into_iter().map(|d| {
                             let id = d.id.clone();
                             let label = if d.label.is_empty() { "browser".to_string() } else { d.label };
+                            let ask_label = label.clone();
                             let revoked = d.revoked;
                             view! {
                                 <li class="row gq-device">
@@ -286,13 +351,42 @@ pub(crate) fn GatewayQR(
                                         class="secondary"
                                         type="button"
                                         disabled=revoked
-                                        on:click=move |_| revoke_device(base, token, id.clone(), devices, device_note)
+                                        on:click=move |_| {
+                                            let id = id.clone();
+                                            if !crate::confirm::ask(
+                                                crate::confirm::ConfirmRequest {
+                                                    title: format!("Revoke {ask_label}?"),
+                                                    body: format!("{ask_label} loses its grant and has to pair again to come back."),
+                                                    confirm_label: "Revoke".into(),
+                                                },
+                                                Rc::new(move || revoke_device(base, token, id.clone(), devices, device_note)),
+                                            ) {
+                                                device_note.set(crate::confirm::BUSY.into());
+                                            }
+                                        }
                                     >"Revoke"</button>
                                 </li>
                             }
                         }).collect_view()}
                     </ul>
-                    <button class="secondary" type="button" on:click=move |_| revoke_all(base, token, devices, device_note)>"Revoke all"</button>
+                    <button class="secondary" type="button" on:click=move |_| {
+                        let live = devices.get_untracked().iter().filter(|d| !d.revoked).count();
+                        let body = match live {
+                            0 => "Every paired browser loses its grant. Pairing again mints a new code.".to_string(),
+                            1 => "The one paired browser loses its grant. Pairing again mints a new code.".to_string(),
+                            n => format!("All {n} paired browsers lose their grants. Pairing again mints a new code."),
+                        };
+                        if !crate::confirm::ask(
+                            crate::confirm::ConfirmRequest {
+                                title: "Revoke paired browsers?".into(),
+                                body,
+                                confirm_label: "Revoke all".into(),
+                            },
+                            Rc::new(move || revoke_all(base, token, devices, device_note)),
+                        ) {
+                            device_note.set(crate::confirm::BUSY.into());
+                        }
+                    }>"Revoke all"</button>
                     <h3 class="gq-sub">"Scan a gateway QR"</h3>
                     <p class="hint">"Add another daemon. The phone camera can open a Strike QR in the browser."</p>
                     <video id="gq-cam" class="gq-video" autoplay=true muted=true playsinline=true></video>
@@ -306,6 +400,20 @@ pub(crate) fn GatewayQR(
     }
 }
 
+/// Select the pairing URL field so a user whose clipboard write was
+/// rejected can copy it manually with one keystroke (#1582).
+fn select_pairing_url() {
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Some(el) = doc.get_element_by_id("gq-url") else {
+        return;
+    };
+    if let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() {
+        input.select();
+    }
+}
+
 fn queue_pair(
     base: RwSignal<String>,
     token: RwSignal<String>,
@@ -315,16 +423,39 @@ fn queue_pair(
     warning: RwSignal<String>,
     devices: RwSignal<Vec<DeviceRow>>,
     device_note: RwSignal<String>,
+    epoch: RwSignal<LoadEpoch>,
+    minting: RwSignal<bool>,
 ) {
     let (b, t) = (base.get_untracked(), token.get_untracked());
+    let mut current = epoch.get_untracked();
+    let mut flag = true;
+    let ticket = begin_mint(&mut current, &mut flag);
+    epoch.set(current);
+    minting.set(flag);
     spawn_local(async move {
         let paint = fetch_pair(&b, &t).await;
-        note.set(paint.note);
-        url.set(paint.url);
-        svg.set(paint.svg);
-        warning.set(paint.warning);
-        devices.set(paint.devices);
-        device_note.set(paint.device_note);
+        let mut flag = minting.get_untracked();
+        if let Some(paint) = commit_pair(
+            &epoch.get_untracked(),
+            ticket,
+            &mut flag,
+            GuardPaint {
+                note: paint.note,
+                url: paint.url,
+                svg: paint.svg,
+                warning: paint.warning,
+                devices: paint.devices,
+                device_note: paint.device_note,
+            },
+        ) {
+            note.set(paint.note);
+            url.set(paint.url);
+            svg.set(paint.svg);
+            warning.set(paint.warning);
+            devices.set(paint.devices);
+            device_note.set(paint.device_note);
+            minting.set(flag);
+        }
     });
 }
 

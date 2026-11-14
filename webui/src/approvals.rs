@@ -28,13 +28,13 @@ pub fn decisions() -> &'static [DecisionChoice] {
             id: "always",
             label: "Allow session",
             key: "2",
-            detail: "Wire value always. Remembered for this session only.",
+            detail: "Remembered for this session only.",
         },
         DecisionChoice {
             id: "project",
             label: "Allow project",
             key: "3",
-            detail: "Appends an allow rule to the project config.",
+            detail: "Remembered for future sessions in this workspace.",
         },
         DecisionChoice {
             id: "reject",
@@ -59,6 +59,8 @@ pub fn known_mode(mode: &str) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConfirmKind {
     Session { mode: String },
+    /// Autonomy (#1572): only ever armed for `skip-all`.
+    Autonomy { mode: String },
     Global { mode: String },
     Workspace { id: String, mode: String },
     RuleAdd {
@@ -67,7 +69,13 @@ pub enum ConfirmKind {
         pattern: String,
         action: String,
     },
-    RuleRemove { scope: String, index: i32 },
+    RuleRemove {
+        scope: String,
+        index: i32,
+        permission: String,
+        pattern: String,
+        action: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -121,6 +129,45 @@ pub fn session_confirm(mode: &str) -> PendingConfirm {
         body: body.into(),
         confirm_label: label.into(),
         kind: ConfirmKind::Session {
+            mode: mode.into(),
+        },
+    }
+}
+
+/// Autonomy (#1572) is a separate dial from permission mode: the four
+/// protocol exit-gate values. Unknown ids are ignored, never rendered.
+pub fn known_autonomy(mode: &str) -> bool {
+    matches!(mode, "supervised" | "agent" | "checks" | "skip-all")
+}
+
+/// Only `skip-all` removes a gate entirely, so only it confirms — the
+/// other modes still gate every phase exit, just with a different
+/// clearer (issue #1572 Q1, recommended default).
+pub fn autonomy_needs_confirm(mode: &str) -> bool {
+    mode == "skip-all"
+}
+
+/// Autonomy changes, mirroring [`begin_session_mode`]: same mode or an
+/// unknown id is a no-op, `skip-all` confirms first, everything else
+/// applies immediately. Applying only posts the op — the displayed
+/// state still waits for the daemon's `autonomy.selected`.
+pub fn begin_autonomy_change(current: &str, next: &str) -> ModeChange {
+    if !known_autonomy(next) || current == next {
+        return ModeChange::Same;
+    }
+    if autonomy_needs_confirm(next) {
+        ModeChange::Confirm(autonomy_confirm(next))
+    } else {
+        ModeChange::Apply(next.to_string())
+    }
+}
+
+pub fn autonomy_confirm(mode: &str) -> PendingConfirm {
+    PendingConfirm {
+        title: "Advance without exit gates?".into(),
+        body: "Skip-all advances workflow phases without exit gates: no one approves a phase exit and no check commands run. Tool permissions are unchanged — permission asks and deny rules still apply. Other sessions stay as they are.".into(),
+        confirm_label: "Use skip-all".into(),
+        kind: ConfirmKind::Autonomy {
             mode: mode.into(),
         },
     }
@@ -183,24 +230,53 @@ pub fn rule_add_confirm(scope: &str, permission: &str, pattern: &str, action: &s
     })
 }
 
-pub fn rule_remove_confirm(scope: &str, index: i32, action: &str) -> Option<PendingConfirm> {
+pub fn rule_remove_confirm(
+    scope: &str,
+    index: i32,
+    permission: &str,
+    pattern: &str,
+    action: &str,
+) -> Option<PendingConfirm> {
     if action != "deny" {
         return None;
     }
     Some(PendingConfirm {
         title: "Remove this deny rule?".into(),
-        body: "Removing a deny weakens that file. Yolo and Edits still honor every deny that remains, and managed denies are not in this list.".into(),
+        body: format!(
+            "{scope} · {permission} · {pattern} · {action}\n\nRemoving a deny weakens that file. Yolo and Edits still honor every deny that remains, and managed denies are not in this list."
+        ),
         confirm_label: "Remove deny".into(),
         kind: ConfirmKind::RuleRemove {
             scope: scope.into(),
             index,
+            permission: permission.into(),
+            pattern: pattern.into(),
+            action: action.into(),
         },
+    })
+}
+
+/// Body for POST /v1/permissions/rules/remove. Identity travels with the
+/// index so a shifted list cannot delete a different rule.
+pub fn rule_remove_body(rule: &RuleRecord, confirm: bool) -> serde_json::Value {
+    serde_json::json!({
+        "scope": rule.scope,
+        "index": rule.index,
+        "permission": rule.permission,
+        "pattern": rule.pattern,
+        "action": rule.action,
+        "confirm": confirm,
     })
 }
 
 /// Visible countdown. A positive config value wins. Otherwise soft-approve
 /// uses 15 seconds. Excluded permission names never count down.
 pub fn countdown_seconds(mode: &str, configured: i32, permission: &str, exclude: &[String]) -> i32 {
+    // Negative means the settings load failed or has not confirmed a value.
+    // A countdown from that state would invent the daemon's auto-approve.
+    if configured < 0 {
+        return 0;
+    }
     if exclude
         .iter()
         .any(|name| name.eq_ignore_ascii_case(permission))
@@ -233,6 +309,167 @@ pub struct Ask {
     pub patterns: Vec<String>,
     pub always: Vec<String>,
     pub preview: Preview,
+    /// Working directory the tool call runs in, stamped by the daemon on
+    /// the ask payload (#1507). Empty when the daemon did not send it —
+    /// the card then hides the line instead of guessing.
+    pub work_dir: String,
+    /// File a project grant appends its rule to, stamped by the daemon
+    /// (#1507). Empty when project grants are not persisted to disk.
+    pub project_rule_path: String,
+    /// True when the ask metadata marks the target as a directory (the
+    /// delete tool), so the folder scope is the named folder itself
+    /// rather than the parent of a file.
+    pub target_directory: bool,
+}
+
+impl Ask {
+    /// The pattern set a session or project grant will remember. Matches
+    /// the permission service: Always when non-empty, otherwise Patterns.
+    pub fn remembered_patterns(&self) -> Vec<String> {
+        if self.always.is_empty() {
+            self.patterns.clone()
+        } else {
+            self.always.clone()
+        }
+    }
+
+    /// The remembered rules in the shape they are stored: one
+    /// "permission pattern" entry per remembered pattern.
+    pub fn remembered_rules(&self) -> String {
+        self.remembered_patterns()
+            .iter()
+            .map(|pattern| format!("{} {}", self.permission, pattern))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// One-line plain-language consequence for a decision id, built only
+    /// from facts the daemon stamped on this ask (#1507). Shown on the
+    /// card next to the scope buttons, before the person chooses.
+    pub fn consequence(&self, decision: &str) -> String {
+        let rules = self.remembered_rules();
+        match decision {
+            "once" => "Runs this one call now. Nothing is remembered.".into(),
+            "always" => format!(
+                "Remembers {rules} for this session only. Not written to the project config."
+            ),
+            "project" => {
+                if self.project_rule_path.is_empty() {
+                    format!(
+                        "Remembers {rules} for future sessions in this workspace. This gateway does not save project rules to a file."
+                    )
+                } else {
+                    format!(
+                        "Remembers {rules} for future sessions in this workspace. Stored in {} — remove it any time under Rules and audit.",
+                        self.project_rule_path
+                    )
+                }
+            }
+            "folder" => match self.folder_scope() {
+                Some(folder) => format!(
+                    "Remembers {} in the folder {} and its subfolders for this session only. Not written to the project config. Remove it any time under Rules and audit.",
+                    self.permission, folder
+                ),
+                None => String::new(),
+            },
+            "reject" => "Stops this call. Nothing runs and nothing is remembered.".into(),
+            _ => String::new(),
+        }
+    }
+
+    /// The folder a folder grant would cover, as an absolute display path
+    /// when the daemon stamped a working directory, else the
+    /// workspace-relative folder. Mirrors the daemon's derivation
+    /// (permission.DeriveFolderGrant) for display only — the grant itself
+    /// is always derived daemon-side from the same patterns. None when
+    /// the ask has no folder scope: non-write/edit permissions, glob or
+    /// escaping patterns, patterns spanning several folders, and targets
+    /// at the workspace root (a bare name is ambiguous between a root
+    /// file and the folder itself, so v1 offers no folder scope there).
+    pub fn folder_scope(&self) -> Option<String> {
+        if self.permission != "write" && self.permission != "edit" {
+            return None;
+        }
+        if self.patterns.is_empty() {
+            return None;
+        }
+        let cleaned: Option<Vec<String>> = self.patterns.iter().map(|p| clean_rel(p)).collect();
+        let cleaned = cleaned?;
+        let rel = if self.target_directory {
+            if cleaned.len() != 1 {
+                return None;
+            }
+            cleaned[0].clone()
+        } else {
+            let mut folder: Option<String> = None;
+            for clean in &cleaned {
+                let parent = clean.rsplit_once('/').map(|(head, _)| head.to_string())?;
+                match &folder {
+                    None => folder = Some(parent),
+                    Some(f) if *f != parent => return None,
+                    _ => {}
+                }
+            }
+            folder?
+        };
+        if self.work_dir.is_empty() {
+            Some(rel)
+        } else {
+            Some(format!("{}/{}", self.work_dir.trim_end_matches('/'), rel))
+        }
+    }
+}
+
+/// Cleans a workspace-relative pattern the way the daemon's path.Clean
+/// does for the shapes the tools emit; None for absolute, escaping, or
+/// glob-shaped patterns (a whole "*" or "**" segment).
+fn clean_rel(pat: &str) -> Option<String> {
+    if pat.is_empty() || pat.starts_with('/') {
+        return None;
+    }
+    let mut segs: Vec<&str> = Vec::new();
+    for seg in pat.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." | "*" | "**" => return None,
+            s => segs.push(s),
+        }
+    }
+    if segs.is_empty() {
+        return None;
+    }
+    Some(segs.join("/"))
+}
+
+/// The choices for one ask's card: the base decisions, plus "Allow in
+/// this folder" (key 4, Deny becomes 5) when the ask has a folder scope.
+pub fn decision_choices(ask: &Ask) -> Vec<DecisionChoice> {
+    let mut out: Vec<DecisionChoice> = decisions().to_vec();
+    if ask.folder_scope().is_some() {
+        let mut reject = out.pop().expect("decisions always ends with reject");
+        out.push(DecisionChoice {
+            id: "folder",
+            label: "Allow in this folder",
+            key: "4",
+            detail: "This folder and its subfolders, this session only.",
+        });
+        reject.key = "5";
+        out.push(reject);
+    }
+    out
+}
+
+/// The card's key hint, e.g. "1 allow once, 2 allow session, 3 allow
+/// project, 4 or Escape denies." — the numbering extends honestly when a
+/// folder choice is present.
+pub fn hint_line(choices: &[DecisionChoice]) -> String {
+    let mut parts: Vec<String> = choices[..choices.len().saturating_sub(1)]
+        .iter()
+        .enumerate()
+        .map(|(i, c)| format!("{} {}", i + 1, c.label.to_lowercase()))
+        .collect();
+    parts.push(format!("{} or Escape denies.", choices.len()));
+    parts.join(", ")
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -299,12 +536,20 @@ fn parse_ask(data: &Value) -> Option<Ask> {
     let patterns = string_list(data, "patterns");
     let always = string_list(data, "always");
     let preview = preview_of(&permission, &patterns, data.get("metadata").unwrap_or(&Value::Null));
+    let target_directory = data
+        .get("metadata")
+        .and_then(|m| m.get("directory"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     Some(Ask {
         request_id,
         permission,
         patterns,
         always,
         preview,
+        work_dir: text(data, "workDir").unwrap_or_default(),
+        project_rule_path: text(data, "projectRulePath").unwrap_or_default(),
+        target_directory,
     })
 }
 
@@ -514,8 +759,70 @@ mod tests {
         assert!(rule_add_confirm("global", "bash", "rm *", "deny").is_none());
         let add = rule_add_confirm("global", "bash", "*", "allow").unwrap();
         assert!(add.body.contains("last matching rule"));
-        assert!(rule_remove_confirm("global", 1, "allow").is_none());
-        assert!(rule_remove_confirm("global", 1, "deny").is_some());
+        assert!(rule_remove_confirm("global", 1, "bash", "rm *", "allow").is_none());
+        let remove = rule_remove_confirm("global", 1, "bash", "rm *", "deny").unwrap();
+        assert!(remove.body.contains("global · bash · rm * · deny"), "{}", remove.body);
+        match remove.kind {
+            ConfirmKind::RuleRemove {
+                permission,
+                pattern,
+                action,
+                ..
+            } => {
+                assert_eq!(permission, "bash");
+                assert_eq!(pattern, "rm *");
+                assert_eq!(action, "deny");
+            }
+            other => panic!("{other:?}"),
+        }
+        let body = rule_remove_body(
+            &RuleRecord {
+                scope: "global".into(),
+                index: 1,
+                permission: "bash".into(),
+                pattern: "rm *".into(),
+                action: "deny".into(),
+            },
+            true,
+        );
+        assert_eq!(body["permission"], "bash");
+        assert_eq!(body["pattern"], "rm *");
+        assert_eq!(body["action"], "deny");
+        assert_eq!(body["index"], 1);
+        assert_eq!(body["confirm"], true);
+    }
+
+    #[test]
+    fn autonomy_change_confirms_only_skip_all() {
+        assert!(matches!(
+            begin_autonomy_change("supervised", "supervised"),
+            ModeChange::Same
+        ));
+        assert!(matches!(
+            begin_autonomy_change("supervised", "bogus"),
+            ModeChange::Same
+        ));
+        for mode in ["supervised", "agent", "checks"] {
+            assert!(matches!(
+                begin_autonomy_change("skip-all", mode),
+                ModeChange::Apply(ref m) if m == mode
+            ));
+        }
+        match begin_autonomy_change("supervised", "skip-all") {
+            ModeChange::Confirm(c) => {
+                assert!(c.title.contains("without exit gates"), "{}", c.title);
+                assert!(c.body.contains("Tool permissions are unchanged"));
+                assert_eq!(
+                    c.kind,
+                    ConfirmKind::Autonomy {
+                        mode: "skip-all".into()
+                    }
+                );
+            }
+            other => panic!("skip-all did not confirm: {other:?}"),
+        }
+        assert!(known_autonomy("checks"));
+        assert!(!known_autonomy("yolo"));
     }
 
     #[test]
@@ -528,6 +835,10 @@ mod tests {
             countdown_seconds("soft-approve", 15, "bash", &["Bash".into()]),
             0
         );
+        // A failed settings load uses a negative sentinel. Soft-approve must
+        // not fall through to the 15s default.
+        assert_eq!(countdown_seconds("soft-approve", -1, "bash", &[]), 0);
+        assert_eq!(countdown_seconds("default", -1, "bash", &[]), 0);
     }
 
     #[test]
@@ -563,6 +874,183 @@ mod tests {
         assert!(matches!(notes_from_envelope(mode).as_slice(), [PermNote::Mode(m)] if m == "yolo"));
         assert!(notes_from_envelope(r#"{"type":"permission.mode","data":{"mode":"trust"}}"#).is_empty());
         assert!(notes_from_envelope("not-json").is_empty());
+    }
+
+    #[test]
+    fn ask_facts_parse_from_the_payload() {
+        let raw = r#"{"type":"permission.asked","data":{"requestId":"p9","permission":"bash","patterns":["ls -la"],"always":["ls *"],"workDir":"/work/project","projectRulePath":"/work/project/.strike/config"}}"#;
+        let notes = notes_from_envelope(raw);
+        let PermNote::Ask(ask) = &notes[0] else {
+            panic!("notes = {notes:?}");
+        };
+        assert_eq!(ask.work_dir, "/work/project");
+        assert_eq!(ask.project_rule_path, "/work/project/.strike/config");
+
+        // Older daemons send neither field: both stay empty and the card
+        // hides the lines rather than guessing.
+        let bare = r#"{"type":"permission.asked","data":{"requestId":"p10","permission":"bash","patterns":["ls"]}}"#;
+        let notes = notes_from_envelope(bare);
+        let PermNote::Ask(ask) = &notes[0] else {
+            panic!("notes = {notes:?}");
+        };
+        assert_eq!(ask.work_dir, "");
+        assert_eq!(ask.project_rule_path, "");
+    }
+
+    #[test]
+    fn remembered_patterns_prefer_always_then_patterns() {
+        let mut ask = Ask {
+            request_id: "p1".into(),
+            permission: "bash".into(),
+            patterns: vec!["ls -la".into()],
+            always: vec!["ls *".into()],
+            preview: Preview {
+                heading: String::new(),
+                command: String::new(),
+                removed: Vec::new(),
+                added: Vec::new(),
+                truncated: false,
+            },
+            work_dir: "/work/project".into(),
+            project_rule_path: "/work/project/.strike/config".into(),
+            target_directory: false,
+        };
+        assert_eq!(ask.remembered_patterns(), vec!["ls *".to_string()]);
+        assert_eq!(ask.remembered_rules(), "bash ls *");
+        ask.always.clear();
+        assert_eq!(ask.remembered_patterns(), vec!["ls -la".to_string()]);
+        assert_eq!(ask.remembered_rules(), "bash ls -la");
+    }
+
+    #[test]
+    fn consequence_lines_state_scope_pattern_and_store() {
+        let ask = Ask {
+            request_id: "p1".into(),
+            permission: "bash".into(),
+            patterns: vec!["ls -la".into()],
+            always: vec!["ls *".into()],
+            preview: Preview {
+                heading: String::new(),
+                command: String::new(),
+                removed: Vec::new(),
+                added: Vec::new(),
+                truncated: false,
+            },
+            work_dir: "/work/project".into(),
+            project_rule_path: "/work/project/.strike/config".into(),
+            target_directory: false,
+        };
+        assert_eq!(
+            ask.consequence("once"),
+            "Runs this one call now. Nothing is remembered."
+        );
+        assert_eq!(
+            ask.consequence("always"),
+            "Remembers bash ls * for this session only. Not written to the project config."
+        );
+        assert_eq!(
+            ask.consequence("project"),
+            "Remembers bash ls * for future sessions in this workspace. Stored in /work/project/.strike/config — remove it any time under Rules and audit."
+        );
+        assert_eq!(
+            ask.consequence("reject"),
+            "Stops this call. Nothing runs and nothing is remembered."
+        );
+        assert_eq!(ask.consequence("bogus"), "");
+    }
+
+    #[test]
+    fn project_consequence_without_a_store_path_says_so() {
+        let ask = Ask {
+            request_id: "p1".into(),
+            permission: "edit".into(),
+            patterns: vec!["a.go".into()],
+            always: vec!["*".into()],
+            preview: Preview {
+                heading: String::new(),
+                command: String::new(),
+                removed: Vec::new(),
+                added: Vec::new(),
+                truncated: false,
+            },
+            work_dir: "/work/project".into(),
+            project_rule_path: String::new(),
+            target_directory: false,
+        };
+        let line = ask.consequence("project");
+        assert!(line.contains("edit *"), "{line}");
+        assert!(line.contains("does not save project rules to a file"), "{line}");
+    }
+
+    fn ask_with(permission: &str, patterns: &[&str]) -> Ask {
+        Ask {
+            request_id: "p1".into(),
+            permission: permission.into(),
+            patterns: patterns.iter().map(|s| s.to_string()).collect(),
+            always: vec!["*".into()],
+            preview: Preview {
+                heading: String::new(),
+                command: String::new(),
+                removed: Vec::new(),
+                added: Vec::new(),
+                truncated: false,
+            },
+            work_dir: "/work/project".into(),
+            project_rule_path: "/work/project/.strike/config".into(),
+            target_directory: false,
+        }
+    }
+
+    #[test]
+    fn folder_scope_and_choice_for_write_and_edit_asks() {
+        let ask = ask_with("write", &["docs/guide.md"]);
+        assert_eq!(ask.folder_scope().as_deref(), Some("/work/project/docs"));
+        let choices = decision_choices(&ask);
+        let ids: Vec<&str> = choices.iter().map(|c| c.id).collect();
+        assert_eq!(ids, ["once", "always", "project", "folder", "reject"]);
+        let keys: Vec<&str> = choices.iter().map(|c| c.key).collect();
+        assert_eq!(keys, ["1", "2", "3", "4", "5"]);
+        assert_eq!(
+            hint_line(&choices),
+            "1 allow once, 2 allow session, 3 allow project, 4 allow in this folder, 5 or Escape denies."
+        );
+        let line = ask.consequence("folder");
+        assert!(line.contains("/work/project/docs"), "{line}");
+        assert!(line.contains("and its subfolders"), "{line}");
+        assert!(line.contains("this session only"), "{line}");
+        assert!(line.contains("Not written to the project config"), "{line}");
+        assert!(line.contains("Rules and audit"), "{line}");
+
+        // Directory targets grant the named folder itself.
+        let mut del = ask_with("edit", &["docs/old"]);
+        del.target_directory = true;
+        assert_eq!(del.folder_scope().as_deref(), Some("/work/project/docs/old"));
+
+        // Without a stamped working directory the folder stays relative.
+        let mut bare = ask_with("edit", &["src/api/x.go"]);
+        bare.work_dir = String::new();
+        assert_eq!(bare.folder_scope().as_deref(), Some("src/api"));
+    }
+
+    #[test]
+    fn folder_choice_absent_without_a_folder_scope() {
+        for ask in [
+            ask_with("bash", &["ls docs"]),
+            ask_with("write", &["main.go"]),            // workspace root: no v1 folder scope
+            ask_with("edit", &["a/x.md", "b/y.md"]),    // spans two folders
+            ask_with("write", &["docs/**"]),            // glob, not a file path
+            ask_with("write", &["../outside.md"]),     // escapes the workspace
+        ] {
+            assert_eq!(ask.folder_scope(), None, "{ask:?}");
+            let choices = decision_choices(&ask);
+            assert_eq!(choices.len(), 4, "{ask:?}");
+            assert_eq!(choices[3].id, "reject");
+            assert_eq!(choices[3].key, "4");
+        }
+        assert_eq!(
+            hint_line(&decision_choices(&ask_with("bash", &["ls"]))),
+            "1 allow once, 2 allow session, 3 allow project, 4 or Escape denies."
+        );
     }
 
     #[test]

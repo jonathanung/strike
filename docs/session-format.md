@@ -407,6 +407,8 @@ Go `PermissionAsked`.
 | `patterns` | array of string |  |
 | `always` | array of string | yes |
 | `metadata` | raw | yes |
+| `workDir` | string | yes |
+| `projectRulePath` | string | yes |
 
 #### `permission.resolved`
 
@@ -519,6 +521,22 @@ Go `TurnSteered`.
 | `text` | string | yes |
 | `mode` | string |  |
 | `targetTurnId` | string | yes |
+
+#### `input.queued`
+
+Go `InputQueued`.
+
+| Field | Type | omitempty |
+|---|---|---|
+| `sessionId` | string | yes |
+| `turnId` | string | yes |
+| `providerRequestId` | string | yes |
+| `attempt` | number | yes |
+| `parentSessionId` | string | yes |
+| `depth` | number | yes |
+| `items` | array of object |  |
+| `items[].id` | string |  |
+| `items[].text` | string | yes |
 
 #### `turn.completed`
 

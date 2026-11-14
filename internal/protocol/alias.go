@@ -84,6 +84,7 @@ const (
 	DecisionOnce    = pub.DecisionOnce
 	DecisionAlways  = pub.DecisionAlways
 	DecisionProject = pub.DecisionProject
+	DecisionFolder  = pub.DecisionFolder
 	DecisionReject  = pub.DecisionReject
 )
 
@@ -138,6 +139,10 @@ type (
 	QuestionReply           = pub.QuestionReply
 	Interrupt               = pub.Interrupt
 	Steer                   = pub.Steer
+	InputQueueEdit          = pub.InputQueueEdit
+	InputQueueCancel        = pub.InputQueueCancel
+	InputQueueReorder       = pub.InputQueueReorder
+	InputQueueSendNow       = pub.InputQueueSendNow
 	SelectModel             = pub.SelectModel
 	SelectAgent             = pub.SelectAgent
 	SetEffort               = pub.SetEffort
@@ -185,6 +190,8 @@ type (
 	QuestionAsked           = pub.QuestionAsked
 	QuestionResolved        = pub.QuestionResolved
 	TurnSteered             = pub.TurnSteered
+	InputQueueItem          = pub.InputQueueItem
+	InputQueued             = pub.InputQueued
 	TurnCompleted           = pub.TurnCompleted
 	TurnFileChange          = pub.TurnFileChange
 	VerificationStarted     = pub.VerificationStarted

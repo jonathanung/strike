@@ -305,6 +305,10 @@ type Options struct {
 	// PersistProjectRule, when set, is invoked after a DecisionProject grant
 	// so the rule can be written to project config. Optional.
 	PersistProjectRule func(permission.Rule) error
+	// ProjectRulePath is the file PersistProjectRule appends to, stamped
+	// onto permission asks so frontends can state where a project grant is
+	// stored before the user chooses it. Display only; optional.
+	ProjectRulePath string
 	// PrepareInput, when set, expands composer text (!shell, /command,
 	// $skill, @file) before a user.input or steer turn. nil leaves the
 	// text unchanged. workDir is this engine's working directory.
@@ -423,6 +427,10 @@ type Options struct {
 	// InitialAlwaysGrants restores session DecisionAlways rules after the
 	// initial agent profile is applied (SetAgentRules clears grants).
 	InitialAlwaysGrants permission.Ruleset
+	// InitialFolderGrants restores session DecisionFolder grants the same
+	// way; their rules are seeded by SeedFolderGrants, not via
+	// InitialAlwaysGrants.
+	InitialFolderGrants []permission.FolderGrant
 	// DangerouslySkipPermissions mirrors --auto / --dangerously-skip-permissions:
 	// workflow phase permission widening is accepted without a review prompt.
 	// Hard sandbox and path protections are unchanged. Agent denies still apply
@@ -901,6 +909,7 @@ func New(opts Options) *Engine {
 	if opts.PersistProjectRule != nil {
 		e.perms.SetProjectPersister(opts.PersistProjectRule)
 	}
+	e.perms.SetAskFacts(opts.WorkDir, opts.ProjectRulePath)
 	e.questions = question.New(e.emit)
 	return e
 }
@@ -1143,6 +1152,9 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 	if len(e.opts.InitialAlwaysGrants) > 0 {
 		e.perms.SeedAlwaysGrants(e.opts.InitialAlwaysGrants)
+	}
+	if len(e.opts.InitialFolderGrants) > 0 {
+		e.perms.SeedFolderGrants(e.opts.InitialFolderGrants)
 	}
 	// Session lifecycle hooks observe start vs resume before quietStartup clears.
 	e.fireSessionLifecycle()

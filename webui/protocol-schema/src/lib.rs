@@ -4,7 +4,7 @@
 // Unknown event type strings become Event::Unknown.
 // Unknown JSON fields are ignored. Missing fields are defaults.
 // Unknown op type strings return Err.
-// protocol.Version 1.19.0
+// protocol.Version 1.22.0
 
 use std::collections::HashMap;
 
@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "1.19.0";
+pub const PROTOCOL_VERSION: &str = "1.22.0";
 pub const LEGACY_VERSION: &str = "1.0.0";
 
 /// Open string. Known writer values live in the JSON Schema.
@@ -1007,6 +1007,64 @@ pub struct ImageAttachment {
     pub name: String,
 }
 
+/// InputQueueCancel removes one pending user-input item.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct InputQueueCancel {
+    #[serde(default, rename = "id")]
+    pub id: String,
+}
+
+/// InputQueueEdit replaces the text of one pending user-input item. The id comes from InputQueued. Empty text is rejected when the item has no images; cancel the item to remove it. Images already on the item are kept.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct InputQueueEdit {
+    #[serde(default, rename = "id")]
+    pub id: String,
+    #[serde(default, rename = "text")]
+    pub text: String,
+}
+
+/// InputQueueItem is one user.input waiting for the active turn to finish.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct InputQueueItem {
+    #[serde(default, rename = "id")]
+    pub id: String,
+    #[serde(default, rename = "text")]
+    pub text: String,
+}
+
+/// InputQueueReorder sets the pending FIFO. IDs must list every current item once. The engine does not fill in a position the client omitted.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct InputQueueReorder {
+    #[serde(default, rename = "ids", deserialize_with = "null_as_default")]
+    pub ids: Vec<String>,
+}
+
+/// InputQueueSendNow promotes one pending user-input item out of the FIFO. While a turn is active the item becomes a steer into that turn: it is delivered at the next safe boundary with a TurnSteered acknowledgement, or falls back to the next turn if the turn ends first, like any steer. While idle the item starts as a turn immediately. Removing the item from the queue is the claim, so an id that already left the queue (drained, cancelled, or promoted) is rejected instead of delivered twice.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct InputQueueSendNow {
+    #[serde(default, rename = "id")]
+    pub id: String,
+}
+
+/// InputQueued is the full pending user-input FIFO after a change: enqueue, drain, edit, cancel, reorder, steer queued-fallback, or a budget drop. Items is empty when the queue is clear. Replay uses the latest snapshot.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct InputQueued {
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default, rename = "turnId")]
+    pub turn_id: String,
+    #[serde(default, rename = "providerRequestId")]
+    pub provider_request_id: String,
+    #[serde(default, rename = "attempt")]
+    pub attempt: i64,
+    #[serde(default, rename = "parentSessionId")]
+    pub parent_session_id: String,
+    #[serde(default, rename = "depth")]
+    pub depth: i64,
+    #[serde(default, rename = "items", deserialize_with = "null_as_default")]
+    pub items: Vec<InputQueueItem>,
+}
+
 /// InspectDiagnosticBundle requests a versioned prompt/config diagnostic bundle (layer map + effective dials + digests). Prefer the last Stream composition when one exists; otherwise the current composition. Never carries raw API keys — previews and paths are redacted by the engine. See pkg/diag for the export document schema.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct InspectDiagnosticBundle {
@@ -1205,6 +1263,10 @@ pub struct PermissionAsked {
     pub always: Vec<String>,
     #[serde(default, rename = "metadata")]
     pub metadata: Value,
+    #[serde(default, rename = "workDir")]
+    pub work_dir: String,
+    #[serde(default, rename = "projectRulePath")]
+    pub project_rule_path: String,
 }
 
 /// PermissionDecided is a non-blocking audit event for every permission evaluation outcome (auto-allow, auto-deny, ask suspended, or user reply). Patterns and rule fields are redacted by timeline export; session JSONL consumers should treat them as potentially sensitive paths/commands.
@@ -2714,6 +2776,7 @@ pub enum Event {
     FilesInvalidated(FilesInvalidated),
     HarnessProgress(HarnessProgress),
     HookMatched(HookMatched),
+    InputQueued(InputQueued),
     LedgerUpdated(LedgerUpdated),
     ModelSelected(ModelSelected),
     PathOverlap(PathOverlap),
@@ -2763,6 +2826,10 @@ pub enum Op {
     Compact(Compact),
     SetContextControls(SetContextControls),
     FilesChanged(FilesChanged),
+    InputQueueCancel(InputQueueCancel),
+    InputQueueEdit(InputQueueEdit),
+    InputQueueReorder(InputQueueReorder),
+    InputQueueSendNow(InputQueueSendNow),
     InspectDiagnosticBundle(InspectDiagnosticBundle),
     InspectEffectivePrompt(InspectEffectivePrompt),
     Interrupt(Interrupt),
@@ -2847,6 +2914,7 @@ pub fn decode_event(raw: &str) -> Result<Event, DecodeError> {
         "files.invalidated" => map_event::<FilesInvalidated>("files.invalidated", &env.data, Event::FilesInvalidated),
         "harness.progress" => map_event::<HarnessProgress>("harness.progress", &env.data, Event::HarnessProgress),
         "hook.matched" => map_event::<HookMatched>("hook.matched", &env.data, Event::HookMatched),
+        "input.queued" => map_event::<InputQueued>("input.queued", &env.data, Event::InputQueued),
         "ledger.updated" => map_event::<LedgerUpdated>("ledger.updated", &env.data, Event::LedgerUpdated),
         "model.selected" => map_event::<ModelSelected>("model.selected", &env.data, Event::ModelSelected),
         "path.overlap" => map_event::<PathOverlap>("path.overlap", &env.data, Event::PathOverlap),
@@ -2927,6 +2995,10 @@ pub fn decode_op(raw: &str) -> Result<Op, DecodeError> {
         "compact" => map_op::<Compact>("compact", data.clone(), Op::Compact),
         "context.controls" => map_op::<SetContextControls>("context.controls", data.clone(), Op::SetContextControls),
         "files.changed" => map_op::<FilesChanged>("files.changed", data.clone(), Op::FilesChanged),
+        "input.queue_cancel" => map_op::<InputQueueCancel>("input.queue_cancel", data.clone(), Op::InputQueueCancel),
+        "input.queue_edit" => map_op::<InputQueueEdit>("input.queue_edit", data.clone(), Op::InputQueueEdit),
+        "input.queue_reorder" => map_op::<InputQueueReorder>("input.queue_reorder", data.clone(), Op::InputQueueReorder),
+        "input.queue_send_now" => map_op::<InputQueueSendNow>("input.queue_send_now", data.clone(), Op::InputQueueSendNow),
         "inspect.diagnostic" => map_op::<InspectDiagnosticBundle>("inspect.diagnostic", data.clone(), Op::InspectDiagnosticBundle),
         "inspect.prompt" => map_op::<InspectEffectivePrompt>("inspect.prompt", data.clone(), Op::InspectEffectivePrompt),
         "interrupt" => map_op::<Interrupt>("interrupt", data.clone(), Op::Interrupt),

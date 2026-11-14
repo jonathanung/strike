@@ -162,6 +162,7 @@ func TestServiceAPIsUnavailableWithoutConfiguredHost(t *testing.T) {
 type testPermissions struct {
 	lastPerm, lastPat string
 	presets           []host.PermissionPresetInfo
+	folderGrants      []host.PermissionFolderGrant
 }
 
 func (p *testPermissions) Explain(permission, pattern string) host.PermissionExplanation {
@@ -199,6 +200,18 @@ func (p *testPermissions) Presets() []host.PermissionPresetInfo {
 	return []host.PermissionPresetInfo{
 		{ID: "read-only", Name: "Read only", Description: "deny writes"},
 	}
+}
+
+func (p *testPermissions) SessionFolderGrants() []host.PermissionFolderGrant {
+	return p.folderGrants
+}
+
+func (p *testPermissions) RevokeSessionFolderGrant(index int) bool {
+	if index < 0 || index >= len(p.folderGrants) {
+		return false
+	}
+	p.folderGrants = append(p.folderGrants[:index], p.folderGrants[index+1:]...)
+	return true
 }
 
 func TestPermissionServiceAPIs(t *testing.T) {

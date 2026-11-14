@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"go/ast"
 	"go/constant"
 	"go/importer"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -379,6 +381,16 @@ func isLipglossColorComposite(lit *ast.CompositeLit, info *types.Info) bool {
 // exportDataImporter asks the active Go module for each package's compiled
 // export data. Unlike importer.Default, this also resolves this repository's
 // internal/theme package while type-checking fixtures under testdata.
+//
+// All importers in this test binary share one exportDataSource (#1684). The
+// previous implementation built a fresh importer per scanStyleDir call whose
+// lookup ran `go list -export` as a subprocess for every imported package, so
+// the 23 fixture subtests plus the real-tree scans re-ran `go list` dozens of
+// times per test run — each invocation re-loading the module graph — and under
+// full-suite CPU load that subprocess storm blew the 10m package timeout
+// inside gcimporter's Cmd.Output. The shared source resolves the export
+// files for the whole dependency closure in ONE batched `go list` call and
+// caches the export bytes, so later scans are subprocess-free map hits.
 func exportDataImporter(dir string, fset *token.FileSet) types.Importer {
 	root := dir
 	for {
@@ -391,16 +403,128 @@ func exportDataImporter(dir string, fset *token.FileSet) types.Importer {
 		}
 		root = parent
 	}
-	lookup := func(path string) (io.ReadCloser, error) {
-		cmd := exec.Command("go", "list", "-export", "-f={{.Export}}", path)
-		cmd.Dir = root
+	return importer.ForCompiler(fset, "gc", sharedExportDataSource(root).lookup)
+}
+
+// exportDataSource caches compiled export data by import path for the whole
+// test binary. newExportDataSource installs the production listExports /
+// resolveExport seams; tests substitute fakes for them.
+type exportDataSource struct {
+	mu        sync.Mutex
+	root      string
+	prewarmed bool
+	files     map[string]string // import path -> export data file
+	data      map[string][]byte // import path -> export data contents
+
+	// listExports resolves export files for the dependency closure of the
+	// style-boundary roots in one `go list` invocation.
+	listExports func() (map[string]string, error)
+	// resolveExport resolves one import path's export file; used only for
+	// paths the batched listing did not cover.
+	resolveExport func(path string) (string, error)
+}
+
+var (
+	sharedExportMu     sync.Mutex
+	sharedExportSource *exportDataSource
+)
+
+// sharedExportDataSource returns the process-wide source for root, creating
+// it on first use. Every style-boundary scan in this binary runs against the
+// same module root, so one source serves them all.
+func sharedExportDataSource(root string) *exportDataSource {
+	sharedExportMu.Lock()
+	defer sharedExportMu.Unlock()
+	if sharedExportSource == nil {
+		sharedExportSource = newExportDataSource(root)
+	}
+	return sharedExportSource
+}
+
+func newExportDataSource(root string) *exportDataSource {
+	s := &exportDataSource{
+		root:  root,
+		files: map[string]string{},
+		data:  map[string][]byte{},
+	}
+	s.listExports = func() (map[string]string, error) {
+		// Roots cover every package the scans can import: the fixtures use
+		// lipgloss (+compat) and theme; the real-tree scans type-check the
+		// app and ui sources, whose imports are within these packages'
+		// dependency closures.
+		roots := []string{
+			lipglossPath,
+			lipglossCompatPath,
+			modulePath + "/internal/frontend/tui/theme",
+			modulePath + "/internal/frontend/tui/app",
+			modulePath + "/internal/frontend/tui/ui",
+		}
+		args := append([]string{"list", "-export", "-deps", "-f={{.ImportPath}}\t{{.Export}}"}, roots...)
+		cmd := exec.Command("go", args...)
+		cmd.Dir = s.root
 		out, err := cmd.Output()
 		if err != nil {
 			return nil, err
 		}
-		return os.Open(strings.TrimSpace(string(out)))
+		files := map[string]string{}
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			path, file, ok := strings.Cut(line, "\t")
+			if ok && file != "" {
+				files[path] = file
+			}
+		}
+		return files, nil
 	}
-	return importer.ForCompiler(fset, "gc", lookup)
+	s.resolveExport = func(path string) (string, error) {
+		cmd := exec.Command("go", "list", "-export", "-f={{.Export}}", path)
+		cmd.Dir = s.root
+		out, err := cmd.Output()
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+	return s
+}
+
+// lookup is the gc importer lookup: it returns a fresh reader over the
+// cached export bytes for path, resolving (and caching) them on first use.
+// The mutex is held across resolution so a path is never resolved twice,
+// even if scans ever run concurrently; lookups are leaf calls from the
+// importer and never re-enter.
+func (s *exportDataSource) lookup(path string) (io.ReadCloser, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if b, ok := s.data[path]; ok {
+		return io.NopCloser(bytes.NewReader(b)), nil
+	}
+	if !s.prewarmed {
+		// Best effort: if the batched listing fails (e.g. a root package
+		// is mid-edit), per-path resolution below still applies.
+		s.prewarmed = true
+		if files, err := s.listExports(); err == nil {
+			for p, f := range files {
+				if _, ok := s.files[p]; !ok {
+					s.files[p] = f
+				}
+			}
+		}
+	}
+	file, ok := s.files[path]
+	if !ok {
+		f, err := s.resolveExport(path)
+		if err != nil {
+			return nil, err
+		}
+		file = f
+		s.files[path] = file
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return nil, err
+	}
+	s.data[path] = b
+	return io.NopCloser(bytes.NewReader(b)), nil
 }
 
 func lipglossCall(call *ast.CallExpr, info *types.Info) (name string, visual, constructor bool) {

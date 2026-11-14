@@ -6,13 +6,12 @@ use std::rc::Rc;
 
 use leptos::prelude::*;
 
-use crate::shell::{Command, ShellHook, TopRegion, TopSlot};
+use crate::shell::{Command, Group, ShellHook, TopRegion, TopSlot};
 
 pub fn install(reg: &mut ShellHook) {
     reg.command(Command {
         id: "customize",
-        section: "Apps",
-        section_order: 10,
+        group: Group::Customize,
         label: "Customize",
         detail: "Skills, agents, MCP servers, plugins, hooks, and rules",
         shortcut: "",
@@ -20,6 +19,10 @@ pub fn install(reg: &mut ShellHook) {
         argument: None,
         order: 36,
         run: Rc::new(|_| crate::shell::host::set_view("customize")),
+        visible: None,
+        enabled: None,
+        confirm: None,
+        choices: None,
     });
     reg.slot(TopSlot {
         id: "customize",

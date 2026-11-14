@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/audit"
@@ -16,6 +17,13 @@ import (
 
 const workspaceModeNote = "Stored on the workspace only; storing does not change the live session. Opening the workspace applies its stored mode to the live session. Apply it here if this session should use it now."
 
+// sessionFolderScope is the rules-document scope for live session folder
+// grants (DecisionFolder replies). Unlike global/project records these
+// are not stored in a config file: listing and removal go through the
+// host permissions service bound to the live session, and removal revokes
+// the grant in the running engine.
+const sessionFolderScope = "session folder"
+
 type permissionRuleBody struct {
 	Scope      string `json:"scope"`
 	Permission string `json:"permission"`
@@ -23,6 +31,35 @@ type permissionRuleBody struct {
 	Action     string `json:"action"`
 	Index      int    `json:"index"`
 	Confirm    bool   `json:"confirm"`
+}
+
+// permissionRuleRemoveBody keeps permission/pattern/action as pointers so an
+// older client that omits them stays positional. Any present field opts into
+// the identity check.
+type permissionRuleRemoveBody struct {
+	Scope      string  `json:"scope"`
+	Permission *string `json:"permission"`
+	Pattern    *string `json:"pattern"`
+	Action     *string `json:"action"`
+	Index      int     `json:"index"`
+	Confirm    bool    `json:"confirm"`
+}
+
+func (b permissionRuleRemoveBody) identity() *config.RuleIdentity {
+	if b.Permission == nil && b.Pattern == nil && b.Action == nil {
+		return nil
+	}
+	perm, pat, act := "", "", ""
+	if b.Permission != nil {
+		perm = *b.Permission
+	}
+	if b.Pattern != nil {
+		pat = *b.Pattern
+	}
+	if b.Action != nil {
+		act = *b.Action
+	}
+	return &config.RuleIdentity{Permission: perm, Pattern: pat, Action: act}
 }
 
 func (s *Server) handlePermissionRules(w http.ResponseWriter, r *http.Request) {
@@ -44,17 +81,47 @@ func (s *Server) handlePermissionRuleRemove(w http.ResponseWriter, r *http.Reque
 	if !s.allowPermissionWrite(w) {
 		return
 	}
-	var body permissionRuleBody
+	var body permissionRuleRemoveBody
 	if err := decodeBody(w, r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
-	err := config.DeletePermissionRule(s.currentCWD(r), strings.TrimSpace(body.Scope), body.Index, body.Confirm)
+	if strings.TrimSpace(body.Scope) == sessionFolderScope {
+		if s.opts.Services == nil || s.opts.Services.Permissions == nil {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "session folder grant index out of range"})
+			return
+		}
+		perms := s.opts.Services.Permissions
+		if id := body.identity(); id != nil {
+			grants := perms.SessionFolderGrants()
+			if body.Index < 0 || body.Index >= len(grants) || !folderGrantMatches(grants[body.Index], id) {
+				writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: config.ErrRuleListChanged.Error()})
+				return
+			}
+		}
+		if !perms.RevokeSessionFolderGrant(body.Index) {
+			writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "session folder grant index out of range"})
+			return
+		}
+		s.writePermissionRules(w, r)
+		return
+	}
+	err := config.DeletePermissionRule(s.currentCWD(r), strings.TrimSpace(body.Scope), body.Index, body.Confirm, body.identity())
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
 	s.writePermissionRules(w, r)
+}
+
+func folderGrantMatches(g host.PermissionFolderGrant, id *config.RuleIdentity) bool {
+	if id == nil {
+		return true
+	}
+	action := strings.ToLower(strings.TrimSpace(id.Action))
+	return g.Permission == strings.TrimSpace(id.Permission) &&
+		g.Pattern == id.Pattern &&
+		action == string(permission.Allow)
 }
 
 func (s *Server) appendPermissionRule(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +159,19 @@ func (s *Server) writePermissionRules(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
+	}
+	// Live session folder grants ride along as their own scope so the
+	// panel lists them next to the file rules and can revoke them.
+	if s.opts.Services != nil && s.opts.Services.Permissions != nil {
+		for _, g := range s.opts.Services.Permissions.SessionFolderGrants() {
+			view.Rules = append(view.Rules, config.PermissionRuleRecord{
+				Scope:      sessionFolderScope,
+				Index:      g.Index,
+				Permission: g.Permission,
+				Pattern:    g.Pattern,
+				Action:     string(permission.Allow),
+			})
+		}
 	}
 	modes := make([]string, 0, len(protocol.PermissionModes()))
 	for _, mode := range protocol.PermissionModes() {

@@ -75,13 +75,23 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     the daemon (`POST /v1/sessions/{id}/seen`, `docs/webui-status.md`).
     Pins stay in browser storage (`strike.pins`).
   - The top bar has a command field (Ctrl+K or Cmd+K) for a new session,
-    stop-all, the Chat and Daemon views, Steer/Queue, and the five approval
+    stop-all, stop-turn, the Chat and Daemon views, Steer/Queue, and the five approval
     modes. A gateway chip follows `/health`. Back and Forward walk the
     sessions opened in this tab. Focus hides the side columns.
   - The composer posts `user.input` when the root is idle. While it is
-    busy, Steer posts `steer` and Queue posts `user.input`. That choice is
-    `strike.enterMode` (default Queue, the same send as before). The
-    approval chip posts `set.permission_mode` with Strike's real modes:
+    busy, the saved default (`strike.enterMode`, default Queue) is the
+    main send button: Steer posts `steer`, Queue posts `user.input`. The
+    other half of that button, and Ctrl+Enter or Cmd+Enter, does the other
+    action for this message only. Enter uses the default. Escape stops the
+    running turn when the draft is empty (`interrupt`). Backspace on an
+    empty draft pulls the last queued message into the draft and cancels
+    it. The queue list is the engine FIFO (`input.queued`, edit, cancel,
+    reorder). A steer shows on the user line and in a note when
+    `turn.steered` arrives; until then the note says it is waiting. A
+    context hold blocks send when the daemon reports critical fit or
+    occupancy at the window. It does not invent a limit. Send anyway, or
+    Alt+Enter, sends once. The approval chip posts `set.permission_mode`
+    with Strike's real modes:
     `default` (ask on the normal rules), `plan` (writes denied; stricter
     than read-only shell), `soft-approve` (15s countdown then allow once),
     `accept-edits` (file edits allowed; shell and network still ask),

@@ -8,6 +8,46 @@ import (
 	"github.com/jonathanung/strike/internal/frontend/host/local"
 )
 
+func TestPermissionsFolderGrants(t *testing.T) {
+	p := local.NewPermissions(nil, nil)
+	// No hooks bound: empty list, revoke reports false.
+	if got := p.SessionFolderGrants(); len(got) != 0 {
+		t.Fatalf("unbound grants = %+v, want empty", got)
+	}
+	if p.RevokeSessionFolderGrant(0) {
+		t.Fatal("unbound revoke returned true")
+	}
+
+	grants := []permission.FolderGrant{
+		{Permission: "write", Folder: "docs", Patterns: []string{"docs", "docs/*", "docs/**"}},
+		{Permission: "edit", Folder: "a*b", Patterns: []string{`a\*b`, `a\*b/*`, `a\*b/**`}},
+	}
+	p.SetFolderGrants(func() []permission.FolderGrant { return grants }, func(index int) bool {
+		if index < 0 || index >= len(grants) {
+			return false
+		}
+		grants = append(grants[:index], grants[index+1:]...)
+		return true
+	})
+	got := p.SessionFolderGrants()
+	if len(got) != 2 {
+		t.Fatalf("grants = %+v, want two", got)
+	}
+	if got[0].Index != 0 || got[0].Permission != "write" || got[0].Folder != "docs" || got[0].Pattern != "docs/**" {
+		t.Fatalf("grant[0] = %+v", got[0])
+	}
+	// The display pattern uses the folder name verbatim, not the escaped glob.
+	if got[1].Pattern != "a*b/**" {
+		t.Fatalf("grant[1] pattern = %q, want a*b/**", got[1].Pattern)
+	}
+	if !p.RevokeSessionFolderGrant(0) {
+		t.Fatal("revoke returned false")
+	}
+	if got := p.SessionFolderGrants(); len(got) != 1 || got[0].Folder != "a*b" || got[0].Index != 0 {
+		t.Fatalf("after revoke grants = %+v", got)
+	}
+}
+
 func TestPermissionsExplainBaseLayers(t *testing.T) {
 	layers := []permission.Ruleset{
 		permission.Defaults(),
