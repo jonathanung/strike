@@ -353,3 +353,17 @@ func saveProbeCache(path string, c probeCache) error {
 	}
 	return os.Rename(tmp, path)
 }
+
+// ProbeCheckedAt returns when the cache at cacheFile last recorded a release
+// check (zero when the cache is missing or unreadable). cacheFile "" uses
+// CachePath. Read-only; it never touches the network.
+func ProbeCheckedAt(cacheFile string) time.Time {
+	if cacheFile == "" {
+		cacheFile = CachePath()
+	}
+	c, err := loadProbeCache(cacheFile)
+	if err != nil {
+		return time.Time{}
+	}
+	return c.CheckedAt
+}
