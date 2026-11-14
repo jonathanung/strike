@@ -9,8 +9,9 @@ import (
 // instructions, agents, skills, workflows, themes, and plugins.
 // State files the process creates (sessions, memory, auth) are added by the
 // server from the stores it actually opened. This list must stay on the same
-// helpers Load uses. It does not include ~/.strike/onboarding.json: that file
-// is the TUI wizard, and serve does not read it.
+// helpers Load uses. It does not include ~/.strike/onboarding.json: that
+// file is the shared first-run record (TUI wizard and, since #1552, the
+// /v1/onboarding endpoints), not a config Load input.
 type LocalRead struct {
 	Path   string
 	Group  string // config, instructions, catalog
