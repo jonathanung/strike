@@ -18,8 +18,8 @@ import (
 	"github.com/jonathanung/strike/internal/trust/workspacetrust"
 )
 
-// fakeEngine scripts the docker CLI the route shells out to.
-type fakeEngine struct {
+// fakeContainerEngine scripts the docker CLI the route shells out to.
+type fakeContainerEngine struct {
 	found     bool
 	infoCode  int
 	inspect   string // "" → no such container
@@ -29,7 +29,7 @@ type fakeEngine struct {
 	inspected bool
 }
 
-func (f *fakeEngine) runtime(binary string) *container.CLI {
+func (f *fakeContainerEngine) runtime(binary string) *container.CLI {
 	f.mu.Lock()
 	f.binaries = append(f.binaries, binary)
 	f.mu.Unlock()
@@ -76,7 +76,7 @@ func containerRequest(t *testing.T, srv *Server, path string) (int, containerSta
 	return rec.Code, out, rec.Body.String()
 }
 
-func newContainerServer(t *testing.T, work string, eng *fakeEngine, sandboxMode string) *Server {
+func newContainerServer(t *testing.T, work string, eng *fakeContainerEngine, sandboxMode string) *Server {
 	t.Helper()
 	live := NewLive("sess-container", work, nil, make(chan protocol.Op))
 	t.Cleanup(live.Close)
@@ -104,19 +104,19 @@ func activeRungs(ladder []containerRung) []string {
 func TestContainerStatusStates(t *testing.T) {
 	cases := []struct {
 		name           string
-		eng            *fakeEngine
+		eng            *fakeContainerEngine
 		wantFound      bool
 		wantAvailable  bool
 		wantStatus     string
 		wantRunning    bool
 		wantRuntimeErr bool
 	}{
-		{name: "no runtime installed", eng: &fakeEngine{found: false}, wantStatus: "absent", wantRuntimeErr: true},
-		{name: "engine daemon down", eng: &fakeEngine{found: true, infoCode: 1}, wantFound: true, wantStatus: "absent", wantRuntimeErr: true},
-		{name: "runtime up, no container", eng: &fakeEngine{found: true}, wantFound: true, wantAvailable: true, wantStatus: "absent"},
+		{name: "no runtime installed", eng: &fakeContainerEngine{found: false}, wantStatus: "absent", wantRuntimeErr: true},
+		{name: "engine daemon down", eng: &fakeContainerEngine{found: true, infoCode: 1}, wantFound: true, wantStatus: "absent", wantRuntimeErr: true},
+		{name: "runtime up, no container", eng: &fakeContainerEngine{found: true}, wantFound: true, wantAvailable: true, wantStatus: "absent"},
 		{
 			name:          "runtime up, container running",
-			eng:           &fakeEngine{found: true, inspect: "abc123|/strike-repo|true|running|strike/img:1|0|false|", labels: `{"com.strike.managed":"true","com.strike.config-hash":"deadbeef"}`},
+			eng:           &fakeContainerEngine{found: true, inspect: "abc123|/strike-repo|true|running|strike/img:1|0|false|", labels: `{"com.strike.managed":"true","com.strike.config-hash":"deadbeef"}`},
 			wantFound:     true,
 			wantAvailable: true,
 			wantStatus:    "running",
@@ -175,7 +175,7 @@ func TestContainerStatusStates(t *testing.T) {
 func TestContainerStatusPostureFromEnv(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv(protocol.IsolationEnvKey, "container+no-network")
-	srv := newContainerServer(t, t.TempDir(), &fakeEngine{}, "workspace-write")
+	srv := newContainerServer(t, t.TempDir(), &fakeContainerEngine{}, "workspace-write")
 	_, got, raw := containerRequest(t, srv, "/v1/container/status")
 	if got.Posture != protocol.IsolationContainerNoNet || got.PostureSource != "env" {
 		t.Fatalf("posture = %q (%s): %s", got.Posture, got.PostureSource, raw)
@@ -188,7 +188,7 @@ func TestContainerStatusPostureFromEnv(t *testing.T) {
 func TestContainerStatusSandboxDialIsHostSandbox(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv(protocol.IsolationEnvKey, "")
-	srv := newContainerServer(t, t.TempDir(), &fakeEngine{}, "workspace-write")
+	srv := newContainerServer(t, t.TempDir(), &fakeContainerEngine{}, "workspace-write")
 	_, got, _ := containerRequest(t, srv, "/v1/container/status")
 	if got.Posture != protocol.IsolationHostSandbox || got.SandboxMode != "workspace-write" {
 		t.Fatalf("posture = %q sandbox=%q, want host+sandbox", got.Posture, got.SandboxMode)
@@ -209,7 +209,7 @@ func TestContainerStatusEngineFromRepoNeedsTrust(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	eng := &fakeEngine{found: true}
+	eng := &fakeContainerEngine{found: true}
 	srv := newContainerServer(t, work, eng, "off")
 	_, got, _ := containerRequest(t, srv, "/v1/container/status")
 	if got.ConfigScope != "global" {
@@ -232,7 +232,7 @@ func TestContainerStatusEngineFromRepoNeedsTrust(t *testing.T) {
 	if err := store.Trust(id.Root); err != nil {
 		t.Fatal(err)
 	}
-	eng2 := &fakeEngine{found: true}
+	eng2 := &fakeContainerEngine{found: true}
 	srv2 := newContainerServer(t, work, eng2, "off")
 	_, got, _ = containerRequest(t, srv2, "/v1/container/status")
 	if got.ConfigScope != "project" {
@@ -250,7 +250,7 @@ func TestContainerStatusDrifted(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(work, container.DefaultEjectName), []byte("FROM scratch\n# strike-config-hash: 0000\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	srv := newContainerServer(t, work, &fakeEngine{}, "off")
+	srv := newContainerServer(t, work, &fakeContainerEngine{}, "off")
 	_, got, raw := containerRequest(t, srv, "/v1/container/status")
 	if got.Drift.State != "drifted" || got.Drift.Want == "" {
 		t.Fatalf("drift = %+v (%s), want drifted with a want hash", got.Drift, raw)
@@ -264,7 +264,7 @@ func TestContainerStatusDetectsManifests(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(work, "go.mod"), []byte("module x\n\ngo 1.22\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	srv := newContainerServer(t, work, &fakeEngine{}, "off")
+	srv := newContainerServer(t, work, &fakeContainerEngine{}, "off")
 	_, got, _ := containerRequest(t, srv, "/v1/container/status")
 	if !got.Detect.Go || len(got.Detect.Markers) == 0 {
 		t.Fatalf("detect = %+v, want go.mod detected", got.Detect)
@@ -297,7 +297,7 @@ func TestContainerStatusCapabilityAndRoots(t *testing.T) {
 	}
 
 	// Attach-only daemons still answer (read-only route) from WorkDir.
-	attach, err := New(Options{SessionDir: t.TempDir(), WorkDir: t.TempDir(), ContainerRuntime: (&fakeEngine{}).runtime})
+	attach, err := New(Options{SessionDir: t.TempDir(), WorkDir: t.TempDir(), ContainerRuntime: (&fakeContainerEngine{}).runtime})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestContainerStatusCapabilityAndRoots(t *testing.T) {
 	defer live.Close()
 	hub := NewLiveHub(nil, nil)
 	hub.Add("r1", live)
-	multi, err := New(Options{SessionDir: t.TempDir(), LiveHub: hub, ContainerRuntime: (&fakeEngine{}).runtime})
+	multi, err := New(Options{SessionDir: t.TempDir(), LiveHub: hub, ContainerRuntime: (&fakeContainerEngine{}).runtime})
 	if err != nil {
 		t.Fatal(err)
 	}
