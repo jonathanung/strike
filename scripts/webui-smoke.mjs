@@ -582,6 +582,23 @@ try {
     join(sessionsDir, "invalidated-session.meta.json"),
     JSON.stringify({ title: "Invalidated replay" }) + "\n",
   );
+  // Diagnostics refresh on files.invalidated (#1894): a second replay
+  // with a burst of two invalidations, resumed while the diagnostics pane
+  // is shown; the cockpit must refetch /v1/diagnostics exactly once.
+  const invalidatedDiagSession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-26T07:10:00Z" }) +
+    "\n" +
+    envLine("user.message", "2026-10-26T07:10:00Z", { text: "touch the tree for lsp" }) +
+    envLine("turn.started", "2026-10-26T07:10:01Z", {}) +
+    envLine("files.invalidated", "2026-10-26T07:10:02Z", { paths: ["src/a.go"], reason: "external" }) +
+    envLine("files.invalidated", "2026-10-26T07:10:03Z", { paths: ["src/b.go"], reason: "external" }) +
+    envLine("text.delta", "2026-10-26T07:10:04Z", { text: "lsp tree touched" }) +
+    envLine("turn.completed", "2026-10-26T07:10:05Z", { stopReason: "end_turn" });
+  await writeFile(join(sessionsDir, "invalidated-diag-session.jsonl"), invalidatedDiagSession);
+  await writeFile(
+    join(sessionsDir, "invalidated-diag-session.meta.json"),
+    JSON.stringify({ title: "Invalidated diagnostics replay" }) + "\n",
+  );
   // Live tool tail (#1374) fixture: turn 1's call streams a chunk and
   // then ends (the final output replaces the tail); turn 2's chatty call
   // streams 250 lines and never ends, so it keeps a tail bounded to the
@@ -6151,6 +6168,66 @@ try {
     );
   } finally {
     await rm(invalidatedPath, { force: true });
+  }
+
+  // Diagnostics refresh on files.invalidated (#1894): with the
+  // diagnostics pane shown, resuming a replay with an invalidation burst
+  // refetches /v1/diagnostics once (the same 400 ms debounce as Files).
+  await runPalette("Code diagnostics");
+  await waitFor(
+    "files.invalidated diagnostics: pane shown",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-diagnostics-pane]")`)) === true }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  let diagFetches = 0;
+  const onDiagRequest = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.method === "Network.requestWillBeSent" && (msg.params?.request?.url || "").includes("/v1/diagnostics")) {
+      diagFetches += 1;
+    }
+  };
+  ws.addEventListener("message", onDiagRequest);
+  try {
+    // Let the palette-open fetch settle, then count only what follows.
+    await new Promise((r) => setTimeout(r, 1000));
+    diagFetches = 0;
+    let diagResume = "missing";
+    try {
+      await waitFor(
+        "files.invalidated diagnostics resume row",
+        async () => {
+          diagResume = await evaluate(`(() => {
+            const row = document.querySelector('[data-session-id="invalidated-diag-session"]');
+            const btn = row && row.querySelector(".ss-main");
+            if (!btn) return "missing";
+            btn.click();
+            return "clicked";
+          })()`);
+          return { ok: diagResume === "clicked", clicked: diagResume };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+    } catch {
+      // Reported by the throw below with the last observed state.
+    }
+    if (diagResume !== "clicked") {
+      throw new Error(`files.invalidated diagnostics resume click -> ${diagResume}`);
+    }
+    await waitFor(
+      "files.invalidated diagnostics: replay applied and diagnostics refetched",
+      async () => {
+        const replayed = (await evaluate(`(document.body.textContent || "").includes("lsp tree touched")`)) === true;
+        return { ok: replayed && diagFetches >= 1, replayed, diagFetches };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    // Past the debounce window the burst must still have cost one fetch.
+    await new Promise((r) => setTimeout(r, 1500));
+    if (diagFetches !== 1) {
+      throw new Error(`files.invalidated diagnostics: want 1 refetch for the burst, got ${diagFetches}\n${await diagnostics()}`);
+    }
+  } finally {
+    ws.removeEventListener("message", onDiagRequest);
   }
 
   // Per-turn file summary (#1365): resume the seeded session; each turn

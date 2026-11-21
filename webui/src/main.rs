@@ -3680,9 +3680,11 @@ fn App() -> impl IntoView {
 
     // Diagnostics (#1404) load while the pane is shown or a document is
     // open (for the editor badge), and again on every Refresh / palette
-    // open (diag_rev). The previous result stays visible while reloading.
+    // open (diag_rev) and every debounced files.invalidated burst
+    // (files_rev, #1894). The previous result stays visible while reloading.
     Effect::new(move |_| {
         let _ = diag_rev.get();
+        let _ = files_rev.get();
         let shown = side_tab.get() == "diagnostics";
         let doc_open = !doc_path.get().is_empty();
         if !shown && !doc_open {
