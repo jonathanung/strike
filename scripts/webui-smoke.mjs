@@ -13,6 +13,7 @@
 // what the page actually looked like.
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1757,6 +1758,7 @@ try {
     token,
     repoDir: process.cwd(),
   });
+  await agentPickerCheck({ send });
 
   const beforeSelection = await send("Runtime.evaluate", {
     expression: `(() => {

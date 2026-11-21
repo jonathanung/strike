@@ -147,6 +147,10 @@ pub struct LiveStatus {
     pub cwd: String,
     #[serde(default)]
     pub effort: String,
+    /// The running agent (#1563), from the daemon's last `agent.selected`.
+    /// Empty when not reported; the chip then says unknown, never a guess.
+    #[serde(default)]
+    pub agent: String,
     /// Session exit-gate policy the daemon reports on every status
     /// (#1572). Empty until the daemon reports one; the UI normalizes
     /// empty to the `supervised` default rather than inventing a mode.
@@ -203,6 +207,15 @@ pub struct StatusBoard {
     #[allow(dead_code)]
     #[serde(default)]
     pub sessions: Vec<BoardSession>,
+}
+
+/// One selectable agent from bootstrap `agents` (#1563). The daemon's
+/// `AgentInfo`; `description` is omitted when empty.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+pub struct AgentInfo {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -283,6 +296,9 @@ pub struct Bootstrap {
     pub status: Option<LiveStatus>,
     #[serde(default)]
     pub skills: Vec<SkillInfo>,
+    /// Selectable agents for the live session (#1563), default first.
+    #[serde(default)]
+    pub agents: Vec<AgentInfo>,
     #[serde(default, rename = "composerCommands")]
     pub composer_commands: Vec<ComposerCommand>,
     #[serde(default)]
@@ -1617,6 +1633,26 @@ mod tests {
         assert!(boot.capabilities.project_init);
         let boot: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
         assert!(!boot.capabilities.project_init);
+    }
+
+    #[test]
+    fn bootstrap_reads_agents_and_the_current_agent() {
+        let boot: Bootstrap = serde_json::from_str(
+            r#"{"status":{"agent":"build"},"agents":[{"name":"build"},{"name":"plan","description":"Read-only"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(boot.status.map(|s| s.agent), Some("build".to_string()));
+        assert_eq!(
+            boot.agents,
+            vec![
+                AgentInfo { name: "build".into(), description: String::new() },
+                AgentInfo { name: "plan".into(), description: "Read-only".into() },
+            ]
+        );
+        // Older daemons: no agents and no status agent read as empty.
+        let boot: Bootstrap = serde_json::from_str(r#"{"status":{}}"#).unwrap();
+        assert!(boot.agents.is_empty());
+        assert_eq!(boot.status.map(|s| s.agent), Some(String::new()));
     }
 
     #[test]
