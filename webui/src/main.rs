@@ -24,7 +24,10 @@ mod draft_size;
 mod drafts;
 mod editor;
 mod lessons;
+mod elicitation;
+mod elicitation_ui;
 mod load_epoch;
+mod markdown_review;
 mod local_issues;
 mod localfiles;
 mod customize;
@@ -52,6 +55,7 @@ mod park;
 mod permissions_explain;
 mod plan_card;
 mod steer_queue;
+mod steer_ack;
 mod model_menu;
 mod model_menu_view;
 mod session_list;
@@ -68,6 +72,7 @@ mod transcript_find;
 mod usage_audit;
 mod session_delete;
 mod session_restore;
+mod share;
 mod shell;
 mod skill_usage;
 mod side_chat;
@@ -87,7 +92,9 @@ mod turn_failure;
 mod turn_usage;
 mod turn_verify;
 mod workspace_image;
+mod workspace_trust;
 mod workspaces;
+mod workflows;
 mod workflow_run;
 use crate::shell::icon;
 use crate::child_signals::TeamMessagesFeed;
@@ -139,6 +146,7 @@ use crate::editor::DocumentPane;
 use crate::mobile::PhoneNav;
 use crate::customize::CustomizePane;
 use crate::side_chat::SideChatPanel;
+use crate::share::{ShareDialog, ShareView};
 use crate::outbox::OutboxList;
 
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
@@ -1099,6 +1107,9 @@ fn App() -> impl IntoView {
     let token = RwSignal::new(gateway::initial_token());
     provide_context(transcript_attachments::AttachmentAuth { base, token });
     let status = RwSignal::new("connecting…".to_string());
+    // Bootstrap capability `workspaceTrust` (#1781): gates the untrusted
+    // workspace badge and trust card.
+    let workspace_trust_capable = RwSignal::new(false);
     // Bootstrap capability `diag` (#1489): gates Download diagnostics.
     let diag_capable = RwSignal::new(false);
     // Bootstrap capability `ledger` (#1485): gates the Decisions tab.
@@ -1219,6 +1230,7 @@ fn App() -> impl IntoView {
     });
     let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
+    let elicitations = RwSignal::new(Vec::<elicitation::Pending>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
     let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
     let panel_open = RwSignal::new(false);
@@ -1834,6 +1846,7 @@ fn App() -> impl IntoView {
                                         }
                                     });
                                 }
+                                workspace_trust_capable.set(boot.capabilities.workspace_trust);
                                 diag_capable.set(boot.capabilities.diag);
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
                                 ledger_capable.set(boot.capabilities.ledger);
@@ -1972,6 +1985,7 @@ fn App() -> impl IntoView {
             children.set(Vec::new());
             children_note.set(String::new());
             asks.set(Vec::new());
+            elicitations.set(Vec::new());
             live_audit.set(Vec::new());
             confirm.set(None);
             wipe_on_replay.set(false);
@@ -2124,6 +2138,7 @@ fn App() -> impl IntoView {
                     };
                     note_steer(transcript_cb, &data, &on_note);
                     apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
+                    elicitation_ui::apply_elicitation_notes(&data, elicitations);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
                     lines_cb.set(transcript_cb.with_untracked(|t| t.chat_lines()));
@@ -5094,6 +5109,9 @@ fn App() -> impl IntoView {
                 status=status
             />
         </Show>
+        <Show when=move || mode.get() == "workflows" fallback=move || ()>
+            <workflows::WorkflowsPage base=base token=token status=status />
+        </Show>
         <Show when=move || mode.get() == "triggers" fallback=move || ()>
             <triggers::TriggersPage
                 base=base
@@ -5277,6 +5295,14 @@ fn App() -> impl IntoView {
                     // to the conversation. Visually hidden; the status tabs
                     // and chat-mode bar already show the session name.
                     <h1 id="chat-heading" class="sr-only">{move || chat_title.get()}</h1>
+                    // #1781: persistent untrusted-workspace badge + trust card.
+                    <workspace_trust::WorkspaceTrust
+                        base=base
+                        token=token
+                        root=active_root
+                        status=status
+                        capable=workspace_trust_capable
+                    />
                     {move || {
                         let _ = tick.get();
                         let active = active_root.get();
@@ -5328,6 +5354,8 @@ fn App() -> impl IntoView {
                             jump_line=doc_line
                             want_diff=doc_diff
                             editing=doc_editing
+                            root=active_root
+                            busy=session_busy_now
                             history=file_history
                         />
                     </Show>
@@ -5394,6 +5422,7 @@ fn App() -> impl IntoView {
                         </div>
                     </Show>
                     <Show when=move || doc_path.get().is_empty()>
+                    <ShareDialog base=base token=token session=active_root />
                     <TranscriptPane
                         transcript=transcript
                         session=active_root
@@ -5405,6 +5434,7 @@ fn App() -> impl IntoView {
                         find=find_view
                     />
                     </Show>
+                    <elicitation_ui::ElicitationCards base=base token=token root=active_root elicitations=elicitations />
                     <ApprovalCards
                         asks=asks
                         perm_mode=perm_mode
@@ -6461,7 +6491,13 @@ mod composer_grow_history_tests {
 }
 
 fn main() {
-    leptos::mount::mount_to_body(App);
+    // A share link (#1565) gets only the read-only transcript shell: no
+    // cockpit, no session list, no gateway credential.
+    if let Some(token) = share::share_token_from_location() {
+        leptos::mount::mount_to_body(move || view! { <ShareView token=token /> });
+    } else {
+        leptos::mount::mount_to_body(App);
+    }
     // The cockpit mounted, so the static boot shell from index.html has
     // done its job. mount_to_body appends rather than replacing the body,
     // so remove the placeholder explicitly; if the wasm never runs, the
