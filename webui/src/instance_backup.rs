@@ -2,7 +2,8 @@
 //!
 //! Settings controls over the daemon's `GET /v1/backup/export` (one
 //! portable `strike-backup.json`: sessions, memory, knowledge pins,
-//! schedules, non-secret settings) and `POST /v1/backup/restore` (`?dryRun=1` first, so the user
+//! schedules, issues, plans, non-secret settings; `GET /v1/backup/estimate`
+//! shows its size first, #1940) and `POST /v1/backup/restore` (`?dryRun=1` first, so the user
 //! sees what will be created, skipped, or restored as a copy before
 //! anything is written). The cockpit never parses or rebuilds the archive:
 //! the downloaded bytes and the uploaded bytes are exactly the daemon's.
@@ -13,18 +14,27 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 
-use crate::api::{get_text, post_raw_json};
+use crate::api::{get_json, get_text, post_raw_json};
 use crate::transcript_view::save_download;
 
+pub const BACKUP_ESTIMATE_PATH: &str = "/v1/backup/estimate";
 pub const BACKUP_EXPORT_PATH: &str = "/v1/backup/export";
 pub const BACKUP_RESTORE_PATH: &str = "/v1/backup/restore";
 /// Matches the daemon's Content-Disposition name (backup.Filename).
 pub const BACKUP_FILENAME: &str = "strike-backup.json";
-pub const BACKUP_EXPORT_HINT: &str = "One plain, unencrypted JSON file of this gateway's sessions, memory, knowledge pins, schedules and non-secret settings. Provider keys, gateway tokens and secret values are never included; the file lists every left-out category by name.";
+pub const BACKUP_EXPORT_HINT: &str = "One plain, unencrypted JSON file of this gateway's sessions, memory, knowledge pins, schedules, issues, plans and non-secret settings. Provider keys, gateway tokens and secret values are never included; the file lists every left-out category by name.";
 pub const BACKUP_RESTORE_HINT: &str = "Restore checks the file's integrity hashes, then shows what it will create, skip, or restore as a copy. Nothing on this gateway is overwritten.";
 
 /// Section order the daemon restores in (backup.KnownSections).
-const SECTIONS: [&str; 5] = ["settings", "memory", "knowledge", "schedules", "sessions"];
+const SECTIONS: [&str; 7] = [
+    "settings",
+    "memory",
+    "knowledge",
+    "schedules",
+    "issues",
+    "plans",
+    "sessions",
+];
 /// Rows shown per report; the counts above always cover everything.
 const MAX_ROWS: usize = 200;
 
@@ -65,6 +75,66 @@ pub struct RestoreReport {
     pub items: Vec<RestoreItem>,
     #[serde(default)]
     pub excluded: Vec<Exclusion>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct EstimateSection {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub items: u64,
+    #[serde(default)]
+    pub bytes: u64,
+}
+
+/// The daemon's pre-download size report (`GET /v1/backup/estimate`).
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Estimate {
+    #[serde(default)]
+    pub total_bytes: u64,
+    #[serde(default)]
+    pub sections: Vec<EstimateSection>,
+}
+
+/// "512 B", "1.5 KB", "2.3 MB" (1024-based, one decimal past bytes).
+fn human_bytes(n: u64) -> String {
+    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
+    if n < 1024 {
+        return format!("{n} B");
+    }
+    let mut v = n as f64 / 1024.0;
+    let mut unit = 0;
+    while v >= 1024.0 && unit < UNITS.len() - 1 {
+        v /= 1024.0;
+        unit += 1;
+    }
+    format!("{v:.1} {}", UNITS[unit])
+}
+
+fn estimate_total(e: &Estimate) -> String {
+    format!("About {} to download.", human_bytes(e.total_bytes))
+}
+
+/// "sessions: 3 items, 1.5 KB" in restore order, then any section this
+/// cockpit does not know yet (a newer daemon), so nothing is hidden.
+fn estimate_lines(e: &Estimate) -> Vec<String> {
+    let line = |s: &EstimateSection| {
+        let noun = if s.items == 1 { "item" } else { "items" };
+        format!("{}: {} {noun}, {}", s.name, s.items, human_bytes(s.bytes))
+    };
+    let mut out: Vec<String> = SECTIONS
+        .iter()
+        .filter_map(|name| e.sections.iter().find(|s| s.name == *name))
+        .map(line)
+        .collect();
+    out.extend(
+        e.sections
+            .iter()
+            .filter(|s| !SECTIONS.contains(&s.name.as_str()))
+            .map(line),
+    );
+    out
 }
 
 fn restore_path(dry_run: bool) -> String {
@@ -177,6 +247,22 @@ pub fn InstanceBackup(
     let plan = RwSignal::new(None::<RestoreReport>);
     let result = RwSignal::new(None::<RestoreReport>);
     let busy = RwSignal::new(false);
+    let estimate = RwSignal::new(None::<Estimate>);
+    let estimate_error = RwSignal::new(String::new());
+
+    let load_estimate = move || {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match get_json::<Estimate>(&b, &t, BACKUP_ESTIMATE_PATH).await {
+                Ok(e) => {
+                    estimate.set(Some(e));
+                    estimate_error.set(String::new());
+                }
+                Err(e) => estimate_error.set(format!("Size estimate unavailable: {e}")),
+            }
+        });
+    };
+    load_estimate();
 
     let export = move || {
         if exporting.get_untracked() {
@@ -255,6 +341,7 @@ pub fn InstanceBackup(
                             status.set(format!("Restored from backup: {lines}"));
                             plan.set(None);
                             result.set(Some(rep));
+                            load_estimate();
                         }
                     }
                     Err(e) => error.set(e),
@@ -274,6 +361,24 @@ pub fn InstanceBackup(
                     {move || if exporting.get() { "Exporting\u{2026}" } else { "Export instance backup" }}
                 </button>
                 <p class="hint">{BACKUP_EXPORT_HINT}</p>
+                <div class="backup-estimate" data-backup-estimate="true">
+                    {move || estimate.get().map(|e| {
+                        let total = estimate_total(&e);
+                        let lines = estimate_lines(&e);
+                        view! {
+                            <div class="backup-estimate-body">
+                                <p class="hint">{total}</p>
+                                <ul class="backup-summary">
+                                    {lines.into_iter().map(|line| view! { <li>{line}</li> }).collect_view()}
+                                </ul>
+                            </div>
+                        }
+                        .into_any()
+                    })}
+                    <Show when=move || !estimate_error.get().is_empty()>
+                        <p class="hint">{move || estimate_error.get()}</p>
+                    </Show>
+                </div>
                 <Show when=move || !exported.get().is_empty()>
                     <p class="hint" role="status" data-backup-export-status="true">{move || exported.get()}</p>
                 </Show>
@@ -353,6 +458,51 @@ mod tests {
         let r = parse_report(REPORT).unwrap();
         assert_eq!(item_line(&r.items[0]), "memory prefs \u{2014} create");
         assert_eq!(item_line(&r.items[1]), "sessions Fix \u{2014} copy as s9 (differs)");
+    }
+
+    #[test]
+    fn estimate_parses_and_lists_sections_in_restore_order() {
+        let e: Estimate = serde_json::from_str(
+            r#"{"totalBytes":2200000,"sections":[
+                {"name":"sessions","items":3,"bytes":1536,"sha256":"x"},
+                {"name":"issues","items":1,"bytes":80},
+                {"name":"settings","items":1,"bytes":40},
+                {"name":"widgets","items":2,"bytes":10}],
+               "excluded":[{"category":"provider credentials","kind":"secret","reason":"r"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(estimate_total(&e), "About 2.1 MB to download.");
+        assert_eq!(
+            estimate_lines(&e),
+            vec![
+                "settings: 1 item, 40 B".to_string(),
+                "issues: 1 item, 80 B".to_string(),
+                "sessions: 3 items, 1.5 KB".to_string(),
+                "widgets: 2 items, 10 B".to_string(),
+            ]
+        );
+        assert!(estimate_lines(&Estimate::default()).is_empty());
+    }
+
+    #[test]
+    fn human_bytes_scales() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(1023), "1023 B");
+        assert_eq!(human_bytes(1024), "1.0 KB");
+        assert_eq!(human_bytes(5 * 1024 * 1024 * 1024), "5.0 GB");
+    }
+
+    #[test]
+    fn summary_includes_issues_and_plans() {
+        let r = parse_report(r#"{"counts":{"plans":{"copy":1},"issues":{"create":2},"sessions":{"skip":1}}}"#).unwrap();
+        assert_eq!(
+            summary_lines(&r),
+            vec![
+                "issues: 2 create".to_string(),
+                "plans: 1 copy".to_string(),
+                "sessions: 1 skip".to_string(),
+            ]
+        );
     }
 
     #[test]
