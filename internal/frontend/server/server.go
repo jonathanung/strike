@@ -109,6 +109,17 @@ type Options struct {
 	Sandbox *SandboxSnapshot
 	// ReadOnly rejects mutating protocol ops (POST /v1/ops and WS op frames).
 	ReadOnly bool
+	// WorkspaceTrustPath is the workspace trust store file
+	// (~/.strike/workspace-trust.json) behind GET/POST /v1/workspace/trust
+	// (#1781). Empty disables the routes (501).
+	WorkspaceTrustPath string
+	// WorkspaceTrustAssembled is the workspace this daemon's sessions were
+	// assembled for and the trust decision they were built with. Every root
+	// of one strike serve shares that assembly (session worktrees included),
+	// so when set it is the workspace /v1/workspace/trust reports and
+	// changes, and a decision that differs from Trusted sets
+	// restartRequired. Nil (attach-only) falls back to the live root's CWD.
+	WorkspaceTrustAssembled *WorkspaceTrustAssembly
 	// WorkDir is the process working directory. Customize uses it as the
 	// workspace scope when no live session is attached. Apps uses it as the
 	// git workspace for GitHub triage. The browser cannot choose it. Empty
@@ -218,6 +229,9 @@ type Server struct {
 	// notifyOnce lazily opens the redacted notification log under SessionDir.
 	notifyOnce sync.Once
 	notifyLog  *notifyLog
+	// shareOnce lazily opens the session share-link grant store (#1565).
+	shareOnce  sync.Once
+	shareStore *shareStore
 	// pushOnce lazily opens the Web Push subscription store (#1564).
 	pushOnce  sync.Once
 	pushStore *pushStore
@@ -635,6 +649,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/deploy-watches/{id}", s.handleDeployWatchGet)
 	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/poll", s.handleDeployWatchPoll)
 	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/cancel", s.handleDeployWatchCancel)
+	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/fix-session", s.handleDeployWatchFixSession)
+	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/revert-pr", s.handleDeployWatchRevertPR)
 	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
 	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/activate", s.handleRootActivate)
@@ -650,12 +666,21 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/status/events", s.handleSessionStatusEvents)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/seen", s.handleSessionSeen)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}/seen", s.handleSessionUnseen)
+	// Session share links (#1565). Mint/list/revoke need gateway auth; the
+	// /share/v1 redeem route takes the share token in its body and is the
+	// only route that token opens.
+	s.mux.HandleFunc("POST /v1/sessions/{id}/shares", s.handleShareMint)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/shares", s.handleShareList)
+	s.mux.HandleFunc("DELETE /v1/sessions/{id}/shares/{shareId}", s.handleShareRevoke)
+	s.mux.HandleFunc("POST /share/v1/transcript", s.handleShareTranscript)
 	s.mux.HandleFunc("GET /v1/agents", s.handleAgents)
 	s.mux.HandleFunc("GET /v1/diag", s.handleDiag)
 	s.mux.HandleFunc("POST /v1/diag", s.handleDiag)
 	// Project init (#1581): AGENTS.md bootstrap via host.ProjectInit.
 	s.mux.HandleFunc("GET /v1/init", s.handleProjectInitGet)
 	s.mux.HandleFunc("POST /v1/init", s.handleProjectInitPost)
+	s.mux.HandleFunc("GET /v1/workspace/trust", s.handleWorkspaceTrustGet)
+	s.mux.HandleFunc("POST /v1/workspace/trust", s.handleWorkspaceTrustPost)
 	s.mux.HandleFunc("POST /v1/attachments", s.handleAttachmentIngest)
 	s.mux.HandleFunc("GET /v1/attachments/{ref}", s.handleAttachmentGet)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)

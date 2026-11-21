@@ -506,6 +506,40 @@ Go `QuestionResolved`.
 | `depth` | number | yes |
 | `requestId` | string |  |
 
+#### `elicitation.requested`
+
+Go `ElicitationRequested`.
+
+| Field | Type | omitempty |
+|---|---|---|
+| `sessionId` | string | yes |
+| `turnId` | string | yes |
+| `providerRequestId` | string | yes |
+| `attempt` | number | yes |
+| `parentSessionId` | string | yes |
+| `depth` | number | yes |
+| `requestId` | string |  |
+| `server` | string |  |
+| `message` | string |  |
+| `mode` | string |  |
+| `requestedSchema` | raw | yes |
+| `url` | string | yes |
+
+#### `elicitation.resolved`
+
+Go `ElicitationResolved`.
+
+| Field | Type | omitempty |
+|---|---|---|
+| `sessionId` | string | yes |
+| `turnId` | string | yes |
+| `providerRequestId` | string | yes |
+| `attempt` | number | yes |
+| `parentSessionId` | string | yes |
+| `depth` | number | yes |
+| `requestId` | string |  |
+| `action` | string |  |
+
 #### `turn.steered`
 
 Go `TurnSteered`.
