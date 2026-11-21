@@ -42,6 +42,7 @@ mod local_issues;
 mod mermaid;
 mod localfiles;
 mod customize;
+mod delegation_board;
 mod deploy_watch;
 mod gateway;
 mod gateway_peek;
@@ -122,6 +123,7 @@ mod workspaces;
 mod workflows;
 mod workflow_run;
 use crate::shell::icon;
+use crate::delegation_board::DelegationBoard;
 use crate::child_signals::TeamMessagesFeed;
 
 
@@ -1215,6 +1217,8 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // #1381: delegation board rows from the /v1/team poll.
+    let delegation_rows = RwSignal::new(Vec::<delegation_board::BoardRow>::new());
     // Bootstrap capability `plugins` (#1570): gates plugin lifecycle.
     let plugins_capable = RwSignal::new(false);
     // Typed config-source list (#1493), from bootstrap `configFiles`.
@@ -1649,6 +1653,10 @@ fn App() -> impl IntoView {
                     let now = now_ms();
                     let prev = activity.get_untracked();
                     let rows = rows_from_team(&prev, &team, now);
+                    let board = delegation_board::board_rows(&team);
+                    if delegation_rows.get_untracked() != board {
+                        delegation_rows.set(board);
+                    }
                     let (names, escalations) = team_signal_maps(&team);
                     if team_names.get_untracked() != names {
                         team_names.set(names);
@@ -6691,6 +6699,7 @@ fn App() -> impl IntoView {
                     <Show when=move || !children_note.get().is_empty()>
                         <p class="hint" data-children-note="true">{move || children_note.get()}</p>
                     </Show>
+                    <DelegationBoard rows=delegation_rows />
                     <Show when=move || activity.get().is_empty()>
                         {move || {
                             let failed = !children_note.get().is_empty();
