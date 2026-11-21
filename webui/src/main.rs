@@ -9,6 +9,7 @@
 
 mod api;
 mod appearance;
+mod attachment_honesty;
 mod apps;
 mod approvals;
 mod approvals_ui;
@@ -5364,6 +5365,22 @@ fn App() -> impl IntoView {
                                         }
                                     }).collect_view()}
                                 </div>
+                                {move || {
+                                    // #1561: say when the engine is known to drop a file
+                                    // before the model sees it. Warn, never block.
+                                    let rows: Vec<(String, String)> = pending_files
+                                        .get()
+                                        .into_iter()
+                                        .filter(|f| f.error.is_empty())
+                                        .map(|f| (f.name, f.mime))
+                                        .collect();
+                                    let lines = attachment_honesty::composer_warnings(&provider_name.get(), &rows);
+                                    (!lines.is_empty()).then(|| view! {
+                                        <div class="attach-warning" role="status" data-attach-warning="true">
+                                            {lines.into_iter().map(|line| view! { <p>{line}</p> }).collect_view()}
+                                        </div>
+                                    })
+                                }}
                             </Show>
                             <input class="file-pick" type="file" data-chat-file="true" data-chat-attach="true" node_ref=file_input multiple=true
                                 accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,image/svg+xml,text/plain,application/zip,application/gzip"
