@@ -58,6 +58,9 @@ type suggestionSnoozeRequest struct {
 type suggestionPrefsRequest struct {
 	MutedSources []string `json:"mutedSources"`
 	MutedKinds   []string `json:"mutedKinds"`
+	// QuietHours is optional: an older client that omits it keeps the
+	// stored window.
+	QuietHours *suggestion.QuietHours `json:"quietHours"`
 }
 
 func (s *Server) suggestions() (*suggestion.Store, error) {
@@ -86,7 +89,9 @@ func suggestionError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, suggestion.ErrInvalid):
 		http.Error(w, err.Error(), http.StatusBadRequest)
-	case errors.Is(err, suggestion.ErrMuted):
+	case errors.Is(err, suggestion.ErrMuted),
+		errors.Is(err, suggestion.ErrQuiet),
+		errors.Is(err, suggestion.ErrDismissed):
 		http.Error(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, suggestion.ErrNotFound):
 		http.Error(w, err.Error(), http.StatusNotFound)
@@ -228,7 +233,7 @@ func (s *Server) handleSuggestionPrefs(w http.ResponseWriter, r *http.Request) {
 		suggestionError(w, err)
 		return
 	}
-	prefs, err := store.SetMuted(in.MutedSources, in.MutedKinds)
+	prefs, err := store.SetPrefs(in.MutedSources, in.MutedKinds, in.QuietHours)
 	if err != nil {
 		suggestionError(w, err)
 		return

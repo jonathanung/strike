@@ -48,6 +48,12 @@ func TestProjectLineAllowlistDropsSecretsAndOutput(t *testing.T) {
 			wantSess: "root1", wantReq: "root1:perm_9",
 		},
 		{
+			name:   "agent question keeps the fact only",
+			line:   `{"type":"question.asked","time":"2026-10-26T12:00:00Z","data":{"sessionId":"root1","requestId":"root1:q_1","questions":[{"id":"q1","header":"` + notifyMarker + `","question":"use ` + notifySecret + `?","options":[{"label":"` + notifySecret + `"}]}]}}`,
+			wantOK: true, wantKind: noteApproval, wantBody: "The agent is waiting on your answer",
+			wantSess: "root1", wantSub: "root1", wantReq: "root1:q_1",
+		},
+		{
 			name: "tool output is not a notification",
 			line: `{"type":"tool.end","time":"2026-10-26T12:00:00Z","data":{"name":"bash","output":"` + notifyMarker + ` ` + notifySecret + `"}}`,
 		},

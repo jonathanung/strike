@@ -310,13 +310,13 @@ files are inspected and edited.
 
 ## Powers
 
-The daemon side is in place but no chip is drawn yet (#1347).
+The daemon side is in place but no chip is drawn yet (#1347, #1867).
 `internal/integrate/powers` loads packs from
 `<workspace>/.strike/powers/<pack>/` and `~/.strike/powers/<pack>/`, and
-the workspace copy wins on a name clash. Each pack is an Agent Plugins
-package: `plugin.json` holds `name` and `keywords`, `mcp.json` holds
-`mcpServers`, and `skills/<name>/SKILL.md` holds skills. These are
-references by name, not copies.
+the workspace copy wins on a name clash. Workspace packs load only in a
+trusted workspace. Each pack is an Agent Plugins package: `plugin.json`
+holds `name` and `keywords`, `mcp.json` holds `mcpServers`, and
+`skills/<name>/SKILL.md` holds skills.
 
 A pack is suggested when a keyword appears in the prompt as a whole word
 or phrase. Packs that are muted or already active are not suggested, and
@@ -325,14 +325,29 @@ reference-counted: packs that share a server keep it until the last one is
 deactivated, and ending one session never disconnects another session's
 servers. If a server fails to connect, it is listed as failed and left
 out of the session, and the chip and the tool set read the same result.
-If a pack names a deny-listed server, the whole pack stays inactive and
-the reason is shown.
+If a pack names a server the permission rules deny (`mcp` `<server>/*`),
+the whole pack stays inactive and the reason is shown.
 
-Not built yet:
-- a `Connector` connected to the MCP session manager, and the daemon routes for it;
+`mcp.PackConnector` attaches pack servers through the MCP manager, with
+the same admission scan as configured servers, and detaches them when the
+last session releases them. A server already configured in `mcp.json` is
+borrowed and never detached. The dial runs outside the Powers lock, so a
+slow server does not stall other sessions.
+
+Routes: `GET /v1/powers?session=`, `POST /v1/powers/suggest`
+`{session, prompt}`, `POST /v1/powers/activate` and `/deactivate`
+`{session, name}` (activate needs a live session, a denied pack is 403),
+and `POST /v1/powers/mute` `{name, muted}`. The mutating routes refuse
+`--read-only`. Closing a root or deleting a session unloads its Powers.
+
+Not built yet (#1943):
+- skills loaded into context per session;
+- per-session tool scoping (the MCP registry is process-wide, so a pack's
+  tools are visible to every root until the last session releases them);
 - the composer chip row with context cost (#1259);
 - pack membership on Customize;
-- goal-declared Powers (#1284).
+- goal-declared Powers (#1284);
+- persisted mute and last-used time.
 
 ## Composer triggers
 
@@ -440,8 +455,11 @@ and tool text are never sent. 404/410 from the push service prunes the
 subscription; `GET /v1/notifications` reports `push.lastResult` so the
 toggle can say a push failed. The VAPID key is `push/vapid.json` beside the
 session dir (0600). Unsupported browsers, blocked permission, and iOS
-without Home Screen install are named in the toggle. Not built yet:
-opt-in push for finished or failed runs.
+without Home Screen install are named in the toggle. Finished and failed
+runs (`session.finished`, `child.finished`) push only after "Also push
+finished and failed runs" is checked under Push notifications (#1917): the
+daemon-side `pushFinished` pref in `NotifyPrefs`, default off, with the same
+generic payload.
 A gateway drop is detected by the page (the daemon cannot deliver "I am
 gone"); it is not a JSONL record.
 
@@ -648,6 +666,28 @@ Not in this slice: non-GitHub forges, pushing to a remote other than
 origin, and the live checks chip (PR watch, #1356, reads the same session
 fields).
 
+## Agent questions
+
+Shipped (#1338): the `question` tool's `question.asked` renders as a card
+above the composer (`webui/src/questions.rs`, `questions_ui.rs`). One
+question shows at a time with Back / Next; each choice question also offers
+"Your own answer". Send answers posts one `question.reply` with every answer
+in order. Dismiss (or Escape) posts empty answers, which the engine treats as
+a rejection and ends the turn. The session row's "Question" waiting state
+comes from `questionPending`; the daemon also raises an `approval.needed`
+notification titled "Question from the agent" that carries no question text.
+`strike serve --provider echo`: send `ask <text>` to get a real question.
+
+Not built:
+
+- Multi-select. `QuestionPrompt` has no multi-select flag and the reply is
+  one string per prompt, so the card offers one choice or your own text, the
+  same as the TUI modal. Adding it needs a protocol field first.
+- Answering from the notification or session list without opening the
+  session. Recommended default: no; the card is the only answer surface.
+- Timeouts. An unanswered question blocks until answered, dismissed, or the
+  turn is stopped (recommended default: keep blocking).
+
 ## Pre-push review
 
 "Review this branch" in the Git tab (#1487) sizes the branch diff first
@@ -692,8 +732,8 @@ these need a new panel.
 ## Instance backup
 
 Settings → Backup ships export and dry-run-first restore for sessions,
-memory, schedules and non-secret settings (#1339, see
-`docs/instance-backup.md`). Knowledge pins, artifacts, attachments,
+memory, knowledge pins, schedules and non-secret settings (#1339, see
+`docs/instance-backup.md`). Artifacts, attachments,
 goals/autopilot state, workspaces and their rules, issues, plans and the
 ledger are not in archive version 1; the manifest names them as
 `not-yet-included`. Passphrase encryption is not offered: the file says

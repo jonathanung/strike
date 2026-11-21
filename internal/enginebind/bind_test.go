@@ -31,6 +31,54 @@ func TestMemoryAutoLoad(t *testing.T) {
 	}
 }
 
+func TestMemoryForSessionRecordsInjection(t *testing.T) {
+	root := t.TempDir()
+	project, err := memory.Open(root, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	global, err := memory.Open(root, memory.GlobalKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = project.Close(); _ = global.Close() })
+	if err := project.Put("use-make", "run make test-fast", []string{memory.TagLesson}); err != nil {
+		t.Fatal(err)
+	}
+	if err := project.Put("scratch", "not injected", []string{"note"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := global.Put("tabs", "prefer tabs", []string{memory.TagPreference}); err != nil {
+		t.Fatal(err)
+	}
+	src := CombineMemory(MemoryForSession(project, "sess-a"), MemoryForSession(global, "sess-a"))
+	text, _, err := src.AutoLoad()
+	if err != nil || !contains(text, "run make test-fast") || !contains(text, "prefer tabs") || contains(text, "not injected") {
+		t.Fatalf("autoload text=%q err=%v", text, err)
+	}
+	got, err := project.Injected("sess-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := map[string]string{}
+	for _, e := range got {
+		keys[e.Key] = e.Scope
+	}
+	if len(got) != 2 || keys["use-make"] != "project" || keys["tabs"] != "global" {
+		t.Fatalf("injected = %+v", got)
+	}
+	if other, err := project.Injected("sess-b"); err != nil || len(other) != 0 {
+		t.Fatalf("other session injected = %+v err=%v", other, err)
+	}
+	// Plain Memory records nothing.
+	if _, _, err := Memory(project).AutoLoad(); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := project.Injected("sess-a"); len(again) != 2 {
+		t.Fatalf("plain Memory changed the record: %+v", again)
+	}
+}
+
 func TestLedgerActiveSliceFreshness(t *testing.T) {
 	store, err := ledger.Open(t.TempDir(), "p")
 	if err != nil {
