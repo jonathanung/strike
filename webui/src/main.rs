@@ -25,6 +25,7 @@ mod context_doctor;
 mod composer_triggers;
 mod config_sources;
 mod diag;
+mod diagnostics;
 mod draft_size;
 mod drafts;
 mod editor;
@@ -1505,6 +1506,12 @@ fn App() -> impl IntoView {
     let doc_path = RwSignal::new(String::new());
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
+    // LSP diagnostics (#1404): last /v1/diagnostics result, a refresh
+    // counter, and a generation so a slow older fetch cannot overwrite a
+    // newer one.
+    let diag_state = RwSignal::new(diagnostics::DiagState::Idle);
+    let diag_rev = RwSignal::new(0u32);
+    let diag_gen = RwSignal::new(0u32);
     // Search in files (#1406): the Files-pane box's query and a run
     // counter the palette command bumps to start a search.
     let sif_query = RwSignal::new(String::new());
@@ -3652,6 +3659,31 @@ fn App() -> impl IntoView {
         });
     };
 
+    // Diagnostics (#1404) load while the pane is shown or a document is
+    // open (for the editor badge), and again on every Refresh / palette
+    // open (diag_rev). The previous result stays visible while reloading.
+    Effect::new(move |_| {
+        let _ = diag_rev.get();
+        let shown = side_tab.get() == "diagnostics";
+        let doc_open = !doc_path.get().is_empty();
+        if !shown && !doc_open {
+            return;
+        }
+        let gen = diag_gen.get_untracked().wrapping_add(1);
+        diag_gen.set(gen);
+        if !matches!(diag_state.get_untracked(), diagnostics::DiagState::Ready(_)) {
+            diag_state.set(diagnostics::DiagState::Loading);
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let res = api::get_text(&b, &t, diagnostics::PATH).await;
+            if diag_gen.get_untracked() != gen {
+                return;
+            }
+            diag_state.set(diagnostics::state_from(res));
+        });
+    });
+
     Effect::new(move |_| {
         let tab = side_tab.get();
         let _ = files_path.get();
@@ -5124,6 +5156,15 @@ fn App() -> impl IntoView {
         }),
     );
     shell::bind(
+        "lsp-diagnostics.open",
+        Rc::new(move |_| {
+            side_tab.set("diagnostics".into());
+            mode.set("chat".into());
+            diag_rev.update(|n| *n = n.wrapping_add(1));
+            Ok(())
+        }),
+    );
+    shell::bind(
         "search-in-files.run",
         Rc::new(move |args: &str| {
             let q = args.trim();
@@ -5783,6 +5824,14 @@ fn App() -> impl IntoView {
                     // #1785: a deploy watch session shows its verdict card.
                     <deploy_watch::DeployWatchCard base=base token=token active=active_root tick=tick />
                     <Show when=move || !doc_path.get().is_empty()>
+                        <diagnostics::DocBadge
+                            state=diag_state
+                            doc_path=doc_path
+                            on_click=Callback::new(move |_| {
+                                side_tab.set("diagnostics".into());
+                                diag_rev.update(|n| *n = n.wrapping_add(1));
+                            })
+                        />
                         <DocumentPane
                             base=base
                             token=token
@@ -6908,6 +6957,17 @@ fn App() -> impl IntoView {
                             memory_mode=memory_mode
                             status=status
                             storage_rev=storage_rev
+                        />
+                    </Show>
+                    <Show when=move || side_tab.get() == "diagnostics">
+                        <diagnostics::DiagnosticsPane
+                            state=diag_state
+                            on_refresh=Callback::new(move |_| diag_rev.update(|n| *n = n.wrapping_add(1)))
+                            on_open=Callback::new(move |(path, line): (String, u32)| {
+                                doc_diff.set(false);
+                                doc_line.set(line);
+                                doc_path.set(path);
+                            })
                         />
                     </Show>
                     <Show when=move || side_tab.get() == "issues" && issues_capable.get()>
