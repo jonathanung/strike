@@ -127,6 +127,15 @@ pub fn apply_loops_envelope(raw: &str, stream_root: &str, active: RwSignal<Strin
     }
 }
 
+/// The rows after a successful start, without a refetch: the new loop is
+/// appended unless loops.changed already brought it (ids only grow).
+pub fn with_started(mut loops: Vec<SessionLoop>, started: SessionLoop) -> Vec<SessionLoop> {
+    if !started.id.is_empty() && !loops.iter().any(|l| l.id == started.id) {
+        loops.push(started);
+    }
+    loops
+}
+
 /// The rows after a successful stop, without a refetch: `Some(id)` drops
 /// that loop, `None` (stop all) clears the list.
 pub fn without_stopped(mut loops: Vec<SessionLoop>, id: Option<&str>) -> Vec<SessionLoop> {
@@ -347,7 +356,11 @@ pub async fn run(
                 Ok(v) => {
                     let started = serde_json::from_value::<StartResponse>(v).unwrap_or_default();
                     note(started_note(&started.r#loop));
-                    refresh(base, token, root, active, loops).await;
+                    // loops.changed usually lands first; adding the row
+                    // here only when it is missing avoids a refetch.
+                    if active.get_untracked() == root {
+                        loops.update(|ls| *ls = with_started(std::mem::take(ls), started.r#loop));
+                    }
                 }
                 Err(e) => note(format!("loop: {}", daemon_error(&e))),
             }
@@ -610,6 +623,18 @@ mod tests {
         assert_eq!(loops_from_envelope(empty), Some(Vec::new()));
         let null = r#"{"type":"loops.changed","time":"2026-11-21T10:00:00Z","data":{"sessionId":"s1","reason":"close","loops":null}}"#;
         assert_eq!(loops_from_envelope(null), Some(Vec::new()));
+    }
+
+    #[test]
+    fn start_adds_the_row_once_without_a_refetch() {
+        let row = |id: &str, runs: i64| SessionLoop { id: id.into(), runs, ..Default::default() };
+        // The event already brought l2 (with newer state): keep it.
+        let got = with_started(vec![row("l1", 0), row("l2", 4)], row("l2", 0));
+        assert_eq!(got, vec![row("l1", 0), row("l2", 4)]);
+        // Response first: append.
+        assert_eq!(with_started(vec![row("l1", 0)], row("l2", 0)), vec![row("l1", 0), row("l2", 0)]);
+        // A malformed response adds nothing.
+        assert_eq!(with_started(vec![row("l1", 0)], SessionLoop::default()), vec![row("l1", 0)]);
     }
 
     #[test]
