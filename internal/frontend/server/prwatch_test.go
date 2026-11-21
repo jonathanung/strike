@@ -16,8 +16,8 @@ import (
 	"github.com/jonathanung/strike/internal/persist/session"
 )
 
-// fakeGH records calls and answers by first two args ("pr view", "run view").
-type fakeGH struct {
+// prFakeGH records calls and answers by first two args ("pr view", "run view").
+type prFakeGH struct {
 	mu    sync.Mutex
 	calls [][]string
 	dirs  []string
@@ -27,7 +27,7 @@ type fakeGH struct {
 	logEr error
 }
 
-func (f *fakeGH) run(_ context.Context, dir string, args ...string) ([]byte, error) {
+func (f *prFakeGH) run(_ context.Context, dir string, args ...string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, append([]string(nil), args...))
@@ -44,7 +44,7 @@ func (f *fakeGH) run(_ context.Context, dir string, args ...string) ([]byte, err
 	return []byte(f.pr), nil
 }
 
-func (f *fakeGH) count(prefix string) int {
+func (f *prFakeGH) count(prefix string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	n := 0
@@ -69,7 +69,7 @@ func seedPRSession(t *testing.T, dir, id string, meta session.Meta) {
 	}
 }
 
-func newPRServer(t *testing.T, gh *fakeGH) (*Server, string) {
+func newPRServer(t *testing.T, gh *prFakeGH) (*Server, string) {
 	t.Helper()
 	dir := t.TempDir()
 	srv, err := New(Options{SessionDir: dir})
@@ -108,7 +108,7 @@ const (
 )
 
 func TestSessionsPayloadIncludesPRFields(t *testing.T) {
-	srv, dir := newPRServer(t, &fakeGH{})
+	srv, dir := newPRServer(t, &prFakeGH{})
 	seedPRSession(t, dir, "pr-session", session.Meta{Title: "Shipped", PRURL: prURL, PRNumber: 42, PRState: "OPEN"})
 	seedPRSession(t, dir, "plain-session", session.Meta{Title: "No PR"})
 	code, body := prGet(t, srv, "/v1/sessions")
@@ -212,7 +212,7 @@ func TestRollupPRChecks(t *testing.T) {
 }
 
 func TestSessionPRStatusFailingOpenPR(t *testing.T) {
-	gh := &fakeGH{pr: prJSON("OPEN", "", strings.Join([]string{checkPass, checkFail, checkCtx}, ","))}
+	gh := &prFakeGH{pr: prJSON("OPEN", "", strings.Join([]string{checkPass, checkFail, checkCtx}, ","))}
 	srv, dir := newPRServer(t, gh)
 	clock := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
 	srv.prWatch.now = func() time.Time { return clock }
@@ -277,7 +277,7 @@ func TestSessionPRStatusFailingOpenPR(t *testing.T) {
 func TestSessionPRStatusStopsPollingOnTerminalState(t *testing.T) {
 	for _, state := range []string{"MERGED", "CLOSED"} {
 		t.Run(state, func(t *testing.T) {
-			gh := &fakeGH{pr: prJSON(state, "", checkFail)}
+			gh := &prFakeGH{pr: prJSON(state, "", checkFail)}
 			srv, dir := newPRServer(t, gh)
 			seedPRSession(t, dir, "s1", session.Meta{PRURL: prURL, PRNumber: 42, PRState: "open"})
 			_, body := prGet(t, srv, "/v1/sessions/s1/pr")
@@ -303,7 +303,7 @@ func TestSessionPRStatusStopsPollingOnTerminalState(t *testing.T) {
 }
 
 func TestSessionPRStatusChangesRequestedNeedsAttention(t *testing.T) {
-	gh := &fakeGH{pr: prJSON("OPEN", "CHANGES_REQUESTED", checkPass)}
+	gh := &prFakeGH{pr: prJSON("OPEN", "CHANGES_REQUESTED", checkPass)}
 	srv, dir := newPRServer(t, gh)
 	seedPRSession(t, dir, "s1", session.Meta{PRURL: prURL})
 	_, body := prGet(t, srv, "/v1/sessions/s1/pr")
@@ -332,7 +332,7 @@ func TestSessionPRStatusUnavailableStopsPolling(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gh := &fakeGH{prErr: tc.err}
+			gh := &prFakeGH{prErr: tc.err}
 			srv, dir := newPRServer(t, gh)
 			seedPRSession(t, dir, "s1", tc.meta)
 			code, body := prGet(t, srv, "/v1/sessions/s1/pr")
@@ -357,7 +357,7 @@ func TestSessionPRStatusUnavailableStopsPolling(t *testing.T) {
 }
 
 func TestSessionPRStatusUnlinkedAndInvalid(t *testing.T) {
-	gh := &fakeGH{}
+	gh := &prFakeGH{}
 	srv, dir := newPRServer(t, gh)
 	seedPRSession(t, dir, "plain", session.Meta{Title: "x"})
 	_, body := prGet(t, srv, "/v1/sessions/plain/pr")
@@ -374,7 +374,7 @@ func TestSessionPRStatusUnlinkedAndInvalid(t *testing.T) {
 func TestPRFixDraftIsRedactedAndPostsNothing(t *testing.T) {
 	secret := fakeToken()
 	t.Setenv("GH_TOKEN", secret)
-	gh := &fakeGH{
+	gh := &prFakeGH{
 		pr:  prJSON("OPEN", "CHANGES_REQUESTED", strings.Join([]string{checkPass, checkFail, checkCtx}, ",")),
 		log: "vet\tRun go vet\t./x.go:3: bad\nvet\tRun go vet\ttoken=" + secret + "\n",
 	}
@@ -422,12 +422,12 @@ func TestPRFixDraftRefusesWithoutAttention(t *testing.T) {
 	cases := []struct {
 		name string
 		meta session.Meta
-		gh   *fakeGH
+		gh   *prFakeGH
 	}{
-		{"unlinked", session.Meta{}, &fakeGH{}},
-		{"all green", session.Meta{PRURL: prURL}, &fakeGH{pr: prJSON("OPEN", "", checkPass)}},
-		{"merged", session.Meta{PRURL: prURL}, &fakeGH{pr: prJSON("MERGED", "", checkFail)}},
-		{"gh signed out", session.Meta{PRURL: prURL}, &fakeGH{prErr: errGHUnauthenticated}},
+		{"unlinked", session.Meta{}, &prFakeGH{}},
+		{"all green", session.Meta{PRURL: prURL}, &prFakeGH{pr: prJSON("OPEN", "", checkPass)}},
+		{"merged", session.Meta{PRURL: prURL}, &prFakeGH{pr: prJSON("MERGED", "", checkFail)}},
+		{"gh signed out", session.Meta{PRURL: prURL}, &prFakeGH{prErr: errGHUnauthenticated}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -447,7 +447,7 @@ func TestPRWatchNeverReturnsTokens(t *testing.T) {
 	secret := fakeToken()
 	t.Setenv("GH_TOKEN", secret)
 	t.Setenv("GITHUB_TOKEN", secret)
-	gh := &fakeGH{pr: prJSON("OPEN", "", checkRun)}
+	gh := &prFakeGH{pr: prJSON("OPEN", "", checkRun)}
 	srv, dir := newPRServer(t, gh)
 	seedPRSession(t, dir, "s1", session.Meta{PRURL: prURL})
 	for _, path := range []string{"/v1/sessions", "/v1/sessions/s1/pr"} {
@@ -543,7 +543,7 @@ func TestPRAttentionNoteDedupesBySet(t *testing.T) {
 }
 
 func TestSessionPRNumberOnlyRunsInSessionRepo(t *testing.T) {
-	gh := &fakeGH{pr: prJSON("OPEN", "", checkPass)}
+	gh := &prFakeGH{pr: prJSON("OPEN", "", checkPass)}
 	srv, dir := newPRServer(t, gh)
 	seedPRSession(t, dir, "s1", session.Meta{PRNumber: 42, ProjectKey: "/work/session-repo"})
 	_, body := prGet(t, srv, "/v1/sessions/s1/pr")
