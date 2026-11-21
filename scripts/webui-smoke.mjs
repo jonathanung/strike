@@ -2484,6 +2484,120 @@ try {
     { timeout: WAIT_MS, interval: 250 },
   );
 
+  // Local issues (#1500): create → listed under Open → close → listed under
+  // Closed → still closed after the panel remounts (fresh daemon read) and
+  // in the daemon's own list. An empty title is refused inline.
+  const issuesBoot = await (
+    await fetch(`http://127.0.0.1:${port}/v1/bootstrap`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (!issuesBoot.capabilities?.issues) {
+    throw new Error(`bootstrap does not advertise the issues capability: ${JSON.stringify(issuesBoot.capabilities)}`);
+  }
+  const issueRows = async () =>
+    (await evaluate(`[...document.querySelectorAll("[data-local-issues] .local-issue-row")].map((r) => [
+      r.dataset.issueId,
+      r.dataset.issueStatus,
+      r.innerText,
+    ])`)) || [];
+  const smokeIssueTitle = "smoke local issue";
+  await runPalette("Local issues");
+  await waitFor(
+    "issues panel mounts with the create form",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-local-issues] [data-issues-form]")`)) === true,
+    }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-action="issues-create"]').click()`);
+  await waitFor(
+    "empty title is refused inline",
+    async () => {
+      const t = await evaluate(`document.querySelector("[data-issues-action-error]")?.innerText || ""`);
+      return { ok: String(t).includes("Title is required"), body: t };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const fillIssue = await evaluate(`(() => {
+    const set = (sel, value) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      el.value = value;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    };
+    if (!set("[data-issues-title]", ${JSON.stringify(smokeIssueTitle)})) return "missing title";
+    if (!set("[data-issues-body]", "filed by webui-smoke")) return "missing body";
+    document.querySelector('[data-action="issues-create"]').click();
+    return "sent";
+  })()`);
+  if (fillIssue !== "sent") throw new Error(`issues create form: ${fillIssue}`);
+  let smokeIssueId = "";
+  await waitFor(
+    "created issue appears under Open",
+    async () => {
+      const rows = await issueRows();
+      const row = rows.find((r) => String(r[2]).includes(smokeIssueTitle));
+      if (row) smokeIssueId = row[0];
+      return { ok: !!row && row[1] === "open", body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-issue-id="${smokeIssueId}"] .link').click()`);
+  await waitFor(
+    "issue body expands",
+    async () => {
+      const t = await evaluate(`document.querySelector('[data-issue-body="${smokeIssueId}"]')?.innerText || ""`);
+      return { ok: String(t).includes("filed by webui-smoke"), body: t };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector('[data-issue-id="${smokeIssueId}"] [data-action="issues-close"]').click()`);
+  await waitFor(
+    "closed issue leaves the Open filter",
+    async () => {
+      const rows = await issueRows();
+      return { ok: !rows.some((r) => r[0] === smokeIssueId), body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-issues-filter="closed"]').click()`);
+  await waitFor(
+    "closed issue listed under Closed",
+    async () => {
+      const rows = await issueRows();
+      return { ok: rows.some((r) => r[0] === smokeIssueId && r[1] === "closed"), body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Remount: leave the tab and come back; the panel re-reads the daemon.
+  await runPalette("Memory");
+  await waitFor(
+    "issues panel unmounts on another tab",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-local-issues]")`)) === false }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await runPalette("Local issues");
+  await waitFor(
+    "issues panel remounts",
+    async () => ({ ok: (await evaluate(`!!document.querySelector('[data-issues-filter="closed"]')`)) === true }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-issues-filter="closed"]').click()`);
+  await waitFor(
+    "closed issue persists after the panel remounts",
+    async () => {
+      const rows = await issueRows();
+      return { ok: rows.some((r) => r[0] === smokeIssueId && r[1] === "closed"), body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const persisted = await (
+    await fetch(`http://127.0.0.1:${port}/v1/issues?status=closed`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (!(persisted.issues || []).some((i) => String(i.ID ?? i.id) === smokeIssueId && (i.Status ?? i.status) === "closed")) {
+    throw new Error(`daemon does not list issue ${smokeIssueId} as closed: ${JSON.stringify(persisted)}`);
+  }
+
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
   // that predates Goals has no palette command and fails here.
   await runPalette("Goals");

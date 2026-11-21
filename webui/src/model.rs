@@ -241,6 +241,10 @@ pub struct BootstrapCapabilities {
     /// (`GET /v1/ledger`, #1485); gates the Decisions storage tab.
     #[serde(default)]
     pub ledger: bool,
+    /// True when the daemon serves the project-local issues tracker
+    /// (`/v1/issues*`, #1500); gates the Issues storage tab.
+    #[serde(default)]
+    pub issues: bool,
     /// True when `/v1/init` can write AGENTS.md (#1581): host init service
     /// present, live engine, and not `--read-only`.
     #[serde(default, rename = "projectInit")]

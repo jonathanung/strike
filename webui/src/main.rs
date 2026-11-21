@@ -22,6 +22,7 @@ mod draft_size;
 mod drafts;
 mod editor;
 mod load_epoch;
+mod local_issues;
 mod localfiles;
 mod customize;
 mod gateway;
@@ -1088,6 +1089,8 @@ fn App() -> impl IntoView {
     let diag_capable = RwSignal::new(false);
     // Bootstrap capability `ledger` (#1485): gates the Decisions tab.
     let ledger_capable = RwSignal::new(false);
+    // Bootstrap capability `issues` (#1500): gates the Issues tab.
+    let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
     // Bootstrap capability `loops` (#1588): session /loop jobs.
@@ -1719,6 +1722,8 @@ fn App() -> impl IntoView {
                                 diag_capable.set(boot.capabilities.diag);
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
                                 ledger_capable.set(boot.capabilities.ledger);
+                                crate::local_issues::set_issues_capable(boot.capabilities.issues);
+                                issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
                                 skills.set(boot.skills);
                                 loops_capable.set(boot.capabilities.loops);
@@ -3720,6 +3725,16 @@ fn App() -> impl IntoView {
                 return Err("This daemon does not serve the decision ledger.".into());
             }
             side_tab.set("decisions".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "panel-issues",
+        Rc::new(move |_args: &str| {
+            if !issues_capable.get_untracked() {
+                return Err("Local issues are not available on this gateway.".into());
+            }
+            side_tab.set("issues".into());
             Ok(())
         }),
     );
@@ -5972,6 +5987,14 @@ fn App() -> impl IntoView {
                             token=token
                             root=active_root
                             memory_mode=memory_mode
+                            status=status
+                            storage_rev=storage_rev
+                        />
+                    </Show>
+                    <Show when=move || side_tab.get() == "issues" && issues_capable.get()>
+                        <local_issues::LocalIssuesPanel
+                            base=base
+                            token=token
                             status=status
                             storage_rev=storage_rev
                         />
