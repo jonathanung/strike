@@ -250,6 +250,38 @@ pub async fn upload_attachment(
     serde_json::from_value(value).map_err(|e| e.to_string())
 }
 
+/// How a composer chip previews a pending file (#1390). Images get a
+/// thumbnail; audio and video get native player controls over the same
+/// blob URL. Everything else is name-only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewKind {
+    None,
+    Image,
+    Audio,
+    Video,
+}
+
+pub fn preview_kind(mime: &str) -> PreviewKind {
+    let mime = mime.trim().to_ascii_lowercase();
+    if mime.starts_with("image/") {
+        PreviewKind::Image
+    } else if mime.starts_with("audio/") {
+        PreviewKind::Audio
+    } else if mime.starts_with("video/") {
+        PreviewKind::Video
+    } else {
+        PreviewKind::None
+    }
+}
+
+/// File picker `accept=` list: what the daemon store classifies. Office
+/// Open XML, audio and video were added by #1390.
+pub const ACCEPT_TYPES: &str = "image/png,image/jpeg,image/webp,image/gif,application/pdf,image/svg+xml,text/plain,application/zip,application/gzip,\
+application/vnd.openxmlformats-officedocument.wordprocessingml.document,\
+application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,\
+application/vnd.openxmlformats-officedocument.presentationml.presentation,\
+.docx,.xlsx,.pptx,audio/mpeg,audio/wav,audio/ogg,audio/webm,audio/mp4,video/mp4,video/webm,.mp3,.wav,.ogg,.m4a,.mp4,.webm";
+
 pub fn enqueue_file_list(
     list: web_sys::FileList,
     pending: RwSignal<Vec<PendingAttachment>>,
@@ -282,7 +314,7 @@ pub fn enqueue_file_list(
             status.set("That file was not attached.".into());
             continue;
         }
-        let preview = if declared.starts_with("image/") {
+        let preview = if preview_kind(&declared) != PreviewKind::None {
             web_sys::Url::create_object_url_with_blob(&file).unwrap_or_default()
         } else {
             String::new()
@@ -477,6 +509,41 @@ fn call0(obj: &JsValue, method: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_kind_by_mime() {
+        for (mime, want) in [
+            ("image/png", PreviewKind::Image),
+            ("audio/mpeg", PreviewKind::Audio),
+            ("AUDIO/WEBM;codecs=opus", PreviewKind::Audio),
+            ("video/mp4", PreviewKind::Video),
+            ("application/pdf", PreviewKind::None),
+            ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", PreviewKind::None),
+            ("", PreviewKind::None),
+        ] {
+            assert_eq!(preview_kind(mime), want, "mime {mime:?}");
+        }
+    }
+
+    #[test]
+    fn accept_types_cover_office_and_media() {
+        for needle in [
+            "image/png",
+            "application/zip",
+            "wordprocessingml.document",
+            "spreadsheetml.sheet",
+            "presentationml.presentation",
+            ".docx",
+            "audio/mpeg",
+            "audio/wav",
+            "audio/ogg",
+            "video/mp4",
+            "video/webm",
+        ] {
+            assert!(ACCEPT_TYPES.split(',').any(|t| t.contains(needle)), "missing {needle}");
+        }
+        assert!(!ACCEPT_TYPES.contains(' ') && !ACCEPT_TYPES.contains('\n'));
+    }
 
     #[test]
     fn failed_send_keeps_text_typed_during_upload() {
