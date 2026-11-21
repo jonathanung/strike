@@ -45,11 +45,23 @@ pub fn reset() {
 }
 
 /// Seed from `GET /v1/status` / bootstrap (`verbosity`, `verbosityDelivery`).
+/// A status that reports neither (the daemon has not confirmed a style
+/// since it started) leaves the state alone, so it cannot overwrite a style
+/// the replayed `verbosity.selected` events already restored.
 pub fn seed(level: &str, delivery: &str) {
-    set(VerbosityState {
+    if let Some(next) = seeded(level, delivery) {
+        set(next);
+    }
+}
+
+pub fn seeded(level: &str, delivery: &str) -> Option<VerbosityState> {
+    if level.trim().is_empty() && delivery.trim().is_empty() {
+        return None;
+    }
+    Some(VerbosityState {
         level: normalize(level).to_string(),
         delivery: delivery.trim().to_string(),
-    });
+    })
 }
 
 /// Known style id, or "" for default/unknown input.
@@ -231,6 +243,13 @@ mod tests {
         assert!(delivery_note(&st("concise", "instruction")).contains("session instruction"));
         assert!(delivery_note(&st("", "none")).contains("nothing is sent"));
         assert!(delivery_note(&st("concise", "")).contains("Waiting"));
+    }
+
+    #[test]
+    fn empty_status_does_not_overwrite_replayed_style() {
+        assert_eq!(seeded("", ""), None);
+        assert_eq!(seeded("", "none"), Some(st("", "none")));
+        assert_eq!(seeded("concise", "instruction"), Some(st("concise", "instruction")));
     }
 
     #[test]
