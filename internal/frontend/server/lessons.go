@@ -195,6 +195,13 @@ func (s *Server) handleSessionLessonsUsed(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "session id is required"})
 		return
 	}
+	// The cockpit addresses the live root; a root can serve a different
+	// durable session (rewind/fork), so map a live root id to its session.
+	if s.opts.LiveHub != nil {
+		if live := s.opts.LiveHub.LiveFor(id); live != nil && live.SessionID() != "" {
+			id = live.SessionID()
+		}
+	}
 	list, err := lessons.Injected(id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})

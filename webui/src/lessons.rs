@@ -365,6 +365,9 @@ pub fn PendingLessons(
             match get_json::<ProposalList>(&b, &t, "/v1/memory/proposals").await {
                 Ok(list) => {
                     rows.set(list.proposals.unwrap_or_default());
+                    if error.get_untracked().starts_with("Could not load") {
+                        error.set(String::new());
+                    }
                 }
                 Err(e) if e.starts_with("HTTP 501") => rows.set(Vec::new()),
                 Err(e) => error.set(format!("Could not load pending lessons: {e}")),
