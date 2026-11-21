@@ -3988,7 +3988,6 @@ try {
     throw new Error(`PR watch: fix-draft on an untracked PR should be 409, got ${prDraft.status}`);
   }
   await clickSideTab("Git", "Staged");
-<<<<<<< HEAD
   await waitFor(
     "PR watch chip shows tracking unavailable (data-pr-watch)",
     async () => {
@@ -4022,7 +4021,7 @@ try {
     delete meta.prState;
     delete meta.prUpdatedAt;
     await writeFile(prMetaPath, JSON.stringify(meta) + "\n");
-=======
+  }
   // Pre-push review (#1487): the preview route sizes the diff and names the
   // read-only reviewer profile, a start without confirm never spawns (400),
   // and the Git tab's "Review this branch" panel renders the same state
@@ -4070,7 +4069,6 @@ try {
       { timeout: STEP_MS, interval: 250 },
     );
     await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
->>>>>>> origin/main
   }
   // Ship to PR (#1340): the preview route answers with an honest state
   // (CI checks out a detached merge commit, so "blocked" with a detached

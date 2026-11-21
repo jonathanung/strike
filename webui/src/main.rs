@@ -6852,11 +6852,8 @@ fn App() -> impl IntoView {
                     </Show>
                     <div hidden=move || !git_active.get()>
                         <ship_pr::ShipPr base=base token=token status_line=status active=git_active />
-<<<<<<< HEAD
-                        <pr_watch::PrWatch base=base token=token session=active_root active=git_active />
-=======
                         <review_branch::ReviewBranch base=base token=token active=git_active doc_path=doc_path doc_line=doc_line doc_diff=doc_diff />
->>>>>>> origin/main
+                        <pr_watch::PrWatch base=base token=token session=active_root active=git_active />
                         <git::GitPanel base=base token=token status_line=status active=git_active />
                     </div>
                     <div hidden=move || !review_active.get()>
