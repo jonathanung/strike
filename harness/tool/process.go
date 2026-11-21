@@ -135,13 +135,14 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 	// process-group kill). Started observers see the pre-wrap argv.
 	wrap := sandbox.WrapResult(spec.Argv, spec.Sandbox)
 	// Fail-closed: non-off sandbox that could not be applied must not run
-	// unsandboxed unless Policy.AllowDegrade is set (#1030).
-	if wrap.Degraded && spec.Sandbox.Mode != sandbox.ModeOff && !spec.Sandbox.AllowDegrade {
+	// unsandboxed unless Policy.AllowDegrade is set (#1030). The microvm
+	// runtime always fails closed (AllowDegrade does not apply).
+	if spec.Sandbox.DenyDegraded(wrap) {
 		return ProcessResult{
 			ID:              id,
 			Status:          ProcessStatusError,
 			SandboxDegraded: true,
-		}, ErrSandboxDenied("OS sandbox required but unavailable (set sandboxAllowDegrade: true to permit unsandboxed fallback, or sandbox: off)")
+		}, ErrSandboxDenied(spec.Sandbox.DeniedMessage(wrap))
 	}
 	execArgv := wrap.Argv
 	if len(execArgv) == 0 || execArgv[0] == "" {

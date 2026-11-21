@@ -192,3 +192,11 @@
 }
 .lesson-draft textarea { min-height: 80px; resize: vertical; }
 /* feature:lessons end */
+
+/* feature:local-issues begin (#1500) */
+.local-issues .local-issue-row[data-issue-status="closed"] .name { color: var(--muted); }
+.local-issues .local-issue-body { list-style: none; padding: 0 0 var(--space-2); border-bottom: 1px solid var(--rule); }
+.local-issues .local-issue-body .storage-preview { margin: 0; white-space: pre-wrap; }
+.local-issues .local-issues-import { display: inline-flex; align-items: center; gap: var(--space-2); cursor: pointer; }
+.local-issues .local-issues-import input[type="file"] { max-width: 180px; font-size: var(--text-sm); }
+/* feature:local-issues end */
