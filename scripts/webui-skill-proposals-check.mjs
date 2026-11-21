@@ -84,25 +84,30 @@ const cardSel = (skill) =>
   `[...document.querySelectorAll('[data-cz-proposal]')].find((c) => c.innerText.includes(${JSON.stringify(skill)}))`;
 const badgeExpr = `(document.querySelector('[data-cz-proposals-badge]')?.getAttribute('data-cz-proposals-badge') || "")`;
 
-// sessionReply joins the assistant text a session log holds.
-async function sessionReply(file) {
+// sessionLog reads a session log: the joined assistant text, the raw
+// lines, and a short summary for failure messages.
+async function sessionLog(file) {
   let raw = "";
   try {
     raw = await readFile(file, "utf8");
-  } catch {
-    return "";
+  } catch (err) {
+    return { reply: "", lines: [], summary: `no log (${err.code || err})` };
   }
-  let out = "";
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
+  let reply = "";
+  const types = {};
+  const errors = [];
+  const lines = raw.split("\n").filter((l) => l.trim());
+  for (const line of lines) {
     try {
       const env = JSON.parse(line);
-      if (env.type === "text.delta" && typeof env.data?.text === "string") out += env.data.text;
+      types[env.type] = (types[env.type] || 0) + 1;
+      if (env.type === "text.delta" && typeof env.data?.text === "string") reply += env.data.text;
+      if (String(env.type).includes("error") || String(env.type).includes("notice")) errors.push(JSON.stringify(env.data || {}).slice(0, 200));
     } catch {
       // partial line while the daemon writes
     }
   }
-  return out;
+  return { reply, lines, summary: `types ${JSON.stringify(types)} errors ${JSON.stringify(errors.slice(-3))}` };
 }
 
 // invokeInFreshSession (#1958) runs the accepted skill as a slash command in
@@ -151,13 +156,21 @@ async function invokeInFreshSession({ home, port, token }) {
     });
     if (!sent.ok) throw new Error(`skill proposals: invoke ${sent.status} ${await sent.text()}`);
     const file = join(home, ".strike", "sessions", `${root}.jsonl`);
-    let reply = "";
+    // The rendered skill reaches the model as the turn text; echo replies
+    // with it. Either copy proves the slash command expanded the skill.
+    const rendered = (t) => t.includes(INVOKE_MARKER) && t.includes("Use the `bash` tool.");
+    let got = { reply: "", lines: [], summary: "" };
     for (let i = 0; i < 120; i++) {
-      reply = await sessionReply(file);
-      if (reply.includes(INVOKE_MARKER) && reply.includes("Use the `bash` tool.")) return;
+      got = await sessionLog(file);
+      if (rendered(got.reply) || got.lines.some((l) => l.includes('"user.message"') && rendered(l))) return;
       await delay(250);
     }
-    throw new Error(`skill proposals: the accepted skill did not run in a fresh session: reply ${JSON.stringify(reply.slice(0, 400))} log ${log.slice(-600)}`);
+    const boot = await (await api("/v1/bootstrap", freshPort)).json().catch(() => ({}));
+    const freshTrust = await (await api("/v1/workspace/trust", freshPort)).json().catch(() => ({}));
+    throw new Error(
+      `skill proposals: the accepted skill did not run in a fresh session: reply ${JSON.stringify(got.reply.slice(0, 300))} ${got.summary}` +
+        ` trusted ${freshTrust.trusted} skills ${JSON.stringify((boot.skills || []).map((k) => k.name)).slice(0, 300)} log ${log.slice(0, 1200)}`,
+    );
   } finally {
     if (root) await api(`/v1/roots/${encodeURIComponent(root)}`, freshPort, { method: "DELETE" }).catch(() => {});
     const exited = new Promise((resolve) => fresh.once("exit", resolve));
