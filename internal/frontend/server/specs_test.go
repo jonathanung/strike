@@ -50,7 +50,7 @@ func specDo(t *testing.T, srv *Server, method, path, body string) (int, map[stri
 	return rec.Code, out
 }
 
-func version(t *testing.T, v map[string]any) int {
+func specVersion(t *testing.T, v map[string]any) int {
 	t.Helper()
 	n, ok := v["version"].(float64)
 	if !ok {
@@ -83,7 +83,7 @@ func TestSpecLifecycleOverHTTP(t *testing.T) {
 	if code, _ := specDo(t, srv, http.MethodPost, "/v1/specs", `{"name":"export"}`); code != http.StatusConflict {
 		t.Fatalf("duplicate create = %d", code)
 	}
-	v := version(t, created)
+	v := specVersion(t, created)
 
 	// Design approval before requirements is refused with the reason.
 	code, refused := specDo(t, srv, http.MethodPost, "/v1/specs/export/phases/design", `{"status":"approved","expectedVersion":1}`)
@@ -100,7 +100,7 @@ func TestSpecLifecycleOverHTTP(t *testing.T) {
 	if _, ok := lint["R2#0"]; !ok {
 		t.Fatalf("EARS warning missing for R2: %v", lint)
 	}
-	v = version(t, saved)
+	v = specVersion(t, saved)
 
 	step := func(method, path, body string) map[string]any {
 		t.Helper()
@@ -108,7 +108,7 @@ func TestSpecLifecycleOverHTTP(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("%s %s = %d %v", method, path, code, out)
 		}
-		v = version(t, out)
+		v = specVersion(t, out)
 		return out
 	}
 	vs := func() string { return strconv.Itoa(v) }
