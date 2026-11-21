@@ -23,6 +23,8 @@ func opType(op Op) string {
 		return "permission.reply"
 	case QuestionReply:
 		return "question.reply"
+	case ElicitationReply:
+		return "elicitation.reply"
 	case Interrupt:
 		return "interrupt"
 	case Steer:
@@ -120,6 +122,8 @@ func (e OpEnvelope) Decode() (Op, error) {
 		op = &PermissionReply{}
 	case "question.reply":
 		op = &QuestionReply{}
+	case "elicitation.reply":
+		op = &ElicitationReply{}
 	case "interrupt":
 		return Interrupt{}, nil
 	case "steer":
@@ -195,6 +199,8 @@ func derefOp(op Op) Op {
 	case *PermissionReply:
 		return *v
 	case *QuestionReply:
+		return *v
+	case *ElicitationReply:
 		return *v
 	case *Steer:
 		return *v

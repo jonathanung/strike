@@ -14,6 +14,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
+import { mdReviewBrowserCheck } from "./webui-md-review-check.mjs";
 import { seedSkillUsage, skillUsageCheck } from "./webui-skill-usage-check.mjs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -2006,6 +2007,12 @@ try {
     token,
     repoDir: process.cwd(),
   });
+  await mdReviewBrowserCheck({
+    send,
+    port,
+    token,
+    repoDir: process.cwd(),
+  });
 
   const beforeSelection = await send("Runtime.evaluate", {
     expression: `(() => {
@@ -3275,6 +3282,52 @@ try {
     throw new Error(`outbox retry was not deduped: ${seedRetry.status} ${seedRetryBody}`);
   }
 
+  // #1565: share link create -> open with no credential -> revoke -> dead end.
+  {
+    const authed = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const st = await (await fetch(`http://127.0.0.1:${port}/v1/status`, { headers: authed })).json();
+    const sid = st.sessionId;
+    if (!sid) throw new Error(`share smoke: no live session id ${JSON.stringify(st)}`);
+    const sharesUrl = `http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(sid)}/shares`;
+    // The session log is written by the engine; give the seed a moment.
+    let minted;
+    for (let i = 0; i < 50; i++) {
+      minted = await fetch(sharesUrl, { method: "POST", headers: authed, body: JSON.stringify({ ttlSeconds: 3600 }) });
+      if (minted.status !== 404) break;
+      await delay(200);
+    }
+    if (minted.status !== 201) throw new Error(`share mint ${minted.status} ${await minted.text()}`);
+    const grant = await minted.json();
+    if (!grant.path || !grant.path.startsWith("/#share=") || grant.path.includes("?")) {
+      throw new Error(`share link not fragment-carried: ${grant.path}`);
+    }
+    const redeem = () =>
+      fetch(`http://127.0.0.1:${port}/share/v1/transcript`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: grant.token, after: 0 }),
+      });
+    let opened;
+    let openedBody = "";
+    for (let i = 0; i < 50; i++) {
+      opened = await redeem();
+      openedBody = await opened.text();
+      if (opened.status !== 200 || openedBody.includes("read the makefile")) break;
+      await delay(200);
+    }
+    if (opened.status !== 200 || !openedBody.includes("read the makefile")) {
+      throw new Error(`share redeem ${opened.status} ${openedBody.slice(0, 300)}`);
+    }
+    const asGateway = await fetch(`http://127.0.0.1:${port}/v1/sessions`, {
+      headers: { Authorization: `Bearer ${grant.token}` },
+    });
+    if (asGateway.status !== 401) throw new Error(`share token opened /v1/sessions: ${asGateway.status}`);
+    const revoked = await fetch(`${sharesUrl}/${encodeURIComponent(grant.id)}`, { method: "DELETE", headers: authed });
+    if (revoked.status !== 204) throw new Error(`share revoke ${revoked.status}`);
+    const dead = await redeem();
+    if (dead.status !== 404) throw new Error(`revoked share still opens: ${dead.status}`);
+  }
+
   await evaluate(`document.querySelector(".side-chat-open-activity").click()`);
 
   const panel = await waitFor(
@@ -4148,6 +4201,116 @@ try {
     },
     { timeout: STEP_MS, interval: 250 },
   );
+  // Search in files (#1406): seed a fixture dir under the daemon's work
+  // dir, search from the Files-pane box, and check: matches grouped by
+  // file with marked text, the no-results state, the capped state (per-
+  // file cap of 20), and click-to-line landing in the document viewer.
+  // Needles are built at runtime so this script's own source never
+  // matches. DOM probes use textContent so the layout cannot hide them.
+  const sifDir = join(process.cwd(), "smoke-search-in-files");
+  const sifTag = Date.now().toString(36);
+  const sifNeedle = ["sif", "needle", sifTag].join("");
+  const sifCap = ["sif", "cap", sifTag].join("");
+  await rm(sifDir, { recursive: true, force: true });
+  await mkdir(sifDir, { recursive: true });
+  try {
+    await writeFile(join(sifDir, "alpha.txt"), `one\ntwo\nfind ${sifNeedle.toUpperCase()} here\n`);
+    await writeFile(
+      join(sifDir, "beta.txt"),
+      `${sifNeedle} top\nb2\nb3\nb4\nb5\nb6\nagain ${sifNeedle} below\n`,
+    );
+    await writeFile(
+      join(sifDir, "capped.txt"),
+      Array.from({ length: 25 }, (_, i) => `${sifCap} ${i + 1}`).join("\n") + "\n",
+    );
+    const sifTab = await evaluate(`(() => {
+      const btn = [...document.querySelectorAll(".side-tabs button")].find((b) => (b.textContent || "").includes("Files"));
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+    if (sifTab !== "clicked") {
+      throw new Error(`search-in-files: Files side tab ${sifTab}\n${await diagnostics()}`);
+    }
+    // Fill the box and press Enter. Re-sent on each poll until the
+    // expected state shows, which also rides out the daemon's 2s file
+    // index cache right after the fixture was written.
+    const sifSearch = (q) =>
+      evaluate(`(() => {
+        const input = document.querySelector("[data-search-in-files]");
+        if (!input) return "missing";
+        const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+        proto.set.call(input, ${JSON.stringify(q)});
+        input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "sent";
+      })()`);
+    const sifState = `(() => {
+      const files = [...document.querySelectorAll("[data-sif-file]")].map((el) => el.getAttribute("data-sif-file"));
+      const hits = [...document.querySelectorAll(".sif-hit")].map((b) => b.getAttribute("data-sif-path") + ":" + b.getAttribute("data-sif-line"));
+      const summary = document.querySelector(".sif-summary");
+      return {
+        files,
+        hits,
+        marks: document.querySelectorAll(".sif-hit mark.tf-mark").length,
+        summary: summary ? summary.textContent || "" : "",
+        capped: summary ? summary.getAttribute("data-sif-capped") : "",
+      };
+    })()`;
+    const sifWait = (label, q, ok) =>
+      waitFor(
+        label,
+        async () => {
+          const v = await evaluate(sifState);
+          if (ok(v)) return { ok: true, ...v };
+          const sent = await sifSearch(q);
+          return { ok: false, sent, ...v };
+        },
+        { timeout: WAIT_MS, interval: 750 },
+      );
+    const rel = (name) => `smoke-search-in-files/${name}`;
+    await sifWait("search-in-files: matches grouped by file", sifNeedle, (v) =>
+      v.files.length === 2 &&
+      v.files.includes(rel("alpha.txt")) &&
+      v.files.includes(rel("beta.txt")) &&
+      v.hits.join(",") === [rel("alpha.txt") + ":3", rel("beta.txt") + ":1", rel("beta.txt") + ":7"].join(",") &&
+      v.marks === 3 &&
+      v.capped === "false",
+    );
+    await sifWait("search-in-files: no-results state", `${sifNeedle}-absent`, (v) =>
+      v.hits.length === 0 && v.summary.startsWith("No matches for") && v.capped === "false",
+    );
+    await sifWait("search-in-files: capped state", sifCap, (v) =>
+      v.hits.length === 20 && v.capped === "true" && v.summary.includes("results are partial"),
+    );
+    await sifWait("search-in-files: results again for click-to-line", sifNeedle, (v) => v.hits.length === 3);
+    const sifClicked = await evaluate(`(() => {
+      const b = document.querySelector('.sif-hit[data-sif-path=${JSON.stringify(rel("beta.txt"))}][data-sif-line="7"]');
+      if (!b) return "missing";
+      b.click();
+      return "clicked";
+    })()`);
+    if (sifClicked !== "clicked") {
+      throw new Error(`search-in-files: result button ${sifClicked}`);
+    }
+    await waitFor(
+      "search-in-files: document viewer opened the file at the line",
+      async () => {
+        const v = await evaluate(`(() => {
+          const doc = document.querySelector('[data-ev-root="open"]');
+          return {
+            path: doc ? doc.getAttribute("data-ev-path") || "" : "",
+            lines: doc ? doc.querySelectorAll(".ev-line").length : 0,
+            text: doc ? (doc.textContent || "").includes(${JSON.stringify(`again ${sifNeedle} below`)}) : false,
+          };
+        })()`);
+        return { ok: v.path.endsWith("beta.txt") && v.lines >= 7 && v.text, ...v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  } finally {
+    await rm(sifDir, { recursive: true, force: true });
+  }
   // Session delete (#1358): seed a session, close its root so it is
   // saved but not open, then delete it through the cockpit. Cancelling
   // the confirm must issue no request; confirming must remove it from
