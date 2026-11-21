@@ -159,6 +159,11 @@ pub struct LiveStatus {
     /// empty to the `supervised` default rather than inventing a mode.
     #[serde(default)]
     pub autonomy: String,
+    /// Session fallback model (#1350); empty when none is set.
+    #[serde(default, rename = "fallbackProvider")]
+    pub fallback_provider: String,
+    #[serde(default, rename = "fallbackModel")]
+    pub fallback_model: String,
     /// Session response style (#1369): "" default | concise | detailed,
     /// and how it reaches the model (none | instruction).
     #[serde(default)]
@@ -303,6 +308,11 @@ pub struct BootstrapCapabilities {
     /// present, live engine, and not `--read-only`.
     #[serde(default, rename = "projectInit")]
     pub project_init: bool,
+    /// True when the daemon accepts human team-control ops (`team.message`,
+    /// `team.broadcast`, …; docs/human-orchestration-ops.md §5). Gates the
+    /// activity panel's Message action (#1573).
+    #[serde(default, rename = "teamControl")]
+    pub team_control: bool,
     /// True when the daemon wires plugin lifecycle (`/v1/plugins*`, #1570).
     #[serde(default)]
     pub plugins: bool,
@@ -2494,6 +2504,15 @@ mod tests {
         assert!(boot.capabilities.project_init);
         let boot: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
         assert!(!boot.capabilities.project_init);
+    }
+
+    #[test]
+    fn bootstrap_reads_team_control_capability() {
+        let boot: Bootstrap =
+            serde_json::from_str(r#"{"capabilities":{"teamControl":true}}"#).unwrap();
+        assert!(boot.capabilities.team_control);
+        let boot: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
+        assert!(!boot.capabilities.team_control);
     }
 
     #[test]

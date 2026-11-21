@@ -773,6 +773,65 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       await delay(250);
       await shoot("shell-activity", ["desk1024", "desk1440"]);
 
+      // #1573: the live child row carries a Message action (bootstrap
+      // teamControl + live team). The composer posts team.message and
+      // renders the daemon's outcome, not a local echo.
+      const msgButton = await waitUntil(
+        `Boolean(document.querySelector(".activity-row [data-team-message-open]"))`,
+        8000,
+        "Message action on the child row",
+      );
+      check(Boolean(msgButton), "child row has no Message action while teamControl is live");
+      if (msgButton) {
+        await page.evaluate(`document.querySelector(".activity-row [data-team-message-open]").click()`);
+        // The echo child ends blocked: a closed mailbox. The composer must
+        // explain that instead of offering a send the daemon would refuse.
+        const terminal = await waitUntil(
+          `document.querySelector("[data-team-message-terminal]")?.textContent || ""`,
+          4000,
+          "terminal child explanation",
+        );
+        check(/cannot receive messages/.test(String(terminal)), `blocked child composer did not explain: ${terminal}`);
+        check(
+          Boolean(await page.evaluate(`!document.querySelector(".team-message-body")`)),
+          "blocked child still offered a message form",
+        );
+        await shoot("team-message-composer", ["desk1024", "desk1440", "mobile"]);
+        await page.evaluate(`document.querySelector('[data-team-message-target="all"]')?.click()`);
+        const form = await waitUntil(
+          `Boolean(document.querySelector('[data-team-message="open"] .team-message-body'))`,
+          4000,
+          "broadcast form",
+        );
+        check(Boolean(form), "All members target did not open the broadcast form");
+        if (form) {
+          await page.evaluate(`(() => {
+            const ta = document.querySelector(".team-message-body");
+            const proto = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+            proto.set.call(ta, "uat: wrap up");
+            ta.dispatchEvent(new InputEvent("input", { bubbles: true, data: "x" }));
+            return true;
+          })()`);
+          await page.evaluate(`document.querySelector("[data-team-message-send]").click()`);
+          const outcome = await waitUntil(
+            `document.querySelector("[data-team-message-outcome]")?.textContent || ""`,
+            20000,
+            "team broadcast outcome",
+          );
+          check(Boolean(outcome), "team broadcast rendered no daemon outcome");
+          check(!/^HTTP \d+$/.test(String(outcome).trim()), `team broadcast outcome is a raw status: ${outcome}`);
+          log(`team broadcast outcome: ${outcome}`);
+          await shoot("team-message-outcome", ["desk1024"]);
+        }
+        await page.evaluate(`document.querySelector('[data-team-message="open"] .team-message-head button')?.click()`);
+        const closed = await waitUntil(
+          `!document.querySelector('[data-team-message="open"]')`,
+          4000,
+          "team message composer closed",
+        );
+        check(Boolean(closed), "team message composer did not close");
+      }
+
       // #1379: the child row carries a decorative identity disc beside the
       // status dot; the dot and badge are unchanged.
       const disc = await page.evaluate(`(() => {

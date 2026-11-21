@@ -23,7 +23,7 @@ func (s *Store) rewriteProjectionLocked() error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Strike memory (%s)\n\n", s.Scope())
 	b.WriteString("This file is the plain-text projection of the memory store.\n")
-	b.WriteString("The agent reads entries tagged instruction, preference, or project-convention at every turn, including the start of a session.\n")
+	b.WriteString("The agent reads entries tagged instruction, preference, project-convention, or lesson at every turn, including the start of a session.\n")
 	b.WriteString("Edits made in this file are replaced on the next write. Change memory through the memory tools or PUT /v1/memory.\n")
 	fmt.Fprintf(&b, "Audit log: `%s`\n\n", s.AuditPath())
 	if len(entries) == 0 {
