@@ -109,6 +109,17 @@ type Options struct {
 	Sandbox *SandboxSnapshot
 	// ReadOnly rejects mutating protocol ops (POST /v1/ops and WS op frames).
 	ReadOnly bool
+	// WorkspaceTrustPath is the workspace trust store file
+	// (~/.strike/workspace-trust.json) behind GET/POST /v1/workspace/trust
+	// (#1781). Empty disables the routes (501).
+	WorkspaceTrustPath string
+	// WorkspaceTrustAssembled is the workspace this daemon's sessions were
+	// assembled for and the trust decision they were built with. Every root
+	// of one strike serve shares that assembly (session worktrees included),
+	// so when set it is the workspace /v1/workspace/trust reports and
+	// changes, and a decision that differs from Trusted sets
+	// restartRequired. Nil (attach-only) falls back to the live root's CWD.
+	WorkspaceTrustAssembled *WorkspaceTrustAssembly
 	// WorkDir is the process working directory. Customize uses it as the
 	// workspace scope when no live session is attached. Apps uses it as the
 	// git workspace for GitHub triage. The browser cannot choose it. Empty
@@ -206,6 +217,10 @@ type Server struct {
 	// status and reset calls on one repo corrupt the index.
 	gitMu sync.Mutex
 
+	// review holds the review queue's unsent comments, accept marks and
+	// rejections per session (#1324).
+	review *reviewStore
+
 	// grants are short-lived bearers kept in memory only. grantNow overrides
 	// the clock in tests. rootSum is the last host-token hash; a change
 	// (strike daemon logout, or POST /v1/gateway/rotate) drops every grant.
@@ -289,6 +304,7 @@ func New(opts Options) (*Server, error) {
 		scriptCSPHashes: inlineScriptHashes(static),
 		terms:           terminal.NewManager(terminal.ManagerConfig{Sandbox: opts.TerminalSandbox}),
 		pairs:           newPairStore(opts),
+		review:          newReviewStore(opts.SessionDir),
 		shutdownCtx:     shutdownCtx,
 		shutdownCancel:  shutdownCancel,
 	}
@@ -478,6 +494,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/session-list", s.handleSessionList)
 	s.mux.HandleFunc("GET /v1/files", s.handleFiles)
 	s.mux.HandleFunc("GET /v1/files/search", s.handleFilesSearch)
+	s.mux.HandleFunc("GET /v1/files/grep", s.handleFilesGrep)
 	s.mux.HandleFunc("GET /v1/changed-files", s.handleChangedFiles)
 	s.mux.HandleFunc("GET /v1/git/status", s.handleGitStatus)
 	s.mux.HandleFunc("GET /v1/git/diff", s.handleGitDiff)
@@ -504,6 +521,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/git/worktrees", s.handleGitWorktreeCreate)
 	s.mux.HandleFunc("POST /v1/git/worktrees/remove", s.handleGitWorktreeRemove)
 	s.mux.HandleFunc("POST /v1/git/worktrees/prune", s.handleGitWorktreePrune)
+	// Review queue (#1324): per-hunk accept/reject/comment, sent as one turn.
+	s.mux.HandleFunc("GET /v1/review", s.handleReviewGet)
+	s.mux.HandleFunc("POST /v1/review/state", s.handleReviewState)
+	s.mux.HandleFunc("POST /v1/review/reject", s.handleReviewReject)
+	s.mux.HandleFunc("POST /v1/review/comments", s.handleReviewCommentAdd)
+	s.mux.HandleFunc("DELETE /v1/review/comments/{id}", s.handleReviewCommentDelete)
+	s.mux.HandleFunc("POST /v1/review/send", s.handleReviewSend)
 	s.mux.HandleFunc("GET /v1/file", s.handleFile)
 	s.mux.HandleFunc("GET /v1/file/view", s.handleFileView)
 	s.mux.HandleFunc("GET /v1/file/raw", s.handleFileRaw)
@@ -514,6 +538,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/memory", s.handleMemory)
 	s.mux.HandleFunc("GET /v1/memory/export", s.handleMemoryExport)
 	s.mux.HandleFunc("POST /v1/memory/import", s.handleMemoryImport)
+	// Whole-gateway backup/restore (#1339). Secrets are never exported.
+	s.mux.HandleFunc("GET /v1/backup/export", s.handleBackupExport)
+	s.mux.HandleFunc("POST /v1/backup/restore", s.handleBackupRestore)
 	s.mux.HandleFunc("GET /v1/memory/mode", s.handleMemoryModeGet)
 	s.mux.HandleFunc("PUT /v1/memory/mode", s.handleMemoryModePut)
 	s.mux.HandleFunc("PUT /v1/memory/{key}", s.handleMemoryPut)
@@ -638,6 +665,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/deploy-watches/{id}", s.handleDeployWatchGet)
 	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/poll", s.handleDeployWatchPoll)
 	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/cancel", s.handleDeployWatchCancel)
+	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/fix-session", s.handleDeployWatchFixSession)
+	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/revert-pr", s.handleDeployWatchRevertPR)
 	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
 	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/activate", s.handleRootActivate)
@@ -666,6 +695,8 @@ func (s *Server) routes() {
 	// Project init (#1581): AGENTS.md bootstrap via host.ProjectInit.
 	s.mux.HandleFunc("GET /v1/init", s.handleProjectInitGet)
 	s.mux.HandleFunc("POST /v1/init", s.handleProjectInitPost)
+	s.mux.HandleFunc("GET /v1/workspace/trust", s.handleWorkspaceTrustGet)
+	s.mux.HandleFunc("POST /v1/workspace/trust", s.handleWorkspaceTrustPost)
 	s.mux.HandleFunc("POST /v1/attachments", s.handleAttachmentIngest)
 	s.mux.HandleFunc("GET /v1/attachments/{ref}", s.handleAttachmentGet)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)

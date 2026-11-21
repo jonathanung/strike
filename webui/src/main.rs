@@ -17,14 +17,19 @@ mod approvals_ui;
 mod chat_mode;
 mod child_signals;
 mod clipboard;
+mod compaction_marks;
 mod confirm;
 mod composer_triggers;
+mod config_sources;
 mod diag;
 mod draft_size;
 mod drafts;
 mod editor;
 mod lessons;
+mod elicitation;
+mod elicitation_ui;
 mod load_epoch;
+mod markdown_review;
 mod local_issues;
 mod localfiles;
 mod customize;
@@ -33,13 +38,16 @@ mod gateway_peek;
 mod gateway_qr;
 mod git;
 mod goals;
+mod instance_backup;
 mod mobile;
 mod provider_signin;
 mod providers;
+mod review_queue;
 mod push;
 mod rule_author;
 mod sandbox_explain;
 mod schedule;
+mod search_in_files;
 mod scheduler_presets;
 mod model;
 mod notify;
@@ -88,7 +96,9 @@ mod turn_failure;
 mod turn_usage;
 mod turn_verify;
 mod workspace_image;
+mod workspace_trust;
 mod workspaces;
+mod workflows;
 mod workflow_run;
 use crate::shell::icon;
 use crate::child_signals::TeamMessagesFeed;
@@ -1170,6 +1180,9 @@ fn App() -> impl IntoView {
     let token = RwSignal::new(gateway::initial_token());
     provide_context(transcript_attachments::AttachmentAuth { base, token });
     let status = RwSignal::new("connecting…".to_string());
+    // Bootstrap capability `workspaceTrust` (#1781): gates the untrusted
+    // workspace badge and trust card.
+    let workspace_trust_capable = RwSignal::new(false);
     // Bootstrap capability `diag` (#1489): gates Download diagnostics.
     let diag_capable = RwSignal::new(false);
     // Bootstrap capability `ledger` (#1485): gates the Decisions tab.
@@ -1178,6 +1191,8 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // Typed config-source list (#1493), from bootstrap `configFiles`.
+    let config_files_capable = RwSignal::new(false);
     // #1375: daemon-aggregated team signals from the /v1/team poll — the
     // bounded inter-agent mail, member names for its From/To, the lead id,
     // and each child's latest escalation sentence by session id.
@@ -1290,6 +1305,7 @@ fn App() -> impl IntoView {
     });
     let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
+    let elicitations = RwSignal::new(Vec::<elicitation::Pending>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
     let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
     let panel_open = RwSignal::new(false);
@@ -1459,6 +1475,10 @@ fn App() -> impl IntoView {
     let doc_path = RwSignal::new(String::new());
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
+    // Search in files (#1406): the Files-pane box's query and a run
+    // counter the palette command bumps to start a search.
+    let sif_query = RwSignal::new(String::new());
+    let sif_run = RwSignal::new(0u32);
     let doc_editing = RwSignal::new(false);
     // Open a file in the document viewer: the one path the Files pane's
     // Open and quick-open (#1396) share.
@@ -1911,12 +1931,14 @@ fn App() -> impl IntoView {
                                         }
                                     });
                                 }
+                                workspace_trust_capable.set(boot.capabilities.workspace_trust);
                                 diag_capable.set(boot.capabilities.diag);
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
                                 ledger_capable.set(boot.capabilities.ledger);
                                 crate::local_issues::set_issues_capable(boot.capabilities.issues);
                                 issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                config_files_capable.set(boot.capabilities.config_files);
                                 crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
                                 skills.set(boot.skills);
                                 loops_capable.set(boot.capabilities.loops);
@@ -2049,6 +2071,7 @@ fn App() -> impl IntoView {
             children.set(Vec::new());
             children_note.set(String::new());
             asks.set(Vec::new());
+            elicitations.set(Vec::new());
             live_audit.set(Vec::new());
             confirm.set(None);
             wipe_on_replay.set(false);
@@ -2204,6 +2227,7 @@ fn App() -> impl IntoView {
                     };
                     note_steer(transcript_cb, &data, &on_note);
                     apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
+                    elicitation_ui::apply_elicitation_notes(&data, elicitations);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
                     lines_cb.set(transcript_cb.with_untracked(|t| t.chat_lines()));
@@ -4931,6 +4955,20 @@ fn App() -> impl IntoView {
         }),
     );
     shell::bind(
+        "search-in-files.run",
+        Rc::new(move |args: &str| {
+            let q = args.trim();
+            if q.is_empty() {
+                return Err("Type the text to find.".into());
+            }
+            side_tab.set("files".into());
+            mode.set("chat".into());
+            sif_query.set(q.to_string());
+            sif_run.update(|n| *n = n.wrapping_add(1));
+            Ok(())
+        }),
+    );
+    shell::bind(
         "workspaces.change",
         Rc::new(move |_| {
             picker_open.set(true);
@@ -5201,6 +5239,7 @@ fn App() -> impl IntoView {
 
     let git_active = Memo::new(move |_| side_tab.get() == "git");
     let worktree_active = Memo::new(move |_| side_tab.get() == "worktrees");
+    let review_active = Memo::new(move |_| side_tab.get() == "review");
     // Names the open session for the chat-mode bar and the chat view's h1.
     let chat_title = Memo::new(move |_| {
         let id = active_root.get();
@@ -5273,6 +5312,7 @@ fn App() -> impl IntoView {
                 status=status
                 diag_capable=diag_capable
                 project_init_capable=project_init_capable
+                config_files_capable=config_files_capable
                 root=active_root
                 theme=theme_id
                 theme_catalog=themes_state
@@ -5319,6 +5359,9 @@ fn App() -> impl IntoView {
                 active_root=active_root
                 status=status
             />
+        </Show>
+        <Show when=move || mode.get() == "workflows" fallback=move || ()>
+            <workflows::WorkflowsPage base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "triggers" fallback=move || ()>
             <triggers::TriggersPage
@@ -5503,6 +5546,14 @@ fn App() -> impl IntoView {
                     // to the conversation. Visually hidden; the status tabs
                     // and chat-mode bar already show the session name.
                     <h1 id="chat-heading" class="sr-only">{move || chat_title.get()}</h1>
+                    // #1781: persistent untrusted-workspace badge + trust card.
+                    <workspace_trust::WorkspaceTrust
+                        base=base
+                        token=token
+                        root=active_root
+                        status=status
+                        capable=workspace_trust_capable
+                    />
                     {move || {
                         let _ = tick.get();
                         let active = active_root.get();
@@ -5552,6 +5603,8 @@ fn App() -> impl IntoView {
                             jump_line=doc_line
                             want_diff=doc_diff
                             editing=doc_editing
+                            root=active_root
+                            busy=session_busy_now
                             history=file_history
                         />
                     </Show>
@@ -5630,6 +5683,7 @@ fn App() -> impl IntoView {
                         find=find_view
                     />
                     </Show>
+                    <elicitation_ui::ElicitationCards base=base token=token root=active_root elicitations=elicitations />
                     <ApprovalCards
                         asks=asks
                         perm_mode=perm_mode
@@ -6266,6 +6320,7 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "files" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("files".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("files")></span>"Files"</button>
                         <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
                         <button class=move || if side_tab.get() == "git" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("git".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("git")></span>"Git"</button>
+                        <button class=move || if side_tab.get() == "review" { "chip on" } else { "chip" } data-side-tab="review" on:click=move |_| side_tab.set("review".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Review"</button>
                         <button class=move || if side_tab.get() == "terminal" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("terminal".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("terminal")></span>"Terminal"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
@@ -6422,6 +6477,17 @@ fn App() -> impl IntoView {
                                 <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
                                 <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
                             </div>
+                            <search_in_files::SearchInFiles
+                                base=base
+                                token=token
+                                query=sif_query
+                                run=sif_run
+                                on_open=Callback::new(move |(path, line): (String, u32)| {
+                                    doc_diff.set(false);
+                                    doc_line.set(line);
+                                    doc_path.set(path);
+                                })
+                            />
                             <p class="hint">"Click a file to open it. @ mentions it in chat; drag also inserts @path."</p>
                             <Show when=move || file_history.with(|h| !h.recent(1).is_empty())>
                                 <div class="files-recent" data-ev-recent=true>
@@ -6545,6 +6611,9 @@ fn App() -> impl IntoView {
                     </Show>
                     <div hidden=move || !git_active.get()>
                         <git::GitPanel base=base token=token status_line=status active=git_active />
+                    </div>
+                    <div hidden=move || !review_active.get()>
+                        <review_queue::ReviewPanel base=base token=token root=active_root busy=session_busy_now active=review_active />
                     </div>
                     <div hidden=move || !worktree_active.get()>
                         <git::WorktreePanel base=base token=token status_line=status active_root=active_root active=worktree_active />
