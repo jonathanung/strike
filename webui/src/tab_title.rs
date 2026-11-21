@@ -102,6 +102,7 @@ mod tests {
             last_activity_at: 0,
             permission_pending: permission,
             question_pending: question,
+            ask_outcome: String::new(),
             unread,
         }
     }
