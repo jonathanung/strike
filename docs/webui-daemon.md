@@ -266,13 +266,16 @@ for each workspace until you turn it on, and it only scans when you click
 **Look now**.
 
 - **Routes**:
-  - `GET /v1/skill-proposals` returns `{workspace, enabled, threshold, windowDays, lastScan, pending}` (`workspace` is the project key the scan reads).
-  - `PATCH /v1/skill-proposals` takes `{enabled?, threshold?}`. The threshold must be 2–20; the default is 3.
+  - `GET /v1/skill-proposals` returns `{workspace, enabled, threshold, windowDays, lastScan, pending, modelDraft, modelDraftAvailable}` (`workspace` is the project key the scan reads).
+  - `PATCH /v1/skill-proposals` takes `{enabled?, threshold?, modelDraft?}`. The threshold must be 2–20; the default is 3. `modelDraft: true` returns 409 when the daemon has no model provider.
   - `POST /v1/skill-proposals/scan` returns 409 while off.
   - `POST /v1/skill-proposals/dismiss` and `POST /v1/skill-proposals/accept` each take `{id}`.
 - **What the scan reads**: only this workspace's own root session logs from the last 28 days. Child sessions and other workspaces are excluded. For each session it takes the opening request and the tools of the first turn.
 - **What counts as repeated**: sessions whose openings share most of their words and whose tool sequences mostly match. The threshold number of such sessions makes a proposal.
 - **Drafts**: matching is local and makes no model call. Drafts are redacted with `pkg/redact`. Drafts stay pending in `~/.strike/skill-proposals.json` (0600) and are not visible to any session.
+- **Model-assisted drafting (#1958)**: off by default, and it runs only while the scan is on too. After a scan, up to 5 local drafts are rewritten through the operator's configured provider (the side-chat model, called with no tools). The model sees only the redacted openings, tool names, and evidence titles. Its reply is redacted again. The card says "Drafted by <model> from N sessions", and so does the first line of the skill body. If the call fails or the reply is not a usable draft, the local draft stays. A rescan keeps a model draft while the pattern and session count are unchanged.
+- **Badge**: the Customize Skills tab shows how many proposals are pending.
+- **Invoking an accepted skill**: the skill catalog is read again on each input and on each `skill` tool call, so a skill accepted while serve runs can be invoked straight away. An untrusted workspace still never loads repo skills (#1352).
 - **Accept**: installs the draft as a workspace skill through the same preview + apply path the editor uses.
 - **Edit**: opens the draft in the skill editor. Once a skill with that name exists, the draft drops out of the proposals.
 - **Dismiss**: removes the draft and suppresses its pattern on later scans.

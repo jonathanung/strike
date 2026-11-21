@@ -428,10 +428,16 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// Plugin path/capability admission (trust remains a separate gate).
 	pluginVerdicts := config.AdmitPlugins(admitPol, config.DiscoverPlugins(cfgScope), workDir)
 	admissionVerdicts = append(admissionVerdicts, pluginVerdicts...)
-	skillInfos := make([]tools.SkillInfo, len(skills))
-	for i, s := range skills {
-		skillInfos[i] = tools.SkillInfo{Name: s.Name, Description: s.Description, Template: s.Template, Path: s.Path}
-	}
+	// #1958: re-read on use so a skill installed while serve runs (an
+	// accepted skill proposal, a Customize save) is invocable at once.
+	liveSkillCatalog := newLiveSkills(skills, func() ([]config.Skill, error) {
+		next, err := config.LoadSkillsWithError(cfgScope)
+		if err != nil {
+			return nil, err
+		}
+		return config.AdmittedSkills(admitPol, next, workDir), nil
+	})
+	skillInfos := skillInfosOf(skills)
 
 	todoStore := tool.NewTodoStore()
 	registry := tool.NewRegistry(
@@ -483,7 +489,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tools.NewTUISnapshot(),
 		tools.NewNotebookEdit(),
 		tool.NewSleep(),
-		tools.NewSkill(skillInfos),
+		tools.NewSkillWithLoader(skillInfos, liveSkillCatalog),
 		tool.NewQuestion(),
 		tools.NewEnterPlanMode(),
 		tools.NewExitPlanMode(),
@@ -917,7 +923,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			SessionID: sid,
 			Select:    selectProvider,
 			PrepareInput: func(text, dir string) engine.InputPrep {
-				return composerPrepare(text, dir, skills, &triggers.Sessions{
+				return composerPrepare(text, dir, liveSkillCatalog.Current(), &triggers.Sessions{
 					Self: sid,
 					Read: sessionref.Reader(sessions.Dir(), sessionref.DefaultTurns),
 				})

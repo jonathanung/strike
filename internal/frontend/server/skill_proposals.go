@@ -36,11 +36,17 @@ type skillProposalsResponse struct {
 	WindowDays int                     `json:"windowDays"`
 	LastScan   *time.Time              `json:"lastScan,omitempty"`
 	Pending    []skillpropose.Proposal `json:"pending"`
+	// ModelDraft is the workspace's model-drafting opt-in (#1958);
+	// ModelDraftAvailable says whether this daemon has a provider to
+	// draft with.
+	ModelDraft          bool `json:"modelDraft"`
+	ModelDraftAvailable bool `json:"modelDraftAvailable"`
 }
 
 type skillProposalSettings struct {
-	Enabled   *bool `json:"enabled"`
-	Threshold *int  `json:"threshold"`
+	Enabled    *bool `json:"enabled"`
+	Threshold  *int  `json:"threshold"`
+	ModelDraft *bool `json:"modelDraft"`
 }
 
 type skillProposalTarget struct {
@@ -72,13 +78,15 @@ func installedSkills(dir string) map[string]bool {
 	return out
 }
 
-func proposalsView(key string, ws skillpropose.Workspace, installed map[string]bool) skillProposalsResponse {
+func (s *Server) proposalsView(key string, ws skillpropose.Workspace, installed map[string]bool) skillProposalsResponse {
 	out := skillProposalsResponse{
-		Workspace:  key,
-		Enabled:    ws.Enabled,
-		Threshold:  ws.EffectiveThreshold(),
-		WindowDays: int(skillpropose.DefaultWindow / (24 * time.Hour)),
-		Pending:    []skillpropose.Proposal{},
+		Workspace:           key,
+		Enabled:             ws.Enabled,
+		Threshold:           ws.EffectiveThreshold(),
+		WindowDays:          int(skillpropose.DefaultWindow / (24 * time.Hour)),
+		Pending:             []skillpropose.Proposal{},
+		ModelDraft:          ws.ModelDraft,
+		ModelDraftAvailable: s.proposalDraftModel() != nil && !s.opts.ReadOnly,
 	}
 	if !ws.LastScan.IsZero() {
 		at := ws.LastScan
@@ -117,7 +125,7 @@ func (s *Server) handleSkillProposals(w http.ResponseWriter, r *http.Request) {
 		proposalFail(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, proposalsView(key, ws, installedSkills(dir)))
+	writeJSON(w, http.StatusOK, s.proposalsView(key, ws, installedSkills(dir)))
 }
 
 func (s *Server) handleSkillProposalSettings(w http.ResponseWriter, r *http.Request) {
@@ -131,12 +139,22 @@ func (s *Server) handleSkillProposalSettings(w http.ResponseWriter, r *http.Requ
 	}
 	key, dir := s.proposalWorkspace(r)
 	_ = proposalStore().SetDir(key, dir)
+	if body.ModelDraft != nil && *body.ModelDraft && s.proposalDraftModel() == nil {
+		proposalFail(w, http.StatusConflict, errors.New("no model provider is configured for drafting"))
+		return
+	}
 	ws, err := proposalStore().Settings(key, body.Enabled, body.Threshold)
 	if err != nil {
 		proposalFail(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, proposalsView(key, ws, installedSkills(dir)))
+	if body.ModelDraft != nil {
+		if ws, err = proposalStore().SetModelDraft(key, *body.ModelDraft); err != nil {
+			proposalFail(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, s.proposalsView(key, ws, installedSkills(dir)))
 }
 
 func (s *Server) handleSkillProposalScan(w http.ResponseWriter, r *http.Request) {
@@ -161,8 +179,9 @@ func (s *Server) handleSkillProposalScan(w http.ResponseWriter, r *http.Request)
 		proposalFail(w, http.StatusInternalServerError, err)
 		return
 	}
+	ws = s.modelDraftProposals(r.Context(), key, ws)
 	s.mirrorProposalIdeas(ws.Pending)
-	writeJSON(w, http.StatusOK, proposalsView(key, ws, installed))
+	writeJSON(w, http.StatusOK, s.proposalsView(key, ws, installed))
 }
 
 func (s *Server) handleSkillProposalDismiss(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +208,7 @@ func (s *Server) handleSkillProposalDismiss(w http.ResponseWriter, r *http.Reque
 		proposalFail(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, proposalsView(key, ws, installedSkills(dir)))
+	writeJSON(w, http.StatusOK, s.proposalsView(key, ws, installedSkills(dir)))
 }
 
 // handleSkillProposalAccept installs a pending draft as a workspace skill.

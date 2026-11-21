@@ -66,6 +66,7 @@ func (s *Server) scanDueSkillProposals(now time.Time) int {
 			continue
 		}
 		scanned++
+		ws = s.modelDraftProposals(context.Background(), d.Key, ws)
 		s.mirrorProposalIdeas(ws.Pending)
 	}
 	return scanned

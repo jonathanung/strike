@@ -26,6 +26,8 @@ pub struct Proposal {
     pub count: u32,
     pub sessions: Vec<Evidence>,
     pub drafted_by: String,
+    /// The model that rewrote the local draft (#1958); empty for a local draft.
+    pub model: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
@@ -36,6 +38,10 @@ pub struct State {
     pub window_days: u32,
     pub last_scan: Option<String>,
     pub pending: Vec<Proposal>,
+    /// #1958: the workspace's model-drafting opt-in, and whether the daemon
+    /// has a provider to draft with.
+    pub model_draft: bool,
+    pub model_draft_available: bool,
 }
 
 fn day(stamp: &str) -> &str {
@@ -70,14 +76,47 @@ pub fn status_text(st: &State) -> String {
     }
 }
 
-/// "From 3 sessions · drafted by local pattern match (no model call)".
+/// "From 3 sessions · drafted by local pattern match (no model call)", or
+/// "Drafted by <model> from 3 sessions" for a model draft (#1958).
 pub fn evidence_text(p: &Proposal) -> String {
     let n = if p.count == 0 { p.sessions.len() as u32 } else { p.count };
     let sessions = if n == 1 { "1 session".to_string() } else { format!("{n} sessions") };
+    if !p.model.trim().is_empty() {
+        return format!("Drafted by {} from {sessions}", p.model.trim());
+    }
     if p.drafted_by.is_empty() {
         format!("From {sessions}")
     } else {
         format!("From {sessions} · drafted by {}", p.drafted_by)
+    }
+}
+
+/// The Skills tab badge (#1958): the pending proposal count, or None when
+/// there is nothing to review.
+pub fn badge_count(st: &State) -> Option<String> {
+    match st.pending.len() {
+        0 => None,
+        n if n > 99 => Some("99+".into()),
+        n => Some(n.to_string()),
+    }
+}
+
+/// The model-drafting toggle label and its hint (#1958).
+pub fn model_draft_label(st: &State) -> &'static str {
+    if st.model_draft {
+        "Draft with my model: On"
+    } else {
+        "Draft with my model: Off"
+    }
+}
+
+pub fn model_draft_hint(st: &State) -> &'static str {
+    if !st.model_draft_available {
+        "No model provider is configured, so drafts are written by local pattern matching."
+    } else if !st.enabled {
+        "Model drafting runs only while the scan is on."
+    } else {
+        "When on, each draft is rewritten by your configured provider after a scan, from redacted openings and tool names. The card says which model drafted it."
     }
 }
 
@@ -156,6 +195,30 @@ mod tests {
         assert_eq!(evidence_row(&e), "s1 · 2026-11-01");
         let e = Evidence { session_id: "s1".into(), title: "Release".into(), at: "bad".into() };
         assert_eq!(evidence_row(&e), "Release");
+    }
+
+    #[test]
+    fn model_draft_disclosure() {
+        let p = Proposal { count: 3, drafted_by: "claude-test".into(), model: "claude-test".into(), ..Default::default() };
+        assert_eq!(evidence_text(&p), "Drafted by claude-test from 3 sessions");
+        let st = state(r#"{"enabled":true,"modelDraft":true,"modelDraftAvailable":true,"pending":[{"id":"a","model":"m"}]}"#);
+        assert!(st.model_draft && st.model_draft_available);
+        assert_eq!(st.pending[0].model, "m");
+        assert_eq!(model_draft_label(&st), "Draft with my model: On");
+        assert!(model_draft_hint(&st).contains("configured provider"));
+        assert!(model_draft_hint(&State { model_draft_available: true, ..Default::default() }).contains("only while the scan is on"));
+        assert!(model_draft_hint(&State::default()).contains("No model provider"));
+        assert_eq!(model_draft_label(&State::default()), "Draft with my model: Off");
+    }
+
+    #[test]
+    fn badge_counts_pending() {
+        let mut st = State::default();
+        assert_eq!(badge_count(&st), None);
+        st.pending = vec![Proposal::default(); 2];
+        assert_eq!(badge_count(&st).as_deref(), Some("2"));
+        st.pending = vec![Proposal::default(); 120];
+        assert_eq!(badge_count(&st).as_deref(), Some("99+"));
     }
 
     #[test]

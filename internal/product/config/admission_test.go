@@ -120,3 +120,35 @@ func TestFilterSkillsAllowsProjectFirstPartyRoot(t *testing.T) {
 		t.Fatalf("admitted = %v verdicts=%v", out, verdicts)
 	}
 }
+
+// AdmittedSkills (#1958) admits exactly what FilterSkills admits.
+func TestAdmittedSkillsMatchesFilterSkills(t *testing.T) {
+	home := t.TempDir()
+	work := t.TempDir()
+	pol, err := admission.Resolve(admission.Config{Preset: admission.PresetDefault}, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol.Home = home
+	skills := []config.Skill{
+		{Name: "ok", Template: "hello", Path: filepath.Join(home, "skills", "ok.md")},
+		{Name: "pwn", Template: "pwn", Path: filepath.Join(home, "repo", "evil", ".strike", "skills", "pwn.md")},
+		{Name: "ship", Template: "builtin", Builtin: true},
+		{Name: "local", Template: "hello from project", Path: filepath.Join(work, ".strike", "skills", "local.md")},
+	}
+	want, _ := config.FilterSkills(pol, skills, work)
+	got := config.AdmittedSkills(pol, skills, work)
+	if len(got) != len(want) {
+		t.Fatalf("AdmittedSkills = %v, FilterSkills = %v", got, want)
+	}
+	for i := range got {
+		if got[i].Name != want[i].Name {
+			t.Fatalf("AdmittedSkills = %v, FilterSkills = %v", got, want)
+		}
+	}
+	for _, s := range got {
+		if s.Name == "pwn" {
+			t.Fatal("spoof skill must not admit")
+		}
+	}
+}

@@ -9021,7 +9021,7 @@ try {
   }
 
   await seedRepeatedWorkflow({ home, port, token });
-  await skillProposalsCheck({ send, repoDir: process.cwd(), port, token });
+  await skillProposalsCheck({ send, repoDir: process.cwd(), port, token, home });
   await debugModeCheck({ send, port, token });
   // Last: the comparison card it leaves in the chat column stays put.
   await bestOfNCheck({ send });
