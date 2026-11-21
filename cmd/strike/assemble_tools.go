@@ -85,6 +85,12 @@ type assembled struct {
 	// trustNotice says repo config was skipped as untrusted ("" when trusted
 	// or when the repo ships none) (#1352).
 	trustNotice string
+	// trustDir / trustRoot / trustedAtStart record the workspace and trust
+	// decision this assembly was built with, so the cockpit trust card acts
+	// on that workspace and can say a grant/revoke needs a restart (#1781).
+	trustDir       string
+	trustRoot      string
+	trustedAtStart bool
 	// mcpClose stops MCP server sessions (stdio/HTTP; process-scoped).
 	mcpClose func() error
 	// lspClose stops language server sessions (stdio; process-scoped).
@@ -1370,6 +1376,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		worktreeClose:  first.wtClose,
 		worktreeNotice: first.wtNotice,
 		trustNotice:    wsTrust.notice(),
+		trustDir:       launchDir,
+		trustRoot:      wsTrust.root,
+		trustedAtStart: wsTrust.trusted,
 		mcpClose: func() error {
 			return mcpMgr.Close()
 		},
