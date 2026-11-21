@@ -883,6 +883,7 @@ impl Transcript {
                 });
             }
             "artifact.updated" => self.artifact_updates = self.artifact_updates.wrapping_add(1),
+            "files.invalidated" => self.note_files_invalidated(&data, at_ms),
             "compaction.started"
             | "compaction.completed"
             | "context.fit_warning"
@@ -1167,6 +1168,46 @@ impl Transcript {
                 text: pin_text(m),
             })
             .collect()
+    }
+
+    /// `files.invalidated` (#1380): one muted notice naming the paths
+    /// (TUI wording, capped). Back-to-back invalidations extend the
+    /// previous notice instead of stacking lines; `copy_text` keeps the
+    /// full path list (one per line), which is also the merge state.
+    fn note_files_invalidated(&mut self, data: &Value, at_ms: f64) {
+        use crate::files_invalidated::{merge_paths, notice_body, paths_from, KIND};
+        let paths = paths_from(data);
+        if paths.is_empty() {
+            return;
+        }
+        if let Some(last) = self.messages.last_mut() {
+            if last.role == Role::Notice && last.key == KIND {
+                let mut all: Vec<String> = last.copy_text.lines().map(str::to_string).collect();
+                merge_paths(&mut all, &paths);
+                last.body = notice_body(&all);
+                last.copy_text = all.join("\n");
+                return;
+            }
+        }
+        self.push(Message {
+            id: 0,
+            role: Role::Notice,
+            title: "Files changed".into(),
+            body: notice_body(&paths),
+            badge: String::new(),
+            detail: String::new(),
+            key: KIND.into(),
+            call_id: String::new(),
+            diff: None,
+            chips: Vec::new(),
+            keep_events: -1,
+            retry_text: String::new(),
+            copy_text: paths.join("\n"),
+            reconnect: String::new(),
+            at_ms,
+            turn_id: String::new(),
+            attachments: Vec::new(),
+        });
     }
 
     /// Rows reduced to what edit & resend (#1361) needs.
@@ -3846,6 +3887,59 @@ mod tests {
         assert!(t.messages[0].body.contains("**world**"));
         let blocks = parse_markdown(&t.messages[0].body);
         assert!(matches!(blocks[0], Block::Paragraph(_)));
+    }
+
+    #[test]
+    fn files_invalidated_adds_one_muted_notice_with_tui_wording() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "edit it"})));
+        t.apply_envelope(&env(
+            "files.invalidated",
+            serde_json::json!({"paths": ["src/a.rs"], "reason": "external"}),
+        ));
+        assert_eq!(t.messages.len(), 2);
+        let notice = &t.messages[1];
+        assert_eq!(notice.role, Role::Notice);
+        assert_eq!(notice.key, crate::files_invalidated::KIND);
+        assert_eq!(notice.body, "files changed — agent will re-read: src/a.rs");
+        assert!(notice.badge.is_empty());
+    }
+
+    #[test]
+    fn files_invalidated_burst_merges_into_one_capped_notice() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "files.invalidated",
+            serde_json::json!({"paths": ["a", "b"]}),
+        ));
+        t.apply_envelope(&env(
+            "files.invalidated",
+            serde_json::json!({"paths": ["b", "c", "d", "e"]}),
+        ));
+        assert_eq!(t.messages.len(), 1, "burst must not stack notices");
+        assert_eq!(
+            t.messages[0].body,
+            "files changed — agent will re-read: a, b, c +2 more"
+        );
+        assert_eq!(t.messages[0].copy_text, "a\nb\nc\nd\ne");
+    }
+
+    #[test]
+    fn files_invalidated_after_other_lines_starts_a_new_notice() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("files.invalidated", serde_json::json!({"paths": ["a"]})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "done"})));
+        t.apply_envelope(&env("files.invalidated", serde_json::json!({"paths": ["b"]})));
+        assert_eq!(t.messages.len(), 3);
+        assert_eq!(t.messages[2].body, "files changed — agent will re-read: b");
+    }
+
+    #[test]
+    fn files_invalidated_without_paths_adds_nothing() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("files.invalidated", serde_json::json!({"paths": []})));
+        t.apply_envelope(&env("files.invalidated", serde_json::json!({"paths": [""]})));
+        assert!(t.messages.is_empty());
     }
 
     #[test]
