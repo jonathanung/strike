@@ -34,7 +34,7 @@ pub fn section_blurb(id: &str) -> &'static str {
         "skills" => "Slash skills the agent can run. Builtins and plugin files are copied into this directory before they can be edited.",
         "agents" => "Personas and crew. Permission lines stay as they are. Handoff is the child schema gate.",
         "mcp" => "Servers from global and workspace mcp files. Env and header values are masked. A project file replaces the global map.",
-        "plugins" => "Installed plugins. Enable or disable here. Package files are not edited on this page.",
+        "plugins" => "Installed plugins. Enable or disable from the list; trust, updates, and removal are below it. Package files are not edited on this page.",
         "hooks" => "Shell commands and declarative rules from config. A hook cannot widen a hard permission denial.",
         "rules" => "AGENTS.md for this directory and the global file. Other instruction files are shown and not written.",
         "roster" => "Stall threshold and whether a child must hand off before it finishes. Clearing stall removes the key; 0 does not override a higher layer.",
@@ -480,6 +480,7 @@ pub fn CustomizePane(
     base: RwSignal<String>,
     token: RwSignal<String>,
     status: RwSignal<String>,
+    plugins_capable: RwSignal<bool>,
 ) -> impl IntoView {
     let section = RwSignal::new("skills".to_string());
     let catalog = RwSignal::new(Catalog::default());
@@ -926,6 +927,14 @@ pub fn CustomizePane(
                         }).collect_view().into_any()
                     }}
                 </div>
+                <Show when=move || section.get() == "plugins">
+                    <crate::plugin_lifecycle::PluginLifecycle
+                        base=base
+                        token=token
+                        status=status
+                        capable=plugins_capable
+                    />
+                </Show>
             </section>
             <section class="cz-editor" aria-label="Editor">
                 <Show when=move || !err.get().is_empty()>

@@ -41,6 +41,8 @@ mod project_init;
 mod onboarding;
 mod park;
 mod permissions_explain;
+mod plugin_flow;
+mod plugin_lifecycle;
 mod steer_queue;
 mod model_menu;
 mod model_menu_view;
@@ -1087,6 +1089,8 @@ fn App() -> impl IntoView {
     let ledger_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // Bootstrap capability `plugins` (#1570): gates plugin lifecycle.
+    let plugins_capable = RwSignal::new(false);
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -1713,6 +1717,7 @@ fn App() -> impl IntoView {
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
                                 ledger_capable.set(boot.capabilities.ledger);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                plugins_capable.set(boot.capabilities.plugins);
                                 skills.set(boot.skills);
                                 commands.set(boot.composer_commands);
                                 if !catalog_once.get_untracked() {
@@ -4810,7 +4815,7 @@ fn App() -> impl IntoView {
             />
         </Show>
         <Show when=move || mode.get() == "customize" fallback=move || ()>
-            <CustomizePane base=base token=token status=status />
+            <CustomizePane base=base token=token status=status plugins_capable=plugins_capable />
         </Show>
         <Show when=move || mode.get() == "chat">
             <div

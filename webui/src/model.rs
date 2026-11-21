@@ -245,6 +245,9 @@ pub struct BootstrapCapabilities {
     /// present, live engine, and not `--read-only`.
     #[serde(default, rename = "projectInit")]
     pub project_init: bool,
+    /// True when the daemon wires plugin lifecycle (`/v1/plugins*`, #1570).
+    #[serde(default)]
+    pub plugins: bool,
 }
 
 /// One `/v1/init` reply (#1581). `exists` with a non-empty `error` is the
@@ -1282,6 +1285,14 @@ fn one_line(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bootstrap_plugins_capability() {
+        let on: Bootstrap = serde_json::from_str(r#"{"capabilities":{"plugins":true,"panes":true}}"#).unwrap();
+        assert!(on.capabilities.plugins);
+        let off: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
+        assert!(!off.capabilities.plugins);
+    }
 
     #[test]
     fn root_reported_idle_needs_a_daemon_status() {
