@@ -1,0 +1,48 @@
+/* feature:transcript-pins begin (#1528) */
+/* Pin rail: a compact strip of the session's pinned messages above the
+   transcript. Absent entirely until the first pin exists. */
+.pin-rail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 0;
+  border-bottom: var(--border-width) solid var(--border-muted);
+}
+.pin-rail-title {
+  flex: none;
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+.pin-rail-items {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.pin-rail-item {
+  flex: none;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--ink);
+  font: var(--type-sm)/1.3 var(--font-body);
+  text-align: left;
+}
+button.pin-rail-item { cursor: pointer; }
+button.pin-rail-item:hover,
+button.pin-rail-item:focus-visible { border-color: var(--border-focus); }
+.pin-rail-lost { color: var(--muted); border-style: dashed; }
+.pin-rail-note { margin-left: 6px; font-style: italic; }
+.sx-pin[aria-pressed="true"] { color: var(--ink); }
+/* Phone: message actions (Copy, Pin) get full 44px touch targets
+   (#1524); the rail scrolls sideways and never covers the composer. */
+body[data-phone="1"] .sx-actions button { min-height: 44px; min-width: 44px; }
+body[data-phone="1"] .pin-rail-item { min-height: 44px; max-width: 70vw; }
+/* feature:transcript-pins end */

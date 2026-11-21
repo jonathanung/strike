@@ -892,6 +892,10 @@ name = "mermaid-lite"
 version = "0.1.0"
 
 [[package]]
+name = "message-pins"
+version = "0.1.0"
+
+[[package]]
 name = "next_tuple"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1408,6 +1412,7 @@ dependencies = [
  "load-guard",
  "md-review",
  "mermaid-lite",
+ "message-pins",
  "prompt-library",
  "protocol-schema",
  "qrcode",

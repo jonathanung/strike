@@ -23,6 +23,7 @@ debug-mode = { path = "debug-mode" }
 prompt-library = { path = "prompt-library" }
 signin-flow = { path = "signin-flow" }
 transcript-window = { path = "transcript-window" }
+message-pins = { path = "message-pins" }
 quote-message = { path = "quote-message" }
 edit-resend = { path = "edit-resend" }
 theme-catalog = { path = "theme-catalog" }

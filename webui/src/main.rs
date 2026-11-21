@@ -105,6 +105,7 @@ mod team_message;
 mod file_history;
 mod quick_open;
 mod transcript_find;
+mod transcript_pins;
 mod usage_audit;
 mod regenerate_title;
 mod rewind;
@@ -5161,6 +5162,8 @@ fn App() -> impl IntoView {
     })
     .into();
     let rename_for_palette = apply_title.clone();
+    // Message pins (#1528): daemon-backed, reloaded on session switch.
+    let pin_store = transcript_pins::PinStore::new(base, token, active_root, ux_note);
     // A quote's anchor is per session: switching sessions drops it.
     Effect::new(move |prev: Option<String>| {
         let root = active_root.get();
@@ -6230,6 +6233,7 @@ fn App() -> impl IntoView {
                         note=ux_note
                         handlers=handlers
                         find=find_view
+                        pins=pin_store
                     />
                     </Show>
                     <debug_mode_ui::DebugPanel base=base token=token root=active_root debug=debug_state />
