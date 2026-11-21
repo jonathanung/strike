@@ -230,6 +230,13 @@ static files. To rebuild main's bundle by hand, run
 
 `GET /v1/customize` is the catalog the agent already loads (skills, agents,
 MCP, plugins, hooks, rules, roster). `GET /v1/customize/doc` opens one item.
+`GET /v1/customize/skill-usage` counts how often each catalog skill ran
+(#1442), as `{ "skills": { "<name>": { "count", "lastUsed" } }, "sessions" }`.
+It reads the recorded session logs, all-time, and nothing leaves the gateway.
+A run is a `user.message` that starts with `/name` or `$name`, or a `skill`
+tool call (resource-only loads excluded). Child-agent runs count once.
+Runs typed in the TUI count too, because the TUI writes the same logs.
+Sessions deleted from the sessions directory no longer count.
 `POST /v1/customize/preview` returns a redacted diff and does not write.
 `POST /v1/customize/apply` writes only when `confirm` is true and `diffHash`
 matches that preview. Env, header, and URL secrets are masked; sending `••••`

@@ -559,6 +559,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/plugins/{id}", s.handlePluginGet)
 	s.mux.HandleFunc("GET /v1/customize", s.handleCustomize)
 	s.mux.HandleFunc("GET /v1/customize/doc", s.handleCustomizeDoc)
+	s.mux.HandleFunc("GET /v1/customize/skill-usage", s.handleSkillUsage)
 	s.mux.HandleFunc("POST /v1/customize/preview", s.handleCustomizePreview)
 	s.mux.HandleFunc("POST /v1/customize/apply", s.handleCustomizeApply)
 	s.mux.HandleFunc("GET /v1/panes", s.handlePanesList)

@@ -483,6 +483,9 @@ pub fn CustomizePane(
 ) -> impl IntoView {
     let section = RwSignal::new("skills".to_string());
     let catalog = RwSignal::new(Catalog::default());
+    // #1442: per-skill run counts. None until a report loads; rows then show
+    // no usage line instead of claiming "Never used".
+    let usage = RwSignal::new(None::<crate::skill_usage::Report>);
     let tick = RwSignal::new(0u32);
     let err = RwSignal::new(String::new());
     let selected = RwSignal::new(None::<usize>);
@@ -537,6 +540,10 @@ pub fn CustomizePane(
                     err.set(String::new());
                 }
                 Err(e) => err.set(e),
+            }
+            match get_json::<crate::skill_usage::Report>(&b, &t, "/v1/customize/skill-usage").await {
+                Ok(report) => usage.set(Some(report)),
+                Err(_) => usage.set(None),
             }
         });
     });
@@ -904,7 +911,9 @@ pub fn CustomizePane(
                 </Show>
                 <div class="cz-rows">
                     {move || {
-                        let rows = rows_for(&section.get(), &catalog.get());
+                        let sec = section.get();
+                        let rows = rows_for(&sec, &catalog.get());
+                        let report = if sec == "skills" { usage.get() } else { None };
                         let current = selected.get();
                         if rows.is_empty() {
                             return view! { <p class="hint">"Nothing in this section."</p> }.into_any();
@@ -915,12 +924,14 @@ pub fn CustomizePane(
                             let meta = row.meta.clone();
                             let origin = row.origin.clone();
                             let item = row.name.clone();
+                            let used = crate::skill_usage::usage_line(report.as_ref(), &row.name);
                             let class = if current == Some(i) { "cz-row on" } else { "cz-row" };
                             view! {
                                 <button type="button" class=class data-cz-item=item on:click=move |_| open(i)>
                                     <span class="cz-row-title">{title}</span>
                                     <span class="badge">{origin_label(&origin)}</span>
                                     <span class="cz-row-meta">{meta}</span>
+                                    {used.map(|text| view! { <span class="cz-row-meta cz-row-usage" data-cz-usage=text.clone()>{text}</span> })}
                                 </button>
                             }
                         }).collect_view().into_any()
