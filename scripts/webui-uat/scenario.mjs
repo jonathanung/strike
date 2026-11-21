@@ -53,6 +53,80 @@ async function headerAt(page, check, viewport, grab) {
   await viewport(1440, 900);
 }
 
+// #1533 / #1538: a card offers device-code / OAuth sign-in only when the
+// daemon lists it in `methods` (today: xai device+oauth, openai oauth). The
+// flows hit the real daemon endpoints; the vendor step cannot finish here,
+// so the check is start -> pending (link, code or paste field) -> cancel,
+// or an honest daemon error at the card. Never a "Signed in".
+async function signinFlow(page, check, waitUntil, grab) {
+  const offered = await page.evaluate(`(() => {
+    const pick = (name) => {
+      const card = document.querySelector('[data-provider="' + name + '"]');
+      if (!card) return null;
+      return [...card.querySelectorAll("[data-signin]")].map((el) => el.getAttribute("data-signin")).sort().join(",");
+    };
+    return { xai: pick("xai"), openai: pick("openai"), anthropic: pick("anthropic"), echo: pick("echo") };
+  })()`);
+  check(offered.xai === "device,oauth", `xai sign-in actions were ${offered.xai}, want device,oauth`);
+  check(offered.openai === "oauth", `openai sign-in actions were ${offered.openai}, want oauth`);
+  check(offered.anthropic === "", `anthropic offered sign-in it does not advertise: ${offered.anthropic}`);
+  check(offered.echo === "", `echo offered sign-in it does not advertise: ${offered.echo}`);
+
+  for (const [provider, method] of [
+    ["openai", "oauth"],
+    ["xai", "device"],
+  ]) {
+    const card = `[data-provider="${provider}"]`;
+    await page.evaluate(`document.querySelector('${card} [data-signin="${method}"]')?.click()`);
+    const outcome = await waitUntil(
+      `(() => {
+        const flow = document.querySelector('${card} [data-signin-flow="${method}"]');
+        const note = document.querySelector('${card} [data-provider-note]');
+        return Boolean(flow) || Boolean(note && note.innerText.trim());
+      })()`,
+      20000,
+      `${provider} ${method} sign-in start`,
+    );
+    check(Boolean(outcome), `${provider} ${method} sign-in showed neither a flow nor an error`);
+    const state = await page.evaluate(`(() => {
+      const flow = document.querySelector('${card} [data-signin-flow="${method}"]');
+      if (!flow) return { phase: "" };
+      return {
+        phase: flow.getAttribute("data-signin-phase") || "",
+        url: flow.querySelector("[data-signin-url]")?.textContent || "",
+        code: flow.querySelector("[data-signin-code]")?.textContent || "",
+        paste: Boolean(flow.querySelector("[data-signin-paste]")),
+        cancel: Boolean(flow.querySelector("[data-signin-cancel]")),
+      };
+    })()`);
+    check(state.phase !== "completed", `${provider} ${method} claimed a completed sign-in in UAT`);
+    if (state.phase !== "pending") {
+      // Vendor unreachable from this box: the daemon's error is the evidence.
+      continue;
+    }
+    check(/^https?:\/\//.test(state.url), `${provider} ${method} pending flow has no link`);
+    check(state.cancel, `${provider} ${method} pending flow has no Cancel`);
+    if (method === "oauth") check(state.paste, `${provider} oauth pending flow has no paste field`);
+    if (method === "device") check(state.code.trim().length > 0, `${provider} device flow shows no user code`);
+    const stored = await page.evaluate(`(() => {
+      let store = "";
+      try { store = JSON.stringify(localStorage); } catch (err) { store = ""; }
+      const url = ${JSON.stringify(state.url)};
+      return url !== "" && store.includes(url);
+    })()`);
+    check(!stored, `${provider} ${method} flow link was written to localStorage`);
+    await grab(`providers-signin-${method}-pending-1440`);
+    await page.evaluate(`document.querySelector('${card} [data-signin-cancel]')?.click()`);
+    const canceled = await waitUntil(
+      `document.querySelector('${card} [data-signin-flow="${method}"]')?.getAttribute("data-signin-phase") === "canceled"`,
+      8000,
+      `${provider} ${method} cancel`,
+    );
+    check(Boolean(canceled), `${provider} ${method} Cancel did not reach the canceled state`);
+    await page.evaluate(`document.querySelector('${card} [data-signin-dismiss]')?.click()`);
+  }
+}
+
 // #1508: the composer action row must never scroll sideways or clip a
 // chip, Send must stay on screen, and the transcript must not render
 // underneath the composer — at 1024x594 especially.
@@ -141,6 +215,7 @@ async function providerFlow(page, check, waitUntil, grab) {
     `document.querySelector('[data-provider="echo"]')?.innerText || ""`,
   );
   check(String(echoState).includes("Connected"), `echo was not Connected: ${echoState}`);
+  await signinFlow(page, check, waitUntil, grab);
   for (const [width, height] of [
     [390, 844],
     [768, 1024],
