@@ -777,6 +777,42 @@ impl Transcript {
                 card.at_ms = at_ms;
                 self.upsert_child(card);
             }
+            "child.escalated" => {
+                // #1375: a child tripped a budget/stall/loop. One persistent
+                // line names the child, the trip and the action taken; the
+                // later child.completed card still carries the outcome.
+                let session = field_str(&data, "sessionId");
+                let mut name = field_str(&data, "name");
+                if name.is_empty() {
+                    name = session.chars().take(8).collect();
+                }
+                if name.is_empty() {
+                    name = "A child".into();
+                }
+                let body = crate::child_signals::escalation_sentence(
+                    &field_str(&data, "kind"),
+                    &field_str(&data, "reason"),
+                    &field_str(&data, "action"),
+                );
+                self.push(Message {
+                    id: 0,
+                    role: Role::Notice,
+                    title: format!("{name} escalated"),
+                    body: body.clone(),
+                    badge: "escalated".into(),
+                    detail: String::new(),
+                    key: String::new(),
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: body,
+                    reconnect: String::new(),
+                    at_ms,
+                    turn_id: field_str(&data, "turnId"),
+                });
+            }
             "artifact.updated" => self.artifact_updates = self.artifact_updates.wrapping_add(1),
             "engine.error" => {
                 let message = field_str(&data, "message");
@@ -2755,6 +2791,42 @@ mod tests {
         t.apply_envelope(&env("turn.completed", serde_json::json!({"turnId": "t1"})));
         let row = t.messages.iter().find(|m| m.call_id == "a").expect("row");
         assert_eq!(row.badge, "no result");
+    }
+
+    #[test]
+    fn child_escalated_renders_a_line() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "child.escalated",
+            serde_json::json!({
+                "sessionId": "abcd1234ef",
+                "name": "scout",
+                "kind": "stall",
+                "reason": "no progress for 300s",
+                "action": "finalizing",
+                "terminalStatus": "blocked"
+            }),
+        ));
+        let line = t
+            .messages
+            .iter()
+            .find(|m| m.badge == "escalated")
+            .expect("escalation line");
+        assert_eq!(line.role, Role::Notice);
+        assert_eq!(line.title, "scout escalated");
+        assert_eq!(
+            line.body,
+            "Stalled: no progress for 300s. Action: finishing with a handoff."
+        );
+
+        // No name: fall back to the short session id.
+        t.apply_envelope(&env(
+            "child.escalated",
+            serde_json::json!({"sessionId": "abcd1234ef", "kind": "tokens", "reason": "", "action": "interrupted"}),
+        ));
+        let last = t.messages.last().unwrap();
+        assert_eq!(last.title, "abcd1234 escalated");
+        assert_eq!(last.body, "Token budget. Action: stopped.");
     }
 
     #[test]
