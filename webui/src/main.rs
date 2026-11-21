@@ -11,6 +11,7 @@ mod api;
 mod appearance;
 mod attachment_honesty;
 mod apps;
+mod approval_outcome;
 mod approvals;
 mod approvals_ui;
 mod chat_mode;
@@ -21,11 +22,13 @@ mod diag;
 mod draft_size;
 mod drafts;
 mod editor;
+mod lessons;
 mod load_epoch;
 mod local_issues;
 mod localfiles;
 mod customize;
 mod gateway;
+mod gateway_peek;
 mod gateway_qr;
 mod git;
 mod goals;
@@ -40,6 +43,7 @@ mod notify;
 mod outcome;
 mod project_init;
 mod onboarding;
+mod outbox;
 mod park;
 mod permissions_explain;
 mod steer_queue;
@@ -52,13 +56,16 @@ mod session_panel;
 mod storage;
 mod tab_title;
 mod task_runner;
+mod file_history;
 mod quick_open;
 mod transcript_find;
 mod usage_audit;
 mod session_delete;
 mod session_restore;
 mod shell;
+mod skill_usage;
 mod side_chat;
+mod side_chat_promote;
 mod status;
 mod status_card_view;
 mod term;
@@ -66,12 +73,15 @@ mod tool_tail;
 mod terminal;
 mod transcript;
 mod transcript_view;
+mod update_check;
 mod triggers;
 mod turn_elapsed;
 mod turn_failure;
 mod turn_usage;
+mod turn_verify;
 mod workspace_image;
 mod workspaces;
+mod workflow_run;
 use crate::shell::icon;
 
 
@@ -121,6 +131,7 @@ use crate::editor::DocumentPane;
 use crate::mobile::PhoneNav;
 use crate::customize::CustomizePane;
 use crate::side_chat::SideChatPanel;
+use crate::outbox::OutboxList;
 
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 use crate::model_menu::{active_context, context_view, reduce_envelope, LiveModelState, ModelDefaults};
@@ -1164,12 +1175,17 @@ fn App() -> impl IntoView {
     let stream_note = RwSignal::new(String::new());
     let load_error = RwSignal::new(String::new());
     let gateway = RwSignal::new("checking".to_string());
+    // Offline outbox (#1325): text sends queued while the gateway is down.
+    let outbox = outbox::Outbox::new(base, token);
     let gateway_kind = RwSignal::new(StatusKind::Idle);
     let gateway_label = RwSignal::new("Checking".to_string());
     let last_beat = RwSignal::new(0.0f64);
     let boot_ms = now_ms();
     let focus = RwSignal::new(false);
     let back_stack = RwSignal::new(Vec::<String>::new());
+    // Open-file history and recents (#1395): in-memory, global across
+    // sessions like the Files pane, mirroring the session stacks here.
+    let file_history = RwSignal::new(file_history::FileHistory::default());
     let forward_stack = RwSignal::new(Vec::<String>::new());
     // Kept for the shell host bridge (palette session list / breadcrumb
     // label), which merges with the browser-local pins. The session panel
@@ -1184,6 +1200,12 @@ fn App() -> impl IntoView {
     // solely on `fast.selected`. Neither is set optimistically on click.
     let autonomy = RwSignal::new("supervised".to_string());
     let autonomy_menu = RwSignal::new(false);
+    // Live workflow run (#1574): daemon-reported only — seeded from
+    // bootstrap status, then moved solely by `phase.changed`.
+    let wf_run = RwSignal::new(workflow_run::WorkflowRun::default());
+    Effect::new(move |_| {
+        workflow_run::set_active(wf_run.with(|w| w.is_active()));
+    });
     let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
@@ -1310,6 +1332,13 @@ fn App() -> impl IntoView {
     let memory_mode_known = RwSignal::new(false);
     let memory_menu = RwSignal::new(false);
     let storage_rev = RwSignal::new(0u32);
+    // Lessons capture (#1376): rows show "Remember this" only while the
+    // confirmed memory mode allows storing; the draft is page-owned.
+    let lesson_gate = Signal::derive(move || {
+        lessons::capture_allowed(memory_mode_known.get(), &memory_mode.get())
+    });
+    provide_context(lessons::CaptureGate(lesson_gate));
+    let lesson_draft = RwSignal::new(None::<lessons::Draft>);
     // Find in transcript (#1342): bar visibility, query, current match,
     // and the transcript scroll offset saved when the bar opened so
     // Escape / Close can restore it.
@@ -1500,6 +1529,8 @@ fn App() -> impl IntoView {
                     gateway.set("connected".into());
                     last_beat.set(now_ms());
                     gateway_up = true;
+                    // Deliver anything queued while offline (#1325).
+                    outbox.kick();
                     // HTTP is up. If the event stream is still down after an
                     // outage, open it again now instead of waiting out backoff.
                     if was == "unreachable"
@@ -1721,9 +1752,31 @@ fn App() -> impl IntoView {
                                                 .to_string(),
                                         );
                                     }
+                                    wf_run.set(workflow_run::WorkflowRun::from_status(
+                                        &st.workflow,
+                                        &st.phase,
+                                    ));
                                     session_cwd.set(st.cwd);
                                     live_busy.set(st.busy);
                                     live_busy_root.set(root);
+                                }
+                                // #1574: refresh the Start workflow… choices
+                                // from the daemon catalog for this session.
+                                {
+                                    let (cb, ct) = (b.clone(), t.clone());
+                                    spawn_local(async move {
+                                        if let Ok(list) = get_json::<workflow_run::CatalogList>(
+                                            &cb,
+                                            &ct,
+                                            "/v1/workflows",
+                                        )
+                                        .await
+                                        {
+                                            workflow_run::set_catalog(
+                                                workflow_run::catalog_choices(&list.workflows),
+                                            );
+                                        }
+                                    });
                                 }
                                 diag_capable.set(boot.capabilities.diag);
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
@@ -1731,6 +1784,7 @@ fn App() -> impl IntoView {
                                 crate::local_issues::set_issues_capable(boot.capabilities.issues);
                                 issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
                                 skills.set(boot.skills);
                                 loops_capable.set(boot.capabilities.loops);
                                 commands.set(if boot.capabilities.loops {
@@ -1893,6 +1947,7 @@ fn App() -> impl IntoView {
         fast_on.set(false);
         autonomy.set("supervised".to_string());
         autonomy_menu.set(false);
+        wf_run.set(workflow_run::WorkflowRun::default());
         context_used.set(0);
         context_limit.set(0);
         context_fit.set(String::new());
@@ -2026,6 +2081,10 @@ fn App() -> impl IntoView {
                         note: model_note.get_untracked(),
                         note_after: model_note_after.get_untracked(),
                     };
+                    let wf_next = workflow_run::reduce(wf_run.get_untracked(), &data);
+                    if wf_next != wf_run.get_untracked() {
+                        wf_run.set(wf_next);
+                    }
                     let next = reduce_envelope(prev, &data);
                     provider_name.set(next.provider);
                     model_name.set(next.model);
@@ -2471,6 +2530,26 @@ fn App() -> impl IntoView {
             draft_armed.set(String::new());
         }
         let op = steer_queue::send_op(session_busy(&root), &enter_mode.get_untracked(), which);
+        // One id per send. The daemon dedupes on it, so the outbox may
+        // retry a send whose answer was lost without posting it twice.
+        let client_id = outbox::new_client_id();
+        // Offline outbox (#1325): with the gateway down, or earlier queued
+        // items for this session still waiting, a text send is queued in
+        // order instead of posted. Attachments need an upload, so they keep
+        // the normal path (and its failure restore).
+        if !ready
+            && outbox::should_queue(&gateway.get_untracked(), &outbox.items.get_untracked(), &root)
+        {
+            if !outbox.enqueue(client_id, root.clone(), op, text.clone()) {
+                status.set("Outbox is full. Delete a queued message first.".into());
+                return;
+            }
+            queue_note.set(String::new());
+            prompt_history.update(|h| h.push(&text));
+            draft.set(String::new());
+            outbox.kick();
+            return;
+        }
         queue_note.set(String::new());
         if op == "steer" {
             steer_note.set(steer_queue::STEER_WAITING.into());
@@ -2548,7 +2627,7 @@ fn App() -> impl IntoView {
             } else {
                 serde_json::json!({"text": text, "images": images})
             };
-            match post_op(&b, &t, &root, op, body).await {
+            match outbox::post_op_with_id(&b, &t, &root, op, body, &client_id).await {
                 Ok(()) => {
                     for file in &updated {
                         chat_mode::revoke_preview(&file.preview);
@@ -2558,6 +2637,16 @@ fn App() -> impl IntoView {
                 Err(err) => {
                     if op == "steer" && steer_note.get_untracked() == steer_queue::STEER_WAITING {
                         steer_note.set(String::new());
+                    }
+                    // Lost connection on a text send: queue it under the
+                    // same id. If the daemon did get it, the retry is a
+                    // no-op there instead of a second prompt (#1325).
+                    if images.is_empty()
+                        && outbox::classify_failure(&err) == outbox::SendFailure::Transient
+                        && outbox.enqueue(client_id.clone(), root.clone(), op, text.clone())
+                    {
+                        sending.set(false);
+                        return;
                     }
                     queue_note.set(format!("Send failed: {err}"));
                     status.set(format!("send failed: {err}"));
@@ -3746,6 +3835,16 @@ fn App() -> impl IntoView {
         }),
     );
     shell::bind(
+        "lesson-remember",
+        Rc::new(move |text: &str| {
+            if !lesson_gate.get_untracked() {
+                return Err("This session's memory mode does not store lessons.".into());
+            }
+            lesson_draft.set(Some(lessons::draft_from_message(text)));
+            Ok(())
+        }),
+    );
+    shell::bind(
         "panel-issues",
         Rc::new(move |_args: &str| {
             if !issues_capable.get_untracked() {
@@ -3859,6 +3958,64 @@ fn App() -> impl IntoView {
             set_memory("temporary".into());
             Ok(())
         }),
+    );
+
+    // Workflow run performers (#1574). Both post the browser-certified
+    // ops and never touch `wf_run`: the chip moves only on the
+    // daemon's `phase.changed`. A refusal is an `engine.error` that the
+    // model-note reducer shows verbatim (it arms on `model_note_after`).
+    let post_workflow_op = move |typ: &'static str, data: serde_json::Value| {
+        let root = active_root.get_untracked();
+        if root.is_empty() {
+            model_note.set("No live session yet — open or start one first.".into());
+            return;
+        }
+        model_note_after.set(now_ms() as i64);
+        model_note.set(String::new());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(&b, &t, &root, typ, data).await {
+                model_note.set(format!("{typ} failed: {e}"));
+                model_note_after.set(0);
+            }
+        });
+    };
+    let request_workflow_stop = move || -> Result<(), String> {
+        let active = wf_run.get_untracked();
+        if !active.is_active() {
+            return Err("No workflow is active on this session.".into());
+        }
+        if !crate::confirm::ask(
+            workflow_run::stop_confirm(&active),
+            Rc::new(move || post_workflow_op("workflow.stop", serde_json::json!({}))),
+        ) {
+            return Err(crate::confirm::BUSY.into());
+        }
+        Ok(())
+    };
+    shell::bind(
+        "workflow-start",
+        Rc::new(move |args: &str| {
+            let name = workflow_run::start_target(args)?;
+            let active = wf_run.get_untracked();
+            let data = serde_json::json!({ "name": name.clone() });
+            match workflow_run::replace_confirm(&active, &name) {
+                None => post_workflow_op("workflow.start", data),
+                Some(request) => {
+                    if !crate::confirm::ask(
+                        request,
+                        Rc::new(move || post_workflow_op("workflow.start", data.clone())),
+                    ) {
+                        return Err(crate::confirm::BUSY.into());
+                    }
+                }
+            }
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "workflow-stop",
+        Rc::new(move |_args: &str| request_workflow_stop()),
     );
 
     // Session delete palette performer (#1358). The contrib command has
@@ -5104,6 +5261,7 @@ fn App() -> impl IntoView {
                             jump_line=doc_line
                             want_diff=doc_diff
                             editing=doc_editing
+                            history=file_history
                         />
                     </Show>
                     <Show when=move || tf_open.get() && doc_path.get().is_empty()>
@@ -5349,6 +5507,7 @@ fn App() -> impl IntoView {
                             </div>
                         </Show>
                         <div class="steer-queue" id="steer-queue">
+                            <OutboxList outbox=outbox root=active_root gateway=gateway />
                             <session_loops::LoopRows base=base token=token root=active_root capable=loops_capable loops=loop_rows note=loop_note />
                             <Show when=move || !steer_note.get().is_empty()>
                                 <p class="steer-note" role="status">{move || steer_note.get()}</p>
@@ -5696,6 +5855,16 @@ fn App() -> impl IntoView {
                                     model_menu.set(false);
                                     autonomy_menu.update(|v| *v = !*v);
                                 }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
+                                // #1574: the live workflow run, only while the
+                                // daemon reports one. Stop asks first.
+                                <Show when=move || wf_run.with(|w| w.is_active())>
+                                    <span class="composer-glance workflow-glance" data-workflow-status="true" title="Active workflow and phase, as reported by the daemon. Start another from the palette: Start workflow…">{move || wf_run.with(|w| w.label())}</span>
+                                    <button type="button" class="composer-glance workflow-stop" data-workflow-stop="true" title="Stop the active workflow (asks first)" aria-label=move || format!("Stop workflow {}", wf_run.with(|w| w.workflow.clone())) on:click=move |_| {
+                                        if let Err(e) = request_workflow_stop() {
+                                            model_note.set(e);
+                                        }
+                                    }>"Stop"</button>
+                                </Show>
                                 <Show when=move || fast_on.get()>
                                     <span class="composer-glance" data-fast-status="true" title="Fast (priority service tier) is on for this session, as confirmed by the daemon. The current provider may not support priority tier.">"Fast · on"</span>
                                 </Show>
@@ -5906,6 +6075,25 @@ fn App() -> impl IntoView {
                                 <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
                             </div>
                             <p class="hint">"Click a file to open it. @ mentions it in chat; drag also inserts @path."</p>
+                            <Show when=move || file_history.with(|h| !h.recent(1).is_empty())>
+                                <div class="files-recent" data-ev-recent=true>
+                                    <p class="hint">"Recent"</p>
+                                    <ul class="plain">
+                                        {move || file_history.with(|h| h.recent(file_history::RECENT_SHOWN)).into_iter().map(|p| {
+                                            let label = p.clone();
+                                            let attr = p.clone();
+                                            let title = p.clone();
+                                            view! {
+                                                <li class="ev-fileline">
+                                                    <button class="link file-row" data-ev-recent-open=attr title=title
+                                                        on:click=move |_| open_doc(&p)
+                                                    >{label}</button>
+                                                </li>
+                                            }
+                                        }).collect_view()}
+                                    </ul>
+                                </div>
+                            </Show>
                             <Show when=move || !files_error.get().is_empty()>
                                 <div class="notice" role="alert">
                                     <span>{move || files_error.get()}</span>
@@ -6058,6 +6246,9 @@ fn App() -> impl IntoView {
                 focus_name=side_focus_name
                 live_provider=provider_name
                 live_model=model_name
+                on_promote=Callback::new(move |(text,): (String,)| {
+                    draft.update(|d| *d = side_chat_promote::insert_into_draft(d, &text));
+                })
             />
         </Show>
         <WorkspacePicker
@@ -6071,6 +6262,13 @@ fn App() -> impl IntoView {
             refresh=refresh_meta
         />
         <PhoneNav pane=phone_pane side_tab=side_tab mode=mode />
+        <lessons::LessonDraftDialog
+            draft=lesson_draft
+            base=base
+            token=token
+            status=status
+            storage_rev=storage_rev
+        />
     }
 }
 

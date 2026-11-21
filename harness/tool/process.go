@@ -64,6 +64,12 @@ type ProcessSpec struct {
 	// full stream (not reported to observers) in ProcessResult.Full so callers
 	// can spill overflow past MaxOutput to a file (#1199). Zero discards it.
 	SpillMax int
+	// TailMax, when > 0, additionally keeps the last TailMax bytes of the
+	// stream (not reported to observers) in ProcessResult.Tail. MaxOutput and
+	// SpillMax keep the head; a scheduled script wants the end, where the
+	// failing assertion is. Split streams share the budget like MaxOutput.
+	// Zero (the bash tool) keeps no tail.
+	TailMax int
 	// Combine merges stdout and stderr into one ordered stream (bash-style).
 	// ProcessObserver.Output still labels chunks stdout/stderr when separate;
 	// when Combine is true every chunk is labeled stdout.
@@ -93,7 +99,10 @@ type ProcessResult struct {
 	Truncated bool
 	// Full is the full stream (capped at ProcessSpec.SpillMax) when Truncated
 	// and SpillMax > 0; empty otherwise.
-	Full   string
+	Full string
+	// Tail is the last ProcessSpec.TailMax bytes of the stream (stdout tail
+	// then stderr tail when split); empty when TailMax is zero.
+	Tail   string
 	Status ProcessStatus
 	// SandboxApplied is true when an OS sandbox launcher prefixed the exec argv.
 	SandboxApplied bool
@@ -165,6 +174,7 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 	if spec.Combine {
 		combinedW = newProcessStreamWriter(maxOut, id, ProcessStreamStdout, obs.Output)
 		combinedW.spillMax = spec.SpillMax
+		combinedW.tailMax = spec.TailMax
 		cmd.Stdout = combinedW
 		cmd.Stderr = combinedW
 	} else {
@@ -177,6 +187,8 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 		stderrW = newProcessStreamWriter(maxOut-half, id, ProcessStreamStderr, obs.Output)
 		stdoutW.spillMax = spec.SpillMax / 2
 		stderrW.spillMax = spec.SpillMax - spec.SpillMax/2
+		stdoutW.tailMax = spec.TailMax / 2
+		stderrW.tailMax = spec.TailMax - spec.TailMax/2
 		cmd.Stdout = stdoutW
 		cmd.Stderr = stderrW
 	}
@@ -219,6 +231,7 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 		if res.Truncated {
 			res.Full = combinedW.spilled()
 		}
+		res.Tail = combinedW.tailString()
 	} else {
 		out, outSeen, outTrunc := stdoutW.result()
 		errOut, errSeen, errTrunc := stderrW.result()
@@ -227,6 +240,7 @@ func RunProcess(ctx context.Context, spec ProcessSpec, obs ProcessObserver) (Pro
 		res.Output = out + errOut
 		res.BytesSeen = outSeen + errSeen
 		res.Truncated = outTrunc || errTrunc
+		res.Tail = stdoutW.tailString() + stderrW.tailString()
 		if res.Truncated {
 			if full := stdoutW.spilled() + stderrW.spilled(); full != "" {
 				res.Full = full
@@ -282,6 +296,9 @@ type processStreamWriter struct {
 	// spill retains up to spillMax bytes of the full stream (0 = disabled).
 	spill    bytes.Buffer
 	spillMax int
+	// tail keeps the last tailMax bytes of the stream (0 = disabled).
+	tail    []byte
+	tailMax int
 }
 
 func newProcessStreamWriter(max int, id, stream string, report func(id, stream, data string)) *processStreamWriter {
@@ -296,6 +313,7 @@ func (w *processStreamWriter) Write(p []byte) (int, error) {
 	if room := w.spillMax - w.spill.Len(); room > 0 {
 		w.spill.Write(p[:min(room, n)])
 	}
+	w.keepTail(p)
 	if w.total >= w.max {
 		return n, nil
 	}
@@ -318,6 +336,33 @@ func (w *processStreamWriter) result() (string, int, bool) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.buf.String(), w.seen, w.seen > w.total
+}
+
+// keepTail appends p to the tail window and drops the front past tailMax.
+// The window is compacted in place so memory stays at most 2*tailMax.
+func (w *processStreamWriter) keepTail(p []byte) {
+	if w.tailMax <= 0 || len(p) == 0 {
+		return
+	}
+	if len(p) >= w.tailMax {
+		w.tail = append(w.tail[:0], p[len(p)-w.tailMax:]...)
+		return
+	}
+	if w.tail == nil {
+		w.tail = make([]byte, 0, 2*w.tailMax)
+	}
+	if len(w.tail)+len(p) > w.tailMax {
+		drop := len(w.tail) + len(p) - w.tailMax
+		w.tail = w.tail[:copy(w.tail, w.tail[drop:])]
+	}
+	w.tail = append(w.tail, p...)
+}
+
+// tailString returns the retained tail (empty when TailMax is zero).
+func (w *processStreamWriter) tailString() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return string(w.tail)
 }
 
 // spilled returns the retained full stream (empty when spill is disabled).

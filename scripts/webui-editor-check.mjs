@@ -1295,6 +1295,63 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "blame off restores the viewer",
     );
+    // Open-file history (#1395): open A (smoke, already open), open B
+    // (other), Back returns to A, Forward to B, Recent lists both and
+    // reopens A; Back is disabled at the start of the stack.
+    const viewerPath = (want, label) =>
+      waitFor(
+        send,
+        `(() => {
+          const root = document.querySelector("[data-ev-root]");
+          const p = root ? root.getAttribute("data-ev-path") : "";
+          return p === ${JSON.stringify(want)} ? "ok" : "path = " + p;
+        })()`,
+        label,
+      );
+    await viewerPath("editor-smoke.txt", "history: A open");
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector('[data-ev-open="editor-other.txt"]'); if (!b) return "no other row"; b.click(); return "ok"; })()`,
+    );
+    await viewerPath("editor-other.txt", "history: B open");
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-hist-back]"); if (!b || b.disabled) return "back disabled"; b.click(); return "ok"; })()`,
+    );
+    await viewerPath("editor-smoke.txt", "history: Back returns to A");
+    await waitFor(
+      send,
+      `(() => { const f = document.querySelector("[data-ev-hist-forward]"); return f && !f.disabled ? "ok" : "forward disabled after Back"; })()`,
+      "history: Forward enabled after Back",
+    );
+    // Keyboard path: Alt+] steps forward from inside the pane.
+    await evalValue(
+      send,
+      `(() => {
+        const pane = document.querySelector(".ev-doc");
+        pane.dispatchEvent(new KeyboardEvent("keydown", { key: "]", code: "BracketRight", altKey: true, bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await viewerPath("editor-other.txt", "history: Alt+] returns to B");
+    await waitFor(
+      send,
+      `(() => {
+        const r = document.querySelector("[data-ev-recent]");
+        if (!r) return "no Recent section";
+        const a = r.querySelector('[data-ev-recent-open="editor-smoke.txt"]');
+        const b = r.querySelector('[data-ev-recent-open="editor-other.txt"]');
+        if (!a || !b) return "Recent = " + r.innerText.slice(0, 160);
+        const rows = [...r.querySelectorAll("[data-ev-recent-open]")].map((el) => el.getAttribute("data-ev-recent-open"));
+        return rows[0] === "editor-other.txt" ? "ok" : "order = " + rows.join(",");
+      })()`,
+      "history: Recent lists both, most recent first",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-recent-open="editor-smoke.txt"]').click(); return "ok"; })()`,
+    );
+    await viewerPath("editor-smoke.txt", "history: Recent reopens A");
     // Quick-open (#1396): Ctrl+P opens the palette on Open file…; a
     // query with no match shows the empty state, a partial name lists
     // the nested file, and Enter (keyboard only) opens it in the viewer.

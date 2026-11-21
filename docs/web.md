@@ -993,6 +993,13 @@ Response: `{ mode, state, current?, latest?, available, message?, error?, checke
 `current` (only after a successful check), `failed` (offline, rate limit, API
 error — never reported as up to date), or `unknown`. Missing capability returns
 501.
+
+The cockpit calls the route once per gateway after bootstrap reports
+`capabilities.updateCheck`, and again from **Settings → Updates** (dial change
+or *Check now*). The Updates section edits the `autoupdate` dial and states the
+result (`off`, available, up to date, or the failure reason). An `available`
+result adds one notification-centre row keyed by the release; dismissing it
+holds until a newer release. The web never installs.
 The cockpit Settings dialog loads `GET`, edits sections, and saves via `PATCH`.
 Browser color scheme (auto/dark/light) is local-only (`data-appearance` +
 `localStorage`), not a host config key.
@@ -1179,6 +1186,7 @@ writes remain coherent via the underlying stores; browser reads are race-safe.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/v1/files/search` | mode | Workspace file search (`q`, `limit`≤50) for `@file` completion; root-scoped via `host.Files.SearchFiles` |
+| `GET` | `/v1/sessions/{id}/reference` | mode | Size of an `@session:<id>` reference (#1550): `chars` of the exact quoted block the daemon attaches (summary + last 10 turns), `tokens` (~4 chars/token, `estimated`), `turns`, `omitted`, `hasSummary`, `self`. 404 for a missing/pruned session. Display only. |
 | `GET` | `/v1/file/view` | mode | Document read (`path`). JSON: content, sha256, mtimeUnixNano, binary, truncated, writable, writeBlock. Work-root confined; symlinks rejected. An explicit allowed-root ceiling (workspace `AllowedRoots`, when the registry grows one) also rejects paths outside that list. |
 | `GET` | `/v1/file/raw` | mode | One workspace file's bytes (`path`) for the document viewer's image/binary view (#1393). Same confinement as `/v1/file/view` (work root, symlinks rejected, allowed-root ceiling). Allowlisted images (png, jpeg, gif, webp, avif, bmp, ico, svg) are served `inline` with their MIME; everything else as `application/octet-stream` `attachment`. Capped at 1 MiB (the document-view cap): **413** `too_large` past it. Responses carry `Content-Security-Policy: default-src 'none'; …; sandbox` and `nosniff`. Normal `/v1` auth (bearer or the HttpOnly cookie); query tokens are refused. |
 | `PUT` | `/v1/file` | **yes** | Save one existing text file (`path`, `content`, `sha256`, `mtimeUnixNano`). 409 `conflict` when the hash or mtime moved; the body has the new revision, not the file text. Plan mode and edit/write deny rules return 403. Does not create files. Attach-only and read-only reject. |

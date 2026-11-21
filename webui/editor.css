@@ -323,6 +323,15 @@
   }
 }
 /* feature:document-outline end */
+/* feature:open-file-history begin */
+.ev-hist { min-width: 28px; padding: 0 6px; }
+.files-recent {
+  margin: 0 0 var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-muted);
+}
+.files-recent > .hint { margin: 0 0 4px; }
+/* feature:open-file-history end */
 /* feature:editor-find-replace begin */
 .ev-replace-row {
   display: flex;
