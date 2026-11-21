@@ -933,6 +933,7 @@ impl Transcript {
             reconnect: String::new(),
             at_ms,
             turn_id,
+            attachments: Vec::new(),
         });
     }
 

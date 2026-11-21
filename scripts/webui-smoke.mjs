@@ -1759,6 +1759,51 @@ try {
     "font and density",
   );
 
+  // #1583: Settings → Updates shows the effective autoupdate dial, `off`
+  // persists and the route answers "off" (no probe), and the row never
+  // claims "up to date" without a successful check.
+  await waitUntil(
+    `(() => {
+      const sec = document.querySelector('[data-section="updates"]');
+      const notify = sec?.querySelector('input[data-autoupdate="notify"]');
+      return !!notify && notify.checked && !notify.disabled && !!sec.querySelector(".update-status")?.textContent;
+    })()`,
+    "updates section shows the effective notify dial",
+  );
+  const updateRoute = async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/update`, { headers: { Authorization: `Bearer ${token}` } });
+    return { status: res.status, body: res.status === 200 ? await res.json() : null };
+  };
+  const updateCap = (await updateRoute()).status === 200;
+  await evaluate(`document.querySelector('input[data-autoupdate="off"]').click()`);
+  await waitUntil(
+    `(() => {
+      const off = document.querySelector('input[data-autoupdate="off"]');
+      const line = document.querySelector('[data-section="updates"] .update-status')?.textContent || "";
+      return off.checked && !off.disabled && (${updateCap} ? line.includes("Checks are off") : true);
+    })()`,
+    "autoupdate off saved",
+  );
+  {
+    const settings = await (await fetch(`http://127.0.0.1:${port}/v1/settings`, { headers: { Authorization: `Bearer ${token}` } })).json();
+    if (settings.autoupdateEffective !== "off") {
+      throw new Error(`autoupdate off did not persist: ${JSON.stringify(settings.autoupdateEffective)}`);
+    }
+    if (updateCap) {
+      const r = await updateRoute();
+      if (r.body?.state !== "off") throw new Error(`update route with dial off: ${JSON.stringify(r)}`);
+    }
+  }
+  await evaluate(`document.querySelector('input[data-autoupdate="notify"]').click()`);
+  await waitUntil(
+    `(() => {
+      const n = document.querySelector('input[data-autoupdate="notify"]');
+      const line = document.querySelector('[data-section="updates"] .update-status')?.textContent || "";
+      return n.checked && !n.disabled && !line.includes("Checks are off");
+    })()`,
+    "autoupdate back to notify",
+  );
+
   await waitUntil(`(() => {
     if (document.querySelector(".gw-pop")) return true;
     if (!document.querySelector('[data-nav="palette-dialog"]')) {
@@ -3042,16 +3087,25 @@ try {
     throw new Error(`side chat shell did not boot ${JSON.stringify(booted)}`);
   }
 
-  const seeded = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+  // The seed carries an outbox client message id (#1325); the retry below
+  // must be acknowledged as a duplicate and never start a second turn.
+  const seedInit = {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      "X-Strike-Client-Message-Id": "smoke-seed-1325",
     },
     body: JSON.stringify({ type: "user.input", data: { text: "read the makefile" } }),
-  });
+  };
+  const seeded = await fetch(`http://127.0.0.1:${port}/v1/ops`, seedInit);
   if (!seeded.ok) {
     throw new Error(`seed user.input ${seeded.status} ${await seeded.text()}`);
+  }
+  const seedRetry = await fetch(`http://127.0.0.1:${port}/v1/ops`, seedInit);
+  const seedRetryBody = await seedRetry.text();
+  if (seedRetry.status !== 200 || !seedRetryBody.includes('"duplicate":true')) {
+    throw new Error(`outbox retry was not deduped: ${seedRetry.status} ${seedRetryBody}`);
   }
 
   await evaluate(`document.querySelector(".side-chat-open-activity").click()`);
