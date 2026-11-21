@@ -127,3 +127,11 @@ body[data-phone="1"] .cz-actions button {
 body[data-phone="1"] .cz-proposals-head button,
 body[data-phone="1"] .cz-proposal .cz-actions button { min-height: 44px; }
 /* feature:skill-proposals end */
+
+/* feature:plugin-lifecycle begin */
+.plugin-life { margin-top: var(--space-4); border-top: var(--border-width) solid var(--border-muted); padding-top: var(--space-3); }
+.plugin-life-list { list-style: none; margin: var(--space-2) 0; padding: 0; display: grid; gap: var(--space-3); }
+.plugin-life-head { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; }
+.plugin-life-flow { margin-top: var(--space-2); padding: var(--space-2); border: var(--border-width) solid var(--rule); }
+.plugin-life-review { margin: var(--space-1) 0; padding-left: var(--space-4); overflow-wrap: anywhere; }
+/* feature:plugin-lifecycle end */

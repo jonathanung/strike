@@ -1,0 +1,8 @@
+[package]
+name = "ideas-inbox"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Ideas inbox view rules: sections, badge and the accept draft (#1323)."
+
+[dependencies]

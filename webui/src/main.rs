@@ -7,6 +7,7 @@
 //! `task_runner`. Customize (skills, agents, MCP, hooks, rules) lives
 //! in `customize`.
 
+mod agent_picker;
 mod annotate;
 mod api;
 mod appearance;
@@ -20,6 +21,7 @@ mod child_signals;
 mod clipboard;
 mod compaction_marks;
 mod confirm;
+mod context_doctor;
 mod composer_triggers;
 mod config_sources;
 mod diag;
@@ -34,11 +36,13 @@ mod markdown_review;
 mod local_issues;
 mod localfiles;
 mod customize;
+mod deploy_watch;
 mod gateway;
 mod gateway_peek;
 mod gateway_qr;
 mod git;
 mod goals;
+mod ideas;
 mod instance_backup;
 mod mobile;
 mod provider_signin;
@@ -55,10 +59,13 @@ mod model;
 mod notify;
 mod outcome;
 mod project_init;
+mod prompt_sharpen;
 mod onboarding;
 mod outbox;
 mod park;
 mod permissions_explain;
+mod plugin_flow;
+mod plugin_lifecycle;
 mod plan_card;
 mod steer_queue;
 mod steer_ack;
@@ -67,6 +74,7 @@ mod model_menu_view;
 mod session_list;
 mod session_loops;
 mod settings;
+mod ship_pr;
 mod session_panel;
 mod storage;
 mod tab_title;
@@ -1125,6 +1133,8 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // Bootstrap capability `plugins` (#1570): gates plugin lifecycle.
+    let plugins_capable = RwSignal::new(false);
     // Typed config-source list (#1493), from bootstrap `configFiles`.
     let config_files_capable = RwSignal::new(false);
     // #1375: daemon-aggregated team signals from the /v1/team poll — the
@@ -1255,10 +1265,19 @@ fn App() -> impl IntoView {
     let model_name = RwSignal::new(String::new());
     let model_note = RwSignal::new(String::new());
     let model_note_after = RwSignal::new(0i64);
+    // Agent picker (#1563): the selectable agents from bootstrap and the
+    // daemon-confirmed running agent. `agent_name` changes only from the
+    // bootstrap status or an `agent.selected` event, never on click.
+    let agent_list = RwSignal::new(Vec::<crate::model::AgentInfo>::new());
+    let agent_name = RwSignal::new(String::new());
+    let agent_note = RwSignal::new(String::new());
+    let agent_note_after = RwSignal::new(0i64);
     let effort_level = RwSignal::new(String::new());
     let context_used = RwSignal::new(0i64);
     let context_limit = RwSignal::new(0i64);
     let context_fit = RwSignal::new(String::new());
+    // Context doctor (#1537): inspect.prompt breakdown dialog.
+    let doctor = context_doctor::DoctorState::new();
     // Compact now (#1567): true from sending the `compact` op until the
     // daemon's own `compaction.completed` event lands — the meter only
     // ever moves from daemon events, never optimistically.
@@ -1824,6 +1843,7 @@ fn App() -> impl IntoView {
                                 if let Some(st) = boot.status {
                                     provider_name.set(st.provider);
                                     model_name.set(st.model);
+                                    agent_name.set(st.agent);
                                     effort_level.set(st.effort);
                                     context_used.set(st.context_used);
                                     context_limit.set(st.context_limit);
@@ -1870,9 +1890,11 @@ fn App() -> impl IntoView {
                                 crate::local_issues::set_issues_capable(boot.capabilities.issues);
                                 issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                plugins_capable.set(boot.capabilities.plugins);
                                 config_files_capable.set(boot.capabilities.config_files);
                                 crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
                                 skills.set(boot.skills);
+                                agent_list.set(boot.agents);
                                 loops_capable.set(boot.capabilities.loops);
                                 commands.set(if boot.capabilities.loops {
                                     session_loops::with_loop_commands(boot.composer_commands)
@@ -2097,6 +2119,7 @@ fn App() -> impl IntoView {
                 if let Some(data) = ev.data().as_string() {
                     note_live_title(sessions_cb, roots_cb, &titled_root, &data);
                     transcript_cb.update(|t| t.apply_envelope(&data));
+                    doctor.on_envelope(&data, &titled_root);
                     let mut plan_changed = false;
                     plan.update_untracked(|p| plan_changed = p.apply_envelope(&data));
                     if plan_changed {
@@ -2122,6 +2145,7 @@ fn App() -> impl IntoView {
                         }
                         steer_queue::LiveNote::TurnStarted => {
                             live_busy.set(true);
+                            doctor.on_turn_started();
                             live_busy_root.set(active_root.get_untracked());
                             if steer_mode.get_untracked() == "queued_fallback" {
                                 steer_note.set(String::new());
@@ -2130,6 +2154,11 @@ fn App() -> impl IntoView {
                         }
                         steer_queue::LiveNote::TurnFinished => {
                             live_busy.set(false);
+                            doctor.on_turn_finished(
+                                base.get_untracked(),
+                                token.get_untracked(),
+                                active_root.get_untracked(),
+                            );
                             confirm_stop.set(false);
                             if context_fit.get_untracked() == "critical" {
                                 context_fit.set(String::new());
@@ -2176,6 +2205,17 @@ fn App() -> impl IntoView {
                         note: model_note.get_untracked(),
                         note_after: model_note_after.get_untracked(),
                     };
+                    let agent_next = crate::agent_picker::reduce_envelope(
+                        crate::agent_picker::AgentState {
+                            current: agent_name.get_untracked(),
+                            note: agent_note.get_untracked(),
+                            note_after: agent_note_after.get_untracked(),
+                        },
+                        &data,
+                    );
+                    agent_name.set(agent_next.current);
+                    agent_note.set(agent_next.note);
+                    agent_note_after.set(agent_next.note_after);
                     let wf_next = workflow_run::reduce(wf_run.get_untracked(), &data);
                     if wf_next != wf_run.get_untracked() {
                         wf_run.set(wf_next);
@@ -3443,6 +3483,15 @@ fn App() -> impl IntoView {
         roots.get().iter().any(|r| r.id == root && r.busy)
             || (live_busy.get() && live_busy_root.get() == root)
     });
+    // Prompt sharpen (#1385): App-owned so the binding outlives the
+    // chat view's remounts.
+    let sharpen = prompt_sharpen::Sharpen::new(
+        draft,
+        active_root,
+        Signal::derive(move || session_busy_now.get()),
+        base,
+        token,
+    );
 
     Effect::new(move |_| {
         if model_menu.get() {
@@ -3499,6 +3548,22 @@ fn App() -> impl IntoView {
             }
         });
     });
+    let on_select_agent = Callback::new(move |name: String| {
+        agent_note_after.set(now_ms() as i64);
+        agent_note.set(String::new());
+        let (b, t, root) = (base.get_untracked(), token.get_untracked(), active_root.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(&b, &t, &root, "select.agent", serde_json::json!({"name": name})).await {
+                agent_note.set(format!("agent change failed: {e}"));
+                agent_note_after.set(0);
+            }
+        });
+    });
+    crate::agent_picker::set_picker(Rc::new(move |name: &str| {
+        on_select_agent.run(name.to_string());
+    }));
+    Effect::new(move |_| crate::agent_picker::set_agents(agent_list.get()));
+    Effect::new(move |_| crate::agent_picker::set_current(&agent_name.get()));
     {
         let pick = on_select_model.clone();
         shell::set_model_picker(Rc::new(move |provider, id| {
@@ -3981,6 +4046,30 @@ fn App() -> impl IntoView {
             Ok(())
         }),
     );
+    // Context doctor (#1537): open the breakdown and ask the live root.
+    shell::bind(
+        "context-doctor",
+        Rc::new(move |_args: &str| {
+            doctor.open.set(true);
+            doctor.request(
+                base.get_untracked(),
+                token.get_untracked(),
+                active_root.get_untracked(),
+            );
+            Ok(())
+        }),
+    );
+    // A different session's breakdown never lingers in the dialog.
+    Effect::new(move |prev: Option<String>| {
+        let root = active_root.get();
+        if prev.as_ref().is_some_and(|p| p != &root) {
+            doctor.reset();
+            if doctor.open.get_untracked() {
+                doctor.request(base.get_untracked(), token.get_untracked(), root.clone());
+            }
+        }
+        root
+    });
     shell::bind(
         "lesson-remember",
         Rc::new(move |text: &str| {
@@ -5177,6 +5266,9 @@ fn App() -> impl IntoView {
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
         </Show>
+        <Show when=move || mode.get() == "ideas" fallback=move || ()>
+            <ideas::IdeasPage base=base token=token draft=draft active_root=active_root mode=mode />
+        </Show>
         <Show when=move || mode.get() == "tasks" fallback=move || ()>
             <task_runner::TaskRunner
                 base=base
@@ -5223,7 +5315,7 @@ fn App() -> impl IntoView {
             />
         </Show>
         <Show when=move || mode.get() == "customize" fallback=move || ()>
-            <CustomizePane base=base token=token status=status />
+            <CustomizePane base=base token=token status=status plugins_capable=plugins_capable />
         </Show>
         <Show when=move || mode.get() == "chat">
             <div
@@ -5300,6 +5392,7 @@ fn App() -> impl IntoView {
                     panel_drawer.set(false);
                 }></button>
                 <aside class="rail">
+                    <ideas::IdeasBadge base=base token=token mode=mode />
 <SessionPanel
                         base=base
                         token=token
@@ -5430,6 +5523,8 @@ fn App() -> impl IntoView {
                     <Show when=move || !stream_note.get().is_empty()>
                         <p class="hint banner">{move || stream_note.get()}</p>
                     </Show>
+                    // #1785: a deploy watch session shows its verdict card.
+                    <deploy_watch::DeployWatchCard base=base token=token active=active_root tick=tick />
                     <Show when=move || !doc_path.get().is_empty()>
                         <DocumentPane
                             base=base
@@ -5645,6 +5740,13 @@ fn App() -> impl IntoView {
                                 <button type="button" class="palette-row" on:click=move |_| open_composer_catalog("skills", &ui)>
                                     <span class="name">"Use a skill"</span>
                                     <span class="path">"Skills loaded for this daemon"</span>
+                                </button>
+                                <button type="button" class="palette-row" data-sharpen-menu="true" on:click=move |_| {
+                                    plus_open.set(false);
+                                    let _ = sharpen.start();
+                                }>
+                                    <span class="name">"Sharpen prompt"</span>
+                                    <span class="path">"Rewrite the draft with the session model (Alt+P)"</span>
                                 </button>
                                 <button type="button" class="palette-row" data-chat-attach="menu" on:click=move |_| {
                                     plus_open.set(false);
@@ -5887,6 +5989,7 @@ fn App() -> impl IntoView {
                                     }
                                 }
                             />
+                            {move || prompt_sharpen::bar_view(sharpen)}
                             <textarea
                                 id="composer-input"
                                 aria-label="Message this session"
@@ -5914,6 +6017,19 @@ fn App() -> impl IntoView {
                                     }
                                 }
                                 on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                    // Prompt sharpen (#1385): Alt+P rewrites the
+                                    // draft; `code` also matches macOS, where
+                                    // Option+P types a symbol.
+                                    if ev.alt_key() && !ev.ctrl_key() && !ev.meta_key()
+                                        && (ev.key().eq_ignore_ascii_case("p") || ev.code() == "KeyP")
+                                    {
+                                        // The chord is consumed here: it must not
+                                        // bubble on to page-level key handlers.
+                                        ev.prevent_default();
+                                        ev.stop_propagation();
+                                        let _ = sharpen.start();
+                                        return;
+                                    }
                                     if ev.key() == "ArrowDown" || ev.key() == "ArrowUp" {
                                         let items = ac_items.get_untracked();
                                         if ac_open.get_untracked() && items.iter().any(|item| item.selectable) {
@@ -6055,6 +6171,23 @@ fn App() -> impl IntoView {
                                     let name = if model.is_empty() { provider_name.get() } else { model };
                                     if name.is_empty() { "Model · none".into() } else { format!("Model · {name}") }
                                 }}</button>
+                                // #1563: the agent chip sits beside the model
+                                // chip — agent and model are the two session
+                                // identity controls. Hidden when the daemon
+                                // reported no selectable agents. It opens
+                                // Switch agent, which only accepts listed
+                                // agents; the label follows agent.selected.
+                                <Show when=move || !agent_list.get().is_empty()>
+                                    <button type="button" class="composer-glance agent-glance" data-agent-status="true" data-agent-current=move || agent_name.get() title="Change the agent this session runs" aria-label=move || crate::agent_picker::chip_aria(&agent_name.get()) on:click=move |_| {
+                                        mode_menu.set(false);
+                                        model_menu.set(false);
+                                        autonomy_menu.set(false);
+                                        plus_open.set(false);
+                                        ac_open.set(false);
+                                        ac_force.set(String::new());
+                                        shell::show_palette_at("switch-agent");
+                                    }>{move || crate::agent_picker::chip_label(&agent_name.get())}</button>
+                                </Show>
                                 <span class=move || {
                                     if approvals::is_dangerous(&perm_mode.get()) {
                                         "composer-glance approvals-mode-chip danger"
@@ -6114,6 +6247,9 @@ fn App() -> impl IntoView {
                         <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
                             <p class="hint" data-model-note="true">{move || model_note.get()}</p>
                         </Show>
+                        <Show when=move || !agent_note.get().is_empty()>
+                            <p class="hint" data-agent-note="true">{move || agent_note.get()}</p>
+                        </Show>
                         <p class="hint composer-statusline" data-composer-triggers="status">{
                             let memory_mode = memory_mode;
                             let memory_mode_known = memory_mode_known;
@@ -6135,7 +6271,11 @@ fn App() -> impl IntoView {
                             };
                             view! {
                                 <span>{if custom.is_empty() { memory } else { custom }}</span>
-                                <span class="context-meter">{meter}</span>
+                                // Context doctor (#1537): the meter opens the breakdown.
+                                <button type="button" class="context-meter context-doctor-open" data-context-doctor="open"
+                                    title="Where is my context going? Opens the context doctor."
+                                    on:click=move |_| { let _ = shell::dispatch("context-doctor", ""); }
+                                >{if meter.is_empty() { "Context".to_string() } else { meter }}</button>
                             }
                         }}</p>
                     </div>
@@ -6436,6 +6576,7 @@ fn App() -> impl IntoView {
                         </div>
                     </Show>
                     <div hidden=move || !git_active.get()>
+                        <ship_pr::ShipPr base=base token=token status_line=status active=git_active />
                         <git::GitPanel base=base token=token status_line=status active=git_active />
                     </div>
                     <div hidden=move || !review_active.get()>
@@ -6505,6 +6646,16 @@ fn App() -> impl IntoView {
             refresh=refresh_meta
         />
         <PhoneNav pane=phone_pane side_tab=side_tab mode=mode />
+        <context_doctor::ContextDoctorDialog
+            state=doctor
+            limit=Signal::derive(move || {
+                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).limit
+            })
+            on_refresh=Callback::new(move |_| {
+                doctor.request(base.get_untracked(), token.get_untracked(), active_root.get_untracked())
+            })
+        />
         <lessons::LessonDraftDialog
             draft=lesson_draft
             base=base
@@ -6630,7 +6781,17 @@ mod composer_grow_history_tests {
     }
 }
 
+#[wasm_bindgen::prelude::wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console, js_name = error)]
+    fn console_error(s: &str);
+}
+
 fn main() {
+    // A wasm panic otherwise surfaces only as "RuntimeError: unreachable";
+    // log the message and location so the console (and the smoke's
+    // console dump) says what broke.
+    std::panic::set_hook(Box::new(|info| console_error(&format!("strike-webui panic: {info}"))));
     // A share link (#1565) gets only the read-only transcript shell: no
     // cockpit, no session list, no gateway credential.
     if let Some(token) = share::share_token_from_location() {
