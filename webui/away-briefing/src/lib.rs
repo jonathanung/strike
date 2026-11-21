@@ -29,6 +29,9 @@ pub struct Note {
     pub id: String,
     pub kind: String,
     pub session_id: String,
+    /// The child (or session) the note is about; used to drop a blocked
+    /// row that a newer finish already resolved.
+    pub subject_id: String,
     pub title: String,
     pub body: String,
     pub href: String,
@@ -202,6 +205,13 @@ pub fn compute(
         .filter(|n| n.at_ms > seen_at && n.at_ms <= now)
         .collect();
     fresh.sort_by(|a, b| b.at_ms.cmp(&a.at_ms).then_with(|| a.id.cmp(&b.id)));
+    // A blocked child that later finished is no longer waiting on anyone.
+    let resolved = |blocked: &Note| {
+        !blocked.subject_id.is_empty()
+            && notes.iter().any(|n| {
+                n.kind == "child.finished" && n.subject_id == blocked.subject_id && n.at_ms >= blocked.at_ms
+            })
+    };
     for n in fresh {
         if !n.id.is_empty() {
             if seen_ids.contains(&n.id.as_str()) {
@@ -218,7 +228,11 @@ pub fn compute(
                     finished.push(note_row(n));
                 }
             }
-            "child.blocked" => wait.push(note_row(n)),
+            "child.blocked" => {
+                if !resolved(n) {
+                    wait.push(note_row(n));
+                }
+            }
             _ => {}
         }
     }
@@ -315,6 +329,7 @@ mod tests {
             id: id.into(),
             kind: kind.into(),
             session_id: format!("s-{id}"),
+            subject_id: format!("c-{id}"),
             title: title.into(),
             body: "body".into(),
             href: format!("/#session=s-{id}"),
@@ -412,6 +427,25 @@ mod tests {
         ];
         let b = compute(SEEN, NOW, &notes, &[], &[]).expect("briefing");
         assert_eq!(b.total(), 1);
+    }
+
+    #[test]
+    fn blocked_child_that_later_finished_is_not_waiting() {
+        let mut blocked = note("b", "child.blocked", "scribe blocked", SEEN + 10);
+        blocked.subject_id = "child-1".into();
+        let mut done = note("d", "child.finished", "scribe finished", SEEN + 20);
+        done.subject_id = "child-1".into();
+        let mut other = note("o", "child.blocked", "tester blocked", SEEN + 30);
+        other.subject_id = "child-2".into();
+        let b = compute(SEEN, NOW, &[blocked.clone(), done.clone(), other], &[], &[]).expect("briefing");
+        let waiting = b.groups.iter().find(|g| g.kind == GroupKind::Waiting).expect("waiting group");
+        let labels: Vec<&str> = waiting.rows.iter().map(|r| r.label.as_str()).collect();
+        assert_eq!(labels, vec!["tester blocked"]);
+        // A finish older than the block does not resolve it.
+        let mut early = done;
+        early.at_ms = SEEN + 5;
+        let b = compute(SEEN, NOW, &[blocked, early], &[], &[]).expect("briefing");
+        assert!(b.groups.iter().any(|g| g.kind == GroupKind::Waiting));
     }
 
     #[test]

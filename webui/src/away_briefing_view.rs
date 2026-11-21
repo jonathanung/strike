@@ -49,6 +49,8 @@ struct NoteDto {
     kind: String,
     #[serde(default, rename = "sessionId")]
     session_id: String,
+    #[serde(default, rename = "subjectId")]
+    subject_id: String,
     #[serde(default)]
     title: String,
     #[serde(default)]
@@ -220,6 +222,7 @@ pub fn AwayBriefing(
                         id: n.id,
                         kind: n.kind,
                         session_id: n.session_id,
+                        subject_id: n.subject_id,
                         title: n.title,
                         body: n.body,
                         href: n.href,
