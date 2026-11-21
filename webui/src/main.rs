@@ -20,6 +20,7 @@ mod clipboard;
 mod compaction_marks;
 mod confirm;
 mod composer_triggers;
+mod config_sources;
 mod diag;
 mod draft_size;
 mod drafts;
@@ -1120,6 +1121,8 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // Typed config-source list (#1493), from bootstrap `configFiles`.
+    let config_files_capable = RwSignal::new(false);
     // #1375: daemon-aggregated team signals from the /v1/team poll — the
     // bounded inter-agent mail, member names for its From/To, the lead id,
     // and each child's latest escalation sentence by session id.
@@ -1859,6 +1862,7 @@ fn App() -> impl IntoView {
                                 crate::local_issues::set_issues_capable(boot.capabilities.issues);
                                 issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                config_files_capable.set(boot.capabilities.config_files);
                                 crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
                                 skills.set(boot.skills);
                                 loops_capable.set(boot.capabilities.loops);
@@ -5082,6 +5086,7 @@ fn App() -> impl IntoView {
                 status=status
                 diag_capable=diag_capable
                 project_init_capable=project_init_capable
+                config_files_capable=config_files_capable
                 root=active_root
                 theme=theme_id
                 theme_catalog=themes_state
