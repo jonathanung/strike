@@ -39,6 +39,7 @@ func TestProductToolWireNames(t *testing.T) {
 		"exit_plan_mode":  NewExitPlanMode(),
 		"phase_done":      NewPhaseDone(),
 		"steer_ack":       NewSteerAck(),
+		"debug_session":   NewDebugSession(),
 		"tui_snapshot":    NewTUISnapshot(),
 		"context_bundle":  NewContextBundle(),
 		"definition":      NewDefinition(nil),

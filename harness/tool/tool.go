@@ -865,6 +865,11 @@ type Context struct {
 	// applied in this turn and not yet acknowledged (turn.steer_ack, #1860).
 	// It errors when no such steer exists. Nil disables steer_ack.
 	AckSteer func(ack SteerAck) error
+	// DebugSession applies one agent debug op (hypotheses, evidence, mark)
+	// to the session's active debug session and returns a one-line state
+	// summary (debug_session, #1961). User-only actions are refused. Nil
+	// disables debug_session.
+	DebugSession func(op DebugOp) (string, error)
 	// ReportOutput streams retained output chunks (already size-capped by the
 	// tool) for live UI. Nil disables streaming; tools must still return the
 	// full Result.Output at the end.

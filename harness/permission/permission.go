@@ -57,7 +57,7 @@ var knownPermissions = map[string]struct{}{
 	"sleep":          {}, "skill": {}, "question": {}, "toolsearch": {}, "hook": {},
 	"phase_check":     {},
 	"enter_plan_mode": {}, "exit_plan_mode": {}, "phase_done": {},
-	"steer_ack": {},
+	"steer_ack": {}, "debug_session": {},
 	// LSP navigation + diagnostics (read-only; deferred tools when deferTools is on).
 	"definition": {}, "references": {}, "symbols": {}, "diagnostics": {},
 	"call_hierarchy": {}, "rename_preview": {}, "impact": {},
@@ -194,6 +194,7 @@ func Defaults() Ruleset {
 		{Permission: "exit_plan_mode", Pattern: "*", Action: Allow},
 		{Permission: "phase_done", Pattern: "*", Action: Allow},
 		{Permission: "steer_ack", Pattern: "*", Action: Allow},
+		{Permission: "debug_session", Pattern: "*", Action: Allow},
 		{Permission: "toolsearch", Pattern: "*", Action: Allow},
 		// LSP navigation + diagnostics are read-only.
 		{Permission: "definition", Pattern: "*", Action: Allow},
