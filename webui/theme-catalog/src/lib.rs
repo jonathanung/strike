@@ -334,7 +334,7 @@ impl Paint {
 /// know, and always carries a note.
 pub fn resolve(id: &str, scheme: Scheme, catalog: &CatalogState, cached: Option<&Entry>) -> Paint {
     let id = id.trim();
-    if id.is_empty() || id == DEFAULT_ID {
+    if id.is_empty() {
         return Paint::Bundled(DEFAULT_ID.into());
     }
     let paint_entry = |e: &Entry| -> Paint {
@@ -669,6 +669,27 @@ mod tests {
             assert_eq!(got.current_id(), want, "{name}: {got:?}");
             assert_eq!(!got.note().is_empty(), note, "{name}: {got:?}");
         }
+    }
+
+    #[test]
+    fn user_override_of_strike_paints_inline() {
+        let mut mine = sunset();
+        mine.id = "strike".into();
+        mine.overrode = "builtin".into();
+        let catalog = CatalogState::Loaded(vec![mine.clone()]);
+        assert!(matches!(resolve("strike", Scheme::Dark, &catalog, None), Paint::Inline(_)));
+        assert_eq!(
+            resolve("strike", Scheme::Dark, &CatalogState::Loading, None),
+            Paint::Bundled("strike".into())
+        );
+        assert!(matches!(
+            resolve("strike", Scheme::Dark, &CatalogState::Loading, Some(&mine)),
+            Paint::Inline(_)
+        ));
+        assert_eq!(
+            resolve("strike", Scheme::Dark, &CatalogState::Loaded(vec![bundled("strike")]), None),
+            Paint::Bundled("strike".into())
+        );
     }
 
     #[test]
