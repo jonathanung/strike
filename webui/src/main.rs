@@ -43,6 +43,7 @@ mod steer_queue;
 mod model_menu;
 mod model_menu_view;
 mod session_list;
+mod session_loops;
 mod settings;
 mod session_panel;
 mod storage;
@@ -1085,6 +1086,10 @@ fn App() -> impl IntoView {
     let ledger_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // Bootstrap capability `loops` (#1588): session /loop jobs.
+    let loops_capable = RwSignal::new(false);
+    let loop_rows = RwSignal::new(Vec::<session_loops::SessionLoop>::new());
+    let loop_note = RwSignal::new(String::new());
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -1696,7 +1701,12 @@ fn App() -> impl IntoView {
                                 ledger_capable.set(boot.capabilities.ledger);
                                 project_init_capable.set(boot.capabilities.project_init);
                                 skills.set(boot.skills);
-                                commands.set(boot.composer_commands);
+                                loops_capable.set(boot.capabilities.loops);
+                                commands.set(if boot.capabilities.loops {
+                                    session_loops::with_loop_commands(boot.composer_commands)
+                                } else {
+                                    boot.composer_commands
+                                });
                                 if !catalog_once.get_untracked() {
                                     catalog_once.set(true);
                                     load_model_catalog();
@@ -2373,6 +2383,23 @@ fn App() -> impl IntoView {
         let root = active_root.get_untracked();
         if root.is_empty() {
             status.set("no live session yet".into());
+            return;
+        }
+        // Session /loop (#1588): handled against the loops routes, never
+        // sent as a prompt. Without the capability the draft is kept.
+        if let Some(cmd) = session_loops::parse(&text) {
+            if !loops_capable.get_untracked() {
+                loop_note.set("loop: this gateway cannot run loops for this session (attach-only or read-only).".into());
+                return;
+            }
+            if ready {
+                loop_note.set("loop: a loop job is text only. Remove the attachments first.".into());
+                return;
+            }
+            prompt_history.update(|h| h.push(&text));
+            draft.set(String::new());
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(session_loops::run(b, t, root, cmd, loop_rows, loop_note));
             return;
         }
         // Draft-size gate (#1542): when the draft itself projects the
@@ -5241,6 +5268,7 @@ fn App() -> impl IntoView {
                             </div>
                         </Show>
                         <div class="steer-queue" id="steer-queue">
+                            <session_loops::LoopRows base=base token=token root=active_root capable=loops_capable loops=loop_rows note=loop_note />
                             <Show when=move || !steer_note.get().is_empty()>
                                 <p class="steer-note" role="status">{move || steer_note.get()}</p>
                             </Show>
