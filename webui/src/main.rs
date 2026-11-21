@@ -34,6 +34,7 @@ mod gateway_qr;
 mod git;
 mod goals;
 mod mobile;
+mod provider_signin;
 mod providers;
 mod push;
 mod rule_author;
