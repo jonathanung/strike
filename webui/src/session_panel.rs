@@ -1327,6 +1327,7 @@ fn build_layout(
                 status: row.status.clone(),
                 permission_pending: row.permission_pending,
                 question_pending: row.question_pending,
+                ask_outcome: row.ask_outcome.clone(),
                 workspace: workspaces
                     .iter()
                     .find(|w| w.id == row.workspace_id)

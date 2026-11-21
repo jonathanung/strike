@@ -11,6 +11,7 @@ mod api;
 mod appearance;
 mod attachment_honesty;
 mod apps;
+mod approval_outcome;
 mod approvals;
 mod approvals_ui;
 mod chat_mode;
