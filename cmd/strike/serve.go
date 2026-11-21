@@ -637,6 +637,10 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) (result error) {
 			if sr != nil && sr.cancel != nil {
 				sr.cancel()
 			}
+			// Every way a root leaves the hub unloads its Powers (#1867).
+			if a.services.Powers != nil {
+				a.services.Powers.EndSession(id)
+			}
 			_ = a.sessions.Close(id)
 		})
 
@@ -910,6 +914,10 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) (result error) {
 		return err
 	}
 	notifySrv.Store(srv)
+	// Skill proposals (#1913): weekly scan for workspaces that opted in.
+	if !opts.readOnly {
+		go srv.RunSkillProposalCadence(ctx)
+	}
 
 	ln, err := net.Listen("tcp", opts.addr)
 	if err != nil {
