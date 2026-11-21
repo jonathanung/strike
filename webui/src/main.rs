@@ -73,6 +73,7 @@ mod term;
 mod tool_tail;
 mod terminal;
 mod transcript;
+mod transcript_attachments;
 mod transcript_view;
 mod update_check;
 mod triggers;
@@ -1068,6 +1069,7 @@ fn apply_status_payload(
 fn App() -> impl IntoView {
     let base = RwSignal::new(load("strike.base"));
     let token = RwSignal::new(gateway::initial_token());
+    provide_context(transcript_attachments::AttachmentAuth { base, token });
     let status = RwSignal::new("connecting…".to_string());
     // Bootstrap capability `diag` (#1489): gates Download diagnostics.
     let diag_capable = RwSignal::new(false);
