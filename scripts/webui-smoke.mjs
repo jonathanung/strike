@@ -366,6 +366,30 @@ try {
     join(sessionsDir, "elapsed-session.meta.json"),
     JSON.stringify({ title: "Elapsed replay" }) + "\n",
   );
+  // files.invalidated (#1380) fixture: a replayed turn with two
+  // back-to-back invalidations (five distinct paths). The cockpit must
+  // render ONE muted notice (merged, capped at three names) and refetch
+  // the open Files panel once.
+  const invalidatedSession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-26T07:00:00Z" }) +
+    "\n" +
+    envLine("user.message", "2026-10-26T07:00:00Z", { text: "touch the tree" }) +
+    envLine("turn.started", "2026-10-26T07:00:01Z", {}) +
+    envLine("files.invalidated", "2026-10-26T07:00:02Z", {
+      paths: ["src/a.go", "src/b.go"],
+      reason: "external",
+    }) +
+    envLine("files.invalidated", "2026-10-26T07:00:03Z", {
+      paths: ["src/b.go", "src/c.go", "src/d.go", "src/e.go"],
+      reason: "external",
+    }) +
+    envLine("text.delta", "2026-10-26T07:00:04Z", { text: "tree touched" }) +
+    envLine("turn.completed", "2026-10-26T07:00:05Z", { stopReason: "end_turn" });
+  await writeFile(join(sessionsDir, "invalidated-session.jsonl"), invalidatedSession);
+  await writeFile(
+    join(sessionsDir, "invalidated-session.meta.json"),
+    JSON.stringify({ title: "Invalidated replay" }) + "\n",
+  );
   const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
     throw new Error(`content search ${found.status} ${found.text.slice(0, 300)}`);
@@ -3986,6 +4010,79 @@ try {
     },
     { timeout: WAIT_MS, interval: 250 },
   );
+
+  // files.invalidated (#1380): with the Files tab open, add a file to the
+  // daemon's work dir, then open the seeded replay session. The replayed
+  // invalidations must produce exactly one merged, capped notice, and the
+  // open Files panel must refetch (the new file appears) with no manual
+  // Refresh. DOM probes use textContent so a collapsed side panel in the
+  // current layout cannot hide the result.
+  const invalidatedFile = "smoke-files-invalidated.tmp";
+  const invalidatedPath = join(process.cwd(), invalidatedFile);
+  await rm(invalidatedPath, { force: true });
+  try {
+    const filesTab = await evaluate(`(() => {
+      const btn = [...document.querySelectorAll(".side-tabs button")].find((b) => (b.textContent || "").trim() === "Files");
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+    if (filesTab !== "clicked") {
+      throw new Error(`files.invalidated: Files side tab ${filesTab}\n${await diagnostics()}`);
+    }
+    const fileRows = `[...document.querySelectorAll(".files .file-row")].map((b) => (b.textContent || "").trim())`;
+    await waitFor(
+      "files.invalidated: Files panel loaded before the change",
+      async () => {
+        const v = await evaluate(`(() => { const rows = ${fileRows}; return { n: rows.length, has: rows.includes(${JSON.stringify(invalidatedFile)}) }; })()`);
+        return { ok: v.n > 0 && !v.has, ...v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await writeFile(invalidatedPath, "changed outside the transcript\n");
+    let invalidatedClicked = "missing";
+    try {
+      await waitFor(
+        "files.invalidated resume row",
+        async () => {
+          invalidatedClicked = await evaluate(`(() => {
+            const row = document.querySelector('[data-session-id="invalidated-session"]');
+            const btn = row && row.querySelector(".ss-main");
+            if (!btn) return "missing";
+            btn.click();
+            return "clicked";
+          })()`);
+          return { ok: invalidatedClicked === "clicked", clicked: invalidatedClicked };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+    } catch {
+      // Reported by the throw below with the last observed state.
+    }
+    if (invalidatedClicked !== "clicked") {
+      throw new Error(`files.invalidated resume click -> ${invalidatedClicked}`);
+    }
+    await waitFor(
+      "files.invalidated: one merged notice and a refreshed Files panel",
+      async () => {
+        const v = await evaluate(`(() => {
+          const notices = [...document.querySelectorAll('article[data-kind="files.invalidated"]')];
+          const rows = ${fileRows};
+          return {
+            n: notices.length,
+            text: notices[0] ? (notices[0].textContent || "") : "",
+            replayed: (document.body.textContent || "").includes("tree touched"),
+            has: rows.includes(${JSON.stringify(invalidatedFile)}),
+          };
+        })()`);
+        const want = "files changed — agent will re-read: src/a.go, src/b.go, src/c.go +2 more";
+        return { ok: v.n === 1 && v.text.includes(want) && v.replayed && v.has, ...v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  } finally {
+    await rm(invalidatedPath, { force: true });
+  }
 
   const wsClicked = await send("Runtime.evaluate", {
     expression: `(() => {

@@ -3163,3 +3163,13 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .files-head .hint, .changes-head .hint { margin: 0; }
 /* feature:files-refresh end */
+/* feature:files-invalidated begin */
+/* #1380: a freshness signal, not a warning — muted system line. */
+.sx-notice[data-kind="files.invalidated"] {
+  border-left-color: var(--border-muted);
+  color: var(--muted);
+}
+.sx-notice[data-kind="files.invalidated"] .sx-who {
+  color: var(--muted);
+}
+/* feature:files-invalidated end */

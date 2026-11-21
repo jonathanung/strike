@@ -19,6 +19,7 @@ mod composer_triggers;
 mod diag;
 mod draft_size;
 mod editor;
+mod files_invalidated;
 mod load_epoch;
 mod localfiles;
 mod customize;
@@ -1283,6 +1284,11 @@ fn App() -> impl IntoView {
     let memory_mode_known = RwSignal::new(false);
     let memory_menu = RwSignal::new(false);
     let storage_rev = RwSignal::new(0u32);
+    // files.invalidated (#1380): bumped (debounced) when the daemon says
+    // files changed underneath the session; the Files/Changes load Effect
+    // observes it so the open panel refetches.
+    let files_rev = RwSignal::new(0u32);
+    let files_debounce: Rc<Cell<files_invalidated::Debounce>> = Rc::new(Cell::new(Default::default()));
     // Find in transcript (#1342): bar visibility, query, current match,
     // and the transcript scroll offset saved when the bar opened so
     // Escape / Close can restore it.
@@ -1798,6 +1804,7 @@ fn App() -> impl IntoView {
     let wipe_on_replay = RwSignal::new(false);
     let tail_fx = tail.clone();
     let cursor_fx = live_cursor.clone();
+    let debounce_fx = files_debounce.clone();
     Effect::new(move |_| {
         let root = active_root.get();
         let b = base.get();
@@ -1899,6 +1906,7 @@ fn App() -> impl IntoView {
         let epoch_msg = epoch;
         let epochs_msg = stream_epoch;
         let cursor_msg = cursor_fx.clone();
+        let debounce_msg = debounce_fx.clone();
         let on_msg =
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
                 if epochs_msg.get_untracked() != epoch_msg {
@@ -1972,6 +1980,9 @@ fn App() -> impl IntoView {
                     let artifact_rev = transcript_cb.with_untracked(|t| t.artifact_updates);
                     if artifact_rev != storage_rev.get_untracked() {
                         storage_rev.set(artifact_rev);
+                    }
+                    if files_invalidated::is_event(&data) {
+                        files_invalidated::refresh_soon(debounce_msg.clone(), files_rev);
                     }
                     let prev = LiveModelState {
                         provider: provider_name.get_untracked(),
@@ -3076,6 +3087,7 @@ fn App() -> impl IntoView {
     Effect::new(move |_| {
         let tab = side_tab.get();
         let _ = files_path.get();
+        let _ = files_rev.get();
         if tab == "files" {
             load_files();
         } else if tab == "changes" {
