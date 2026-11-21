@@ -9,6 +9,10 @@ use std::rc::Rc;
 use crate::shell::{Argument, Command, Group, ShellHook};
 
 pub fn install(reg: &mut ShellHook) {
+    // The catalog lists only after "Start workflow…" is opened: a root
+    // query like "plan" must not surface (and one-Enter start)
+    // plan-implement, nor shadow "Approval: Plan".
+    crate::shell::choices_in_argument_step_only("workflow-start");
     reg.command(
         Command::new(
             "workflow-start",
