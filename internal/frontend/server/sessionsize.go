@@ -47,6 +47,11 @@ func sessionHistoryTokens(path, id string) int64 {
 	}
 	st, err := os.Stat(path)
 	if err != nil || !st.Mode().IsRegular() {
+		// Deleted or replaced log: drop its entry so the cache only holds
+		// sessions that still exist.
+		historyCache.Lock()
+		delete(historyCache.m, path)
+		historyCache.Unlock()
 		return 0
 	}
 	historyCache.Lock()
