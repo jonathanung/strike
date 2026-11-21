@@ -109,6 +109,7 @@ func (m sideChatModel) Answer(ctx context.Context, in server.SideChatPrompt) (se
 		return server.SideChatCompletion{}, err
 	}
 	var b strings.Builder
+	var usage *provider.Usage
 	for {
 		select {
 		case <-ctx.Done():
@@ -122,11 +123,21 @@ func (m sideChatModel) Answer(ctx context.Context, in server.SideChatPrompt) (se
 				if text == "" {
 					return server.SideChatCompletion{}, errors.New("side chat model returned no text")
 				}
-				return server.SideChatCompletion{Text: text, Provider: name, Model: model}, nil
+				out := server.SideChatCompletion{Text: text, Provider: name, Model: model}
+				if usage != nil {
+					out.InputTokens = usage.InputTokens
+					out.OutputTokens = usage.OutputTokens
+					out.UsageEstimated = usage.Estimated
+				}
+				return out, nil
 			}
 			switch ev.Type {
 			case provider.EventTextDelta:
 				b.WriteString(ev.Text)
+			case provider.EventDone:
+				if ev.Usage != nil {
+					usage = ev.Usage
+				}
 			case provider.EventToolCall:
 				go drainSideChat(ch)
 				return server.SideChatCompletion{}, errors.New("side chat refused a tool call from the model")
