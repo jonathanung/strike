@@ -1934,6 +1934,24 @@ try {
   if (rejected.status !== 400) {
     throw new Error(`empty attachment status ${rejected.status}`);
   }
+  // Attachment honesty (#1561): on the echo provider the engine drops
+  // every attachment, so the composer must say so before send (warn,
+  // not block). Removing the file clears the warning.
+  await evaluate(`(() => {
+    const input = document.querySelector('input[data-chat-attach="true"]');
+    const bytes = Uint8Array.from(atob(${JSON.stringify(png)}), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], "honesty-shot.png", { type: "image/png" }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  await waitUntil(
+    `(() => { const w = document.querySelector("[data-attach-warning]"); return !!w && w.offsetParent !== null && w.innerText.includes("honesty-shot.png") && w.innerText.includes("echo provider does not accept attachments"); })()`,
+    "composer warns that echo drops the attachment",
+  );
+  await evaluate(`(() => { const b = [...document.querySelectorAll(".attach-chip button")].find((x) => x.closest(".attach-chip")?.innerText.includes("honesty-shot.png")); b?.click(); return !!b; })()`);
+  await waitUntil(`!document.querySelector("[data-attach-warning]")`, "attachment warning clears with the file");
   await send("Runtime.evaluate", {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
   });
