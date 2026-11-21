@@ -62,6 +62,7 @@ Effort pins still apply on phase switches unless locked. Shipping built-ins
 | **general** | multi-step research/execution subagent |
 | **commit** | git commits only (no source edits, no push) |
 | **reviewer** | read-only diff/PR review |
+| **branch-reviewer** | Git panel "Review this branch" child: fresh-context pre-push review of the branch diff; denies edits, commands, spawns, network, and store writes |
 | **tester** | run `make test` / vet / build; report only |
 | **debugger** | root-cause investigation |
 | **validator** | goal-backward requirements check; PASS/FAIL/UNVERIFIED only |

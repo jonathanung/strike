@@ -30,8 +30,10 @@ import (
 	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/server/terminal"
+	"github.com/jonathanung/strike/internal/integrate/container"
 	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/persist/suggestion"
 	"github.com/jonathanung/strike/internal/persist/taskrun"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/version"
@@ -109,6 +111,10 @@ type Options struct {
 	Sandbox *SandboxSnapshot
 	// ReadOnly rejects mutating protocol ops (POST /v1/ops and WS op frames).
 	ReadOnly bool
+	// ContainerRuntime builds the engine CLI behind GET /v1/container/status
+	// (#1584) for a configured binary ("" auto-detects docker, then podman).
+	// Nil uses container.NewCLI; tests inject a fake exec/lookPath.
+	ContainerRuntime func(binary string) *container.CLI
 	// WorkspaceTrustPath is the workspace trust store file
 	// (~/.strike/workspace-trust.json) behind GET/POST /v1/workspace/trust
 	// (#1781). Empty disables the routes (501).
@@ -206,6 +212,9 @@ type Server struct {
 	// terms is the side-panel PTY manager.
 	terms *terminal.Manager
 
+	// preview is the selected live-preview target (#1341).
+	preview previewState
+
 	seenOnce sync.Once
 	seen     *SeenStore
 
@@ -216,6 +225,10 @@ type Server struct {
 	// gitMu serializes git reads and mutations for this daemon. Overlapping
 	// status and reset calls on one repo corrupt the index.
 	gitMu sync.Mutex
+
+	// review holds the review queue's unsent comments, accept marks and
+	// rejections per session (#1324).
+	review *reviewStore
 
 	// grants are short-lived bearers kept in memory only. grantNow overrides
 	// the clock in tests. rootSum is the last host-token hash; a change
@@ -238,6 +251,11 @@ type Server struct {
 	// clientMsgOnce lazily opens the outbox client-message-id dedupe (#1325).
 	clientMsgOnce  sync.Once
 	clientMsgStore *clientMsgDedupe
+
+	// suggestOnce lazily opens the Ideas inbox store (#1323).
+	suggestOnce  sync.Once
+	suggestStore *suggestion.Store
+	suggestErr   error
 
 	// tokenHash is the sha256 of the daemon token file last observed.
 	// A change appends a token-rotation audit entry. The token is not stored.
@@ -300,6 +318,7 @@ func New(opts Options) (*Server, error) {
 		scriptCSPHashes: inlineScriptHashes(static),
 		terms:           terminal.NewManager(terminal.ManagerConfig{Sandbox: opts.TerminalSandbox}),
 		pairs:           newPairStore(opts),
+		review:          newReviewStore(opts.SessionDir),
 		shutdownCtx:     shutdownCtx,
 		shutdownCancel:  shutdownCancel,
 	}
@@ -489,6 +508,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/session-list", s.handleSessionList)
 	s.mux.HandleFunc("GET /v1/files", s.handleFiles)
 	s.mux.HandleFunc("GET /v1/files/search", s.handleFilesSearch)
+	s.mux.HandleFunc("GET /v1/files/grep", s.handleFilesGrep)
 	s.mux.HandleFunc("GET /v1/changed-files", s.handleChangedFiles)
 	s.mux.HandleFunc("GET /v1/git/status", s.handleGitStatus)
 	s.mux.HandleFunc("GET /v1/git/diff", s.handleGitDiff)
@@ -503,6 +523,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/git/stash/drop", s.handleGitStashDrop)
 	s.mux.HandleFunc("GET /v1/git/branch-changes", s.handleGitBranchChanges)
 	s.mux.HandleFunc("GET /v1/git/branch-diff", s.handleGitBranchDiff)
+	s.mux.HandleFunc("GET /v1/git/pr", s.handleGitPRPreview)
+	s.mux.HandleFunc("POST /v1/git/pr", s.handleGitPRCreate)
+	s.mux.HandleFunc("GET /v1/git/review", s.handleGitReviewPreview)
+	s.mux.HandleFunc("POST /v1/git/review", s.handleGitReviewStart)
+	s.mux.HandleFunc("GET /v1/git/review/{id}", s.handleGitReviewResult)
+	s.mux.HandleFunc("POST /v1/git/review/{id}/verify", s.handleGitReviewVerify)
+	s.mux.HandleFunc("GET /v1/git/review-suppressions", s.handleReviewSuppressions)
+	s.mux.HandleFunc("POST /v1/git/review-suppressions", s.handleReviewSuppressions)
+	s.mux.HandleFunc("DELETE /v1/git/review-suppressions", s.handleReviewSuppressions)
 	s.mux.HandleFunc("GET /v1/git/show", s.handleGitShow)
 	s.mux.HandleFunc("POST /v1/git/stage", s.handleGitStage)
 	s.mux.HandleFunc("POST /v1/git/unstage", s.handleGitUnstage)
@@ -515,6 +544,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/git/worktrees", s.handleGitWorktreeCreate)
 	s.mux.HandleFunc("POST /v1/git/worktrees/remove", s.handleGitWorktreeRemove)
 	s.mux.HandleFunc("POST /v1/git/worktrees/prune", s.handleGitWorktreePrune)
+	// Review queue (#1324): per-hunk accept/reject/comment, sent as one turn.
+	s.mux.HandleFunc("GET /v1/review", s.handleReviewGet)
+	s.mux.HandleFunc("POST /v1/review/state", s.handleReviewState)
+	s.mux.HandleFunc("POST /v1/review/reject", s.handleReviewReject)
+	s.mux.HandleFunc("POST /v1/review/comments", s.handleReviewCommentAdd)
+	s.mux.HandleFunc("DELETE /v1/review/comments/{id}", s.handleReviewCommentDelete)
+	s.mux.HandleFunc("POST /v1/review/send", s.handleReviewSend)
 	s.mux.HandleFunc("GET /v1/file", s.handleFile)
 	s.mux.HandleFunc("GET /v1/file/view", s.handleFileView)
 	s.mux.HandleFunc("GET /v1/file/raw", s.handleFileRaw)
@@ -525,6 +561,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/memory", s.handleMemory)
 	s.mux.HandleFunc("GET /v1/memory/export", s.handleMemoryExport)
 	s.mux.HandleFunc("POST /v1/memory/import", s.handleMemoryImport)
+	// Whole-gateway backup/restore (#1339). Secrets are never exported.
+	s.mux.HandleFunc("GET /v1/backup/export", s.handleBackupExport)
+	s.mux.HandleFunc("POST /v1/backup/restore", s.handleBackupRestore)
 	s.mux.HandleFunc("GET /v1/memory/mode", s.handleMemoryModeGet)
 	s.mux.HandleFunc("PUT /v1/memory/mode", s.handleMemoryModePut)
 	s.mux.HandleFunc("PUT /v1/memory/{key}", s.handleMemoryPut)
@@ -589,6 +628,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/plugins/{id}", s.handlePluginGet)
 	s.mux.HandleFunc("GET /v1/customize", s.handleCustomize)
 	s.mux.HandleFunc("GET /v1/customize/doc", s.handleCustomizeDoc)
+	s.mux.HandleFunc("GET /v1/skill-proposals", s.handleSkillProposals)
+	s.mux.HandleFunc("PATCH /v1/skill-proposals", s.handleSkillProposalSettings)
+	s.mux.HandleFunc("POST /v1/skill-proposals/scan", s.handleSkillProposalScan)
+	s.mux.HandleFunc("POST /v1/skill-proposals/dismiss", s.handleSkillProposalDismiss)
+	s.mux.HandleFunc("POST /v1/skill-proposals/accept", s.handleSkillProposalAccept)
 	s.mux.HandleFunc("GET /v1/customize/skill-usage", s.handleSkillUsage)
 	s.mux.HandleFunc("POST /v1/customize/preview", s.handleCustomizePreview)
 	s.mux.HandleFunc("POST /v1/customize/apply", s.handleCustomizeApply)
@@ -685,6 +729,8 @@ func (s *Server) routes() {
 	// Project init (#1581): AGENTS.md bootstrap via host.ProjectInit.
 	s.mux.HandleFunc("GET /v1/init", s.handleProjectInitGet)
 	s.mux.HandleFunc("POST /v1/init", s.handleProjectInitPost)
+	// Container posture (#1584): read-only isolation ladder + engine status.
+	s.mux.HandleFunc("GET /v1/container/status", s.handleContainerStatus)
 	s.mux.HandleFunc("GET /v1/workspace/trust", s.handleWorkspaceTrustGet)
 	s.mux.HandleFunc("POST /v1/workspace/trust", s.handleWorkspaceTrustPost)
 	s.mux.HandleFunc("POST /v1/attachments", s.handleAttachmentIngest)
@@ -693,6 +739,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sidechat", s.handleSideChatList)
 	s.mux.HandleFunc("POST /v1/sidechat/ask", s.handleSideChatAsk)
 	s.mux.HandleFunc("POST /v1/sidechat/ops", s.handleSideChatOps)
+	s.mux.HandleFunc("POST /v1/prompt/sharpen", s.handlePromptSharpen)
 	s.mux.HandleFunc("GET /v1/live/events", s.handleLiveEvents)
 	s.mux.HandleFunc("GET /v1/notifications", s.handleNotifications)
 	s.mux.HandleFunc("GET /v1/notifications/stream", s.handleNotificationStream)
@@ -702,6 +749,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/notifications/push-subscriptions", s.handlePushSubscribe)
 	s.mux.HandleFunc("DELETE /v1/notifications/push-subscriptions", s.handlePushUnsubscribe)
 	s.mux.HandleFunc("POST /v1/notifications/seen", s.handleNotificationSeen)
+	s.mux.HandleFunc("GET /v1/suggestions", s.handleSuggestionsList)
+	s.mux.HandleFunc("POST /v1/suggestions", s.handleSuggestionCreate)
+	s.mux.HandleFunc("PUT /v1/suggestions/prefs", s.handleSuggestionPrefs)
+	s.mux.HandleFunc("POST /v1/suggestions/{id}/accept", s.handleSuggestionAccept)
+	s.mux.HandleFunc("POST /v1/suggestions/{id}/dismiss", s.handleSuggestionDismiss)
+	s.mux.HandleFunc("POST /v1/suggestions/{id}/snooze", s.handleSuggestionSnooze)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
 	s.mux.HandleFunc("GET /v1/terminals", s.handleTerminalsList)
 	s.mux.HandleFunc("POST /v1/terminals", s.handleTerminalCreate)
@@ -709,6 +762,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/terminals/{id}/ticket", s.handleTerminalTicket)
 	s.mux.HandleFunc("GET /v1/terminals/{id}/stream", s.handleTerminalStream)
 	s.mux.HandleFunc("DELETE /v1/terminals/{id}", s.handleTerminalDelete)
+	// Live preview (#1341): user-selected loopback port, proxied under an
+	// unguessable per-port path. See preview.go for the boundary rules.
+	s.mux.HandleFunc("GET /v1/preview/ports", s.handlePreviewPorts)
+	s.mux.HandleFunc("GET /v1/preview", s.handlePreviewGet)
+	s.mux.HandleFunc("PUT /v1/preview", s.handlePreviewPut)
+	s.mux.HandleFunc("DELETE /v1/preview", s.handlePreviewDelete)
+	s.mux.HandleFunc(previewPathPrefix, s.handlePreviewProxy)
 	// Unknown API routes (#1452): these method-less patterns are less
 	// specific than every registered /v1 route, so they only answer paths
 	// no handler claimed (the handler itself synthesises a JSON 405 for a
@@ -740,7 +800,11 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if stateChanging(r.Method) {
+		// /preview/<key>/ is the user's own app behind an unguessable key
+		// (#1341). Its sandboxed frame posts with Origin: null, and the
+		// gateway cookie is never honoured there, so the CSRF origin check
+		// for gateway routes does not apply to it.
+		if stateChanging(r.Method) && !strings.HasPrefix(r.URL.Path, previewPathPrefix) {
 			if origin := r.Header.Get("Origin"); origin != "" && !requestOriginAllowed(r) {
 				http.Error(w, "origin not allowed", http.StatusForbidden)
 				return
