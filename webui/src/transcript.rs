@@ -524,13 +524,16 @@ impl Transcript {
                 self.trigger_note.clear();
                 let text = field_str(&data, "text");
                 let shown = display_user_text(&strip_echo_progress(&text));
+                // #1324: a review-queue turn is labelled as a review, not
+                // shown as if the operator had typed it.
+                let review = crate::review_queue::is_review_turn(&text);
                 let (ack_text, ack_shown) = (text.clone(), shown.clone());
                 let id = self.push(Message {
                     id: 0,
                     role: Role::You,
-                    title: "You".into(),
+                    title: if review { "Review".into() } else { "You".into() },
                     body: shown.clone(),
-                    badge: String::new(),
+                    badge: if review { "review".into() } else { String::new() },
                     detail: String::new(),
                     key: String::new(),
                     call_id: String::new(),
