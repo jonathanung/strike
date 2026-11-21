@@ -22,6 +22,9 @@ const (
 	KindGitHubChecks = "github_checks"
 	// KindHTTP probes a URL and compares the response status.
 	KindHTTP = "http"
+	// KindShell runs a workspace-configured command; exit 0 is healthy
+	// (#1783).
+	KindShell = "shell"
 )
 
 // Per-check states.
@@ -83,6 +86,9 @@ type CheckSpec struct {
 	URL string `json:"url,omitempty"`
 	// ExpectStatus is the healthy HTTP status (kind http). Zero means 200.
 	ExpectStatus int `json:"expectStatus,omitempty"`
+	// Command is the shell check (kind shell), run with bash -c under the
+	// user's sandbox preference.
+	Command string `json:"command,omitempty"`
 }
 
 // CheckResult is one observation of one check.
