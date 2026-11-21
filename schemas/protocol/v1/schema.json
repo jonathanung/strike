@@ -1523,6 +1523,110 @@
       ],
       "type": "object"
     },
+    "ElicitationReply": {
+      "additionalProperties": true,
+      "description": "ElicitationReply answers a pending ElicitationRequested. Action is accept, decline, or cancel; Content carries the form values (a JSON object) on accept and is ignored otherwise.",
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "content": {
+          "description": "Any JSON value (Go json.RawMessage)."
+        },
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "action"
+      ],
+      "type": "object"
+    },
+    "ElicitationRequested": {
+      "additionalProperties": true,
+      "description": "ElicitationRequested pauses an in-flight MCP tool call until an ElicitationReply arrives. Server names the MCP server that asked. Mode is form (RequestedSchema holds the flat JSON Schema to fill) or url (URL is the page the user opens themselves).",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "requestedSchema": {
+          "description": "Any JSON value (Go json.RawMessage)."
+        },
+        "server": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "server",
+        "message",
+        "mode"
+      ],
+      "type": "object"
+    },
+    "ElicitationResolved": {
+      "additionalProperties": true,
+      "description": "ElicitationResolved closes a pending ElicitationRequested with the action the server received (accept, decline, or cancel).",
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "action"
+      ],
+      "type": "object"
+    },
     "EngineError": {
       "additionalProperties": true,
       "properties": {
@@ -2287,6 +2391,54 @@
             },
             "type": {
               "const": "effort.selected"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ElicitationRequested"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "elicitation.requested"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ElicitationResolved"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "elicitation.resolved"
             },
             "v": {
               "type": "string"
@@ -3458,6 +3610,24 @@
             },
             "type": {
               "const": "context.controls"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ElicitationReply"
+            },
+            "type": {
+              "const": "elicitation.reply"
             },
             "v": {
               "type": "string"
@@ -7031,10 +7201,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Forward-compatible Op/Event wire schema generated from pkg/protocol. The root schema is one event envelope: unknown type strings and unknown fields are valid. $defs/KnownEvent lists types this version writes. $defs/KnownOp is fail-closed: unknown op type strings are not valid. required is the writer contract; readers treat missing fields as zero values. See schemas/protocol/v1/COMPAT.md.",
   "title": "Strike event envelope",
-  "x-strike-event-count": 63,
+  "x-strike-event-count": 65,
   "x-strike-legacy-version": "1.0.0",
-  "x-strike-op-count": 31,
-  "x-strike-protocol-version": "1.24.0",
+  "x-strike-op-count": 32,
+  "x-strike-protocol-version": "1.25.0",
   "x-strike-unknown-event": "valid",
   "x-strike-unknown-field": "ignore",
   "x-strike-unknown-op": "reject"
