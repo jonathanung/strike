@@ -2574,6 +2574,37 @@ select.mode, .daemon select {
   border-top: 1px solid var(--border-muted);
 }
 .sched-history h3 { margin: 0 0 var(--space-2); font-size: var(--type-md); }
+/* Script schedules (#1777): explicit type badge, confirm step, and the
+   exit-code / output-tail run rows. Tokens only; no new modal kinds. */
+.sched-row .sched-script-badge { justify-self: start; }
+.sched-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-focus);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+.sched-confirm h3 { margin: 0; font-size: var(--type-md); }
+.sched-confirm .meta { margin: 0; color: var(--muted); font-size: var(--type-sm); }
+.sched-command { font-family: var(--mono, monospace); }
+.sched-output {
+  flex-basis: 100%;
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-family: var(--mono, monospace);
+  font-size: var(--type-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.sched-output-full { max-height: 420px; }
+.sched-run .sched-exit { font-variant-numeric: tabular-nums; }
 /* feature:scheduler-presets begin */
 /* Scheduler presets (#1495): one checkbox row per catalog preset under the
    schedule layout; rows stay full-width tap targets on phones. */
