@@ -123,6 +123,7 @@ body[data-phone="1"] .cz-actions button {
 .cz-proposal header { display: flex; gap: var(--space-2); align-items: center; }
 .cz-proposal .cz-row-meta { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
 .cz-proposal-evidence { margin: var(--space-1) 0; padding-left: 18px; color: var(--ink); }
+.cz-proposal-session { text-align: left; overflow-wrap: anywhere; }
 .cz-proposal .cz-diff { max-height: 240px; }
 body[data-phone="1"] .cz-proposals-head button,
 body[data-phone="1"] .cz-proposal .cz-actions button { min-height: 44px; }

@@ -3372,6 +3372,48 @@ rect.mmd-edge-label { fill: var(--surface-muted); stroke: none; }
 }
 .files-head .hint, .changes-head .hint { margin: 0; }
 /* feature:files-refresh end */
+
+/* feature:settings-guardrails begin */
+.guardrails .guard-subtitle {
+  margin: var(--space-3, 12px) 0 var(--space-1, 4px);
+  font-size: var(--type-sm);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.guard-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px 16px;
+}
+.guard-dial {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.guard-dial .hint { margin: 0; }
+.guard-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.guard-label { font-weight: 600; }
+.guard-value {
+  font-family: var(--mono, monospace);
+  font-size: var(--type-sm);
+  color: var(--acid);
+  white-space: nowrap;
+}
+.guard-edit {
+  display: flex;
+  gap: 6px;
+}
+.guard-edit input { flex: 1; min-width: 0; }
+.guard-dial .segmented { flex-wrap: wrap; }
+.guard-dial .banner { margin: 0; }
+/* feature:settings-guardrails end */
 /* feature:global-search begin */
 /* Global transcript search (#1355): palette-launched overlay. Tokens only. */
 .gs-backdrop {
@@ -3439,6 +3481,67 @@ rect.mmd-edge-label { fill: var(--surface-muted); stroke: none; }
   border-radius: 2px;
 }
 /* feature:global-search end */
+/* feature:rewind begin */
+/* Session rewind (#1336): preview + confirm dialog. Tokens only;
+   warnings use the theme's --warning, errors --signal. */
+.rewind-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: color-mix(in srgb, var(--overlay) 45%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
+.rewind-dialog {
+  width: min(560px, 94vw);
+  max-height: 88vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.rewind-dialog h2 { margin: 0; font-size: var(--type-lg); }
+.rewind-scope { margin: 0; }
+.rewind-prompt {
+  margin: 0;
+  padding: var(--space-2);
+  border-left: 3px solid var(--rule);
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 8em;
+  overflow: auto;
+}
+.rewind-modes {
+  margin: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rewind-mode { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.rewind-reason { flex: 1 1 100%; padding-left: 22px; color: var(--muted); font-size: var(--type-sm); }
+.rewind-files ul { margin: 6px 0 0; padding-left: 18px; }
+.rewind-kind { color: var(--muted); font-size: var(--type-sm); }
+.rewind-warnings {
+  margin: 0;
+  padding: var(--space-2) var(--space-2) var(--space-2) 26px;
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 12%, var(--surface));
+}
+.rewind-ack { display: flex; align-items: center; gap: 6px; }
+.rewind-error { margin: 0; color: var(--signal); }
+.rewind-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+/* feature:rewind end */
 /* feature:search-in-files begin */
 /* #1406: Files-pane search box; matches marked with .tf-mark (transcript-find.css). */
 .sif {

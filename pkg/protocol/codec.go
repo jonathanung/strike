@@ -74,6 +74,10 @@ func eventType(ev Event) string {
 		return "harness.progress"
 	case ModelSelected:
 		return "model.selected"
+	case FallbackModelSelected:
+		return "fallback.selected"
+	case ModelFallback:
+		return "model.fallback"
 	case AgentSelected:
 		return "agent.selected"
 	case PhaseChanged:
@@ -249,6 +253,10 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &HarnessProgress{}
 	case "model.selected":
 		ev = &ModelSelected{}
+	case "fallback.selected":
+		ev = &FallbackModelSelected{}
+	case "model.fallback":
+		ev = &ModelFallback{}
 	case "agent.selected":
 		ev = &AgentSelected{}
 	case "phase.changed":
@@ -407,6 +415,10 @@ func deref(ev Event) Event {
 	case *HarnessProgress:
 		return *v
 	case *ModelSelected:
+		return *v
+	case *FallbackModelSelected:
+		return *v
+	case *ModelFallback:
 		return *v
 	case *AgentSelected:
 		return *v

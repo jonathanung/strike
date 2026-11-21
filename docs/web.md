@@ -126,6 +126,7 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
 | `GET` | `/v1/sessions/{id}/children` | **yes** | Child/subagent sessions under a root |
 | `POST` | `/v1/sessions/{id}/fork` | **yes** | Fork durable session → new id |
+| `GET` | `/v1/sessions/{id}/rewind_preview` | **yes** | Rewind preview (#1336): `?keep=` a turn's fork keep-count → `{turn, turns, totalTurns, prompt, files[{path,kind}], checkpointSkipped, uncovered[], beyondCheckpoints, disabled?}` summing what rewinding that turn and every later one would undo, from the record's `turn.completed` facts. Read-only; the cockpit applies the rewind with one `rewind` op per undone turn. `disabled` states why on `--read-only` cockpits and delegated child sessions. **400** bad `keep`; **409** turn no longer in history; **404** unknown session |
 | `POST` | `/v1/sessions/{id}/report` | **yes** | Generate a `session_report` artifact from the session record (#1444) → **201** artifact. Facts only (turns, asks, tool counts, files, approvals, children, tokens, errors); tool args/output never copied; redacted. **404** unknown session; **501** without sessions or artifact store |
 | `PATCH` | `/v1/sessions/{id}` | **yes** | Rename (`{ "title" }`) |
 | `DELETE` | `/v1/sessions/{id}` | **yes** | Delete durable session (`?force=true` optional) |
@@ -217,6 +218,7 @@ JSON objects with a `type` and optional `data`:
 | `select.model` | `{ "provider", "model?" }` |
 | `set.permission_mode` | `{ "mode": "default\|plan\|accept-edits\|yolo" }` |
 | `set.autonomy` | `{ "mode": "supervised\|agent\|checks\|skip-all" }` |
+| `set.fallback_model` | `{ "provider", "model?" }` — session fallback model (#1350); empty provider clears. Confirmed by `fallback.selected`; a turn the fallback answered emits `model.fallback` `{ primaryProvider, primaryModel, fallbackProvider, fallbackModel, reason: "unavailable", error? }`. Status: `fallbackProvider` / `fallbackModel` |
 | `set.verbosity` | `{ "level": "default\|concise\|detailed" }` — response style (#1369); confirmed by `verbosity.selected` `{ level, delivery: "none\|instruction" }`, reported on status as `verbosity` / `verbosityDelivery` |
 | `team.spawn` | `{ "idempotencyKey", "objective", "agent?", "name?", "isolation?", "budget?", "rootSessionId?" }` |
 | `team.message` | `{ "idempotencyKey", "to", "body", "kind?", "urgency?", "taskId?" }` |
@@ -976,6 +978,13 @@ changes after restart; CLI `--turn-timeout` / `--max-cost` still override.
 A project `.strike/config` that sets the same `session.*` key wins over the
 global value at load.
 
+The cockpit renders these in **Settings → Guardrails**: one control per dial
+showing the daemon-reported effective value. Tightening applies at once;
+loosening (raising or removing a cap, delegation `off`/`advise`, handoff
+optional, children back on the host) asks for confirmation first. A rejected
+value shows the daemon's 400 reason. The Git panel's worktree card points at
+the Child isolation control instead of the config file.
+
 `GET` also carries `autoupdateEffective` (the dial after
 `config.EffectiveAutoupdate`: empty/unknown → `notify`) and, once a check has
 run, `updateCheck` (the last `GET /v1/update` result). Reading settings never
@@ -1153,6 +1162,12 @@ Permission asks appear as `permission.asked` events; resolve with
 | `DELETE` | `/v1/memory/{key}` | **yes** | Delete entry (`?scope=`); blocked in attach-only |
 | `GET` | `/v1/memory/mode` | mode | Session memory mode (`normal`, `incognito`, `temporary`) for `?root=`. `wired:false` when no live engine is bound. |
 | `PUT` | `/v1/memory/mode` | **yes** | Set that mode (`{mode}`) for `?root=`. Persists on the session meta sidecar. |
+| `GET` | `/v1/memory/proposals` | mode | Pending lesson proposals (#1874), oldest first. A pending proposal is never auto-loaded. |
+| `POST` | `/v1/memory/proposals` | **yes** | Propose a lesson (`{key,value,scope?}`; scope `project` default or `global`). Text is credential-scrubbed. The proposing session is the live root's. 403 for an incognito/temporary session or an untrusted workspace. |
+| `PATCH` | `/v1/memory/proposals/{id}` | **yes** | Edit a pending proposal (`{key,value,scope}`). |
+| `POST` | `/v1/memory/proposals/{id}/approve` | **yes** | Store it as a `lesson`-tagged entry in its scope and drop it from pending. 409 when the key exists unless `{replace:true}`. |
+| `DELETE` | `/v1/memory/proposals/{id}` | **yes** | Dismiss a pending proposal; stores nothing. |
+| `GET` | `/v1/sessions/{id}/lessons-used` | mode | Memory entries recorded as auto-loaded into that session (`{sessionId, entries:[{scope,key,value,tags,injectedAt}]}`); the "lessons used" marker. Display-only. |
 | `GET` | `/v1/knowledge` | mode | Pinned paths for `?scope=project` or `global`. |
 | `PUT` | `/v1/knowledge` | **yes** | Pin (`{path,note?,author?,scope?}`). Notes are scrubbed. Blocked in attach-only. |
 | `DELETE` | `/v1/knowledge` | **yes** | Unpin (`{path,scope?}`). Blocked in attach-only. |

@@ -505,6 +505,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.handleSessionFork)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork_at", s.handleSessionForkAt)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/rewind_points", s.handleSessionRewindPoints)
+	// Rewind-to-turn preview for the cockpit (#1336); read-only.
+	s.mux.HandleFunc("GET /v1/sessions/{id}/rewind_preview", s.handleSessionRewindPreview)
 	// Daemon-generated session report artifact (#1444).
 	s.mux.HandleFunc("POST /v1/sessions/{id}/report", s.handleSessionReport)
 	s.mux.HandleFunc("GET /v1/dashboards", s.handleDashboardsList)
@@ -589,6 +591,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /v1/memory/mode", s.handleMemoryModePut)
 	s.mux.HandleFunc("PUT /v1/memory/{key}", s.handleMemoryPut)
 	s.mux.HandleFunc("DELETE /v1/memory/{key}", s.handleMemoryDelete)
+	// Lessons loop (#1874): pending proposals + "lesson used" provenance.
+	s.mux.HandleFunc("GET /v1/memory/proposals", s.handleLessonProposals)
+	s.mux.HandleFunc("POST /v1/memory/proposals", s.handleLessonPropose)
+	s.mux.HandleFunc("PATCH /v1/memory/proposals/{id}", s.handleLessonProposalEdit)
+	s.mux.HandleFunc("POST /v1/memory/proposals/{id}/approve", s.handleLessonProposalApprove)
+	s.mux.HandleFunc("DELETE /v1/memory/proposals/{id}", s.handleLessonProposalDismiss)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/lessons-used", s.handleSessionLessonsUsed)
 	s.mux.HandleFunc("GET /v1/knowledge", s.handleKnowledgeList)
 	s.mux.HandleFunc("PUT /v1/knowledge", s.handleKnowledgePut)
 	s.mux.HandleFunc("DELETE /v1/knowledge", s.handleKnowledgeDelete)
@@ -631,6 +640,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/mcp", s.handleMCPList)
 	s.mux.HandleFunc("POST /v1/mcp/retry", s.handleMCPRetry)
 	s.mux.HandleFunc("POST /v1/mcp/disable", s.handleMCPDisable)
+	// Powers capability packs (#1347 / #1867).
+	s.mux.HandleFunc("GET /v1/powers", s.handlePowersList)
+	s.mux.HandleFunc("POST /v1/powers/activate", s.handlePowersActivate)
+	s.mux.HandleFunc("POST /v1/powers/deactivate", s.handlePowersDeactivate)
+	s.mux.HandleFunc("POST /v1/powers/mute", s.handlePowersMute)
+	s.mux.HandleFunc("POST /v1/powers/suggest", s.handlePowersSuggest)
 	// Plugin lifecycle + pane contributions (web parity #732).
 	// Action paths are body-id based (POST /v1/plugins/disable) so static
 	// segments never collide with plugin ids that contain dots/slashes.

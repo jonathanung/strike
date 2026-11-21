@@ -32,6 +32,7 @@ mod diagnostics;
 mod draft_size;
 mod drafts;
 mod editor;
+mod fallback;
 mod files_invalidated;
 mod lessons;
 mod elicitation;
@@ -51,6 +52,7 @@ mod gateway_peek;
 mod gateway_qr;
 mod git;
 mod global_search;
+mod guardrails;
 mod goals;
 mod ideas;
 mod identity;
@@ -95,10 +97,12 @@ mod storage;
 mod tab_title;
 mod themes;
 mod task_runner;
+mod team_message;
 mod file_history;
 mod quick_open;
 mod transcript_find;
 mod usage_audit;
+mod rewind;
 mod session_delete;
 mod session_restore;
 mod share;
@@ -131,6 +135,7 @@ mod spec_authoring;
 mod workflows;
 mod workflow_run;
 use crate::shell::icon;
+use crate::team_message::TeamMessageComposer;
 use crate::identity::IdentityDisc;
 use crate::delegation_board::DelegationBoard;
 use crate::child_signals::TeamMessagesFeed;
@@ -1226,6 +1231,11 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // #1573: bootstrap `teamControl` plus a live team with members gate the
+    // activity panel's Message action; absent otherwise, never disabled.
+    let team_control_capable = RwSignal::new(false);
+    let team_live = RwSignal::new(false);
+    let message_target = RwSignal::new(None::<team_message::Target>);
     // #1381: delegation board rows from the /v1/team poll.
     let delegation_rows = RwSignal::new(Vec::<delegation_board::BoardRow>::new());
     // Bootstrap capability `plugins` (#1570): gates plugin lifecycle.
@@ -1567,6 +1577,8 @@ fn App() -> impl IntoView {
     // for. `None` means no deletion is pending; setting it never issues
     // a request by itself.
     let delete_target = RwSignal::new(None::<session_delete::DeleteTarget>);
+    // Session rewind (#1336): the preview dialog's open request.
+    let rewind_target = RwSignal::new(None::<rewind::RewindTarget>);
     let pending_files = RwSignal::new(Vec::<chat_mode::PendingAttachment>::new());
     // Visual annotate (#1545): marks per pending image id, and the image
     // open in the overlay. Marks live and die with the composer session.
@@ -1670,6 +1682,7 @@ fn App() -> impl IntoView {
                     let now = now_ms();
                     let prev = activity.get_untracked();
                     let rows = rows_from_team(&prev, &team, now);
+                    team_live.set(team.available && !rows.is_empty());
                     let board = delegation_board::board_rows(&team);
                     if delegation_rows.get_untracked() != board {
                         delegation_rows.set(board);
@@ -1699,7 +1712,10 @@ fn App() -> impl IntoView {
                     };
                     activity.set(rows);
                 }
-                Err(e) => team_note.set(e),
+                Err(e) => {
+                    team_live.set(false);
+                    team_note.set(e);
+                }
             }
         });
     };
@@ -1987,6 +2003,7 @@ fn App() -> impl IntoView {
                                                 .to_string(),
                                         );
                                     }
+                                    crate::fallback::seed(&st.fallback_provider, &st.fallback_model);
                                     crate::verbosity::seed(&st.verbosity, &st.verbosity_delivery);
                                     wf_run.set(workflow_run::WorkflowRun::from_status(
                                         &st.workflow,
@@ -2022,6 +2039,7 @@ fn App() -> impl IntoView {
                                 crate::local_issues::set_issues_capable(boot.capabilities.issues);
                                 issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                team_control_capable.set(boot.capabilities.team_control);
                                 plugins_capable.set(boot.capabilities.plugins);
                                 config_files_capable.set(boot.capabilities.config_files);
                                 crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
@@ -2205,6 +2223,7 @@ fn App() -> impl IntoView {
         // session's Fast/autonomy across the switch.
         fast_on.set(false);
         autonomy.set("supervised".to_string());
+        crate::fallback::reset();
         crate::verbosity::reset();
         autonomy_menu.set(false);
         wf_run.set(workflow_run::WorkflowRun::default());
@@ -2379,6 +2398,7 @@ fn App() -> impl IntoView {
                         wf_run.set(wf_next);
                     }
                     let next = reduce_envelope(prev, &data);
+                    crate::fallback::observe(&data);
                     crate::verbosity::observe(&data);
                     provider_name.set(next.provider);
                     model_name.set(next.model);
@@ -3611,6 +3631,25 @@ fn App() -> impl IntoView {
     // is filed separately; this PR only composes the two existing
     // endpoints, in delete-then-close order, after the user's force
     // confirmation when one was required.
+    // Rewind applied (#1336): after a conversation restore the picked
+    // turn's prompt returns to the composer for edit-and-resend; it is
+    // never sent automatically.
+    let rewind_busy = Signal::derive(move || {
+        let active = active_root.get();
+        roots.with(|list| list.iter().any(|r| r.id == active && r.busy))
+    });
+    let on_rewound = Callback::new(move |(prompt, mode, turns): (String, rewind::Mode, u32)| {
+        let what = if mode.restores_files() { "conversation and code" } else { "conversation" };
+        // The ops were accepted; the engine reports each undone turn (or a
+        // refusal) in the transcript, so this note does not claim more.
+        ux_note.set(format!(
+            "Requested a rewind of {turns} turn(s) ({what}); the transcript shows each undone turn. The prompt is back in the composer."
+        ));
+        if !prompt.trim().is_empty() {
+            draft.set(prompt);
+            sync_composer_height_soon();
+        }
+    });
     // Global search pick (#1355): open the session through the shared
     // live/resume path and queue the find-in-transcript handoff.
     let on_gs_pick = Callback::new(move |(id, q): (String, String)| {
@@ -5116,6 +5155,15 @@ fn App() -> impl IntoView {
             });
         })
         .into(),
+        rewind: (move |keep: i32| {
+            let root = active_root.get_untracked();
+            if root.is_empty() || keep <= 0 {
+                ux_note.set("No completed turn to rewind to.".into());
+                return;
+            }
+            rewind_target.set(Some(rewind::RewindTarget { session: root, keep }));
+        })
+        .into(),
         open_file: (move |path: String, line: u32| {
             // The editor stream (#1269) is wired now: a file chip opens the
             // document pane at the line, beside the transcript.
@@ -5600,6 +5648,13 @@ fn App() -> impl IntoView {
             token=token
             on_deleted=on_deleted
         />
+        <rewind::RewindDialog
+            target=rewind_target
+            base=base
+            token=token
+            busy_turn=rewind_busy
+            on_done=on_rewound
+        />
         <global_search::GlobalSearch
             open=gs_open
             query=gs_query
@@ -5916,6 +5971,14 @@ fn App() -> impl IntoView {
                             panel_drawer.update(|v| *v = !*v);
                         }>"Panel"</button>
                     </div>
+                    // #1874: "N lessons used — view" for the active session.
+                    <lessons::LessonsUsedMarker
+                        base=base
+                        token=token
+                        session=active_root
+                        busy=live_busy
+                        storage_rev=storage_rev
+                    />
                     <Show when=move || !load_error.get().is_empty()>
                         <div class="notice" role="alert">
                             <span>{move || load_error.get()}</span>
@@ -6684,6 +6747,7 @@ fn App() -> impl IntoView {
                                     model_menu.set(false);
                                     autonomy_menu.update(|v| *v = !*v);
                                 }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
+                                <crate::fallback::FallbackChip base=base token=token active_root=active_root status=status busy=Signal::derive(move || session_busy_now.get()) />
                                 <crate::verbosity::VerbosityChip base=base token=token active_root=active_root status=status busy=Signal::derive(move || session_busy_now.get()) />
                                 // #1574: the live workflow run, only while the
                                 // daemon reports one. Stop asks first.
@@ -6771,6 +6835,9 @@ fn App() -> impl IntoView {
                         <span class="hint">"Live tasks"</span>
                         <span class="row-actions">
                             <button type="button" class="secondary side-chat-open-activity" on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
+                            <Show when=move || team_control_capable.get() && team_live.get()>
+                                <button type="button" class="secondary" data-team-message-all="true" on:click=move |_| message_target.set(Some(team_message::Target::All))>"Message all"</button>
+                            </Show>
                             <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
                         </span>
                     </header>
@@ -6786,6 +6853,7 @@ fn App() -> impl IntoView {
                     <Show when=move || !children_note.get().is_empty()>
                         <p class="hint" data-children-note="true">{move || children_note.get()}</p>
                     </Show>
+                    <TeamMessageComposer base=base token=token root=active_root activity=activity target=message_target />
                     <DelegationBoard rows=delegation_rows />
                     <Show when=move || activity.get().is_empty()>
                         {move || {
@@ -6833,6 +6901,8 @@ fn App() -> impl IntoView {
                                 let name = row.name.clone();
                                 let name_chat = name.clone();
                                 let sid_chat = sid.clone();
+                                let sid_msg = sid.clone();
+                                let name_msg = name.clone();
                                 let escalation = team_escalations.with(|m| m.get(&sid).cloned());
                                 let who = name.clone();
                                 let disc_key = identity::child_key(&name, &sid);
@@ -6886,6 +6956,19 @@ fn App() -> impl IntoView {
                                                     open_side(sid_chat.clone(), name_chat.clone());
                                                 }
                                             }>"Side chat"</button>
+                                            <Show when=move || team_control_capable.get() && team_live.get()>
+                                                <button type="button" class="secondary" data-team-message-open=sid_msg.clone() on:click={
+                                                    let sid_msg = sid_msg.clone();
+                                                    let name_msg = name_msg.clone();
+                                                    move |ev: web_sys::MouseEvent| {
+                                                        ev.stop_propagation();
+                                                        message_target.set(Some(team_message::Target::Child {
+                                                            session_id: sid_msg.clone(),
+                                                            name: name_msg.clone(),
+                                                        }));
+                                                    }
+                                                }>"Message"</button>
+                                            </Show>
                                             <button class="secondary" disabled=move || !running on:click={
                                                 let sid_stop = sid_stop.clone();
                                                 move |ev: web_sys::MouseEvent| {

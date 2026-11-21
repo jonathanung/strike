@@ -629,6 +629,44 @@ type MemoryScopes interface {
 	DeleteScope(scope, key string) error
 }
 
+// MemoryProposal is a pending lesson a session suggested (#1376). It is
+// never injected until approved into a MemoryEntry.
+type MemoryProposal struct {
+	ID        string    `json:"id"`
+	Key       string    `json:"key"`
+	Value     string    `json:"value"`
+	Scope     string    `json:"scope"`
+	Session   string    `json:"session,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+// MemoryInjection is one memory entry as it was auto-loaded into a session.
+type MemoryInjection struct {
+	Scope      string    `json:"scope"`
+	Key        string    `json:"key"`
+	Value      string    `json:"value"`
+	Tags       []string  `json:"tags,omitempty"`
+	InjectedAt time.Time `json:"injectedAt"`
+}
+
+// ErrMemoryKeyExists is returned by ApproveProposal when the target key is
+// already stored and replace was not requested.
+var ErrMemoryKeyExists = errors.New("a memory entry with this key already exists")
+
+// MemoryLessons is the optional lessons-loop surface: pending proposals and
+// injection provenance. Proposals live with the project store.
+type MemoryLessons interface {
+	Proposals() ([]MemoryProposal, error)
+	Propose(p MemoryProposal) (MemoryProposal, error)
+	EditProposal(id, key, value, scope string) (MemoryProposal, error)
+	// ApproveProposal stores the proposal as a lesson-tagged entry in its
+	// scope and removes it from the pending list.
+	ApproveProposal(id string, replace bool) (MemoryEntry, error)
+	DismissProposal(id string) error
+	// Injected lists the entries recorded as auto-loaded into sessionID.
+	Injected(sessionID string) ([]MemoryInjection, error)
+}
+
 // MemoryFiles reports the plain-text projection and audit log for a scope.
 type MemoryFiles interface {
 	Files(scope string) (markdownPath, auditPath string)
@@ -1390,6 +1428,7 @@ type Services struct {
 	Providers   Providers // custom/self-hosted provider CRUD; nil when unsupported
 	Init        ProjectInit
 	MCP         MCP       // external MCP server status; nil when unsupported
+	Powers      Powers    // capability packs activated per session (#1347); nil when unsupported
 	LSP         LSP       // language server status + diagnostics; nil when unsupported
 	Plugins     Plugins   // plugin lifecycle manager; nil when unsupported
 	Panes       Panes     // enabled pane contributions; nil when unsupported

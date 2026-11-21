@@ -92,6 +92,13 @@ pub fn evidence_row(e: &Evidence) -> String {
     }
 }
 
+/// Whether an evidence session id can be opened in the cockpit: a plain
+/// session token, not empty and with no path separators or spaces.
+pub fn openable(session_id: &str) -> bool {
+    let s = session_id.trim();
+    !s.is_empty() && s.len() <= 128 && s == session_id && !s.chars().any(|c| matches!(c, '/' | '\\' | ' ' | '\t' | '\n' | '\r'))
+}
+
 /// The daemon's `{"error": …}` text from an `HTTP <code> <body>` failure,
 /// or the raw text when it is not that shape.
 pub fn error_text(raw: &str) -> String {
@@ -149,6 +156,22 @@ mod tests {
         assert_eq!(evidence_row(&e), "s1 · 2026-11-01");
         let e = Evidence { session_id: "s1".into(), title: "Release".into(), at: "bad".into() };
         assert_eq!(evidence_row(&e), "Release");
+    }
+
+    #[test]
+    fn openable_session_ids() {
+        for (id, want) in [
+            ("20260102T000000.000000000Z-ABC", true),
+            ("s1", true),
+            ("", false),
+            (" s1", false),
+            ("a/b", false),
+            ("a\\b", false),
+            ("a b", false),
+        ] {
+            assert_eq!(openable(id), want, "{id:?}");
+        }
+        assert!(!openable(&"x".repeat(129)));
     }
 
     #[test]

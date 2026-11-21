@@ -310,13 +310,13 @@ files are inspected and edited.
 
 ## Powers
 
-The daemon side is in place but no chip is drawn yet (#1347).
+The daemon side is in place but no chip is drawn yet (#1347, #1867).
 `internal/integrate/powers` loads packs from
 `<workspace>/.strike/powers/<pack>/` and `~/.strike/powers/<pack>/`, and
-the workspace copy wins on a name clash. Each pack is an Agent Plugins
-package: `plugin.json` holds `name` and `keywords`, `mcp.json` holds
-`mcpServers`, and `skills/<name>/SKILL.md` holds skills. These are
-references by name, not copies.
+the workspace copy wins on a name clash. Workspace packs load only in a
+trusted workspace. Each pack is an Agent Plugins package: `plugin.json`
+holds `name` and `keywords`, `mcp.json` holds `mcpServers`, and
+`skills/<name>/SKILL.md` holds skills.
 
 A pack is suggested when a keyword appears in the prompt as a whole word
 or phrase. Packs that are muted or already active are not suggested, and
@@ -325,14 +325,29 @@ reference-counted: packs that share a server keep it until the last one is
 deactivated, and ending one session never disconnects another session's
 servers. If a server fails to connect, it is listed as failed and left
 out of the session, and the chip and the tool set read the same result.
-If a pack names a deny-listed server, the whole pack stays inactive and
-the reason is shown.
+If a pack names a server the permission rules deny (`mcp` `<server>/*`),
+the whole pack stays inactive and the reason is shown.
 
-Not built yet:
-- a `Connector` connected to the MCP session manager, and the daemon routes for it;
+`mcp.PackConnector` attaches pack servers through the MCP manager, with
+the same admission scan as configured servers, and detaches them when the
+last session releases them. A server already configured in `mcp.json` is
+borrowed and never detached. The dial runs outside the Powers lock, so a
+slow server does not stall other sessions.
+
+Routes: `GET /v1/powers?session=`, `POST /v1/powers/suggest`
+`{session, prompt}`, `POST /v1/powers/activate` and `/deactivate`
+`{session, name}` (activate needs a live session, a denied pack is 403),
+and `POST /v1/powers/mute` `{name, muted}`. The mutating routes refuse
+`--read-only`. Closing a root or deleting a session unloads its Powers.
+
+Not built yet (#1943):
+- skills loaded into context per session;
+- per-session tool scoping (the MCP registry is process-wide, so a pack's
+  tools are visible to every root until the last session releases them);
 - the composer chip row with context cost (#1259);
 - pack membership on Customize;
-- goal-declared Powers (#1284).
+- goal-declared Powers (#1284);
+- persisted mute and last-used time.
 
 ## Composer triggers
 
