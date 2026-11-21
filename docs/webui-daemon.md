@@ -236,6 +236,25 @@ matches that preview. Env, header, and URL secrets are masked; sending `••�
 keeps the stored value. Plugin enable and disable use the existing
 `/v1/plugins/enable` and `/v1/plugins/disable` routes.
 
+### Skill proposals (#1611)
+
+Customize → Skills can propose skills from workflows you repeat. It is off
+for each workspace until you turn it on, and it only scans when you click
+**Look now**.
+
+- **Routes**:
+  - `GET /v1/skill-proposals` returns `{enabled, threshold, windowDays, lastScan, pending}`.
+  - `PATCH /v1/skill-proposals` takes `{enabled?, threshold?}`. The threshold must be 2–20; the default is 3.
+  - `POST /v1/skill-proposals/scan` returns 409 while off.
+  - `POST /v1/skill-proposals/dismiss` and `POST /v1/skill-proposals/accept` each take `{id}`.
+- **What the scan reads**: only this workspace's own root session logs from the last 28 days. Child sessions and other workspaces are excluded. For each session it takes the opening request and the tools of the first turn.
+- **What counts as repeated**: sessions whose openings share most of their words and whose tool sequences mostly match. The threshold number of such sessions makes a proposal.
+- **Drafts**: matching is local and makes no model call. Drafts are redacted with `pkg/redact`. Drafts stay pending in `~/.strike/skill-proposals.json` (0600) and are not visible to any session.
+- **Accept**: installs the draft as a workspace skill through the same preview + apply path the editor uses.
+- **Edit**: opens the draft in the skill editor. Once a skill with that name exists, the draft drops out of the proposals.
+- **Dismiss**: removes the draft and suppresses its pattern on later scans.
+- **Read-only attach**: refuses every mutation, including turning the scan on or off.
+
 ## Several workspaces, one daemon
 
 One `strike serve` process can hold several live roots at once. Each root

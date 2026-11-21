@@ -55,6 +55,7 @@ mod usage_audit;
 mod session_delete;
 mod session_restore;
 mod shell;
+mod skill_proposals;
 mod side_chat;
 mod status;
 mod term;
