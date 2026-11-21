@@ -49,6 +49,8 @@ func opType(op Op) string {
 		return "set.permission_mode"
 	case SetFast:
 		return "set.fast"
+	case SetVerbosity:
+		return "set.verbosity"
 	case DebugControl:
 		return "debug.control"
 	case StartWorkflow:
@@ -150,6 +152,8 @@ func (e OpEnvelope) Decode() (Op, error) {
 		op = &SetPermissionMode{}
 	case "set.fast":
 		op = &SetFast{}
+	case "set.verbosity":
+		op = &SetVerbosity{}
 	case "debug.control":
 		op = &DebugControl{}
 	case "workflow.start":
@@ -227,6 +231,8 @@ func derefOp(op Op) Op {
 	case *SetPermissionMode:
 		return *v
 	case *SetFast:
+		return *v
+	case *SetVerbosity:
 		return *v
 	case *DebugControl:
 		return *v

@@ -248,6 +248,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashboard-view"
+version = "0.1.0"
+
+[[package]]
 name = "debug-mode"
 version = "0.1.0"
 
@@ -1377,6 +1381,7 @@ version = "0.1.0"
 dependencies = [
  "away-briefing",
  "composer-drafts",
+ "dashboard-view",
  "debug-mode",
  "edit-resend",
  "gloo-net",

@@ -37,13 +37,14 @@ const (
 const (
 	SectionSessions  = "sessions"
 	SectionMemory    = "memory"
+	SectionKnowledge = "knowledge"
 	SectionSchedules = "schedules"
 	SectionSettings  = "settings"
 )
 
 // KnownSections lists every section this version can restore, in restore
 // order (settings first so a restored session opens with its defaults).
-var KnownSections = []string{SectionSettings, SectionMemory, SectionSchedules, SectionSessions}
+var KnownSections = []string{SectionSettings, SectionMemory, SectionKnowledge, SectionSchedules, SectionSessions}
 
 // Exclusion kinds.
 const (

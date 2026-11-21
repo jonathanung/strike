@@ -709,8 +709,8 @@ these need a new panel.
 ## Instance backup
 
 Settings → Backup ships export and dry-run-first restore for sessions,
-memory, schedules and non-secret settings (#1339, see
-`docs/instance-backup.md`). Knowledge pins, artifacts, attachments,
+memory, knowledge pins, schedules and non-secret settings (#1339, see
+`docs/instance-backup.md`). Artifacts, attachments,
 goals/autopilot state, workspaces and their rules, issues, plans and the
 ledger are not in archive version 1; the manifest names them as
 `not-yet-included`. Passphrase encryption is not offered: the file says

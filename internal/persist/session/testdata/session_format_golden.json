@@ -2461,6 +2461,50 @@
       ]
     },
     {
+      "type": "verbosity.selected",
+      "go": "VerbositySelected",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "level",
+          "type": "string"
+        },
+        {
+          "name": "delivery",
+          "type": "string"
+        }
+      ]
+    },
+    {
       "type": "debug.updated",
       "go": "DebugUpdated",
       "fields": [
