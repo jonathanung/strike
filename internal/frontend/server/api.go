@@ -393,6 +393,19 @@ type settingsResponse struct {
 	DelegationPolicy     delegationPolicyJSON `json:"delegationPolicy"`
 	ChildHandoffRequired bool                 `json:"childHandoffRequired"`
 	ChildIsolation       string               `json:"childIsolation,omitempty"`
+
+	// LinkPatterns is webui.linkPatterns (#1879): the cockpit's Text Link
+	// Patterns, shared by every paired device. Always present (an empty
+	// array when none) so a cockpit can tell a gateway that stores them
+	// from an older one that does not.
+	LinkPatterns []linkPatternJSON `json:"linkPatterns"`
+}
+
+// linkPatternJSON is one Text Link Patterns rule on the settings wire.
+type linkPatternJSON struct {
+	Name     string `json:"name"`
+	Pattern  string `json:"pattern"`
+	Template string `json:"template"`
 }
 
 // agentBudgetJSON is session.agentBudget on the settings wire (0 = unlimited).
@@ -485,6 +498,11 @@ type settingsPatchBody struct {
 	DelegationPolicy     *delegationPolicyPatch `json:"delegationPolicy"`
 	ChildHandoffRequired string                 `json:"childHandoffRequired"`
 	ChildIsolation       string                 `json:"childIsolation"`
+
+	// LinkPatterns replaces webui.linkPatterns when present (nil leaves it
+	// unchanged; [] clears it). Validated as a whole on the gateway: an
+	// invalid list is refused with 400 and nothing is stored.
+	LinkPatterns *[]linkPatternJSON `json:"linkPatterns"`
 }
 
 // guardrailDials maps the PATCH body onto host.GuardrailDials.
@@ -565,7 +583,24 @@ func settingsFromDefaults(d host.UserDefaults) settingsResponse {
 		},
 		ChildHandoffRequired: d.Guardrails.ChildHandoffRequired,
 		ChildIsolation:       d.Guardrails.ChildIsolation,
+		LinkPatterns:         linkPatternsToWire(d.LinkPatterns),
 	}
+}
+
+func linkPatternsToWire(in []host.LinkPattern) []linkPatternJSON {
+	out := make([]linkPatternJSON, len(in))
+	for i, r := range in {
+		out[i] = linkPatternJSON(r)
+	}
+	return out
+}
+
+func linkPatternsFromWire(in []linkPatternJSON) []host.LinkPattern {
+	out := make([]host.LinkPattern, len(in))
+	for i, r := range in {
+		out[i] = host.LinkPattern(r)
+	}
+	return out
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -670,6 +705,11 @@ func applySettingsPatch(settings host.Settings, body settingsPatchBody) error {
 	}
 	if guardrails := body.guardrailDials(); guardrails != (host.GuardrailDials{}) {
 		if err := settings.SaveGuardrailDials(guardrails); err != nil {
+			return err
+		}
+	}
+	if body.LinkPatterns != nil {
+		if err := settings.SaveLinkPatterns(linkPatternsFromWire(*body.LinkPatterns)); err != nil {
 			return err
 		}
 	}

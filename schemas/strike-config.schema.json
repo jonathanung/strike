@@ -122,6 +122,28 @@
         "on"
       ]
     },
+    "webui": {
+      "type": "object",
+      "description": "Web UI cockpit preferences stored on the gateway and shared by every paired device. Global config only; edited from Settings in the cockpit (PATCH /v1/settings).",
+      "additionalProperties": true,
+      "properties": {
+        "linkPatterns": {
+          "type": "array",
+          "description": "Text Link Patterns: regex \u2192 URL rules applied to transcript text at display time. First matching rule wins. At most 50.",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["name", "pattern", "template"],
+            "properties": {
+              "name": {"type": "string", "maxLength": 80},
+              "pattern": {"type": "string", "description": "RE2 regular expression (at most 512 bytes) that must not match empty text."},
+              "template": {"type": "string", "maxLength": 2048, "description": "Absolute https:// or http:// URL with {match} outside the host; the match is percent-encoded."}
+            }
+          }
+        }
+      }
+    },
     "permissionAutoApproveSeconds": {
       "type": "integer",
       "description": "Auto-allow permission asks after N seconds (1\u201360). Zero disables.",

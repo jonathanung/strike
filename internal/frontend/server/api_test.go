@@ -80,6 +80,7 @@ func (s testSettings) SaveKeepAwake(mode string) error {
 	return nil
 }
 func (testSettings) SaveGuardrailDials(host.GuardrailDials) error         { return nil }
+func (testSettings) SaveLinkPatterns([]host.LinkPattern) error            { return nil }
 func (testSettings) SaveAutoApproveDials(string, *[]string, string) error { return nil }
 func (testSettings) SaveCompactionDials(host.CompactionDials) error       { return nil }
 func (testSettings) SaveKeybinds(map[string][]string) error               { return nil }

@@ -533,11 +533,19 @@ cap); a pattern that matches empty text, a non-http(s) template, a
 template whose host comes from `{match}`, and more than 50 rules are
 refused inline in Settings and never applied.
 
-Persistence choice: rules live in this browser's localStorage
-(`strike.linkPatterns`), like the other cockpit view prefs, so a phone
-and a desktop keep separate lists for now. Sharing them through the
-gateway needs a settings field on the host contract and a config key; that is
-a follow-up issue, not part of this slice.
+Persistence (#1879): rules live on the gateway as `webui.linkPatterns`
+in the global `~/.strike/config`, read and written through
+`GET`/`PATCH /v1/settings`, so every device paired to one gateway shares
+one list (a rule saved on the desktop links on the phone after reload).
+The gateway validates the whole list with the same rules (Go RE2, ≤512-byte
+patterns under a compiled-program size cap) and refuses an invalid one with
+400; nothing is stored. On first load the cockpit moves a list it kept in
+this browser's localStorage (`strike.linkPatterns`, slice 1) to the gateway,
+appending only rules the gateway does not already have, then deletes the
+local key; if the move fails the key stays and the move is retried on the
+next load. A gateway too old to report `linkPatterns` keeps the per-browser
+list, and Settings says so.
+
 ## Review queue
 
 The Review side tab (`webui/src/review_queue.rs`, daemon routes in

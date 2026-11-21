@@ -178,7 +178,7 @@ pub fn SettingsPage(
             </section>
             <crate::guardrails::Guardrails base=base token=token status=status dials=dials />
             <crate::update_check::AutoupdateRow base=base token=token status=status dials=dials />
-            <crate::link_patterns::LinkPatternsSettings />
+            <crate::link_patterns::LinkPatternsSettings base=base token=token />
             <section class="card settings-section" id="settings-project">
                 <h2 class="panel-title">"Project"</h2>
                 <crate::project_init::ProjectInit

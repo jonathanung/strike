@@ -4637,6 +4637,8 @@ try {
   // then a valid rule linkifies a seeded ticket key (LPS-1383) in the
   // transcript at display time. Removing the rule and saving restores
   // plain text. Inputs are set the way a keyboard user's typing lands.
+  // Rules are stored on the gateway (#1879): "stored" is the daemon's
+  // GET /v1/settings linkPatterns, and nothing is left in localStorage.
   const lpOpen = async () => {
     await evaluate(`document.querySelector('[data-action="open-settings"]')?.click()`);
     await waitFor(
@@ -4662,9 +4664,14 @@ try {
       note: (document.querySelector("[data-lp-note]") || {}).textContent || "",
       error: [...document.querySelectorAll("[data-lp-error]")].map((e) => e.textContent).join(" | "),
       rules: document.querySelectorAll("[data-link-patterns] [data-lp-rule]").length,
-      stored: localStorage.getItem("strike.linkPatterns"),
+      local: localStorage.getItem("strike.linkPatterns"),
     }))()`);
-    return JSON.parse(raw || "{}");
+    const settingsRes = await fetch(`http://127.0.0.1:${port}/v1/settings`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const settings = settingsRes.ok ? await settingsRes.json() : {};
+    const stored = Array.isArray(settings.linkPatterns) ? JSON.stringify(settings.linkPatterns) : `missing (${settingsRes.status})`;
+    return { ...JSON.parse(raw || "{}"), stored };
   };
   const lpSave = () => evaluate(`document.querySelector("[data-lp-save]").click()`);
   const userLinks = () => evaluate(
@@ -4697,7 +4704,7 @@ try {
     async () => {
       const p = await lpProbe();
       return {
-        ok: p.error.includes("Invalid regular expression") && p.note.includes("Nothing was saved") && !p.stored,
+        ok: p.error.includes("Invalid regular expression") && p.note.includes("Nothing was saved") && p.stored === "[]",
         ...p,
       };
     },
@@ -4710,7 +4717,7 @@ try {
     "javascript: template refused inline in Settings",
     async () => {
       const p = await lpProbe();
-      return { ok: p.error.includes("https://") && p.note.includes("Nothing was saved") && !p.stored, ...p };
+      return { ok: p.error.includes("https://") && p.note.includes("Nothing was saved") && p.stored === "[]", ...p };
     },
     { timeout: STEP_MS, interval: 200 },
   );
@@ -4720,7 +4727,10 @@ try {
     "valid link pattern saved",
     async () => {
       const p = await lpProbe();
-      return { ok: p.note.includes("Saved 1 rule") && (p.stored || "").includes("Smoke tracker"), ...p };
+      return {
+        ok: p.note.includes("Saved 1 rule") && (p.stored || "").includes("Smoke tracker") && p.local === null,
+        ...p,
+      };
     },
     { timeout: STEP_MS, interval: 200 },
   );
