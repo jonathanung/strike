@@ -90,6 +90,9 @@ pub struct RootSummary {
     pub permission_pending: bool,
     #[serde(default, rename = "questionPending")]
     pub question_pending: bool,
+    /// Last approval outcome this turn (allowed | denied | expired), #1387.
+    #[serde(default, rename = "askOutcome")]
+    pub ask_outcome: String,
     /// `None` when the field is absent (older daemon). Present `false` is read.
     #[serde(default)]
     pub unread: Option<bool>,
@@ -152,6 +155,13 @@ pub struct LiveStatus {
     /// empty to the `supervised` default rather than inventing a mode.
     #[serde(default)]
     pub autonomy: String,
+    /// Active workflow and phase the daemon reports on every status
+    /// (#1574; `StatusSnapshot.Workflow` / `.Phase`). Both empty when no
+    /// workflow is active. Later changes arrive as `phase.changed`.
+    #[serde(default)]
+    pub workflow: String,
+    #[serde(default)]
+    pub phase: String,
     #[serde(default)]
     pub busy: bool,
     #[serde(default, rename = "contextUsed")]
@@ -266,6 +276,9 @@ pub struct BootstrapCapabilities {
     /// present, live engine, and not `--read-only`.
     #[serde(default, rename = "projectInit")]
     pub project_init: bool,
+    /// True when `GET /v1/update` can run the release probe (#1583).
+    #[serde(default, rename = "updateCheck")]
+    pub update_check: bool,
     /// True when `/v1/sessions/{id}/loops` can start and stop session
     /// loops (#1588): live engine and not `--read-only`.
     #[serde(default)]
@@ -454,6 +467,8 @@ pub struct SessionRow {
     pub permission_pending: bool,
     /// Live root is waiting on an answer to an agent question (#1451).
     pub question_pending: bool,
+    /// Last approval outcome this turn (allowed | denied | expired), #1387.
+    pub ask_outcome: String,
     /// Unix milliseconds when `status` began.
     pub status_since: i64,
     /// Unix milliseconds of the last user-visible activity. 0 when unknown.
@@ -498,6 +513,46 @@ pub struct TeamMember {
     pub budget: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(default)]
     pub terminal: bool,
+    /// Latest `child.escalated` the daemon recorded for this member (#1375).
+    #[serde(default)]
+    pub escalation: Option<TeamEscalation>,
+}
+
+/// One child budget/stall/loop trip, as the daemon's team snapshot keeps it.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct TeamEscalation {
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub action: String,
+    #[serde(default, rename = "terminalStatus")]
+    #[allow(dead_code)]
+    pub terminal_status: String,
+}
+
+/// One inter-agent message from the daemon's bounded team snapshot
+/// (`TeamSnapshot.messages`, already redacted daemon-side).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct TeamMessage {
+    #[serde(default, rename = "messageId")]
+    pub message_id: String,
+    #[serde(default)]
+    pub from: String,
+    #[serde(default)]
+    pub to: String,
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub urgency: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default, rename = "taskId")]
+    #[allow(dead_code)]
+    pub task_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -510,6 +565,18 @@ pub struct TeamSnapshot {
     pub lead_id: String,
     #[serde(default)]
     pub members: HashMap<String, TeamMember>,
+    /// Recent inter-agent mail, oldest first (#1375). The daemon sends
+    /// `null` for an empty list, which reads as empty here.
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub messages: Vec<TeamMessage>,
+}
+
+fn null_as_empty<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
 }
 
 #[derive(Clone, Debug)]
@@ -539,10 +606,15 @@ pub struct ActivityRow {
     pub agent: String,
     pub task: String,
     pub state: String,
-    pub output: String,
     pub elapsed_s: i64,
     pub started_ms: f64,
     pub expanded: bool,
+    /// Agent-written terminal summary, kept apart for the status card (#1397).
+    pub summary: String,
+    /// Agent-written block reason, kept apart for the status card (#1397).
+    pub block_reason: String,
+    /// Engine budget counters; `None` when the daemon sent no budget.
+    pub budget: Option<status_card::Budget>,
 }
 
 pub fn display_state(m: &TeamMember) -> String {
@@ -566,6 +638,24 @@ fn budget_flag(m: &TeamMember, key: &str) -> bool {
         .and_then(|b| b.get(key))
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
+}
+
+fn budget_i64(b: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<i64> {
+    let v = b.get(key)?;
+    v.as_i64().or_else(|| v.as_f64().filter(|f| f.is_finite()).map(|f| f as i64))
+}
+
+/// Engine counters for the status card (#1397). Keys match the daemon's
+/// `TeamMemberSnapshot.Budget` map (`internal/frontend/server/live.go`).
+/// A missing key stays `None` so the card shows a dash, never `0`.
+pub fn card_budget(m: &TeamMember) -> Option<status_card::Budget> {
+    let b = m.budget.as_ref()?;
+    Some(status_card::Budget {
+        elapsed_s: budget_i64(b, "elapsedS"),
+        tokens: budget_i64(b, "tokensUsed"),
+        tool_calls: budget_i64(b, "toolCalls"),
+        cost_usd: b.get("costUsdUsed").and_then(|v| v.as_f64()),
+    })
 }
 
 pub fn budget_elapsed(m: &TeamMember) -> i64 {
@@ -715,6 +805,7 @@ fn blank_row(id: &str, title: &str, mtime: i64, pinned: bool) -> SessionRow {
         status: String::new(),
         permission_pending: false,
         question_pending: false,
+        ask_outcome: String::new(),
         status_since: 0,
         last_activity_at: 0,
     }
@@ -769,6 +860,7 @@ pub fn merge_sessions(
         }
         entry.permission_pending = r.permission_pending;
         entry.question_pending = r.question_pending;
+        entry.ask_outcome = r.ask_outcome.clone();
         if r.status_since > 0 {
             entry.status_since = r.status_since;
         }
@@ -1267,10 +1359,12 @@ pub fn activity_panel(
             agent: String::new(),
             task: card.map(|line| line.body.clone()).unwrap_or_default(),
             state: card.map(|line| line.badge.clone()).unwrap_or_default(),
-            output: card.map(|line| line.detail.clone()).unwrap_or_default(),
             elapsed_s: 0,
             started_ms: 0.0,
             expanded: false,
+            summary: card.map(|line| line.detail.clone()).unwrap_or_default(),
+            block_reason: String::new(),
+            budget: None,
         });
     }
     rows
@@ -1312,6 +1406,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn card_budget_keeps_missing_counters_unmeasured() {
+        let mk = |v: serde_json::Value| -> TeamMember { serde_json::from_value(v).unwrap() };
+        assert_eq!(card_budget(&mk(serde_json::json!({"sessionId": "a"}))), None);
+        let b = card_budget(&mk(serde_json::json!({
+            "sessionId": "a",
+            "budget": {"elapsedS": 90, "tokensUsed": 1200.0, "costUsdUsed": 0.0}
+        })))
+        .expect("budget sent");
+        assert_eq!(b.elapsed_s, Some(90));
+        assert_eq!(b.tokens, Some(1200));
+        assert_eq!(b.tool_calls, None, "key not sent stays unmeasured");
+        assert_eq!(b.cost_usd, Some(0.0));
+    }
+
+    #[test]
     fn root_reported_idle_needs_a_daemon_status() {
         let mk = |id: &str, busy: bool, status: &str| -> RootSummary {
             serde_json::from_value(serde_json::json!({"id": id, "busy": busy, "status": status}))
@@ -1338,6 +1447,7 @@ mod tests {
             status: String::new(),
             permission_pending: false,
             question_pending: false,
+            ask_outcome: String::new(),
             status_since: 0,
             last_activity_at: 0,
         }
@@ -1355,6 +1465,7 @@ mod tests {
             last_activity_at: 0,
             permission_pending: false,
             question_pending: false,
+            ask_outcome: String::new(),
             unread: None,
         }];
         let sessions = vec![SessionItem {
@@ -1393,6 +1504,7 @@ mod tests {
             last_activity_at: 9_000,
             permission_pending: true,
             question_pending: false,
+            ask_outcome: String::new(),
             unread: Some(true),
         }];
         let mut seen = HashMap::new();
@@ -1562,6 +1674,8 @@ mod tests {
         assert_eq!(rows[0].name, "scribe");
         assert_eq!(rows[0].state, "blocked");
         assert_eq!(rows[0].task, "schema: handoff missing");
+        assert_eq!(rows[0].summary, "handoff json", "transcript detail feeds the card as agent text");
+        assert!(rows[0].budget.is_none(), "saved children carry no engine counters");
 
         let siblings = vec![
             ChildSession {
@@ -1662,6 +1776,28 @@ mod tests {
         assert_eq!(w.fingerprint, "abc");
         let boot: Bootstrap = serde_json::from_str(r#"{}"#).unwrap();
         assert!(boot.load_warnings.is_empty());
+    }
+
+    #[test]
+    fn team_snapshot_reads_messages_and_escalation() {
+        let snap: TeamSnapshot = serde_json::from_str(
+            r#"{"available":true,"leadId":"lead","members":{"c1":{"sessionId":"c1","name":"scout","state":"running","escalation":{"kind":"stall","reason":"no progress","action":"finalizing","terminalStatus":"blocked"}}},"messages":[{"messageId":"m1","from":"c1","to":"lead","body":"stuck on schema","summary":"blocked","urgency":"high","kind":"request"}]}"#,
+        )
+        .unwrap();
+        let esc = snap.members["c1"].escalation.clone().unwrap();
+        assert_eq!((esc.kind.as_str(), esc.action.as_str()), ("stall", "finalizing"));
+        assert_eq!(snap.messages.len(), 1);
+        assert_eq!(snap.messages[0].summary, "blocked");
+        assert_eq!(snap.messages[0].urgency, "high");
+
+        // Go marshals an empty slice as null; older daemons omit it.
+        for raw in [
+            r#"{"available":true,"members":{},"messages":null}"#,
+            r#"{"available":true,"members":{}}"#,
+        ] {
+            let snap: TeamSnapshot = serde_json::from_str(raw).unwrap();
+            assert!(snap.messages.is_empty(), "{raw}");
+        }
     }
 
     #[test]

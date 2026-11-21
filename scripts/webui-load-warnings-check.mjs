@@ -31,6 +31,9 @@ async function waitFor(send, expression, label, tries = 60) {
 // Session-start notice in the chat column, plus the remembered fingerprint.
 export async function loadWarningNoticeCheck({ send }) {
   const file = `${BROKEN_SKILL}.md`;
+  // The notice lives in the chat column; an earlier step may have left
+  // another view (Settings) open across the reload.
+  await evalValue(send, `document.querySelector('[data-view="chat"]')?.click()`);
   await waitFor(
     send,
     `(() => {
