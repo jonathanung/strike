@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -461,5 +462,36 @@ func TestBackupRestoreReportsMissingStores(t *testing.T) {
 	bare.Handler().ServeHTTP(exp, httptest.NewRequest(http.MethodGet, "/v1/backup/export", nil))
 	if exp.Code != http.StatusOK || !strings.Contains(exp.Body.String(), backup.ExcludeUnavailable) {
 		t.Fatalf("bare export = %d %s", exp.Code, exp.Body.String())
+	}
+}
+
+func TestBackupExportSkipsUnreadableSessionAndNamesIt(t *testing.T) {
+	src := newBackupGateway(t, true)
+	seedBackupSource(t, src)
+	// A log from a future schema cannot be packaged; the rest still can.
+	bad := session.LogPath(src.dir, "s-future")
+	if err := os.WriteFile(bad, []byte(`{"type":"session.header","schemaVersion":999}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	body := exportBackup(t, src)
+	a, err := backup.Decode([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkgs []session.Package
+	if _, err := a.Section(backup.SectionSessions, &pkgs); err != nil {
+		t.Fatal(err)
+	}
+	if len(pkgs) != 2 {
+		t.Fatalf("sessions exported = %d, want the 2 readable ones", len(pkgs))
+	}
+	found := false
+	for _, ex := range a.Manifest.Excluded {
+		if strings.HasPrefix(ex.Category, "session s-future:") && ex.Kind == backup.ExcludeUnavailable {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("unreadable session not named in exclusions: %+v", a.Manifest.Excluded)
 	}
 }

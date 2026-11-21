@@ -176,9 +176,12 @@ func (s *Server) buildBackup(now time.Time) (*backup.Archive, error) {
 		a.Exclude("schedules", backup.ExcludeUnavailable, "this gateway runs no schedule clock")
 	}
 
-	pkgs, err := exportBackupSessions(s.opts.SessionDir)
+	pkgs, unreadable, err := exportBackupSessions(s.opts.SessionDir)
 	if err != nil {
 		return nil, fmt.Errorf("backup sessions: %w", err)
+	}
+	for _, msg := range unreadable {
+		a.Exclude(msg, backup.ExcludeUnavailable, "the session log could not be read; it is not in this backup")
 	}
 	if err := a.Add(backup.SectionSessions, len(pkgs), pkgs); err != nil {
 		return nil, err
@@ -265,21 +268,24 @@ func exportBackupSchedules(list []schedule.Schedule) []backupSchedule {
 
 // exportBackupSessions packages every session log on disk, redacted the
 // same way as a single-session export. Children travel with their links.
-func exportBackupSessions(dir string) ([]session.Package, error) {
+// One unreadable log must not make the whole gateway unbackupable: it is
+// returned in unreadable (for the manifest) and the rest are exported.
+func exportBackupSessions(dir string) (pkgs []session.Package, unreadable []string, err error) {
 	infos, err := session.NewManager(dir).List()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sort.Slice(infos, func(i, j int) bool { return infos[i].ID < infos[j].ID })
-	out := make([]session.Package, 0, len(infos))
+	pkgs = make([]session.Package, 0, len(infos))
 	for _, info := range infos {
 		pkg, err := session.ExportPackage(dir, info.ID)
 		if err != nil {
-			return nil, fmt.Errorf("session %s: %w", info.ID, err)
+			unreadable = append(unreadable, "session "+info.ID+": "+secret.Redact(err.Error()))
+			continue
 		}
-		out = append(out, pkg)
+		pkgs = append(pkgs, pkg)
 	}
-	return out, nil
+	return pkgs, unreadable, nil
 }
 
 // restoreBackup plans (apply=false) or performs the restore. Sections run
