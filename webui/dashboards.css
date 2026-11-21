@@ -1,0 +1,82 @@
+/* feature:dashboards begin (#1628) */
+/* Agent-authored dashboards. Blocky tokens: 2px borders, hard edges, no
+   gradients. Measured blocks are plain; agent-written blocks carry a
+   persistent marker and a dashed border so the two never read alike. */
+.dash-shell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 8px;
+  padding: 0 8px 8px;
+  flex: 1;
+  min-height: 0;
+}
+.dash-index, .dash-main {
+  min-height: 0;
+  overflow: auto;
+  background: var(--surface);
+  border: var(--border-width) solid var(--border-muted);
+  border-radius: var(--radius);
+  padding: 12px;
+  color: var(--ink);
+}
+.dash-templates { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.dash-blocks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+.dash-block {
+  padding: 10px;
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  min-width: 0;
+}
+.dash-block[data-kind="sessions_kanban"],
+.dash-block[data-kind="kanban"],
+.dash-block[data-kind="text"],
+.dash-block[data-kind="list"] { grid-column: 1 / -1; }
+.dash-agent { border-style: dashed; border-color: var(--warning); }
+.dash-block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+.dash-block-head h3 { margin: 0; font-size: var(--type-sm); }
+.dash-mark {
+  padding: 0 4px;
+  border: var(--border-width) solid var(--warning);
+  border-radius: var(--radius-sm);
+  color: var(--warning);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.dash-value {
+  margin: 6px 0 0;
+  font-size: var(--type-md);
+  font-variant-numeric: tabular-nums;
+}
+.dash-value[data-measured="false"] { color: var(--muted); }
+.dash-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; }
+.dash-kanban {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 6px;
+  margin-top: 6px;
+}
+.dash-col {
+  padding: 6px;
+  border: var(--border-width) solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  min-width: 0;
+}
+.dash-col h4 { margin: 0 0 4px; font-size: var(--type-sm); }
+.dash-card { overflow-wrap: anywhere; padding: 2px 0; }
+@media (max-width: 480px) {
+  .dash-shell { grid-template-columns: 1fr; padding: 0; }
+  .dash-blocks { grid-template-columns: 1fr; }
+}
+/* feature:dashboards end */

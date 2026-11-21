@@ -42,6 +42,7 @@ mod local_issues;
 mod mermaid;
 mod localfiles;
 mod customize;
+mod dashboards;
 mod delegation_board;
 mod deploy_watch;
 mod gateway;
@@ -5645,6 +5646,9 @@ fn App() -> impl IntoView {
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
+        </Show>
+        <Show when=move || mode.get() == "dashboards" fallback=move || ()>
+            <dashboards::DashboardsPane base=base token=token active_root=active_root />
         </Show>
         <Show when=move || mode.get() == "ideas" fallback=move || ()>
             <ideas::IdeasPage base=base token=token draft=draft active_root=active_root mode=mode />

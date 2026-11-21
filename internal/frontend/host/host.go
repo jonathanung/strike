@@ -1041,6 +1041,16 @@ type SessionReportWriter interface {
 	CreateSessionReport(sessionID, ownerRoot, title, content string) (Artifact, error)
 }
 
+// DashboardWriter starts an agent-authored dashboard page from a template
+// (#1628). The content is a dashboard spec the artifact store validates;
+// measured blocks carry no values. Later edits go through the agent's
+// normal artifact CAS update. Frontends type-assert and degrade.
+type DashboardWriter interface {
+	// CreateDashboard stores content as a new team-access, project-scoped
+	// dashboard artifact owned by ownerSession under ownerRoot.
+	CreateDashboard(ownerSession, ownerRoot, title, content string) (Artifact, error)
+}
+
 // LedgerEntry is one durable decision/assumption/constraint record.
 type LedgerEntry struct {
 	ID                 string
