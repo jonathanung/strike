@@ -597,6 +597,43 @@ impl Transcript {
                 self.absorb();
                 let usage = std::mem::take(&mut self.usage_acc);
                 self.stamp_turn(at_ms, usage);
+                // #1371: an abnormal stop gets its own end-of-turn line,
+                // pushed after the turn is stamped so the elapsed/usage
+                // labels and fork keep-counts stay on the turn's real
+                // last line. Another session's stop on this stream (a
+                // child's) is the child card's job.
+                if !self.foreign_session(&data) {
+                    let stop = field_str(&data, "stopReason");
+                    if let Some(m) = crate::turn_failure::stop_marker(&stop) {
+                        self.push_failure_line(
+                            m.title,
+                            m.body.to_string(),
+                            crate::turn_failure::STOP_BADGE,
+                            format!("{}{}", crate::turn_failure::STOP_KEY_PREFIX, m.reason),
+                            at_ms,
+                            field_str(&data, "turnId"),
+                        );
+                    }
+                }
+            }
+            "tool.loop_detected" => {
+                if self.foreign_session(&data) {
+                    return;
+                }
+                let count = data.get("count").and_then(|c| c.as_i64()).unwrap_or(0);
+                let body = crate::turn_failure::loop_body(
+                    &field_str(&data, "message"),
+                    &field_str(&data, "toolName"),
+                    count,
+                );
+                self.push_failure_line(
+                    crate::turn_failure::LOOP_TITLE,
+                    body,
+                    crate::turn_failure::LOOP_BADGE,
+                    String::new(),
+                    at_ms,
+                    field_str(&data, "turnId"),
+                );
             }
             "tool.begin" => {
                 self.assistant_open = false;
@@ -862,6 +899,48 @@ impl Transcript {
             self.title = title.to_string();
         }
         self.auto_title = title.to_string();
+    }
+
+    /// Whether an event belongs to a different session than the turn in
+    /// progress (a child's stream), by the same rule `TurnUsage::absorb`
+    /// uses: only a known, differing `sessionId` is foreign. A child
+    /// session opened on its own has its own `turn.started` id, so its
+    /// events are not foreign there.
+    fn foreign_session(&self, data: &Value) -> bool {
+        let session = field_str(data, "sessionId");
+        !self.turn_session.is_empty() && !session.is_empty() && session != self.turn_session
+    }
+
+    /// One turn-failure notice line (#1371): end-of-turn marker or
+    /// loop-guard line. Body is plain text; nothing is retried or forked
+    /// from it.
+    fn push_failure_line(
+        &mut self,
+        title: &str,
+        body: String,
+        badge: &str,
+        key: String,
+        at_ms: f64,
+        turn_id: String,
+    ) {
+        self.push(Message {
+            id: 0,
+            role: Role::Notice,
+            title: title.into(),
+            body: body.clone(),
+            badge: badge.into(),
+            detail: String::new(),
+            key,
+            call_id: String::new(),
+            diff: None,
+            chips: Vec::new(),
+            keep_events: -1,
+            retry_text: String::new(),
+            copy_text: body,
+            reconnect: String::new(),
+            at_ms,
+            turn_id,
+        });
     }
 
     fn current_retry(&self) -> String {
@@ -2104,6 +2183,153 @@ pub fn provider_auth_headline(provider: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #1371: one turn ending with `stopReason`, after a short answer.
+    fn turn_ending(stop: Value) -> Transcript {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "go"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"turnId": "t1"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "partial"})));
+        t.apply_envelope(&env("turn.completed", stop));
+        t
+    }
+
+    #[test]
+    fn clean_turn_end_adds_no_failure_line() {
+        for stop in [
+            serde_json::json!({"stopReason": "end_turn"}),
+            serde_json::json!({"stopReason": "interrupted"}),
+            serde_json::json!({}),
+        ] {
+            let t = turn_ending(stop.clone());
+            assert_eq!(t.messages.len(), 2, "{stop}");
+            assert!(t.messages.iter().all(|m| m.role != Role::Notice), "{stop}");
+        }
+    }
+
+    #[test]
+    fn abnormal_stop_reasons_end_with_a_marker() {
+        let cases = [
+            ("error", "Turn failed"),
+            ("loop_detected", "Turn stopped by loop guard"),
+            ("timeout", "Turn timed out"),
+            ("budget_exhausted", "Budget exhausted"),
+        ];
+        for (reason, title) in cases {
+            let t = turn_ending(serde_json::json!({"turnId": "t1", "stopReason": reason}));
+            let last = t.messages.last().unwrap();
+            assert_eq!(last.role, Role::Notice, "{reason}");
+            assert_eq!(last.title, title, "{reason}");
+            assert_eq!(last.badge, crate::turn_failure::STOP_BADGE, "{reason}");
+            assert_eq!(crate::turn_failure::stop_reason_of(&last.key), Some(reason));
+            assert_eq!(last.turn_id, "t1");
+            // Stamped after the turn: fork keep-counts stay on real lines.
+            assert_eq!(last.keep_events, -1, "{reason}");
+            assert!(t.messages[1].keep_events > 0, "{reason}");
+            assert!(!protocol_leak(&visible(&t)), "{reason}");
+        }
+    }
+
+    #[test]
+    fn foreign_session_stop_adds_no_marker() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "go"})));
+        t.apply_envelope(&env(
+            "turn.started",
+            serde_json::json!({"turnId": "t1", "sessionId": "root"}),
+        ));
+        t.apply_envelope(&env(
+            "tool.loop_detected",
+            serde_json::json!({"sessionId": "child", "message": "x"}),
+        ));
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"sessionId": "child", "stopReason": "error"}),
+        ));
+        assert!(t.messages.iter().all(|m| m.role != Role::Notice));
+        // A child session viewed on its own: its events carry the
+        // parent link but match its own turn, so the marker shows.
+        let mut c = Transcript::new();
+        c.apply_envelope(&env("user.message", serde_json::json!({"text": "task"})));
+        c.apply_envelope(&env(
+            "turn.started",
+            serde_json::json!({"sessionId": "child", "parentSessionId": "root"}),
+        ));
+        c.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"sessionId": "child", "parentSessionId": "root", "stopReason": "timeout"}),
+        ));
+        assert_eq!(c.messages.last().unwrap().title, "Turn timed out");
+    }
+
+    #[test]
+    fn engine_failure_then_marker_replays_in_order() {
+        // The engine's real loop-guard sequence (harness/engine failTurn):
+        // tool.loop_detected, engine.error, turn.completed loop_detected.
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "go"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"turnId": "t1"})));
+        t.apply_envelope(&env(
+            "tool.loop_detected",
+            serde_json::json!({
+                "turnId": "t1",
+                "reason": "identical_calls",
+                "toolName": "bash",
+                "count": 3,
+                "message": "repeated identical failing tool calls"
+            }),
+        ));
+        t.apply_envelope(&env(
+            "engine.error",
+            serde_json::json!({"message": "tool loop detected: identical_calls", "code": "blocked"}),
+        ));
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"turnId": "t1", "stopReason": "loop_detected"}),
+        ));
+        let titles: Vec<&str> = t.messages.iter().map(|m| m.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["You", "Loop guard", "Notice", "Turn stopped by loop guard"]
+        );
+        let guard = &t.messages[1];
+        assert_eq!(guard.badge, "blocked");
+        assert_eq!(guard.body, "Repeated identical failing tool calls · bash, 3 times");
+        assert_eq!(crate::turn_failure::stop_reason_of(&guard.key), None);
+    }
+
+    #[test]
+    fn loop_detected_with_sparse_payload_degrades() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("tool.loop_detected", serde_json::json!({})));
+        assert_eq!(t.messages.len(), 1);
+        assert_eq!(t.messages[0].body, "Repeated failing tool calls");
+    }
+
+    #[test]
+    fn failure_marker_does_not_steal_turn_labels() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env_at(
+            "user.message",
+            serde_json::json!({"text": "slow"}),
+            "2026-10-26T06:00:00Z",
+        ));
+        t.apply_envelope(&env_at(
+            "text.delta",
+            serde_json::json!({"text": "partial"}),
+            "2026-10-26T06:01:00Z",
+        ));
+        t.apply_envelope(&env_at(
+            "turn.completed",
+            serde_json::json!({"stopReason": "timeout"}),
+            "2026-10-26T06:04:12Z",
+        ));
+        let answer = t.messages.iter().find(|m| m.role == Role::Strike).unwrap();
+        let marker = t.messages.last().unwrap();
+        assert_eq!(marker.title, "Turn timed out");
+        assert_eq!(t.elapsed_for(answer.id), Some("took 4:12"));
+        assert_eq!(t.elapsed_for(marker.id), None);
+    }
 
     #[test]
     fn reasoning_attaches_around_tools_and_turn_end() {

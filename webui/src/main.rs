@@ -22,6 +22,7 @@ mod draft_size;
 mod drafts;
 mod editor;
 mod load_epoch;
+mod local_issues;
 mod localfiles;
 mod customize;
 mod gateway;
@@ -66,6 +67,7 @@ mod transcript;
 mod transcript_view;
 mod triggers;
 mod turn_elapsed;
+mod turn_failure;
 mod turn_usage;
 mod workspaces;
 use crate::shell::icon;
@@ -1088,6 +1090,8 @@ fn App() -> impl IntoView {
     let diag_capable = RwSignal::new(false);
     // Bootstrap capability `ledger` (#1485): gates the Decisions tab.
     let ledger_capable = RwSignal::new(false);
+    // Bootstrap capability `issues` (#1500): gates the Issues tab.
+    let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
     // Bootstrap capability `loops` (#1588): session /loop jobs.
@@ -1719,6 +1723,8 @@ fn App() -> impl IntoView {
                                 diag_capable.set(boot.capabilities.diag);
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
                                 ledger_capable.set(boot.capabilities.ledger);
+                                crate::local_issues::set_issues_capable(boot.capabilities.issues);
+                                issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
                                 skills.set(boot.skills);
                                 loops_capable.set(boot.capabilities.loops);
@@ -3724,6 +3730,16 @@ fn App() -> impl IntoView {
         }),
     );
     shell::bind(
+        "panel-issues",
+        Rc::new(move |_args: &str| {
+            if !issues_capable.get_untracked() {
+                return Err("Local issues are not available on this gateway.".into());
+            }
+            side_tab.set("issues".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
         "panel-terminal",
         Rc::new(move |_args: &str| {
             side_tab.set("terminal".into());
@@ -5398,13 +5414,18 @@ fn App() -> impl IntoView {
                                         let name = file.name.clone();
                                         let preview = file.preview.clone();
                                         let error = file.error.clone();
-                                        let show_img = !preview.is_empty();
                                         let show_err = !error.is_empty();
+                                        // #1390: audio/video chips get native controls over
+                                        // the same blob URL images use.
+                                        let preview_view = match (preview.is_empty(), chat_mode::preview_kind(&file.mime)) {
+                                            (false, chat_mode::PreviewKind::Image) => view! { <img src=preview.clone() alt="" /> }.into_any(),
+                                            (false, chat_mode::PreviewKind::Audio) => view! { <audio class="attach-media" controls=true preload="metadata" src=preview.clone()></audio> }.into_any(),
+                                            (false, chat_mode::PreviewKind::Video) => view! { <video class="attach-media" controls=true preload="metadata" playsinline=true src=preview.clone()></video> }.into_any(),
+                                            _ => view! { <span></span> }.into_any(),
+                                        };
                                         view! {
                                             <span class="attach-chip">
-                                                <Show when=move || show_img>
-                                                    <img src=preview.clone() alt="" />
-                                                </Show>
+                                                {preview_view}
                                                 <span>
                                                     <span class="name">{name}</span>
                                                     <Show when=move || show_err>
@@ -5441,7 +5462,7 @@ fn App() -> impl IntoView {
                                 }}
                             </Show>
                             <input class="file-pick" type="file" data-chat-file="true" data-chat-attach="true" node_ref=file_input multiple=true
-                                accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,image/svg+xml,text/plain,application/zip,application/gzip"
+                                accept=chat_mode::ACCEPT_TYPES
                                 on:change=move |_| {
                                     if let Some(el) = file_input.get() {
                                         if let Some(files) = el.files() {
@@ -5972,6 +5993,14 @@ fn App() -> impl IntoView {
                             token=token
                             root=active_root
                             memory_mode=memory_mode
+                            status=status
+                            storage_rev=storage_rev
+                        />
+                    </Show>
+                    <Show when=move || side_tab.get() == "issues" && issues_capable.get()>
+                        <local_issues::LocalIssuesPanel
+                            base=base
+                            token=token
                             status=status
                             storage_rev=storage_rev
                         />
