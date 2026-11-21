@@ -15,6 +15,7 @@ func TestHasAutoLoadTag(t *testing.T) {
 		{[]string{"preference"}, true},
 		{[]string{"instruction"}, true},
 		{[]string{"project-convention"}, true},
+		{[]string{"lesson"}, true},
 		{[]string{"note", "preference"}, true},
 	}
 	for _, tt := range cases {
