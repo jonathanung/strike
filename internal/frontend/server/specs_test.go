@@ -157,3 +157,22 @@ func TestSpecLifecycleOverHTTP(t *testing.T) {
 		t.Fatalf("list = %d %v", code, list)
 	}
 }
+
+// TestSpecStoreSharedAcrossRequests pins that every request for one work
+// dir gets the same Store, so its lock serialises CAS and hand-off.
+func TestSpecStoreSharedAcrossRequests(t *testing.T) {
+	srv, _, _ := specServer(t)
+	a, rootA := srv.specStore()
+	b, rootB := srv.specStore()
+	if a == nil || b == nil {
+		t.Fatal("specStore returned nil")
+	}
+	if a != b || rootA != rootB {
+		t.Fatalf("specStore returned distinct stores %p %p for %q / %q", a, b, rootA, rootB)
+	}
+	other, _, _ := specServer(t)
+	c, _ := other.specStore()
+	if c == a {
+		t.Fatal("different work dirs must not share a store")
+	}
+}

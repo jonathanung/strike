@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/persist/spec"
@@ -22,17 +23,27 @@ type specView struct {
 	Path     string              `json:"path"`
 }
 
+// specStores holds one Store per spec root for the process lifetime. The
+// Store's mutex is what makes CAS checks and hand-off atomic, so every
+// request for the same root must share one instance; a Store per request
+// would let two concurrent hand-offs both create a plan.
+var specStores sync.Map // root string -> *spec.Store
+
 func (s *Server) specStore() (*spec.Store, string) {
 	dir := strings.TrimSpace(s.opts.WorkDir)
 	if dir == "" {
 		return nil, ""
 	}
 	root := filepath.Join(dir, ".strike", "specs")
+	if st, ok := specStores.Load(root); ok {
+		return st.(*spec.Store), root
+	}
 	st, err := spec.Open(root)
 	if err != nil {
 		return nil, ""
 	}
-	return st, root
+	actual, _ := specStores.LoadOrStore(root, st)
+	return actual.(*spec.Store), root
 }
 
 func (s *Server) writeSpec(w http.ResponseWriter, status int, sp spec.Spec, root string) {
