@@ -121,6 +121,7 @@ mod turn_verify;
 mod workspace_image;
 mod workspace_trust;
 mod workspaces;
+mod spec_authoring;
 mod workflows;
 mod workflow_run;
 use crate::shell::icon;
@@ -5661,6 +5662,9 @@ fn App() -> impl IntoView {
                 active_root=active_root
                 status=status
             />
+        </Show>
+        <Show when=move || mode.get() == "specs" fallback=move || ()>
+            <spec_authoring::SpecAuthoringPage base=base token=token status=status active_root=active_root mode=mode />
         </Show>
         <Show when=move || mode.get() == "workflows" fallback=move || ()>
             <workflows::WorkflowsPage base=base token=token status=status />
