@@ -498,6 +498,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Team:                       e.team, // share lead roster; nested enrolls on same team
 		Select:                     e.opts.Select,
 		Registry:                   childReg,
+		ToolVisible:                e.opts.ToolVisible,
 		WorkDir:                    childWorkDir,
 		WorkspaceRoots:             append([]string(nil), e.opts.WorkspaceRoots...),
 		ProjectRoot:                e.opts.ProjectRoot,
