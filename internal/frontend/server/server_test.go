@@ -428,8 +428,11 @@ func TestEmbeddedAssetAndSecurityHeaders(t *testing.T) {
 	}
 	index := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/", nil))
-	if got := index.Header().Get("Content-Security-Policy"); !strings.Contains(got, "default-src 'self'") {
-		t.Fatalf("Content-Security-Policy = %q", got)
+	csp := index.Header().Get("Content-Security-Policy")
+	for _, want := range []string{"default-src 'self'", "media-src 'self' blob:"} {
+		if !strings.Contains(csp, want) {
+			t.Fatalf("Content-Security-Policy = %q, want %q", csp, want)
+		}
 	}
 	body := index.Body.String()
 	start := strings.Index(body, "/assets/")
