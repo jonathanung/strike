@@ -15,6 +15,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
+import { seedRepeatedWorkflow, skillProposalsCheck } from "./webui-skill-proposals-check.mjs";
 import {
   BROKEN_SKILL,
   BROKEN_SKILL_BODY,
@@ -2661,6 +2662,109 @@ try {
       };
     },
     { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // LSP diagnostics (#1404). First the real daemon: the pane must show
+  // the daemon's own empty/unavailable text verbatim. Then a stubbed
+  // /v1/diagnostics payload (CDP Fetch interception): entries grouped by
+  // file, the editor badge counting errors only, and click-to-line
+  // landing in the document viewer.
+  const daemonDiagTexts = [
+    "no language servers configured (add lsp.servers in config)",
+    "no live language servers (see servers status; try retry)",
+    "no diagnostics",
+    "lsp capability unavailable on this host",
+  ];
+  await runPalette("Code diagnostics");
+  await waitFor(
+    "diagnostics pane shows the daemon's own note",
+    async () => {
+      const v = await evaluate(`(() => {
+        const pane = document.querySelector("[data-diagnostics-pane]");
+        const note = document.querySelector("[data-diag-note]");
+        const err = document.querySelector("[data-diag-error] span");
+        return {
+          pane: !!pane,
+          text: ((note && note.textContent) || (err && err.textContent) || "").trim(),
+        };
+      })()`);
+      return { ok: v.pane && daemonDiagTexts.includes(v.text), ...v };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const diagStub = JSON.stringify({
+    diagnostics: [
+      { path: "cmd/strike/main.go", line: 10, character: 1, severity: "error", source: "smoke", code: "E1", message: "smoke diag error ten" },
+      { path: "cmd/strike/main.go", line: 12, character: 3, severity: "warning", source: "smoke", message: "smoke diag warning twelve" },
+      { path: "go.mod", line: 1, character: 1, severity: "error", source: "smoke", message: "smoke diag go mod" },
+    ],
+    count: 3,
+  });
+  const onDiagPaused = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.method !== "Fetch.requestPaused") return;
+    send("Fetch.fulfillRequest", {
+      requestId: msg.params.requestId,
+      responseCode: 200,
+      responseHeaders: [{ name: "Content-Type", value: "application/json" }],
+      body: Buffer.from(diagStub).toString("base64"),
+    });
+  };
+  ws.addEventListener("message", onDiagPaused);
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*/v1/diagnostics*", requestStage: "Request" }] });
+  try {
+    await waitFor(
+      "stubbed diagnostics grouped by file",
+      async () => {
+        const v = await evaluate(`(() => {
+          const files = [...document.querySelectorAll("[data-diag-file]")].map((el) => el.getAttribute("data-diag-file"));
+          const entries = [...document.querySelectorAll(".diag-entry")].map((b) => b.getAttribute("data-diag-path") + ":" + b.getAttribute("data-diag-line"));
+          if (files.length === 0) document.querySelector("[data-diag-refresh]")?.click();
+          return { files, entries };
+        })()`);
+        return {
+          ok: v.files.join(",") === "cmd/strike/main.go,go.mod" && v.entries.join(",") === "cmd/strike/main.go:10,cmd/strike/main.go:12,go.mod:1",
+          ...v,
+        };
+      },
+      { timeout: WAIT_MS, interval: 500 },
+    );
+    const diagClicked = await evaluate(`(() => {
+      const b = document.querySelector('.diag-entry[data-diag-path="cmd/strike/main.go"][data-diag-line="10"]');
+      if (!b) return "missing";
+      b.click();
+      return "clicked";
+    })()`);
+    if (diagClicked !== "clicked") {
+      throw new Error(`diagnostics entry ${diagClicked}`);
+    }
+    await waitFor(
+      "diagnostic click opens the file at its line, badge counts errors only",
+      async () => {
+        const v = await evaluate(`(() => {
+          const doc = document.querySelector('[data-ev-root="open"]');
+          const badge = document.querySelector("[data-diag-badge]");
+          return {
+            path: doc ? doc.getAttribute("data-ev-path") || "" : "",
+            lines: doc ? doc.querySelectorAll(".ev-line").length : 0,
+            badge: badge ? (badge.textContent || "").trim() : "",
+          };
+        })()`);
+        return { ok: v.path.endsWith("cmd/strike/main.go") && v.lines >= 10 && v.badge === "1 error", ...v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  } finally {
+    await send("Fetch.disable", {});
+    ws.removeEventListener("message", onDiagPaused);
+  }
+  // Close the document again: the viewer takes the transcript's place,
+  // and later steps read transcript rows.
+  await evaluate(`document.querySelector("[data-ev-back]")?.click()`);
+  await waitFor(
+    "diagnostics check closes the document viewer",
+    async () => ({ ok: (await evaluate(`!document.querySelector('[data-ev-root="open"]')`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
   );
 
   await runPalette("Memory");
@@ -7222,6 +7326,9 @@ try {
     const docHead = docEv.result?.result?.value || JSON.stringify(docEv).slice(0, 600);
     throw new Error(`mcp form did not mask env err=${extra} doc=${docHead} values=${values.slice(0, 300)} body=${mcpText.slice(0, 300)}`);
   }
+
+  await seedRepeatedWorkflow({ home, port, token });
+  await skillProposalsCheck({ send, repoDir: process.cwd() });
 
   console.log("webui-smoke ok");
 } catch (err) {
