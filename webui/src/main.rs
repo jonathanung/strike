@@ -16,6 +16,7 @@ mod apps;
 mod approval_outcome;
 mod approvals;
 mod approvals_ui;
+mod away_briefing_view;
 mod chat_mode;
 mod child_signals;
 mod clipboard;
@@ -161,6 +162,7 @@ use crate::approvals_ui::{
     apply_perm_notes, commit_autonomy, commit_session_mode, ApprovalCards, ApprovalHost,
     ApprovalMenu, AutonomyMenu,
 };
+use crate::away_briefing_view::AwayBriefing;
 use crate::status_card_view::{ChildStatusCard, SessionStatusCard};
 use crate::transcript::Transcript;
 use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
@@ -5781,6 +5783,7 @@ fn App() -> impl IntoView {
                     // to the conversation. Visually hidden; the status tabs
                     // and chat-mode bar already show the session name.
                     <h1 id="chat-heading" class="sr-only">{move || chat_title.get()}</h1>
+                    <AwayBriefing base=base token=token roots=roots on_focus=on_notify />
                     // #1781: persistent untrusted-workspace badge + trust card.
                     <workspace_trust::WorkspaceTrust
                         base=base

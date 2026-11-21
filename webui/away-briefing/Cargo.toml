@@ -1,0 +1,8 @@
+[package]
+name = "away-briefing"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "While-you-were-away roll-up computed from daemon records against a watermark (#1488)."
+
+[dependencies]
