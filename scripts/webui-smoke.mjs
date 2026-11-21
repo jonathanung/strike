@@ -3499,7 +3499,7 @@ try {
   try {
     await writeFile(join(sifDir, "alpha.txt"), `one\ntwo\nfind ${sifNeedle.toUpperCase()} here\n`);
     await writeFile(
-      join(sifDir, "beta.md"),
+      join(sifDir, "beta.txt"),
       `${sifNeedle} top\nb2\nb3\nb4\nb5\nb6\nagain ${sifNeedle} below\n`,
     );
     await writeFile(
@@ -3555,8 +3555,8 @@ try {
     await sifWait("search-in-files: matches grouped by file", sifNeedle, (v) =>
       v.files.length === 2 &&
       v.files.includes(rel("alpha.txt")) &&
-      v.files.includes(rel("beta.md")) &&
-      v.hits.join(",") === [rel("alpha.txt") + ":3", rel("beta.md") + ":1", rel("beta.md") + ":7"].join(",") &&
+      v.files.includes(rel("beta.txt")) &&
+      v.hits.join(",") === [rel("alpha.txt") + ":3", rel("beta.txt") + ":1", rel("beta.txt") + ":7"].join(",") &&
       v.marks === 3 &&
       v.capped === "false",
     );
@@ -3568,7 +3568,7 @@ try {
     );
     await sifWait("search-in-files: results again for click-to-line", sifNeedle, (v) => v.hits.length === 3);
     const sifClicked = await evaluate(`(() => {
-      const b = document.querySelector('.sif-hit[data-sif-path=${JSON.stringify(rel("beta.md"))}][data-sif-line="7"]');
+      const b = document.querySelector('.sif-hit[data-sif-path=${JSON.stringify(rel("beta.txt"))}][data-sif-line="7"]');
       if (!b) return "missing";
       b.click();
       return "clicked";
@@ -3587,7 +3587,7 @@ try {
             text: doc ? (doc.textContent || "").includes(${JSON.stringify(`again ${sifNeedle} below`)}) : false,
           };
         })()`);
-        return { ok: v.path.endsWith("beta.md") && v.lines >= 7 && v.text, ...v };
+        return { ok: v.path.endsWith("beta.txt") && v.lines >= 7 && v.text, ...v };
       },
       { timeout: WAIT_MS, interval: 250 },
     );

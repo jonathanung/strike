@@ -184,8 +184,9 @@ pub fn SearchInFiles(
                     let line = summary(&q, &resp);
                     let capped = resp.capped;
                     let groups = group_by_file(&resp.matches);
+                    let summary_class = if capped { "hint sif-summary sif-capped" } else { "hint sif-summary" };
                     view! {
-                        <p class=if capped { "hint sif-summary sif-capped" } else { "hint sif-summary" } role="status" data-sif-capped=capped.to_string()>{line}</p>
+                        <p class=summary_class role="status" data-sif-capped=capped.to_string()>{line}</p>
                         <div class="sif-results">
                             {groups.into_iter().map(|(path, items)| {
                                 let count = items.len();
