@@ -39,6 +39,7 @@ mod files_invalidated;
 mod lessons;
 mod elicitation;
 mod elicitation_ui;
+mod link_patterns;
 mod load_epoch;
 mod load_warnings;
 mod markdown_review;

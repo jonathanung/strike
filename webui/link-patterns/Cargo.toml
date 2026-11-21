@@ -1,0 +1,9 @@
+[package]
+name = "link-patterns"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "User Text Link Patterns for the cockpit: validate regex + URL-template rules and linkify plain text at display time."
+
+[dependencies]
+regex = "1"

@@ -23,6 +23,7 @@ composer-drafts = { path = "composer-drafts" }
 debug-mode = { path = "debug-mode" }
 prompt-library = { path = "prompt-library" }
 signin-flow = { path = "signin-flow" }
+link-patterns = { path = "link-patterns" }
 transcript-window = { path = "transcript-window" }
 message-pins = { path = "message-pins" }
 quote-message = { path = "quote-message" }

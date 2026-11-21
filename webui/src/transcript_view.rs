@@ -1704,8 +1704,12 @@ fn inlines_view(inlines: Vec<Inline>, open_file: Callback<(String, u32)>) -> imp
     inlines
         .into_iter()
         .map(|inline| match inline {
-            Inline::Text(text) => view! { <span>{text}</span> }.into_any(),
-            Inline::Code(text) => view! { <code class="sx-inline">{text}</code> }.into_any(),
+            // User Text Link Patterns (#1383) apply to plain text and to
+            // whole-match code spans only; links and chips render as before.
+            Inline::Text(text) => {
+                view! { <span>{crate::link_patterns::linked_text(text)}</span> }.into_any()
+            }
+            Inline::Code(text) => crate::link_patterns::linked_code(text, Some("sx-inline")).into_any(),
             Inline::Strong(inner) => {
                 view! { <strong>{inlines_view(inner, open_file)}</strong> }.into_any()
             }
