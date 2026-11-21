@@ -108,6 +108,7 @@ mod usage_audit;
 mod regenerate_title;
 mod rewind;
 mod session_delete;
+mod session_ref_chip;
 mod session_restore;
 mod share;
 mod shell;
@@ -152,8 +153,9 @@ use std::rc::Rc;
 
 use leptos::callback::Callback;
 use composer_triggers::{
-    file_suggestions, move_index, shell_hint, skill_suggestions,
-    slash_suggestions, splice_draft, trigger_at, trigger_status, Kind, Suggestion,
+    file_suggestions, first_selectable, move_index, session_catalog, session_suggestions,
+    shell_hint, skill_suggestions, slash_suggestions, splice_draft, trigger_at,
+    trigger_status, Kind, Suggestion,
 };
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -716,6 +718,23 @@ fn sync_composer_trigger(text: String, utf16: u32, ui: &TriggerSignals) {
             ui.ac_index.set(0);
             ui.ac_items.set(items);
         }
+        Kind::Session => {
+            let (rows, self_id) = session_catalog();
+            let mut items = session_suggestions(&rows, &self_id, &trig.query);
+            if items.is_empty() {
+                items.push(Suggestion {
+                    id: "no-sessions".into(),
+                    label: "No sessions match".into(),
+                    detail: "An unknown id attaches nothing; the daemon says so on send.".into(),
+                    insert: String::new(),
+                    selectable: false,
+                    replace_all: false,
+                });
+            }
+            ui.ac_index.set(first_selectable(&items));
+            ui.ac_items.set(items);
+            ui.ac_open.set(true);
+        }
         Kind::File => {
             let q = trig.query.clone();
             let (b, t) = (ui.base.get_untracked(), ui.token.get_untracked());
@@ -739,9 +758,13 @@ fn sync_composer_trigger(text: String, utf16: u32, ui: &TriggerSignals) {
                 if search_gen.get_untracked() != gen {
                     return;
                 }
+                // #1550: the @ menu also lists recent sessions by title.
+                let (rows, self_id) = session_catalog();
+                let mut items = items;
+                items.extend(session_suggestions(&rows, &self_id, &q));
                 let open = !items.is_empty();
+                ac_index.set(first_selectable(&items));
                 ac_items.set(items);
-                ac_index.set(0);
                 ac_open.set(open);
             });
         }
@@ -3299,6 +3322,9 @@ fn App() -> impl IntoView {
         });
     };
 
+    // #1550: a session chip opens the session it references.
+    let on_open_session_ref = Callback::new(move |id: String| resume_session(id));
+
     let stop_child = move |id: String| {
         let (b, t, root) = (
             base.get_untracked(),
@@ -3974,6 +4000,19 @@ fn App() -> impl IntoView {
             .map(|skill| (skill.name, skill.description))
             .collect();
         composer_triggers::set_palette_skills(rows);
+    });
+    // #1550: recent sessions for the @ menu's Sessions section.
+    Effect::new(move |_| {
+        let mut rows = sessions.get();
+        rows.sort_by_key(|s| std::cmp::Reverse(s.last_activity_at.max(s.mtime)));
+        let mut rows: Vec<(String, String)> = rows.into_iter().map(|s| (s.id, s.title)).collect();
+        let own = active_root.get();
+        // A fresh session may not be in the list yet; still show it so
+        // the self row is honest instead of missing.
+        if !own.is_empty() && !rows.iter().any(|(id, _)| *id == own) {
+            rows.insert(0, (own.clone(), String::new()));
+        }
+        composer_triggers::set_session_catalog(rows, own);
     });
     let on_default_model = Callback::new(move |(provider, id): (String, String)| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
@@ -6224,8 +6263,8 @@ fn App() -> impl IntoView {
                         <Show when=move || plus_open.get()>
                             <div class="menu composer-plus" data-composer-triggers="plus">
                                 <button type="button" class="palette-row" on:click=move |_| mention_composer_file(&ui)>
-                                    <span class="name">"Mention a file"</span>
-                                    <span class="path">"Insert @ and search the working tree"</span>
+                                    <span class="name">"Mention a file or session"</span>
+                                    <span class="path">"Insert @ and search the working tree and recent sessions"</span>
                                 </button>
                                 <button type="button" class="palette-row" on:click=move |_| prefix_composer_shell(&ui)>
                                     <span class="name">"Run a shell command"</span>
@@ -6287,12 +6326,17 @@ fn App() -> impl IntoView {
                                         let selectable = item.selectable;
                                         let selected = i == selected_at;
                                         let klass = if selected && selectable { "palette-row on" } else { "palette-row" };
+                                        if item.id.starts_with("section-") {
+                                            return view! {
+                                                <p class="hint palette-section" role="presentation" data-composer-section=item.id.clone()>{label}</p>
+                                            }.into_any();
+                                        }
                                         view! {
-                                            <button type="button" role="option" class=klass disabled=move || !selectable aria-selected=selected.to_string() on:click=move |_| accept_suggestion(picked.clone(), &ui)>
+                                            <button type="button" role="option" class=klass data-suggest-id=item.id.clone() disabled=move || !selectable aria-selected=selected.to_string() on:click=move |_| accept_suggestion(picked.clone(), &ui)>
                                                 <span class="name">{label}</span>
                                                 <span class="path">{detail}</span>
                                             </button>
-                                        }
+                                        }.into_any()
                                     }).collect_view()
                                 }}
                             </div>
@@ -6503,6 +6547,7 @@ fn App() -> impl IntoView {
                                 }
                             />
                             {move || prompt_sharpen::bar_view(sharpen)}
+                            <session_ref_chip::SessionRefChips draft=draft base=base token=token root=active_root on_open=on_open_session_ref />
                             <textarea
                                 id="composer-input"
                                 aria-label="Message this session"
