@@ -2503,6 +2503,8 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitUntil(
     `(() => {
+      // Right after Page.navigate the body may not exist yet: not ready, poll again.
+      if (!document.body) return "loading";
       const t = document.body.innerText;
       const sent = [...document.querySelectorAll("[data-sent-attachments]")].some((el) => el.innerText.includes("annotate-shot-annotated.png"));
       if (sent && t.includes("annotate smoke 1545") && t.includes("Annotations on annotate-shot.png") && t.includes('[pin x=50%, y=50%] "move this button"')) return true;
@@ -3986,6 +3988,7 @@ try {
     throw new Error(`PR watch: fix-draft on an untracked PR should be 409, got ${prDraft.status}`);
   }
   await clickSideTab("Git", "Staged");
+<<<<<<< HEAD
   await waitFor(
     "PR watch chip shows tracking unavailable (data-pr-watch)",
     async () => {
@@ -4019,6 +4022,55 @@ try {
     delete meta.prState;
     delete meta.prUpdatedAt;
     await writeFile(prMetaPath, JSON.stringify(meta) + "\n");
+=======
+  // Pre-push review (#1487): the preview route sizes the diff and names the
+  // read-only reviewer profile, a start without confirm never spawns (400),
+  // and the Git tab's "Review this branch" panel renders the same state
+  // with its cost notice. No reviewer is spawned here.
+  {
+    const revHeaders = { Authorization: `Bearer ${token}` };
+    const revRes = await fetch(`http://127.0.0.1:${port}/v1/git/review`, { headers: revHeaders });
+    if (!revRes.ok) {
+      throw new Error(`branch review preview: HTTP ${revRes.status} ${await revRes.text()}`);
+    }
+    const rev = await revRes.json();
+    if (!["ok", "empty", "refuse"].includes(rev.state) || rev.agent !== "branch-reviewer" || rev.turns !== 1) {
+      throw new Error(`branch review preview shape: ${JSON.stringify(rev).slice(0, 300)}`);
+    }
+    const revStart = await fetch(`http://127.0.0.1:${port}/v1/git/review`, {
+      method: "POST",
+      headers: { ...revHeaders, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (revStart.status !== 400) {
+      throw new Error(`branch review start without confirm: HTTP ${revStart.status} ${await revStart.text()}`);
+    }
+    await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+    await waitFor(
+      `branch review notice renders state ${rev.state}`,
+      async () => {
+        const raw = await evaluate(`JSON.stringify((() => {
+          const n = document.querySelector("[data-review-notice]");
+          if (!n) return null;
+          const run = n.querySelector("[data-review-run]");
+          return {
+            state: n.getAttribute("data-review-state"),
+            size: (n.querySelector("[data-review-size]") || {}).textContent || "",
+            runDisabled: run ? run.disabled : null,
+          };
+        })())`);
+        const got = JSON.parse(raw || "null");
+        const ok =
+          !!got &&
+          got.state === rev.state &&
+          got.size.startsWith("Diff:") &&
+          got.runDisabled === (rev.state !== "ok");
+        return { ok, got };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+>>>>>>> origin/main
   }
   // Ship to PR (#1340): the preview route answers with an honest state
   // (CI checks out a detached merge commit, so "blocked" with a detached
@@ -6275,6 +6327,75 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+
+  // Prompt sharpen (#1385): Alt+P sends the draft to the daemon's
+  // one-shot rewrite (echo stands in for the model), shows the
+  // original-vs-sharpened preview, and changes nothing until Accept.
+  // Undo restores the original; Esc on the preview rejects untouched.
+  const sharpenDraft = "fix the flaky thing";
+  const composerText = async () =>
+    evaluate(`(() => { const el = document.querySelector("#composer-input"); return el ? el.value : null; })()`);
+  await setDraft(sharpenDraft);
+  await press("p", { altKey: true });
+  await waitFor(
+    "sharpen preview with original and rewrite",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const diff = document.querySelector("[data-sharpen-diff]");
+        return JSON.stringify({
+          accept: !!document.querySelector("[data-sharpen-accept]"),
+          diff: diff ? diff.innerText : "",
+          state: document.querySelector("[data-feature=prompt-sharpen]")?.getAttribute("data-sharpen-state") || "",
+        });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: p.accept && p.diff.includes(sharpenDraft) && p.diff.includes("You said:"), ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if ((await composerText()) !== sharpenDraft) {
+    throw new Error(`sharpen changed the draft before Accept: ${JSON.stringify(await composerText())}`);
+  }
+  await evaluate(`document.querySelector("[data-sharpen-accept]")?.click()`);
+  await waitFor(
+    "accepted rewrite replaces the draft, Undo offered",
+    async () => {
+      const value = (await composerText()) || "";
+      const undo = await evaluate(`!!document.querySelector("[data-sharpen-undo]")`);
+      return { ok: value.startsWith("You said:") && value.includes(sharpenDraft) && undo, value, undo };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector("[data-sharpen-undo]")?.click()`);
+  await waitFor(
+    "undo restores the original draft",
+    async () => {
+      const value = await composerText();
+      return { ok: value === sharpenDraft, value };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await press("p", { altKey: true });
+  await waitFor(
+    "second sharpen preview",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-sharpen-accept]")`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`(() => {
+    const el = document.querySelector("[data-sharpen-accept]");
+    el?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+    return true;
+  })()`);
+  await waitFor(
+    "Esc rejects and leaves the draft byte-identical",
+    async () => {
+      const value = await composerText();
+      const open = await evaluate(`!!document.querySelector("[data-feature=prompt-sharpen]")`);
+      return { ok: !open && value === sharpenDraft, value, open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await setDraft("");
 
   // Session dials (#1572 autonomy, #1569 Fast): both start at the
   // daemon-reported default, flip only after the daemon confirms the
