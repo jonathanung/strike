@@ -1,8 +1,8 @@
 //! Instance backup and restore (#1339). feature:instance-backup
 //!
 //! Settings controls over the daemon's `GET /v1/backup/export` (one
-//! portable `strike-backup.json`: sessions, memory, schedules, non-secret
-//! settings) and `POST /v1/backup/restore` (`?dryRun=1` first, so the user
+//! portable `strike-backup.json`: sessions, memory, knowledge pins,
+//! schedules, non-secret settings) and `POST /v1/backup/restore` (`?dryRun=1` first, so the user
 //! sees what will be created, skipped, or restored as a copy before
 //! anything is written). The cockpit never parses or rebuilds the archive:
 //! the downloaded bytes and the uploaded bytes are exactly the daemon's.
@@ -20,11 +20,11 @@ pub const BACKUP_EXPORT_PATH: &str = "/v1/backup/export";
 pub const BACKUP_RESTORE_PATH: &str = "/v1/backup/restore";
 /// Matches the daemon's Content-Disposition name (backup.Filename).
 pub const BACKUP_FILENAME: &str = "strike-backup.json";
-pub const BACKUP_EXPORT_HINT: &str = "One plain, unencrypted JSON file of this gateway's sessions, memory, schedules and non-secret settings. Provider keys, gateway tokens and secret values are never included; the file lists every left-out category by name.";
+pub const BACKUP_EXPORT_HINT: &str = "One plain, unencrypted JSON file of this gateway's sessions, memory, knowledge pins, schedules and non-secret settings. Provider keys, gateway tokens and secret values are never included; the file lists every left-out category by name.";
 pub const BACKUP_RESTORE_HINT: &str = "Restore checks the file's integrity hashes, then shows what it will create, skip, or restore as a copy. Nothing on this gateway is overwritten.";
 
 /// Section order the daemon restores in (backup.KnownSections).
-const SECTIONS: [&str; 4] = ["settings", "memory", "schedules", "sessions"];
+const SECTIONS: [&str; 5] = ["settings", "memory", "knowledge", "schedules", "sessions"];
 /// Rows shown per report; the counts above always cover everything.
 const MAX_ROWS: usize = 200;
 
@@ -311,7 +311,7 @@ mod tests {
     use super::*;
 
     const REPORT: &str = r#"{"dryRun":true,"archiveCreatedAt":"2026-11-20T12:00:00Z",
-        "counts":{"memory":{"create":2,"skip":1},"sessions":{"copy":1},"schedules":{"fail":1}},
+        "counts":{"memory":{"create":2,"skip":1},"sessions":{"copy":1},"schedules":{"fail":1},"knowledge":{"create":1}},
         "items":[{"section":"memory","id":"project:prefs","label":"prefs","action":"create"},
                  {"section":"sessions","id":"s1","label":"Fix","action":"copy","target":"s9","detail":"differs"}],
         "excluded":[{"category":"provider credentials","kind":"secret","reason":"never exported"}]}"#;
@@ -332,6 +332,7 @@ mod tests {
             summary_lines(&r),
             vec![
                 "memory: 2 create, 1 skip".to_string(),
+                "knowledge: 1 create".to_string(),
                 "schedules: 1 fail".to_string(),
                 "sessions: 1 copy".to_string(),
             ]

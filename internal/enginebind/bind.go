@@ -21,13 +21,37 @@ func Memory(s *memory.Store) engine.MemorySource {
 	if s == nil {
 		return nil
 	}
-	return memoryBind{s}
+	return memoryBind{Store: s}
 }
 
-type memoryBind struct{ *memory.Store }
+// MemoryForSession is Memory that also records which entries were
+// auto-loaded into sessionID (#1376 "lesson used" provenance). Recording is
+// best-effort: a failed write never blocks the prompt.
+func MemoryForSession(s *memory.Store, sessionID string) engine.MemorySource {
+	if s == nil {
+		return nil
+	}
+	return memoryBind{Store: s, sessionID: sessionID}
+}
+
+type memoryBind struct {
+	*memory.Store
+	sessionID string
+}
 
 func (m memoryBind) AutoLoad() (string, int, error) {
-	return memory.AutoLoadLayer(m.Store)
+	if m.sessionID == "" {
+		return memory.AutoLoadLayer(m.Store)
+	}
+	selected, omitted, err := memory.AutoLoadSelection(m.Store)
+	if err != nil {
+		return "", 0, err
+	}
+	text := memory.FormatAutoLoadLayer(selected, omitted)
+	if text != "" {
+		_ = m.Store.RecordInjected(m.sessionID, selected)
+	}
+	return text, omitted, nil
 }
 
 // Ledger adapts *ledger.Store to engine.LedgerSource.

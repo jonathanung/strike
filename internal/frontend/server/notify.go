@@ -73,6 +73,10 @@ type NotifyPrefs struct {
 	Enabled bool       `json:"enabled"`
 	Quiet   QuietHours `json:"quiet"`
 	Muted   []string   `json:"mutedSessions"`
+	// PushFinished adds finished/failed runs (session.finished,
+	// child.finished) to the Web Push kinds (#1917). Default off: only
+	// needs-you kinds push unless the user opts in.
+	PushFinished bool `json:"pushFinished"`
 }
 
 type notificationsResponse struct {
@@ -568,7 +572,7 @@ func writeAtomic0600(path string, data []byte) error {
 }
 
 func normalizePrefs(in NotifyPrefs) (NotifyPrefs, error) {
-	out := NotifyPrefs{Enabled: in.Enabled, Quiet: in.Quiet, Muted: []string{}}
+	out := NotifyPrefs{Enabled: in.Enabled, Quiet: in.Quiet, Muted: []string{}, PushFinished: in.PushFinished}
 	if strings.TrimSpace(out.Quiet.Start) == "" {
 		out.Quiet.Start = "22:00"
 	}
@@ -683,6 +687,23 @@ func projectLine(logSession, fileParent string, line []byte, now time.Time) (Not
 			Title:     "Approval needed",
 			Body:      safePerm(data.Permission) + " is waiting",
 			Href:      noteHref(focus, req),
+			RequestID: req,
+			At:        at.UTC(),
+		}, true
+	case "question.asked":
+		// An agent question blocks the run like an approval does (#1338).
+		// Only the fact is copied: question text and options may quote
+		// user data, so they never reach the centre or the banner.
+		req, _ := safeID(data.RequestID)
+		subject := firstSafe(data.SessionID, focus)
+		return Notification{
+			ID:        noteID(noteApproval, subject, req),
+			Kind:      noteApproval,
+			SessionID: focus,
+			SubjectID: subject,
+			Title:     "Question from the agent",
+			Body:      "The agent is waiting on your answer",
+			Href:      noteHref(focus, ""),
 			RequestID: req,
 			At:        at.UTC(),
 		}, true
@@ -837,6 +858,10 @@ func ScriptRunNote(scheduleID, runID, name string, exitCode *int, failed bool, a
 func (s *Server) NotifyScriptRun(scheduleID, runID, name string, exitCode *int, failed bool) {
 	if s == nil {
 		return
+	}
+	if failed {
+		// The scheduler producer (#1926): one Ideas row per failing schedule.
+		s.SuggestScriptRunFailure(scheduleID, runID, name, exitCode)
 	}
 	log := s.notifications()
 	note, ok := ScriptRunNote(scheduleID, runID, name, exitCode, failed, log.clock())

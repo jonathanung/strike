@@ -123,12 +123,19 @@ type Options struct {
 	// silent (the user selects interactively later).
 	InitialProvider string
 	InitialModel    string
+	// InitialFallbackProvider / InitialFallbackModel restore the session
+	// fallback model (#1350) at startup; empty means none.
+	InitialFallbackProvider string
+	InitialFallbackModel    string
 	// InitialEffort is the reasoning dial at startup; the zero value leaves
 	// each provider's own default in place.
 	InitialEffort protocol.Effort
 	// InitialAutonomy is the exit-gate policy at startup. Empty becomes
 	// AutonomySupervised so the dial is always explicit.
 	InitialAutonomy protocol.Autonomy
+	// InitialVerbosity is the response style at startup (#1369); the zero
+	// value sends nothing and stays silent.
+	InitialVerbosity protocol.Verbosity
 	// InitialPermissionMode is the tool-permission posture at startup. Empty
 	// becomes PermissionModeDefault so the dial is always explicit.
 	InitialPermissionMode protocol.PermissionMode
@@ -514,6 +521,8 @@ type Engine struct {
 	effort   protocol.Effort
 	// autonomy is the session exit-gate policy (supervised|agent|checks|skip-all).
 	autonomy protocol.Autonomy
+	// verbosity is the session response style (#1369); empty sends nothing.
+	verbosity protocol.Verbosity
 	// permMode is the session tool-permission posture dial.
 	permMode protocol.PermissionMode
 	// memMode is normal, incognito, or temporary. Empty is treated as normal.
@@ -526,7 +535,12 @@ type Engine struct {
 	// priority requests OpenAI service_tier=priority on subsequent turns.
 	// Sticky across model switches; adapters that do not support it no-op.
 	priority bool
-	messages []provider.Message
+	// fallback is the session fallback model (#1350); nil means none.
+	fallback *modelSlot
+	// primaryHold is the primary model while the current turn runs on the
+	// fallback; nil otherwise. restorePrimary puts it back.
+	primaryHold *modelSlot
+	messages    []provider.Message
 
 	// turnCancel/turnDone/turnFinishing are owned exclusively by Run (reap,
 	// start, interrupt, shutdown). The worker only closes the done and
@@ -1137,6 +1151,14 @@ func (e *Engine) Run(ctx context.Context) {
 	// Autonomy is always applied so the exit gate matches config/restore.
 	// Fresh sessions announce it; QuietStartup (resume) skips the emit.
 	e.setAutonomy(e.opts.InitialAutonomy)
+	// Restore the session fallback model (#1350) when one was set.
+	if p := strings.TrimSpace(e.opts.InitialFallbackProvider); p != "" {
+		e.handleSetFallback(protocol.SetFallbackModel{Provider: p, Model: e.opts.InitialFallbackModel})
+	}
+	// Like effort, an unset style stays silent.
+	if e.opts.InitialVerbosity != protocol.VerbosityDefault {
+		e.setVerbosity(e.opts.InitialVerbosity)
+	}
 	// Permission mode rules + emit before AgentSelected so unbuffered event
 	// consumers that wait on AgentSelected as "startup ready" do not deadlock.
 	// Plan workflow alignment runs after agent select (see below).

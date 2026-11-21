@@ -1689,6 +1689,41 @@
       ],
       "type": "object"
     },
+    "FallbackModelSelected": {
+      "additionalProperties": true,
+      "description": "FallbackModelSelected confirms the session fallback model after each SetFallbackModel. An empty Provider means no fallback is set.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "model": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ],
+      "type": "object"
+    },
     "FastSelected": {
       "additionalProperties": true,
       "description": "FastSelected confirms the session priority-tier preference after SetFast.",
@@ -2479,6 +2514,30 @@
           "additionalProperties": true,
           "properties": {
             "data": {
+              "$ref": "#/$defs/FallbackModelSelected"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "fallback.selected"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
               "$ref": "#/$defs/FastSelected"
             },
             "time": {
@@ -2607,6 +2666,30 @@
             },
             "type": {
               "const": "ledger.updated"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/ModelFallback"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "model.fallback"
             },
             "v": {
               "type": "string"
@@ -3511,6 +3594,30 @@
           "additionalProperties": true,
           "properties": {
             "data": {
+              "$ref": "#/$defs/VerbositySelected"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "verbosity.selected"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
               "$ref": "#/$defs/VerificationCompleted"
             },
             "time": {
@@ -3936,6 +4043,24 @@
           "additionalProperties": true,
           "properties": {
             "data": {
+              "$ref": "#/$defs/SetFallbackModel"
+            },
+            "type": {
+              "const": "set.fallback_model"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
               "$ref": "#/$defs/SetFast"
             },
             "type": {
@@ -3958,6 +4083,24 @@
             },
             "type": {
               "const": "set.permission_mode"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SetVerbosity"
+            },
+            "type": {
+              "const": "set.verbosity"
             },
             "v": {
               "type": "string"
@@ -4333,6 +4476,56 @@
       },
       "required": [
         "kind"
+      ],
+      "type": "object"
+    },
+    "ModelFallback": {
+      "additionalProperties": true,
+      "description": "ModelFallback marks a turn that the fallback model continued because the primary failed (#1350). Both models are named so a transcript never attributes a reply to the wrong model. Error is the primary's failure.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "error": {
+          "type": "string"
+        },
+        "fallbackModel": {
+          "type": "string"
+        },
+        "fallbackProvider": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "primaryModel": {
+          "type": "string"
+        },
+        "primaryProvider": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "primaryProvider",
+        "primaryModel",
+        "fallbackProvider",
+        "fallbackModel",
+        "reason"
       ],
       "type": "object"
     },
@@ -5862,6 +6055,22 @@
       ],
       "type": "object"
     },
+    "SetFallbackModel": {
+      "additionalProperties": true,
+      "description": "SetFallbackModel picks the session fallback model (#1350). When a request to the primary model still fails after retries, the fallback answers that turn only and the next turn tries the primary again. An empty Provider clears the fallback. Rejected while a turn is running.",
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "type": "object"
+    },
     "SetFast": {
       "additionalProperties": true,
       "description": "SetFast toggles OpenAI priority (fast) service tier for subsequent turns. Rejected while a turn is running. Providers and models that do not support priority tier ignore the flag silently.",
@@ -5885,6 +6094,19 @@
       },
       "required": [
         "mode"
+      ],
+      "type": "object"
+    },
+    "SetVerbosity": {
+      "additionalProperties": true,
+      "description": "SetVerbosity changes the session response style for subsequent turns. Rejected while a turn is running; past turns are untouched.",
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/Verbosity"
+        }
+      },
+      "required": [
+        "level"
       ],
       "type": "object"
     },
@@ -6900,6 +7122,51 @@
       ],
       "type": "object"
     },
+    "Verbosity": {
+      "description": "Open string. Writers use x-strike-known-values. Readers must accept other strings.",
+      "type": "string",
+      "x-strike-enum-open": true,
+      "x-strike-known-values": [
+        "",
+        "concise",
+        "detailed"
+      ]
+    },
+    "VerbositySelected": {
+      "additionalProperties": true,
+      "description": "VerbositySelected confirms the session response style, at startup and after each SetVerbosity. Delivery says how it reaches the model (none or instruction) so a frontend never shows a style as active while it does nothing.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "delivery": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "level": {
+          "$ref": "#/$defs/Verbosity"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "level",
+        "delivery"
+      ],
+      "type": "object"
+    },
     "VerificationAttempt": {
       "additionalProperties": true,
       "description": "VerificationAttempt is one focused rerun in a gate's triage history.",
@@ -7262,9 +7529,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Forward-compatible Op/Event wire schema generated from pkg/protocol. The root schema is one event envelope: unknown type strings and unknown fields are valid. $defs/KnownEvent lists types this version writes. $defs/KnownOp is fail-closed: unknown op type strings are not valid. required is the writer contract; readers treat missing fields as zero values. See schemas/protocol/v1/COMPAT.md.",
   "title": "Strike event envelope",
-  "x-strike-event-count": 66,
+  "x-strike-event-count": 69,
   "x-strike-legacy-version": "1.0.0",
-  "x-strike-op-count": 32,
+  "x-strike-op-count": 34,
   "x-strike-protocol-version": "1.25.0",
   "x-strike-unknown-event": "valid",
   "x-strike-unknown-field": "ignore",

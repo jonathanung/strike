@@ -247,7 +247,7 @@ func loadDiskAgents(workDir string, col *loadCollector) ([]Agent, error) {
 	loadRoot := func(src agentSource) error {
 		for _, path := range markdownFiles(src.dir) {
 			agent, notes, err := parseAgentFileNotes(path)
-			col.addNotes(path, notes)
+			col.addNotes(src.dir, path, "", notes)
 			if err != nil {
 				if src.strict {
 					col.addFatal(path, err)
@@ -472,7 +472,7 @@ func loadSkills(workDir string, col *loadCollector) ([]Skill, error) {
 	loadRoot := func(src skillSource) error {
 		for _, path := range markdownSkillFiles(src.dir) {
 			skill, notes, err := parseSkillFileNotes(path)
-			col.addNotes(path, notes)
+			col.addNotes(src.dir, path, "", notes)
 			if err != nil {
 				if src.strict {
 					col.addFatal(path, err)

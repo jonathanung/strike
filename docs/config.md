@@ -84,8 +84,14 @@ strike trust --dir <path>    # act on another checkout
 The web cockpit (`strike serve`) shows an **Untrusted workspace** badge while
 the live root's repo ships gated config, and a trust card listing exactly what
 trusting would load, with Grant / Keep untrusted (`GET/POST
-/v1/workspace/trust`, #1781). A grant there also takes effect on the next
-start.
+/v1/workspace/trust`, #1781). A grant or revoke there is saved at once; the
+card then offers **Reload strike serve** (#1834), which stops every session
+and project MCP/LSP/harness process and restarts the daemon in place with the
+same flags so the new decision loads (or unloads) without a manual restart.
+Until then every root shows **Reload to apply trust**. The reload is not
+offered when the restart would strand the cockpit (auto-minted in-memory
+token, `--addr` port `0`, `--read-only`, attach-only, Windows); restart by
+hand there.
 
 While untrusted and the repo ships gated config, startup prints
 `strike: untrusted workspace: repo config inert (…)` and the session

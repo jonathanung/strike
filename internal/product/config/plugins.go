@@ -57,15 +57,20 @@ func applyPluginAgentLayer(plugins []plugin.Plugin, scope plugin.Scope, byName m
 			continue
 		}
 		for _, ref := range p.Agents {
-			agent, err := parseAgentFile(ref.AbsPath)
+			agent, notes, err := parseAgentFileNotes(ref.AbsPath)
+			prefix := "plugin " + ref.PluginID + ": "
+			col.addNotes("", ref.AbsPath, prefix, notes)
 			if err != nil {
 				diags = append(diags, pluginDiag(ref, "malformed", err.Error()))
-				col.add(ref.AbsPath, "warning", DiagSkipped, "plugin "+ref.PluginID+": "+err.Error()+"; the file was skipped", false)
+				col.add(ref.AbsPath, "warning", DiagSkipped, prefix+err.Error()+"; the file was skipped", false)
 				continue
 			}
 			if agent == nil {
 				diags = append(diags, pluginDiag(ref, "malformed", "empty or invalid agent document"))
-				col.add(ref.AbsPath, "warning", DiagEmpty, "plugin "+ref.PluginID+": empty, unreadable, or bodiless agent document; it was skipped", false)
+				// The notes already say why (empty or unreadable).
+				if len(notes) == 0 {
+					col.add(ref.AbsPath, "warning", DiagEmpty, prefix+"empty, unreadable, or bodiless agent document; it was skipped", false)
+				}
 				continue
 			}
 			if _, exists := byName[agent.Name]; exists {
@@ -95,15 +100,20 @@ func applyPluginSkillLayer(plugins []plugin.Plugin, scope plugin.Scope, byName m
 			continue
 		}
 		for _, ref := range p.Skills {
-			skill, err := parseSkillFile(ref.AbsPath)
+			skill, notes, err := parseSkillFileNotes(ref.AbsPath)
+			prefix := "plugin " + ref.PluginID + ": "
+			col.addNotes("", ref.AbsPath, prefix, notes)
 			if err != nil {
 				diags = append(diags, pluginDiag(ref, "malformed", err.Error()))
-				col.add(ref.AbsPath, "warning", DiagSkipped, "plugin "+ref.PluginID+": "+err.Error()+"; the file was skipped", false)
+				col.add(ref.AbsPath, "warning", DiagSkipped, prefix+err.Error()+"; the file was skipped", false)
 				continue
 			}
 			if skill == nil {
 				diags = append(diags, pluginDiag(ref, "malformed", "empty or invalid skill document"))
-				col.add(ref.AbsPath, "warning", DiagEmpty, "plugin "+ref.PluginID+": empty, unreadable, or bodiless skill document; it was skipped", false)
+				// The notes already say why (empty or unreadable).
+				if len(notes) == 0 {
+					col.add(ref.AbsPath, "warning", DiagEmpty, prefix+"empty, unreadable, or bodiless skill document; it was skipped", false)
+				}
 				continue
 			}
 			if _, exists := byName[skill.Name]; exists {

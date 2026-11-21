@@ -743,6 +743,40 @@ Go `ModelSelected`.
 | `provider` | string |  |
 | `model` | string |  |
 
+#### `fallback.selected`
+
+Go `FallbackModelSelected`.
+
+| Field | Type | omitempty |
+|---|---|---|
+| `sessionId` | string | yes |
+| `turnId` | string | yes |
+| `providerRequestId` | string | yes |
+| `attempt` | number | yes |
+| `parentSessionId` | string | yes |
+| `depth` | number | yes |
+| `provider` | string |  |
+| `model` | string |  |
+
+#### `model.fallback`
+
+Go `ModelFallback`.
+
+| Field | Type | omitempty |
+|---|---|---|
+| `sessionId` | string | yes |
+| `turnId` | string | yes |
+| `providerRequestId` | string | yes |
+| `attempt` | number | yes |
+| `parentSessionId` | string | yes |
+| `depth` | number | yes |
+| `primaryProvider` | string |  |
+| `primaryModel` | string |  |
+| `fallbackProvider` | string |  |
+| `fallbackModel` | string |  |
+| `reason` | string |  |
+| `error` | string | yes |
+
 #### `agent.selected`
 
 Go `AgentSelected`.
@@ -918,6 +952,21 @@ Go `FastSelected`.
 | `parentSessionId` | string | yes |
 | `depth` | number | yes |
 | `enabled` | bool |  |
+
+#### `verbosity.selected`
+
+Go `VerbositySelected`.
+
+| Field | Type | omitempty |
+|---|---|---|
+| `sessionId` | string | yes |
+| `turnId` | string | yes |
+| `providerRequestId` | string | yes |
+| `attempt` | number | yes |
+| `parentSessionId` | string | yes |
+| `depth` | number | yes |
+| `level` | string |  |
+| `delivery` | string |  |
 
 #### `files.invalidated`
 

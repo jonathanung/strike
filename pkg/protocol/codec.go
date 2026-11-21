@@ -76,6 +76,10 @@ func eventType(ev Event) string {
 		return "harness.progress"
 	case ModelSelected:
 		return "model.selected"
+	case FallbackModelSelected:
+		return "fallback.selected"
+	case ModelFallback:
+		return "model.fallback"
 	case AgentSelected:
 		return "agent.selected"
 	case PhaseChanged:
@@ -96,6 +100,8 @@ func eventType(ev Event) string {
 		return "permission.mode"
 	case FastSelected:
 		return "fast.selected"
+	case VerbositySelected:
+		return "verbosity.selected"
 	case FilesInvalidated:
 		return "files.invalidated"
 	case PathOverlap:
@@ -249,6 +255,10 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &HarnessProgress{}
 	case "model.selected":
 		ev = &ModelSelected{}
+	case "fallback.selected":
+		ev = &FallbackModelSelected{}
+	case "model.fallback":
+		ev = &ModelFallback{}
 	case "agent.selected":
 		ev = &AgentSelected{}
 	case "phase.changed":
@@ -269,6 +279,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &PermissionModeSelected{}
 	case "fast.selected":
 		ev = &FastSelected{}
+	case "verbosity.selected":
+		ev = &VerbositySelected{}
 	case "files.invalidated":
 		ev = &FilesInvalidated{}
 	case "path.overlap":
@@ -406,6 +418,10 @@ func deref(ev Event) Event {
 		return *v
 	case *ModelSelected:
 		return *v
+	case *FallbackModelSelected:
+		return *v
+	case *ModelFallback:
+		return *v
 	case *AgentSelected:
 		return *v
 	case *PhaseChanged:
@@ -425,6 +441,8 @@ func deref(ev Event) Event {
 	case *PermissionModeSelected:
 		return *v
 	case *FastSelected:
+		return *v
+	case *VerbositySelected:
 		return *v
 	case *FilesInvalidated:
 		return *v
