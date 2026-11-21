@@ -11,7 +11,7 @@
 //! "Diagram didn't parse" note; never an error box, never a blank region.
 
 use leptos::prelude::*;
-use mermaid_lite::{Role, Scene, Shape, Stroke};
+use mermaid_lite::{Scene, Shape, Stroke};
 
 /// Zoom steps offered by the controls; index [`FIT`] is "fit to width".
 pub const ZOOMS: [f64; 7] = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
@@ -187,7 +187,6 @@ pub fn MermaidBlock(source: String, children: Children) -> impl IntoView {
             <div class="mmd-canvas" tabindex="0" aria-label="Diagram canvas; scroll to pan" hidden=move || source_on.get()>
                 <svg
                     class="mmd-svg"
-                    xmlns="http://www.w3.org/2000/svg"
                     role="img"
                     aria-label=label
                     viewBox=format!("0 0 {w:.1} {h:.1}")
