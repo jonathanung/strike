@@ -28,6 +28,8 @@ mod git;
 mod goals;
 mod mobile;
 mod providers;
+mod questions;
+mod questions_ui;
 mod rule_author;
 mod sandbox_explain;
 mod schedule;
@@ -1159,6 +1161,7 @@ fn App() -> impl IntoView {
     let autonomy_menu = RwSignal::new(false);
     let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
+    let questions = RwSignal::new(Vec::<questions::Pending>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
     let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
     let panel_open = RwSignal::new(false);
@@ -1821,6 +1824,7 @@ fn App() -> impl IntoView {
             children.set(Vec::new());
             children_note.set(String::new());
             asks.set(Vec::new());
+            questions.set(Vec::new());
             live_audit.set(Vec::new());
             confirm.set(None);
             wipe_on_replay.set(false);
@@ -1966,6 +1970,7 @@ fn App() -> impl IntoView {
                     };
                     note_steer(transcript_cb, &data, &on_note);
                     apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
+                    questions_ui::apply_question_notes(&data, questions);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
                     lines_cb.set(transcript_cb.with_untracked(|t| t.chat_lines()));
@@ -5072,6 +5077,7 @@ fn App() -> impl IntoView {
                         find=find_view
                     />
                     </Show>
+                    <questions_ui::QuestionCards base=base token=token root=active_root questions=questions />
                     <ApprovalCards
                         asks=asks
                         perm_mode=perm_mode
