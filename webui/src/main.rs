@@ -91,6 +91,7 @@ mod session_delete;
 mod session_restore;
 mod share;
 mod shell;
+mod skill_proposals;
 mod skill_usage;
 mod side_chat;
 mod side_chat_promote;

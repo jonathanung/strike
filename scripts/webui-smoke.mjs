@@ -15,6 +15,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
+import { seedRepeatedWorkflow, skillProposalsCheck } from "./webui-skill-proposals-check.mjs";
 import {
   BROKEN_SKILL,
   BROKEN_SKILL_BODY,
@@ -7228,6 +7229,9 @@ try {
     const docHead = docEv.result?.result?.value || JSON.stringify(docEv).slice(0, 600);
     throw new Error(`mcp form did not mask env err=${extra} doc=${docHead} values=${values.slice(0, 300)} body=${mcpText.slice(0, 300)}`);
   }
+
+  await seedRepeatedWorkflow({ home, port, token });
+  await skillProposalsCheck({ send, repoDir: process.cwd() });
 
   console.log("webui-smoke ok");
 } catch (err) {
