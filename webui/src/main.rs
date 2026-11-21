@@ -380,6 +380,75 @@ fn sync_composer_height_soon() {
     cb.forget();
 }
 
+/// Focus the composer and put the caret at the end (#1361 recall).
+fn focus_composer_end_soon() {
+    let Some(win) = web_sys::window() else {
+        return;
+    };
+    let cb = Closure::once(move || {
+        if let Some(el) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|doc| doc.query_selector("#composer-input").ok().flatten())
+            .and_then(|el| el.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
+        {
+            let _ = el.focus();
+            let end = el.value().encode_utf16().count() as u32;
+            let _ = el.set_selection_range(end, end);
+        }
+        sync_composer_height();
+    });
+    let _ = win.set_timeout_with_callback_and_timeout_and_arguments_0(
+        cb.as_ref().unchecked_ref(),
+        0,
+    );
+    cb.forget();
+}
+
+/// #1361: route the engine's answer to an in-flight edit & resend
+/// rewind. `session.rewound` releases the edited text for sending; a
+/// rewind error keeps the draft and sends nothing.
+fn note_edit_envelope(
+    data: &str,
+    state: RwSignal<edit_resend::State>,
+    resend_now: RwSignal<Option<String>>,
+    note: RwSignal<String>,
+) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else {
+        return;
+    };
+    let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    let d = v.get("data").cloned().unwrap_or(serde_json::Value::Null);
+    let child = d
+        .get("parentSessionId")
+        .and_then(|p| p.as_str())
+        .is_some_and(|p| !p.is_empty())
+        || d.get("depth").and_then(|x| x.as_i64()).unwrap_or(0) > 0;
+    if child {
+        return;
+    }
+    match typ {
+        "session.rewound" => {
+            let (next, send) = edit_resend::on_rewound(state.get_untracked());
+            state.set(next);
+            if let Some(text) = send {
+                note.set(String::new());
+                resend_now.set(Some(text));
+            }
+        }
+        "engine.error" => {
+            let msg = d.get("message").and_then(|m| m.as_str()).unwrap_or("");
+            if edit_resend::is_rewind_error(msg) {
+                let (next, n) = edit_resend::on_rewind_failed(state.get_untracked(), msg);
+                state.set(next);
+                if let Some(n) = n {
+                    note.set(n);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 fn place_composer_caret_end_soon() {
     let Some(win) = web_sys::window() else {
         return;
@@ -1383,6 +1452,12 @@ fn App() -> impl IntoView {
     let edit_draft = RwSignal::new(String::new());
     let steer_note = RwSignal::new(String::new());
     let steer_mode = RwSignal::new(String::new());
+    // Edit last message & resend (#1361): where the edit stands, the
+    // edited text released once the engine confirms the rewind, and the
+    // composer banner note (refusals, failures).
+    let last_edit = RwSignal::new(edit_resend::State::Idle);
+    let resend_now = RwSignal::new(None::<String>);
+    let edit_note = RwSignal::new(String::new());
     let queue_note = RwSignal::new(String::new());
     let hold_bypass = RwSignal::new(false);
     // Draft-size second-press arm (#1542): the exact draft text whose
@@ -2119,6 +2194,9 @@ fn App() -> impl IntoView {
                 if let Some(data) = ev.data().as_string() {
                     note_live_title(sessions_cb, roots_cb, &titled_root, &data);
                     transcript_cb.update(|t| t.apply_envelope(&data));
+                    if matches!(last_edit.get_untracked(), edit_resend::State::Reverting { .. }) {
+                        note_edit_envelope(&data, last_edit, resend_now, edit_note);
+                    }
                     doctor.on_envelope(&data, &titled_root);
                     let mut plan_changed = false;
                     plan.update_untracked(|p| plan_changed = p.apply_envelope(&data));
@@ -2565,6 +2643,137 @@ fn App() -> impl IntoView {
         true
     };
 
+    // Edit last message & resend (#1361). An edit ends quietly when its
+    // target is no longer the newest user message (another device sent
+    // a turn) or the viewed session changes; the draft is left alone.
+    Effect::new(move |_| {
+        let last = transcript.with(|t| t.last_user_id());
+        let state = last_edit.get_untracked();
+        let next = edit_resend::reconcile(state.clone(), last);
+        if next != state {
+            last_edit.set(next);
+        }
+    });
+    Effect::new(move |prev: Option<String>| {
+        let root = active_root.get();
+        if prev.is_some_and(|p| p != root) && last_edit.get_untracked().editing() {
+            last_edit.set(edit_resend::State::Idle);
+            edit_note.set(String::new());
+        }
+        root
+    });
+    // The engine confirmed the rewind: send the edited text as a normal
+    // user.input. A held send (context full) keeps the draft.
+    Effect::new(move |_| {
+        let Some(text) = resend_now.get() else {
+            return;
+        };
+        resend_now.set(None);
+        if send_text(text.clone()) {
+            prompt_history.update(|h| h.push(&text));
+            if draft.get_untracked().trim() == text {
+                draft.set(String::new());
+            }
+            edit_note.set(String::new());
+        } else {
+            edit_note.set(
+                "The last turn was discarded, but the edited text was not sent. It is still in the composer."
+                    .into(),
+            );
+        }
+    });
+    let start_edit = move |id: u32| {
+        let Some(text) = transcript.with_untracked(|t| t.sent_text(id)) else {
+            edit_note.set(edit_resend::NOTHING.into());
+            return;
+        };
+        last_edit.set(edit_resend::State::Editing { target: id });
+        edit_note.set(String::new());
+        draft.set(text);
+        focus_composer_end_soon();
+    };
+    let request_edit = move |r: edit_resend::Recall| match r {
+        edit_resend::Recall::Edit(id) => start_edit(id),
+        edit_resend::Recall::Refused(msg) => edit_note.set(msg.into()),
+        edit_resend::Recall::Inert => {}
+    };
+    // Submit while editing: confirm what will be discarded, post the
+    // engine's `rewind` op (conversation + that turn's file changes),
+    // and keep the draft until `session.rewound` releases it.
+    let resend_edit = move || {
+        let root = active_root.get_untracked();
+        if root.is_empty() {
+            status.set("no live session yet".into());
+            return;
+        }
+        if matches!(last_edit.get_untracked(), edit_resend::State::Reverting { .. }) {
+            return;
+        }
+        if !pending_files.get_untracked().is_empty() {
+            edit_note.set("Edit & resend sends text only. Remove the attachments first.".into());
+            return;
+        }
+        let check = move || -> Result<(edit_resend::State, edit_resend::Discard), &'static str> {
+            let root = active_root.get_untracked();
+            let (rows, last) = transcript.with_untracked(|t| (t.edit_rows(), t.last_user_id()));
+            let next = edit_resend::begin(
+                &last_edit.get_untracked(),
+                &draft.get_untracked(),
+                session_busy(&root),
+                !queue_items.get_untracked().is_empty(),
+                last,
+            )?;
+            let edit_resend::State::Reverting { target, .. } = &next else {
+                return Err(edit_resend::NOTHING);
+            };
+            let discard = edit_resend::discard_after(&rows, *target).ok_or(edit_resend::NOTHING)?;
+            Ok((next, discard))
+        };
+        let discard = match check() {
+            Ok((_, d)) => d,
+            Err(msg) => {
+                edit_note.set(msg.into());
+                return;
+            }
+        };
+        let on_yes: Rc<dyn Fn()> = Rc::new(move || {
+            // Re-checked at confirm time: the session may have moved on
+            // while the dialog was open.
+            let next = match check() {
+                Ok((next, _)) => next,
+                Err(msg) => {
+                    edit_note.set(msg.into());
+                    return;
+                }
+            };
+            last_edit.set(next);
+            edit_note.set(String::new());
+            let root = active_root.get_untracked();
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(async move {
+                if let Err(e) =
+                    post_op(&b, &t, &root, "rewind", serde_json::json!({"restoreFiles": true})).await
+                {
+                    let (n, note) = edit_resend::on_rewind_failed(last_edit.get_untracked(), &e);
+                    last_edit.set(n);
+                    if let Some(note) = note {
+                        edit_note.set(note);
+                    }
+                }
+            });
+        });
+        if !crate::confirm::ask(
+            crate::confirm::ConfirmRequest {
+                title: "Edit and resend?".into(),
+                body: edit_resend::confirm_body(&discard),
+                confirm_label: "Discard and resend".into(),
+            },
+            on_yes,
+        ) {
+            edit_note.set(crate::confirm::BUSY.into());
+        }
+    };
+
     let send = move |which: steer_queue::SendWhich| {
         // Session /loop (#1588): handled against the loops routes, never
         // sent as a prompt, and ahead of the context hold so a full window
@@ -2618,6 +2827,10 @@ fn App() -> impl IntoView {
         plus_open.set(false);
         ac_force.set(String::new());
         if sending.get_untracked() {
+            return;
+        }
+        if last_edit.get_untracked().editing() {
+            resend_edit();
             return;
         }
         let text = draft.get_untracked().trim().to_string();
@@ -4653,6 +4866,17 @@ fn App() -> impl IntoView {
     .into();
     let rename_for_palette = apply_title.clone();
     let handlers = TranscriptHandlers {
+        edit_last: (move |id: u32| {
+            let root = active_root.get_untracked();
+            let last = transcript.with_untracked(|t| t.last_user_id());
+            request_edit(edit_resend::action(
+                session_busy(&root),
+                !queue_items.get_untracked().is_empty(),
+                last,
+                id,
+            ));
+        })
+        .into(),
         send: (move |text: String| {
             send_text(text);
         })
@@ -5791,6 +6015,11 @@ fn App() -> impl IntoView {
                         </Show>
                         <plan_card::PlanCard plan=plan />
                         <div class="steer-queue" id="steer-queue">
+                            <Show when=move || last_edit.get().editing() || !edit_note.get().is_empty()>
+                                <p class="steer-note edit-resend-note" role="status">
+                                    {move || edit_resend::banner(&last_edit.get(), &edit_note.get())}
+                                </p>
+                            </Show>
                             <OutboxList outbox=outbox root=active_root gateway=gateway />
                             <session_loops::LoopRows base=base token=token root=active_root capable=loops_capable loops=loop_rows note=loop_note />
                             <Show when=move || !steer_note.get().is_empty()>
@@ -5998,6 +6227,19 @@ fn App() -> impl IntoView {
                                 on:input=move |ev| {
                                     if let Some((text, cursor)) = textarea_state(ev.target()) {
                                         draft.set(text.clone());
+                                        // #1361: clearing the recalled text
+                                        // abandons the edit.
+                                        if text.trim().is_empty()
+                                            && matches!(last_edit.get_untracked(), edit_resend::State::Editing { .. })
+                                        {
+                                            last_edit.set(edit_resend::State::Idle);
+                                            edit_note.set(String::new());
+                                        } else if !last_edit.get_untracked().editing()
+                                            && !edit_note.get_untracked().is_empty()
+                                        {
+                                            // A refusal note goes once the user types on.
+                                            edit_note.set(String::new());
+                                        }
                                         sync_composer_trigger(text, cursor, &ui);
                                     }
                                     // Auto-grow (#1411): the DOM value is
@@ -6036,6 +6278,26 @@ fn App() -> impl IntoView {
                                             ev.prevent_default();
                                             let delta = if ev.key() == "ArrowDown" { 1 } else { -1 };
                                             ac_index.set(move_index(&items, ac_index.get_untracked(), delta));
+                                        } else if ev.key() == "ArrowUp"
+                                            && (ev.ctrl_key() || ev.meta_key())
+                                            && !ev.alt_key()
+                                            && !ev.shift_key()
+                                        {
+                                            // Edit last message (#1361): Cmd/Ctrl+Up
+                                            // with an empty composer.
+                                            let root = active_root.get_untracked();
+                                            let gate = edit_resend::Gate {
+                                                draft_empty: draft.get_untracked().trim().is_empty(),
+                                                busy: session_busy(&root),
+                                                queued: !queue_items.get_untracked().is_empty(),
+                                                picker_open: ac_open.get_untracked() || plus_open.get_untracked(),
+                                                composing: ev.is_composing(),
+                                            };
+                                            let r = edit_resend::recall(gate, transcript.with_untracked(|t| t.last_user_id()));
+                                            if r != edit_resend::Recall::Inert {
+                                                ev.prevent_default();
+                                            }
+                                            request_edit(r);
                                         } else if !ev.ctrl_key() && !ev.meta_key() && !ev.alt_key() {
                                             // Prompt history (#1402), after the
                                             // autocomplete popup above has had
@@ -6072,6 +6334,18 @@ fn App() -> impl IntoView {
                                         ac_open.set(false);
                                         plus_open.set(false);
                                         ac_force.set(String::new());
+                                    } else if ev.key() == "Escape" && last_edit.get_untracked().editing() {
+                                        // #1361: abandon the edit. Before the
+                                        // confirm this has no side effects.
+                                        ev.prevent_default();
+                                        ev.stop_propagation();
+                                        let (next, clear) = edit_resend::on_escape(&last_edit.get_untracked());
+                                        last_edit.set(next);
+                                        edit_note.set(String::new());
+                                        if clear {
+                                            draft.set(String::new());
+                                            place_composer_caret_end_soon();
+                                        }
                                     } else if ev.key() == "Tab" {
                                         if ac_open.get_untracked() {
                                             let items = ac_items.get_untracked();
