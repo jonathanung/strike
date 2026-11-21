@@ -612,6 +612,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "ideas-inbox"
+version = "0.1.0"
+
+[[package]]
 name = "idna"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1362,6 +1366,7 @@ dependencies = [
  "composer-drafts",
  "edit-resend",
  "gloo-net",
+ "ideas-inbox",
  "js-sys",
  "leptos",
  "load-guard",

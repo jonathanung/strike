@@ -16,7 +16,7 @@ use std::cell::Cell;
 pub use chrome::Chrome;
 #[allow(unused_imports)]
 pub use host::{
-    bind, dispatch, open_session, set_default_model_picker, set_effort_choices,
+    bind, dispatch, new_session, open_session, set_default_model_picker, set_effort_choices,
     set_effort_default_setter, set_effort_setter, set_fast_setter, set_host, set_model_choices,
     set_model_picker, set_show_palette, set_show_palette_at, set_view, show_palette,
     show_palette_at, unbind, HostBridge,
