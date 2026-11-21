@@ -509,6 +509,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/git/stash/drop", s.handleGitStashDrop)
 	s.mux.HandleFunc("GET /v1/git/branch-changes", s.handleGitBranchChanges)
 	s.mux.HandleFunc("GET /v1/git/branch-diff", s.handleGitBranchDiff)
+	s.mux.HandleFunc("GET /v1/git/pr", s.handleGitPRPreview)
+	s.mux.HandleFunc("POST /v1/git/pr", s.handleGitPRCreate)
 	s.mux.HandleFunc("GET /v1/git/show", s.handleGitShow)
 	s.mux.HandleFunc("POST /v1/git/stage", s.handleGitStage)
 	s.mux.HandleFunc("POST /v1/git/unstage", s.handleGitUnstage)
