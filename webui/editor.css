@@ -206,7 +206,8 @@
 }
 .ev-md .md-table-block:hover .md-table-actions,
 .ev-md .md-table-block:focus-within .md-table-actions,
-.ev-md .md-table-wide .md-table-actions { opacity: 1; }
+.ev-md .md-table-wide .md-table-actions,
+.ev-md .md-table-actions:has(.md-table-note:not(:empty)) { opacity: 1; }
 .ev-md .md-table-actions button { font-size: var(--type-sm); }
 .ev-md .md-table-widen[aria-pressed="true"] { color: var(--ink); border-color: var(--border-focus); }
 .ev-md .md-table-note { color: var(--danger); font-size: var(--type-sm); }
