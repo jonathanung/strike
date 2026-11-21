@@ -31,6 +31,25 @@ const chromePort = 9222 + (process.pid % 200);
 await mkdir(join(home, ".strike"), { recursive: true });
 await writeFile(join(home, ".strike", "config"), '{"sandboxAllowDegrade":true}\n');
 
+// Theme catalog (#1529): a user theme the daemon's GET /v1/themes lists.
+// The cockpit picker must offer it, paint it, and keep it across reload.
+const smokeTheme = {
+  id: "smoke-sunset",
+  name: "Smoke Sunset",
+  accent: { dark: "#fb923c", light: "#c2410c" },
+  background: { dark: "#1b1020", light: "#fff8f0" },
+  text: { dark: "#ffe8d0", light: "#2a1a10" },
+};
+await mkdir(join(home, ".strike", "themes"), { recursive: true });
+await writeFile(
+  join(home, ".strike", "themes", `${smokeTheme.id}.json`),
+  JSON.stringify({
+    name: smokeTheme.name,
+    id: smokeTheme.id,
+    colors: { accent: smokeTheme.accent, background: smokeTheme.background, text: smokeTheme.text },
+  }),
+);
+
 // Decision ledger seed (#1485). There is no ledger write route, and the
 // store loads its file once at open, so the file must exist before the
 // daemon starts. Path: ~/.strike/ledger/<sha256(project key)>.json, where
@@ -5796,6 +5815,56 @@ try {
     }
     return ev.result?.result?.value;
   };
+  // #1529: pick the seeded user theme from the catalog-backed picker
+  // before the reload below, then prove it survived the reload.
+  const themeProbe = `(() => {
+    const el = document.documentElement;
+    const cs = getComputedStyle(el);
+    return JSON.stringify({
+      theme: el.getAttribute("data-theme") || "",
+      scheme: el.getAttribute("data-scheme") || "",
+      acid: cs.getPropertyValue("--acid").trim().toLowerCase(),
+      ground: cs.getPropertyValue("--ground").trim().toLowerCase(),
+      saved: localStorage.getItem("strike.theme") || "",
+      note: document.querySelector("[data-theme-catalog-note]")?.innerText || "",
+    });
+  })()`;
+  const themePainted = async (label, wantId) => {
+    let last = {};
+    for (let i = 0; i < 60; i++) {
+      last = JSON.parse(String(await evalJson(themeProbe)));
+      const side = last.scheme === "light" ? "light" : "dark";
+      const ok =
+        wantId === smokeTheme.id
+          ? last.theme === wantId &&
+            last.saved === wantId &&
+            last.acid === smokeTheme.accent[side] &&
+            last.ground === smokeTheme.background[side]
+          : last.theme === wantId && last.saved === wantId && last.acid !== smokeTheme.accent[side];
+      if (ok) return last;
+      await delay(250);
+    }
+    throw new Error(`${label}: ${JSON.stringify(last)}\n${await diagnostics()}`);
+  };
+  await evalJson(`document.querySelector('[data-action="open-settings"]')?.click()`);
+  for (let i = 0; i < 60; i++) {
+    const ready = await evalJson(`(() => {
+      const input = document.querySelector('.settings-page input[data-theme-choice="${smokeTheme.id}"]');
+      return !!input && !input.disabled && !document.querySelector("[data-theme-catalog-note]");
+    })()`);
+    if (ready === true) break;
+    if (i === 59) {
+      throw new Error(`catalog user theme missing from the settings picker: ${String(await evalJson(themeProbe))}\n${await diagnostics()}`);
+    }
+    await delay(250);
+  }
+  const pickerText = String(await evalJson(`document.querySelector(".settings-page .theme-grid")?.innerText || ""`));
+  if (!pickerText.includes(smokeTheme.name) || !pickerText.includes("User theme") || !pickerText.includes("Nord")) {
+    throw new Error(`theme picker should list the user theme beside bundled themes: ${pickerText.slice(0, 600)}`);
+  }
+  await evalJson(`document.querySelector('.settings-page input[data-theme-choice="${smokeTheme.id}"]').click()`);
+  await themePainted("user theme applied from the catalog", smokeTheme.id);
+
   await evalJson(`localStorage.setItem("strike.token", ${JSON.stringify(token)})`);
   await send("Page.reload", { ignoreCache: true });
   for (let i = 0; i < 40; i++) {
@@ -5807,6 +5876,20 @@ try {
     if (i === 39) throw new Error(`reload did not show the cockpit: ${String(body).slice(0, 300)}`);
     await delay(250);
   }
+  await themePainted("user theme persisted across reload", smokeTheme.id);
+  await evalJson(`document.querySelector('[data-action="open-settings"]')?.click()`);
+  for (let i = 0; i < 60; i++) {
+    const clicked = await evalJson(`(() => {
+      const input = document.querySelector('.settings-page input[data-theme-choice="strike"]');
+      if (!input) return false;
+      input.click();
+      return true;
+    })()`);
+    if (clicked === true) break;
+    if (i === 59) throw new Error("settings picker did not return after reload");
+    await delay(250);
+  }
+  await themePainted("back to Strike after the user theme", "strike");
 
   let customizeText = "";
   for (let i = 0; i < 40; i++) {
