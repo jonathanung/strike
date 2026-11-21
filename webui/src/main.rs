@@ -14,6 +14,7 @@ mod approvals;
 mod approvals_ui;
 mod chat_mode;
 mod clipboard;
+mod compaction_marks;
 mod confirm;
 mod composer_triggers;
 mod diag;

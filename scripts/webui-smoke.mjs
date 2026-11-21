@@ -356,6 +356,33 @@ try {
     envLine("user.message", "2026-10-26T06:10:00Z", { text: "quick follow up" }) +
     envLine("text.delta", "2026-10-26T06:10:10Z", { text: "fast answer" }) +
     envLine("turn.completed", "2026-10-26T06:10:20Z", { stopReason: "end_turn" }) +
+    // Compaction visibility (#1359): markers between turns (outside any
+    // turn, so the elapsed check is unchanged), plus one malformed
+    // compaction.completed that must degrade to a title-only marker.
+    envLine("context.fit_warning", "2026-10-26T06:15:00Z", {
+      estimatedTokens: 180000,
+      contextLimit: 200000,
+      level: "warn",
+      message: "context is getting full",
+    }) +
+    envLine("compaction.started", "2026-10-26T06:15:01Z", { reason: "threshold", strategy: "summarize" }) +
+    envLine("compaction.completed", "2026-10-26T06:15:02Z", {
+      reason: "threshold",
+      strategy: "summarize",
+      removed: 6,
+      kept: 2,
+      summary: "Earlier the slow replay ran sleep 180.",
+      residue: { schemaVersion: "1", facts: [{ id: "f1", kind: "fact", text: "bash slept for 180s" }] },
+    }) +
+    envLine("session.budget_warning", "2026-10-26T06:15:03Z", {
+      level: "80",
+      kind: "cost_usd",
+      costUsd: 4,
+      maxCostUsd: 5,
+      ratio: 0.8,
+      message: "80% of session budget",
+    }) +
+    envLine("compaction.completed", "2026-10-26T06:15:04Z", { removed: "lots" }) +
     envLine("user.message", "2026-10-26T06:20:00Z", { text: "old log turn" }) +
     envLine("tool.begin", null, { callId: "c9", name: "bash", args: { command: "sleep 240" } }) +
     envLine("tool.end", "2026-10-26T06:24:00Z", { callId: "c9", name: "bash", output: "done" }) +
@@ -3983,6 +4010,45 @@ try {
         };
       })()`);
       return { ok: v.n === 1 && v.text === "took 4:12" && v.onSlow && v.body, ...v };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Compaction visibility (#1359): the replay's five markers render inline
+  // in order; the completed marker shows removed/kept with summary and
+  // residue in a collapsed fold; the malformed payload still renders a
+  // title-only marker and the transcript after it is intact.
+  await waitFor(
+    "compaction and budget markers in the replayed transcript",
+    async () => {
+      const v = await evaluate(`(() => {
+        const marks = [...document.querySelectorAll("article[data-compaction]")];
+        const done = marks.find((m) => m.getAttribute("data-compaction") === "completed");
+        const fold = done && done.querySelector("details.sx-fold");
+        const last = marks[marks.length - 1];
+        return {
+          kinds: marks.map((m) => m.getAttribute("data-compaction")).join(","),
+          titles: marks.map((m) => (m.querySelector(".sx-who")?.textContent || "").trim()).join("|"),
+          counts: done ? done.innerText.includes("Removed 6 messages, kept 2 messages") : false,
+          foldClosed: !!fold && !fold.open,
+          foldText: fold ? fold.textContent : "",
+          budget: (marks[3]?.innerText || "").includes("$4.00 of $5.00 session cost"),
+          minimalBody: last ? !last.querySelector(".sx-body") : false,
+          after: document.body.innerText.includes("old answer"),
+        };
+      })()`);
+      return {
+        ok:
+          v.kinds === "fit,started,completed,budget,completed" &&
+          v.titles === "Context near limit|Compacting context|Context compacted|Budget warning|Context compacted" &&
+          v.counts &&
+          v.foldClosed &&
+          v.foldText.includes("Earlier the slow replay ran sleep 180.") &&
+          v.foldText.includes("bash slept for 180s") &&
+          v.budget &&
+          v.minimalBody &&
+          v.after,
+        ...v,
+      };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
