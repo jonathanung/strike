@@ -69,6 +69,7 @@ Endpoints:
   GET  /v1/status                   live status chrome
   GET  /v1/agents                   selectable agents
   GET  /v1/sessions                 session list (+ liveId)
+  GET  /v1/sessions/{id}/reference size of an @session:<id> reference (summary + last turns)
   GET  /v1/sessions/{id}/events     SSE tail of a session JSONL log
   GET  /v1/sessions/{id}/loops      session /loop jobs (POST start, DELETE stop)
   GET  /v1/triggers                 trigger registry
