@@ -31,7 +31,6 @@ import (
 	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/product/update"
 	"github.com/jonathanung/strike/internal/protocol"
-	"github.com/jonathanung/strike/internal/trust/audit"
 	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
