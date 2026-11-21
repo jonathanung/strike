@@ -410,6 +410,9 @@ impl Registry {
             let Some(load) = cmd.choices.as_ref() else {
                 continue;
             };
+            if arg_step_only(cmd.id) {
+                continue;
+            }
             let mut took = 0;
             for choice in filter_choices(query, &load()) {
                 if took >= 4 || choice_total >= 12 {
@@ -593,6 +596,25 @@ impl ShellHook {
 
 thread_local! {
     static REG: RefCell<Registry> = RefCell::new(Registry::default());
+    /// Commands whose choices list only inside their own argument step.
+    static ARG_STEP_ONLY: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Keep `id`'s choices out of the root palette query. For commands
+/// where one Enter on a fuzzy root hit would be too easy (Start
+/// workflow, #1574) or would shadow other rows ("plan" vs
+/// "plan-implement"), the user opens the command first, then picks.
+pub fn choices_in_argument_step_only(id: &'static str) {
+    ARG_STEP_ONLY.with(|ids| {
+        let mut ids = ids.borrow_mut();
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    });
+}
+
+fn arg_step_only(id: &str) -> bool {
+    ARG_STEP_ONLY.with(|ids| ids.borrow().iter().any(|known| *known == id))
 }
 
 pub fn palette(raw: &str, usage: &PaletteUsage) -> Vec<PaletteGroup> {
@@ -894,6 +916,27 @@ mod tests {
         assert!(groups[0].hits[0].needs_argument);
         let models = hook.query("model", &PaletteUsage::default());
         assert!(models[0].hits[0].needs_argument);
+    }
+
+    #[test]
+    fn arg_step_only_choices_stay_out_of_the_root_query() {
+        let mut hook = ShellHook::new();
+        hook.command(
+            cmd("approval-plan", Group::Settings, "Approval: Plan", 1),
+        );
+        hook.command(cmd("wf-start-test", Group::Session, "Start workflow…", 1).choices(|| {
+            vec![Choice {
+                id: "plan-implement".into(),
+                label: "Start workflow: plan-implement".into(),
+                detail: String::new(),
+            }]
+        }));
+        choices_in_argument_step_only("wf-start-test");
+        let groups = hook.query("plan", &PaletteUsage::default());
+        assert!(groups
+            .iter()
+            .flat_map(|g| g.hits.iter())
+            .all(|h| h.args != "plan-implement"));
     }
 
     #[test]

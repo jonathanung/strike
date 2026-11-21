@@ -152,6 +152,13 @@ pub struct LiveStatus {
     /// empty to the `supervised` default rather than inventing a mode.
     #[serde(default)]
     pub autonomy: String,
+    /// Active workflow and phase the daemon reports on every status
+    /// (#1574; `StatusSnapshot.Workflow` / `.Phase`). Both empty when no
+    /// workflow is active. Later changes arrive as `phase.changed`.
+    #[serde(default)]
+    pub workflow: String,
+    #[serde(default)]
+    pub phase: String,
     #[serde(default)]
     pub busy: bool,
     #[serde(default, rename = "contextUsed")]
@@ -253,6 +260,9 @@ pub struct BootstrapCapabilities {
     /// ladder and container status (#1584). Read-only.
     #[serde(default)]
     pub container: bool,
+    /// True when `GET /v1/update` can run the release probe (#1583).
+    #[serde(default, rename = "updateCheck")]
+    pub update_check: bool,
     /// True when `/v1/sessions/{id}/loops` can start and stop session
     /// loops (#1588): live engine and not `--read-only`.
     #[serde(default)]
