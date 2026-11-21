@@ -89,6 +89,8 @@ type TeamSpawn struct {
 	Agent        string           `json:"agent,omitempty"`
 	Name         string           `json:"name,omitempty"`
 	Isolation    string           `json:"isolation,omitempty"` // shared|worktree
+	Model        string           `json:"model,omitempty"`     // empty inherits the lead's model
+	Effort       string           `json:"effort,omitempty"`    // empty inherits the lead's effort
 	Budget       *TeamSpawnBudget `json:"budget,omitempty"`
 	DelegationID string           `json:"delegationId,omitempty"`
 

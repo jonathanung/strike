@@ -595,7 +595,7 @@ default.
 
 ## Run with N models
 
-Orchestration core shipped, card not drawn (#1346).
+Orchestration core and daemon wiring shipped, card not drawn (#1346, #1881).
 `internal/daemon/bestofn` validates a comparison (2–4 distinct
 model/effort pairs, non-empty prompt, non-negative per-run budget), shows
 the N× cost multiplier, and builds one spawn spec per model: same prompt,
@@ -608,10 +608,27 @@ that requires every candidate to have stopped and the winner to have
 finished; it returns which child to keep and which to archive. "Keep
 none" archives all. A run is decided once.
 
-Not drawn yet: the Spawner wired to `team.spawn` (a per-child model and
-effort field on the spawn op), worktree merge/cleanup on adopt, parent
-commentary, the comparison card and model picker, and verification
-reuse (#780).
+Daemon wiring shipped (#1881): `team.spawn` takes optional `model` and
+`effort`, and the gateway runs comparisons through it:
+
+| Route | Does |
+|---|---|
+| `POST /v1/bestofn` | Start: `{ownerRoot, prompt, candidates:[{model,effort}], edits, budget:{maxTurns,maxTokens,timeoutSec}}` |
+| `GET /v1/bestofn?root=` | This session's runs, newest first |
+| `GET /v1/bestofn/{id}` | One run: per-candidate status, elapsed, summary, diffstat, verification |
+| `POST /v1/bestofn/{id}/cancel` | Interrupt every running candidate (`team.child_interrupt`) |
+| `POST /v1/bestofn/{id}/adopt` | `{childId}`: apply the winner's patch, then remove every candidate worktree |
+| `POST /v1/bestofn/{id}/keep-none` | Discard all and remove every candidate worktree |
+
+Each candidate's `child.completed` feeds the run (summary, diffstat from
+the worktree patch, verification outcome when gates ran). A per-run
+`timeoutSec` cancels candidates still running. Adopt runs `git apply
+--check` first; a patch that does not apply changes nothing and leaves
+the run undecided. Runs live in daemon memory (last 32).
+
+Not drawn yet: the "Run with N models…" picker, the comparison card,
+parent commentary, and per-candidate tokens/cost (`child.completed` does
+not carry usage today).
 
 ## MCP elicitation
 

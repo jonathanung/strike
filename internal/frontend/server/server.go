@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/internal/daemon/bestofn"
 	"github.com/jonathanung/strike/internal/daemon/deploywatch"
 	"github.com/jonathanung/strike/internal/daemon/keepawake"
 	"github.com/jonathanung/strike/internal/daemon/trigger"
@@ -106,6 +107,9 @@ type Options struct {
 	// TaskSpawn, when set, replaces team.spawn while starting a plan run.
 	// Production leaves it nil and spawns through the live engine.
 	TaskSpawn func(ctx context.Context, ownerRoot, name, objective string) (childID string, err error)
+	// BestOfNSpawner, when set, replaces team.spawn / team.child_interrupt
+	// for best-of-N runs (/v1/bestofn). Production leaves it nil.
+	BestOfNSpawner func(ownerRoot string) bestofn.Spawner
 	// Sandbox enables the sandbox capability and seeds live roots that do not
 	// call Live.SetSandbox themselves. Nil keeps capabilities.sandbox false.
 	Sandbox *SandboxSnapshot
@@ -221,6 +225,9 @@ type Server struct {
 	// scriptCSPHashes allowlists inline <script> bodies from the embedded
 	// index.html (Trunk emits an inline WASM loader) without unsafe-inline.
 	scriptCSPHashes []string
+
+	// bestOfN holds live best-of-N comparisons (#1346), in memory only.
+	bestOfN bestOfNRegistry
 
 	// gitMu serializes git reads and mutations for this daemon. Overlapping
 	// status and reset calls on one repo corrupt the index.
@@ -593,6 +600,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/plans/{id}/reopen", s.handlePlanReopen)
 	s.mux.HandleFunc("GET /v1/plans/{id}/run", s.handleTaskRunGet)
 	s.mux.HandleFunc("POST /v1/plans/{id}/run", s.handleTaskRunPost)
+	// Best-of-N (#1346): one prompt across 2–4 models, then adopt or keep none.
+	s.mux.HandleFunc("GET /v1/bestofn", s.handleBestOfNList)
+	s.mux.HandleFunc("POST /v1/bestofn", s.handleBestOfNStart)
+	s.mux.HandleFunc("GET /v1/bestofn/{id}", s.handleBestOfNGet)
+	s.mux.HandleFunc("POST /v1/bestofn/{id}/adopt", s.handleBestOfNAdopt)
+	s.mux.HandleFunc("POST /v1/bestofn/{id}/cancel", s.handleBestOfNCancel)
+	s.mux.HandleFunc("POST /v1/bestofn/{id}/keep-none", s.handleBestOfNKeepNone)
 	s.mux.HandleFunc("GET /v1/goals", s.handleGoalsList)
 	s.mux.HandleFunc("POST /v1/goals", s.handleGoalsSet)
 	s.mux.HandleFunc("GET /v1/goals/{id}", s.handleGoalGet)

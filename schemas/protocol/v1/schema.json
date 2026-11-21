@@ -6275,10 +6275,16 @@
         "delegationId": {
           "type": "string"
         },
+        "effort": {
+          "type": "string"
+        },
         "idempotencyKey": {
           "type": "string"
         },
         "isolation": {
+          "type": "string"
+        },
+        "model": {
           "type": "string"
         },
         "name": {

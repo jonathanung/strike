@@ -2335,6 +2335,10 @@ pub struct TeamSpawn {
     pub name: String,
     #[serde(default, rename = "isolation")]
     pub isolation: String,
+    #[serde(default, rename = "model")]
+    pub model: String,
+    #[serde(default, rename = "effort")]
+    pub effort: String,
     #[serde(default, rename = "budget")]
     pub budget: Option<TeamSpawnBudget>,
     #[serde(default, rename = "delegationId")]
