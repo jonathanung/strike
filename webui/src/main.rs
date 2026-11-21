@@ -35,6 +35,7 @@ mod git;
 mod goals;
 mod mobile;
 mod providers;
+mod push;
 mod rule_author;
 mod sandbox_explain;
 mod schedule;
