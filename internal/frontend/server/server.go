@@ -218,6 +218,9 @@ type Server struct {
 	// notifyOnce lazily opens the redacted notification log under SessionDir.
 	notifyOnce sync.Once
 	notifyLog  *notifyLog
+	// shareOnce lazily opens the session share-link grant store (#1565).
+	shareOnce  sync.Once
+	shareStore *shareStore
 
 	// tokenHash is the sha256 of the daemon token file last observed.
 	// A change appends a token-rotation audit entry. The token is not stored.
@@ -639,6 +642,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/status/events", s.handleSessionStatusEvents)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/seen", s.handleSessionSeen)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}/seen", s.handleSessionUnseen)
+	// Session share links (#1565). Mint/list/revoke need gateway auth; the
+	// /share/v1 redeem route takes the share token in its body and is the
+	// only route that token opens.
+	s.mux.HandleFunc("POST /v1/sessions/{id}/shares", s.handleShareMint)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/shares", s.handleShareList)
+	s.mux.HandleFunc("DELETE /v1/sessions/{id}/shares/{shareId}", s.handleShareRevoke)
+	s.mux.HandleFunc("POST /share/v1/transcript", s.handleShareTranscript)
 	s.mux.HandleFunc("GET /v1/agents", s.handleAgents)
 	s.mux.HandleFunc("GET /v1/diag", s.handleDiag)
 	s.mux.HandleFunc("POST /v1/diag", s.handleDiag)

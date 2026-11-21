@@ -407,6 +407,28 @@ that push service. The next open replays the daemon log into the centre.
 A gateway drop is detected by the page (the daemon cannot deliver "I am
 gone"); it is not a JSONL record.
 
+## Share a session by link
+
+Shipped (#1565, first slice of #1056): the transcript header's Share button
+opens a dialog that mints a read-only link for the root session
+(`POST /v1/sessions/{id}/shares`, expiry 24h / 7 days (default) / 30 days,
+optional label), lists live links (`GET`), and revokes one
+(`DELETE /v1/sessions/{id}/shares/{shareId}`). The link is
+`<origin>/#share=<token>`: the token rides in the fragment, so it never
+reaches server logs or a Referer header. A browser opening it mounts only a
+read-only transcript shell, which posts the token in a JSON body to
+`POST /share/v1/transcript` (outside `/v1`; the token is not a gateway
+credential and every `/v1` route refuses it). It reads exactly the session
+bound at mint, live as it grows; no composer, approvals, panels, session list,
+or attachment downloads. Tokens are stored as SHA-256 hashes
+(`shares.json`, 0600); mint, revoke, and each first read are audit-logged
+without the token. Expired, revoked, unknown links and deleted sessions get
+one identical dead end. Children are not included (root only).
+
+Not built: redaction or selective disclosure, snapshot (frozen) links,
+accounts or comments — all stay with #1056. Links only work for someone who
+can reach the gateway (same as pairing links).
+
 ## Find in transcript
 
 Shipped (#1342): Ctrl/Cmd+F, the Find chip, or the palette command opens
