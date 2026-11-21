@@ -18,6 +18,7 @@ mod approval_outcome;
 mod approvals;
 mod approvals_ui;
 mod away_briefing_view;
+mod best_of_n_card;
 mod chat_mode;
 mod child_signals;
 mod clipboard;
@@ -6138,6 +6139,8 @@ fn App() -> impl IntoView {
                     </Show>
                     // #1785: a deploy watch session shows its verdict card.
                     <deploy_watch::DeployWatchCard base=base token=token active=active_root tick=tick />
+                    // #1881: best-of-N picker (palette "Run with N models…") and comparison cards.
+                    <best_of_n_card::BestOfNCard base=base token=token active=active_root tick=tick />
                     <Show when=move || !doc_path.get().is_empty()>
                         <diagnostics::DocBadge
                             state=diag_state

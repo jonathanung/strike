@@ -1,0 +1,8 @@
+[package]
+name = "best-of-n"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Best-of-N picker parsing and comparison-card wording (#1346, #1881)."
+
+[dependencies]

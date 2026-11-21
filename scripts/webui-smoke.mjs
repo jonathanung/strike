@@ -14,6 +14,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
+import { bestOfNCheck } from "./webui-best-of-n-check.mjs";
 import { createServer } from "node:http";
 import { debugModeCheck } from "./webui-debug-mode-check.mjs";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
@@ -9022,6 +9023,8 @@ try {
   await seedRepeatedWorkflow({ home, port, token });
   await skillProposalsCheck({ send, repoDir: process.cwd(), port, token });
   await debugModeCheck({ send, port, token });
+  // Last: the comparison card it leaves in the chat column stays put.
+  await bestOfNCheck({ send });
 
   console.log("webui-smoke ok");
 } catch (err) {

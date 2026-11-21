@@ -534,6 +534,15 @@ pub fn ModelMenu(
                                             }
                                         }
                                     >"Save highlighted as default"</button>
+                                    // #1881: best-of-N picker (same as the palette command).
+                                    <button
+                                        type="button"
+                                        class="secondary model-text"
+                                        data-bon-open="true"
+                                        on:click=move |_| {
+                                            let _ = crate::shell::dispatch("best-of-n.open", "");
+                                        }
+                                    >"Run with N models…"</button>
                                 </div>
                             }.into_any()
                         }}

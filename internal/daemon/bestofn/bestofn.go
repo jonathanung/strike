@@ -155,6 +155,30 @@ type Outcome struct {
 	Verified *bool
 	// Err is set when the child failed; Finish then marks it failed.
 	Err string
+	// Worktree is the child's isolated worktree path, when it had one.
+	Worktree string
+}
+
+// Diffstat counts files, added lines and removed lines in a unified diff
+// (git diff format). Header lines (---/+++) are not counted as changes.
+func Diffstat(patch string) (files, added, removed int) {
+	inHunk := false
+	for _, line := range strings.Split(patch, "\n") {
+		switch {
+		case strings.HasPrefix(line, "diff --git "):
+			files++
+			inHunk = false
+		case strings.HasPrefix(line, "@@"):
+			inHunk = true
+		case !inHunk:
+			// File header (index, ---, +++, mode lines): not a change.
+		case strings.HasPrefix(line, "+"):
+			added++
+		case strings.HasPrefix(line, "-"):
+			removed++
+		}
+	}
+	return files, added, removed
 }
 
 // CandidateRun is one candidate's state in a comparison.
@@ -247,44 +271,61 @@ func (r *Run) Finish(childID string, out Outcome) error {
 // Cancel interrupts one running candidate.
 func (r *Run) Cancel(childID string) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	cr, err := r.findLocked(childID)
+	if err == nil && cr.Status.terminal() {
+		err = fmt.Errorf("bestofn: %s already %s", childID, cr.Status)
+	}
 	if err != nil {
+		r.mu.Unlock()
 		return err
 	}
-	if cr.Status.terminal() {
-		return fmt.Errorf("bestofn: %s already %s", childID, cr.Status)
-	}
-	return r.cancelLocked(cr)
+	r.markCancelledLocked(cr)
+	r.mu.Unlock()
+	return r.interrupt([]string{childID})
 }
 
 // CancelAll interrupts every running candidate. It returns the first
 // interrupt error but still attempts and marks every candidate.
 func (r *Run) CancelAll() error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	var first error
+	var ids []string
 	for i := range r.runs {
 		if r.runs[i].Status.terminal() {
 			continue
 		}
-		if err := r.cancelLocked(&r.runs[i]); err != nil && first == nil {
-			first = err
+		r.markCancelledLocked(&r.runs[i])
+		ids = append(ids, r.runs[i].ChildID)
+	}
+	r.mu.Unlock()
+	return r.interrupt(ids)
+}
+
+// markCancelledLocked marks cr cancelled before the interrupt is sent, so
+// the card never shows a candidate as running after the user cancelled it,
+// even if the interrupt fails.
+func (r *Run) markCancelledLocked(cr *CandidateRun) {
+	cr.Status, cr.Ended = StatusCancelled, r.now()
+}
+
+// interrupt sends the interrupts without holding the lock (the Spawner may
+// block on a round trip to the engine) and records failures.
+func (r *Run) interrupt(ids []string) error {
+	var first error
+	for _, id := range ids {
+		err := r.sp.Cancel(id)
+		if err == nil {
+			continue
+		}
+		r.mu.Lock()
+		if cr, ferr := r.findLocked(id); ferr == nil {
+			cr.Outcome.Err = err.Error()
+		}
+		r.mu.Unlock()
+		if first == nil {
+			first = fmt.Errorf("bestofn: cancel %s: %w", id, err)
 		}
 	}
 	return first
-}
-
-// cancelLocked marks cr cancelled even if the interrupt fails, so the card
-// never shows a candidate as running after the user cancelled it.
-func (r *Run) cancelLocked(cr *CandidateRun) error {
-	err := r.sp.Cancel(cr.ChildID)
-	cr.Status, cr.Ended = StatusCancelled, r.now()
-	if err != nil {
-		cr.Outcome.Err = err.Error()
-		return fmt.Errorf("bestofn: cancel %s: %w", cr.ChildID, err)
-	}
-	return nil
 }
 
 // Complete reports whether every candidate has stopped.
@@ -320,17 +361,33 @@ func (r *Run) Candidates() []CandidateRun {
 func (r *Run) Adopt(childID string) (Decision, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if err := r.decidableLocked(); err != nil {
+	if err := r.checkAdoptLocked(childID); err != nil {
 		return Decision{}, err
+	}
+	return r.decideLocked(childID), nil
+}
+
+// CheckAdopt reports whether Adopt(childID) would succeed, without recording
+// a decision. Callers that must apply the winner's changes first use it so a
+// failed apply leaves the run undecided.
+func (r *Run) CheckAdopt(childID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.checkAdoptLocked(childID)
+}
+
+func (r *Run) checkAdoptLocked(childID string) error {
+	if err := r.decidableLocked(); err != nil {
+		return err
 	}
 	cr, err := r.findLocked(childID)
 	if err != nil {
-		return Decision{}, err
+		return err
 	}
 	if cr.Status != StatusDone {
-		return Decision{}, fmt.Errorf("bestofn: cannot adopt %s: it is %s", childID, cr.Status)
+		return fmt.Errorf("bestofn: cannot adopt %s: it is %s", childID, cr.Status)
 	}
-	return r.decideLocked(childID), nil
+	return nil
 }
 
 // KeepNone discards every candidate.

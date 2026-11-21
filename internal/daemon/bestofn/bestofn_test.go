@@ -276,3 +276,70 @@ func TestCandidateLabel(t *testing.T) {
 		t.Fatalf("label = %q", got)
 	}
 }
+
+func TestDiffstat(t *testing.T) {
+	tests := []struct {
+		name                  string
+		patch                 string
+		files, added, removed int
+	}{
+		{name: "empty", patch: ""},
+		{
+			name: "one file",
+			patch: "diff --git a/x.go b/x.go\nindex 1..2 100644\n--- a/x.go\n+++ b/x.go\n" +
+				"@@ -1,3 +1,3 @@\n keep\n-old\n+new\n+extra\n",
+			files: 1, added: 2, removed: 1,
+		},
+		{
+			name: "content lines that look like headers count",
+			patch: "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n---dashes\n+++plus\n" +
+				"diff --git a/b b/b\nnew file mode 100644\n--- /dev/null\n+++ b/b\n@@ -0,0 +1 @@\n+hi\n\\ No newline at end of file\n",
+			files: 2, added: 2, removed: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, a, r := Diffstat(tt.patch)
+			if f != tt.files || a != tt.added || r != tt.removed {
+				t.Fatalf("Diffstat = %d/%d/%d, want %d/%d/%d", f, a, r, tt.files, tt.added, tt.removed)
+			}
+		})
+	}
+}
+
+func TestCheckAdoptDoesNotDecide(t *testing.T) {
+	r, err := start(context.Background(), &fakeSpawner{}, req3(true), fixedClock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CheckAdopt("child-1"); err == nil {
+		t.Fatal("check while running should fail")
+	}
+	_ = r.Finish("child-1", Outcome{Summary: "ok"})
+	_ = r.Finish("child-2", Outcome{Err: "boom"})
+	_ = r.Cancel("child-3")
+	tests := []struct {
+		id      string
+		wantErr bool
+	}{
+		{"child-1", false},
+		{"child-2", true},
+		{"child-3", true},
+		{"nope", true},
+		{"", true},
+	}
+	for _, tt := range tests {
+		if err := r.CheckAdopt(tt.id); (err != nil) != tt.wantErr {
+			t.Fatalf("CheckAdopt(%q) err = %v, wantErr %v", tt.id, err, tt.wantErr)
+		}
+	}
+	if _, ok := r.Decision(); ok {
+		t.Fatal("CheckAdopt must not record a decision")
+	}
+	if _, err := r.Adopt("child-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.CheckAdopt("child-1"); err == nil {
+		t.Fatal("check after a decision should fail")
+	}
+}

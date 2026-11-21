@@ -256,6 +256,8 @@ func (e *Engine) handleTeamSpawn(ctx context.Context, op protocol.TeamSpawn) {
 		Agent:         strings.TrimSpace(op.Agent),
 		Name:          strings.TrimSpace(op.Name),
 		Isolation:     iso,
+		Model:         strings.TrimSpace(op.Model),
+		Effort:        strings.TrimSpace(op.Effort),
 		ForceDelegate: true, // human explicitly requested spawn
 	}
 	if op.Budget != nil {
