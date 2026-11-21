@@ -440,8 +440,11 @@ and tool text are never sent. 404/410 from the push service prunes the
 subscription; `GET /v1/notifications` reports `push.lastResult` so the
 toggle can say a push failed. The VAPID key is `push/vapid.json` beside the
 session dir (0600). Unsupported browsers, blocked permission, and iOS
-without Home Screen install are named in the toggle. Not built yet:
-opt-in push for finished or failed runs.
+without Home Screen install are named in the toggle. Finished and failed
+runs (`session.finished`, `child.finished`) push only after "Also push
+finished and failed runs" is checked under Push notifications (#1917): the
+daemon-side `pushFinished` pref in `NotifyPrefs`, default off, with the same
+generic payload.
 A gateway drop is detected by the page (the daemon cannot deliver "I am
 gone"); it is not a JSONL record.
 

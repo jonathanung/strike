@@ -73,6 +73,10 @@ type NotifyPrefs struct {
 	Enabled bool       `json:"enabled"`
 	Quiet   QuietHours `json:"quiet"`
 	Muted   []string   `json:"mutedSessions"`
+	// PushFinished adds finished/failed runs (session.finished,
+	// child.finished) to the Web Push kinds (#1917). Default off: only
+	// needs-you kinds push unless the user opts in.
+	PushFinished bool `json:"pushFinished"`
 }
 
 type notificationsResponse struct {
@@ -568,7 +572,7 @@ func writeAtomic0600(path string, data []byte) error {
 }
 
 func normalizePrefs(in NotifyPrefs) (NotifyPrefs, error) {
-	out := NotifyPrefs{Enabled: in.Enabled, Quiet: in.Quiet, Muted: []string{}}
+	out := NotifyPrefs{Enabled: in.Enabled, Quiet: in.Quiet, Muted: []string{}, PushFinished: in.PushFinished}
 	if strings.TrimSpace(out.Quiet.Start) == "" {
 		out.Quiet.Start = "22:00"
 	}
