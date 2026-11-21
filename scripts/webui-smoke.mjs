@@ -5816,6 +5816,38 @@ try {
     return false;
   })()`, "worktrees panel via palette");
 
+  // Terminal empty state (#1946): with no active workspace the Terminal
+  // pane must offer a control that opens the workspace picker, not a
+  // dead-end sentence. Only provable while the daemon has no active
+  // workspace, so read that from the API first.
+  const termWs = await (await fetch(`http://127.0.0.1:${port}/v1/workspaces`, { headers: apprAuth })).json();
+  const termNoWorkspace = !termWs.activeId;
+  if (termNoWorkspace) {
+    await clickSideTab("Terminal", "No workspace");
+    const termPick = await evaluate(`(() => {
+      const b = document.querySelector('[data-term-pick-workspace]');
+      if (!b) return "missing";
+      b.click();
+      return "clicked";
+    })()`);
+    if (termPick !== "clicked") {
+      throw new Error(`terminal empty state has no Choose workspace control (${termPick})\n${await diagnostics()}`);
+    }
+    await waitFor(
+      "terminal Choose workspace opens the workspace picker",
+      textProbe((t) => t.includes("A workspace is a directory")),
+      { timeout: STEP_MS, interval: 150 },
+    );
+    await evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    await waitFor(
+      "workspace picker closes after the terminal check",
+      textProbe((t) => !t.includes("A workspace is a directory")),
+      { timeout: STEP_MS, interval: 150 },
+    );
+  } else {
+    console.log(`terminal empty-state check skipped: workspace ${termWs.activeId} is active`);
+  }
+
   // Single ask surface (#1424 review, #1319 Q3): ONE pending permission
   // ask must render EXACTLY ONE decision UI across both ask containers
   // — the ApprovalCards stream (.approvals-card) and the composer
@@ -5850,6 +5882,57 @@ try {
   if (singleAsk.cards !== 1 || singleAsk.composerAsks !== 0) {
     throw new Error(`single-ask count wrong: ${JSON.stringify(singleAsk)}`);
   }
+  // Keyboard-only hints on touch (#1946): at 390x844 with touch
+  // emulation (pointer: coarse) the approval card hides its number/Escape
+  // hint and key labels and shows touch wording instead; the Terminal
+  // hint drops "Click the screen". Back on desktop the key hints return.
+  // Checked by computed style, since innerText of an unrendered node
+  // falls back to textContent.
+  const touchHintState = async () => JSON.parse((await evaluate(`(() => {
+    const vis = (el) => !!el && getComputedStyle(el).display !== "none";
+    const card = document.querySelector(".approvals-card");
+    return JSON.stringify({
+      coarse: matchMedia("(pointer: coarse)").matches,
+      card: !!card,
+      keysHint: vis(card?.querySelector(".hint.keys")),
+      keysText: card?.querySelector(".hint.keys")?.textContent || "",
+      touchHint: vis(card?.querySelector(".hint.touch-only")),
+      touchText: card?.querySelector(".hint.touch-only")?.textContent || "",
+      kbdLabels: [...document.querySelectorAll(".approvals-card .kbd-only, .term .kbd-only")].filter(vis).length,
+      termPick: !!document.querySelector("[data-term-pick-workspace]"),
+    });
+  })()`)) || "{}");
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  // Belt and braces: an unsupported feature just gets a CDP error reply.
+  await send("Emulation.setEmulatedMedia", {
+    features: [{ name: "pointer", value: "coarse" }, { name: "hover", value: "none" }],
+  });
+  await waitFor(
+    "touch: approval card shows tap wording, no Escape / number-key hints",
+    async () => {
+      const st = await touchHintState();
+      const ok = st.coarse && st.card && !st.keysHint && st.touchHint &&
+        st.kbdLabels === 0 && !/Escape|Alt\+|j and k/.test(st.touchText) &&
+        (!termNoWorkspace || st.termPick);
+      return { ok, ...st };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await send("Emulation.setEmulatedMedia", { features: [] });
+  await send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await waitFor(
+    "desktop: approval card keeps its key hint and hides the touch line",
+    async () => {
+      const st = await touchHintState();
+      return {
+        ok: !st.coarse && st.card && st.keysHint && !st.touchHint && st.keysText.includes("Escape"),
+        ...st,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
   const singleAskDenied = await evaluate(`(() => {
     const b = [...document.querySelectorAll(".approvals-card button")].find((x) => (x.textContent || "").includes("Deny"));
     if (!b) return "no-deny";

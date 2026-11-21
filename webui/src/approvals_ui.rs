@@ -14,8 +14,8 @@ use crate::api::{get_json, patch_json, post_json, post_op};
 use crate::approvals::{
     autonomy_confirm, begin_autonomy_change, begin_session_mode, countdown_seconds,
     decision_choices, global_confirm, hint_line, is_dangerous, notes_from_envelope,
-    rule_add_confirm, rule_prefill, rule_remove_confirm, session_confirm, validate_rule_draft,
-    workspace_confirm,
+    rule_add_confirm, rule_prefill, rule_remove_confirm, session_confirm, touch_hint_line,
+    validate_rule_draft, workspace_confirm,
     Ask, AuditDocument, AuditLine, ConfirmKind, ModeChange, PendingConfirm, PermNote, RuleRecord,
     RulesDocument, SettingsBits,
 };
@@ -1152,6 +1152,7 @@ fn ApprovalCard(
     let show_work_dir = !work_dir_line.is_empty();
     let choices = decision_choices(&ask);
     let hint = hint_line(&choices);
+    let touch_hint = touch_hint_line(&choices);
     let consequences: Vec<(&'static str, String)> = choices
         .iter()
         .map(|choice| (choice.label, ask.consequence(choice.id)))
@@ -1198,7 +1199,8 @@ fn ApprovalCard(
             <Show when=move || { seconds.get() > 0 }>
                 <p class="approvals-count">{move || format!("Allows once in {}s unless you choose.", left.get())}</p>
             </Show>
-            <p class="hint">{hint}</p>
+            <p class="hint keys">{hint}</p>
+            <p class="hint touch-only">{touch_hint}</p>
             <ul class="approvals-scopes">
                 {consequences.into_iter().map(|(label, line)| view! {
                     <li><strong>{label}</strong>{" — "}{line}</li>
@@ -1207,12 +1209,14 @@ fn ApprovalCard(
             <div class="approvals-actions">
                 {choices.iter().map(|choice| {
                     let id = choice.id.to_string();
-                    let label = format!("{} ({})", choice.label, choice.key);
+                    // The key is keyboard-only (#1946): hidden on a coarse pointer.
+                    let label = choice.label;
+                    let key = format!(" ({})", choice.key);
                     let class = if choice.id == "reject" { "danger" } else { "secondary" };
                     let detail = choice.detail;
                     let send = Rc::clone(&send);
                     view! {
-                        <button type="button" class=class title=detail on:click=move |_| send(id.clone())>{label}</button>
+                        <button type="button" class=class title=detail on:click=move |_| send(id.clone())>{label}<span class="kbd-only">{key}</span></button>
                     }
                 }).collect_view()}
             </div>

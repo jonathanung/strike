@@ -502,6 +502,18 @@ pub fn hint_line(choices: &[DecisionChoice]) -> String {
     parts.join(", ")
 }
 
+/// The touch twin of [`hint_line`] (#1946): a coarse pointer has no number
+/// keys or Escape, so the card names the buttons instead, e.g. "Tap Allow
+/// once, Allow session, Allow project, or Deny."
+pub fn touch_hint_line(choices: &[DecisionChoice]) -> String {
+    let labels: Vec<&str> = choices.iter().map(|c| c.label).collect();
+    match labels.split_last() {
+        None => String::new(),
+        Some((last, [])) => format!("Tap {last}."),
+        Some((last, rest)) => format!("Tap {}, or {last}.", rest.join(", ")),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuditLine {
     pub time: String,
@@ -1211,6 +1223,21 @@ mod tests {
             hint_line(&decision_choices(&ask_with("bash", &["ls"]))),
             "1 allow once, 2 allow session, 3 allow project, 4 or Escape denies."
         );
+    }
+
+    #[test]
+    fn touch_hint_names_buttons_without_keys() {
+        let line = touch_hint_line(&decision_choices(&ask_with("bash", &["ls"])));
+        assert_eq!(line, "Tap Allow once, Allow session, Allow project, or Deny.");
+        assert!(!line.contains("Escape"));
+        assert!(!line.chars().any(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn touch_hint_edge_cases() {
+        assert_eq!(touch_hint_line(&[]), "");
+        let one = &decision_choices(&ask_with("bash", &["ls"]))[3..];
+        assert_eq!(touch_hint_line(one), "Tap Deny.");
     }
 
     #[test]
