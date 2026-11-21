@@ -136,7 +136,7 @@ func (s *Service) Poll(ctx context.Context, id string) (Watch, error) {
 	if len(w.Rounds) > maxRounds {
 		w.Rounds = w.Rounds[len(w.Rounds)-maxRounds:]
 	}
-	if verdict, reason, final := Evaluate(w.Checks, w.Latest, now, w.Deadline); final {
+	if verdict, reason, final := Evaluate(w.Checks, w.Rounds, w.FailureThreshold, now, w.Deadline); final {
 		w.Status = StatusDone
 		w.Verdict = verdict
 		w.Reason = reason
@@ -244,6 +244,14 @@ func normalize(in Input) (Watch, error) {
 	}
 	w.WindowSeconds = int(window / time.Second)
 	w.IntervalSeconds = int(interval / time.Second)
+	switch {
+	case in.FailureThreshold == 0:
+		w.FailureThreshold = DefaultFailureThreshold
+	case in.FailureThreshold < 1 || in.FailureThreshold > MaxFailureThreshold:
+		return Watch{}, invalid("failureThreshold must be 1-%d", MaxFailureThreshold)
+	default:
+		w.FailureThreshold = in.FailureThreshold
+	}
 	if len(in.Checks) == 0 {
 		return Watch{}, invalid("at least one check is required")
 	}
