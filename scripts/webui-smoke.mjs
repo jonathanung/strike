@@ -342,6 +342,41 @@ try {
   if (!listedText.includes("markdownFile") || !listedText.includes(".md")) {
     throw new Error(`memory list missing plain-file path body=${listedText.slice(0, 500)}`);
   }
+  // #1339: instance backup. The archive verifies, never carries the
+  // seeded credential, names its exclusions, and a dry-run restore onto
+  // the same gateway skips the identical memory entry. A tampered
+  // archive is refused before anything is planned.
+  const backupRes = await fetch(`http://127.0.0.1:${port}/v1/backup/export`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const backupText = await backupRes.text();
+  if (
+    !backupRes.ok ||
+    !backupText.includes('"format":"strike.instance-backup"') ||
+    backupText.includes(secret) ||
+    !backupText.includes("provider credentials") ||
+    !(backupRes.headers.get("content-disposition") || "").includes("strike-backup.json")
+  ) {
+    throw new Error(`backup export check failed status=${backupRes.status} body=${backupText.slice(0, 400)}`);
+  }
+  const backupPlan = await fetch(`http://127.0.0.1:${port}/v1/backup/restore?dryRun=1`, {
+    method: "POST",
+    headers: auth,
+    body: backupText,
+  });
+  const backupPlanBody = await backupPlan.json().catch(() => ({}));
+  if (!backupPlan.ok || backupPlanBody.dryRun !== true || !(backupPlanBody.counts?.memory?.skip >= 1)) {
+    throw new Error(`backup dry-run check failed status=${backupPlan.status} body=${JSON.stringify(backupPlanBody).slice(0, 400)}`);
+  }
+  const backupTampered = await fetch(`http://127.0.0.1:${port}/v1/backup/restore?dryRun=1`, {
+    method: "POST",
+    headers: auth,
+    body: backupText.replace("smoke likes plain files", "smoke likes tampering"),
+  });
+  const backupTamperedText = await backupTampered.text();
+  if (backupTampered.status !== 400 || !backupTamperedText.includes("integrity check")) {
+    throw new Error(`backup tamper check failed status=${backupTampered.status} body=${backupTamperedText.slice(0, 300)}`);
+  }
   // Seed one knowledge pin for the Knowledge search check (#1469).
   const putPin = await fetch(`http://127.0.0.1:${port}/v1/knowledge`, {
     method: "PUT",
@@ -432,6 +467,36 @@ try {
     envLine("user.message", "2026-10-26T06:10:00Z", { text: "quick follow up" }) +
     envLine("text.delta", "2026-10-26T06:10:10Z", { text: "fast answer" }) +
     envLine("turn.completed", "2026-10-26T06:10:20Z", { stopReason: "end_turn" }) +
+    // Compaction visibility (#1359): markers between turns (outside any
+    // turn, so the elapsed check is unchanged), plus one schema-rejected
+    // compaction.completed that must degrade to a title-only marker.
+    envLine("context.fit_warning", "2026-10-26T06:15:00Z", {
+      estimatedTokens: 180000,
+      contextLimit: 200000,
+      level: "warn",
+      message: "context is getting full",
+    }) +
+    envLine("compaction.started", "2026-10-26T06:15:01Z", { reason: "threshold", strategy: "summarize" }) +
+    envLine("compaction.completed", "2026-10-26T06:15:02Z", {
+      reason: "threshold",
+      strategy: "summarize",
+      removed: 6,
+      kept: 2,
+      summary: "Earlier the slow replay ran sleep 180.",
+      residue: { schemaVersion: "1", facts: [{ id: "f1", kind: "fact", text: "bash slept for 180s" }] },
+    }) +
+    envLine("session.budget_warning", "2026-10-26T06:15:03Z", {
+      level: "80",
+      kind: "cost_usd",
+      costUsd: 4,
+      maxCostUsd: 5,
+      ratio: 0.8,
+      message: "80% of session budget",
+    }) +
+    // `removed: null` is valid for the daemon's Go decoder (resume must
+    // still work) but rejected by the cockpit's generated schema, so it
+    // exercises the minimal-marker degradation path.
+    envLine("compaction.completed", "2026-10-26T06:15:04Z", { reason: "manual", removed: null }) +
     envLine("user.message", "2026-10-26T06:20:00Z", { text: "old log turn" }) +
     envLine("tool.begin", null, { callId: "c9", name: "bash", args: { command: "sleep 240" } }) +
     envLine("tool.end", "2026-10-26T06:24:00Z", { callId: "c9", name: "bash", output: "done" }) +
@@ -1823,6 +1888,67 @@ try {
   await waitUntil(
     `document.body.innerText.includes("diagnostic bundle downloaded")`,
     "diag download success confirmation",
+  );
+  // #1493: Config sources lists the daemon's GET /v1/config-sources rows in
+  // daemon order, read-only. Global rows do not depend on the session root,
+  // so every one must render, in the same order, with the same exists flag.
+  {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/config-sources`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status !== 200) throw new Error(`config-sources HTTP ${res.status}`);
+    const wire = (await res.json()).sources || [];
+    const globals = wire.filter((s) => s.scope === "global");
+    const main = globals.find((s) => s.slot === "config");
+    if (!main || main.exists !== true) {
+      throw new Error(`smoke seeds ~/.strike/config, so the global main config must exist: ${JSON.stringify(wire).slice(0, 600)}`);
+    }
+    const want = JSON.stringify(globals.map((s) => [s.display, String(!!s.exists)]));
+    await waitUntil(
+      `(() => {
+        const want = ${JSON.stringify(want)};
+        const rows = [...document.querySelectorAll('[data-config-sources] li.config-source')]
+          .map((li) => [li.getAttribute("data-config-source"), li.getAttribute("data-exists")]);
+        const globals = JSON.parse(want);
+        let at = 0;
+        for (const g of globals) {
+          const i = rows.findIndex((r, k) => k >= at && r[0] === g[0] && r[1] === g[1]);
+          if (i < 0) return JSON.stringify({ missing: g, rows });
+          at = i + 1;
+        }
+        const text = document.querySelector("[data-config-sources]")?.innerText || "";
+        return text.includes("Main config") && text.includes("Global") && !document.querySelector("[data-config-sources-unavailable]");
+      })()`,
+      "config sources render the daemon's global rows in order",
+    );
+  }
+  // #1339: Settings > Backup. Export downloads the archive; restore reads
+  // a chosen file and previews the plan without writing anything.
+  await waitUntil(
+    `!!document.querySelector('[data-action="backup-export"]') && !document.querySelector('[data-action="backup-export"]').disabled`,
+    "backup export control",
+  );
+  await evaluate(`document.querySelector('[data-action="backup-export"]').click()`);
+  await waitUntil(
+    `!!document.querySelector('[data-backup-export-status]') && document.body.innerText.includes("Downloaded strike-backup.json")`,
+    "backup export confirmation",
+  );
+  await evaluate(`(() => {
+    const input = document.querySelector('[data-action="backup-restore-file"]');
+    const dt = new DataTransfer();
+    dt.items.add(new File([${JSON.stringify(backupText)}], "strike-backup.json", { type: "application/json" }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  await waitUntil(
+    `!!document.querySelector('[data-action="backup-restore-preview"]') && !document.querySelector('[data-action="backup-restore-preview"]').disabled`,
+    "backup restore file read",
+  );
+  await evaluate(`document.querySelector('[data-action="backup-restore-preview"]').click()`);
+  await waitUntil(
+    `!!document.querySelector('[data-backup-report="preview"]') && document.body.innerText.includes("Restore preview") && document.body.innerText.includes("memory:")`,
+    "backup restore preview",
   );
   await evaluate(`document.querySelector('input[data-choice="lg"]').click()`);
   await evaluate(`document.querySelector('input[data-choice="compact"]').click()`);
@@ -4083,6 +4209,138 @@ try {
       await rm(join(process.cwd(), stashFile), { force: true });
     }
   }
+  // Review queue (#1324): seed two separate edits in a tracked file,
+  // accept nothing, reject the first hunk (two taps: Reject, then
+  // "Revert this hunk?") and require it reverted on disk, comment on the
+  // second hunk, then Send review and require exactly one transcript
+  // turn labelled "Review". Runs only when the seed file is unmodified
+  // so a developer's own edits are never touched; restored in finally.
+  const reviewSeed = join(process.cwd(), "AGENTS.md");
+  const reviewOriginal = await readFile(reviewSeed, "utf8");
+  const reviewStatus = await gitStatusPaths();
+  if (reviewStatus.unstaged.includes("AGENTS.md") || reviewStatus.staged.includes("AGENTS.md")) {
+    console.log("review queue smoke: skipped (AGENTS.md already modified)");
+  } else {
+    try {
+      const seeded = reviewOriginal.split("\n");
+      seeded[0] = "# strike-cli (smoke-review-first-1324)";
+      seeded.push("smoke-review-second-1324");
+      await writeFile(reviewSeed, seeded.join("\n"));
+      await clickSideTab("Review", "Review queue");
+      const reviewProbe = async () => {
+        const raw = await evaluate(`(() => {
+          const file = document.querySelector('[data-rq-file="AGENTS.md"]');
+          const hunks = file ? [...file.querySelectorAll("[data-rq-hunk]")] : [];
+          const send = document.querySelector(".rq-send-btn");
+          return JSON.stringify({
+            hunks: hunks.length,
+            first: hunks[0] ? hunks[0].textContent.includes("smoke-review-first-1324") : false,
+            summary: (document.querySelector("[data-rq-summary]") || {}).textContent || "",
+            sendDisabled: send ? send.disabled : null,
+            note: (document.querySelector(".rq-note") || {}).textContent || "",
+          });
+        })()`);
+        return JSON.parse(raw || "{}");
+      };
+      const reviewClick = async (expr, label) => {
+        await waitFor(
+          label,
+          async () => {
+            const v = await evaluate(`(() => { const b = ${expr}; if (!b) return "missing"; if (b.disabled) return "disabled"; b.click(); return "clicked"; })()`);
+            return { ok: v === "clicked", v };
+          },
+          { timeout: WAIT_MS, interval: 250 },
+        );
+      };
+      await waitFor(
+        "review queue lists two AGENTS.md hunks, send disabled",
+        async () => {
+          const p = await reviewProbe();
+          return { ok: p.hunks === 2 && p.first && p.sendDisabled === true && p.summary.includes("0 comments"), ...p };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      const firstHunk = `document.querySelector('[data-rq-file="AGENTS.md"] [data-rq-hunk] .rq-reject')`;
+      await reviewClick(firstHunk, "review reject (first tap)");
+      await waitFor(
+        "review reject asks for confirmation",
+        async () => {
+          const label = await evaluate(`(${firstHunk} || {}).textContent || ""`);
+          return { ok: String(label).includes("Revert this hunk?"), label };
+        },
+        { timeout: STEP_MS, interval: 200 },
+      );
+      await reviewClick(firstHunk, "review reject (confirm)");
+      await waitFor(
+        "rejected hunk reverted on disk and listed",
+        async () => {
+          const disk = await readFile(reviewSeed, "utf8");
+          const p = await reviewProbe();
+          return {
+            ok: !disk.includes("smoke-review-first-1324") && disk.includes("smoke-review-second-1324") && p.hunks === 1 && p.summary.includes("1 rejected hunk"),
+            ...p,
+          };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      await reviewClick(`document.querySelector('[data-rq-file="AGENTS.md"] .rq-comment-open')`, "review comment open");
+      await waitFor(
+        "review comment composer opens with a line range",
+        async () => {
+          const v = await evaluate(`(() => {
+            const ta = document.querySelector(".rq-composer textarea");
+            const start = document.querySelector('.rq-composer input[aria-label="Start line"]');
+            if (!ta || !start || !start.value) return "missing";
+            ta.value = "smoke review comment 1324";
+            ta.dispatchEvent(new Event("input", { bubbles: true }));
+            return "typed";
+          })()`);
+          return { ok: v === "typed", v };
+        },
+        { timeout: STEP_MS, interval: 200 },
+      );
+      await reviewClick(`document.querySelector(".rq-composer .rq-save")`, "review add comment");
+      await waitFor(
+        "review comment listed and send enabled",
+        async () => {
+          const p = await reviewProbe();
+          const listed = await evaluate(`[...document.querySelectorAll(".rq-comment")].some((c) => c.textContent.includes("smoke review comment 1324"))`);
+          return { ok: listed === true && p.summary.includes("1 comment") && p.sendDisabled === false, listed, ...p };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      const reviewTurns = async () =>
+        Number(
+          await evaluate(
+            `[...document.querySelectorAll('article[data-role="you"] .sx-who')].filter((e) => (e.textContent || "").trim() === "Review").length`,
+          ),
+        );
+      const turnsBefore = await reviewTurns();
+      await reviewClick(`document.querySelector(".rq-send-btn")`, "review send");
+      await waitFor(
+        "review arrives as one transcript turn labelled Review and the queue clears",
+        async () => {
+          const turns = await reviewTurns();
+          const p = await reviewProbe();
+          return { ok: turns === turnsBefore + 1 && p.summary.includes("0 comments · 0 rejected hunks"), turns, turnsBefore, ...p };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      // Let the echo turn the review started finish before later sections.
+      await waitFor(
+        "review turn completes",
+        async () => {
+          const res = await fetch(`http://127.0.0.1:${port}/v1/review`, { headers: { Authorization: `Bearer ${token}` } });
+          const body = res.ok ? await res.json() : {};
+          return { ok: res.ok && body.busy === false, status: res.status, busy: body.busy };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+    } finally {
+      await writeFile(reviewSeed, reviewOriginal);
+    }
+    await clickSideTab("Git", "Staged");
+  }
   await waitUntil(`(() => {
     if ((document.body.innerText || "").includes("session.childIsolation")) return true;
     const cmd = document.querySelector('[data-command-id="panel-worktrees"]');
@@ -4144,6 +4402,116 @@ try {
     },
     { timeout: STEP_MS, interval: 250 },
   );
+  // Search in files (#1406): seed a fixture dir under the daemon's work
+  // dir, search from the Files-pane box, and check: matches grouped by
+  // file with marked text, the no-results state, the capped state (per-
+  // file cap of 20), and click-to-line landing in the document viewer.
+  // Needles are built at runtime so this script's own source never
+  // matches. DOM probes use textContent so the layout cannot hide them.
+  const sifDir = join(process.cwd(), "smoke-search-in-files");
+  const sifTag = Date.now().toString(36);
+  const sifNeedle = ["sif", "needle", sifTag].join("");
+  const sifCap = ["sif", "cap", sifTag].join("");
+  await rm(sifDir, { recursive: true, force: true });
+  await mkdir(sifDir, { recursive: true });
+  try {
+    await writeFile(join(sifDir, "alpha.txt"), `one\ntwo\nfind ${sifNeedle.toUpperCase()} here\n`);
+    await writeFile(
+      join(sifDir, "beta.txt"),
+      `${sifNeedle} top\nb2\nb3\nb4\nb5\nb6\nagain ${sifNeedle} below\n`,
+    );
+    await writeFile(
+      join(sifDir, "capped.txt"),
+      Array.from({ length: 25 }, (_, i) => `${sifCap} ${i + 1}`).join("\n") + "\n",
+    );
+    const sifTab = await evaluate(`(() => {
+      const btn = [...document.querySelectorAll(".side-tabs button")].find((b) => (b.textContent || "").includes("Files"));
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+    if (sifTab !== "clicked") {
+      throw new Error(`search-in-files: Files side tab ${sifTab}\n${await diagnostics()}`);
+    }
+    // Fill the box and press Enter. Re-sent on each poll until the
+    // expected state shows, which also rides out the daemon's 2s file
+    // index cache right after the fixture was written.
+    const sifSearch = (q) =>
+      evaluate(`(() => {
+        const input = document.querySelector("[data-search-in-files]");
+        if (!input) return "missing";
+        const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+        proto.set.call(input, ${JSON.stringify(q)});
+        input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "sent";
+      })()`);
+    const sifState = `(() => {
+      const files = [...document.querySelectorAll("[data-sif-file]")].map((el) => el.getAttribute("data-sif-file"));
+      const hits = [...document.querySelectorAll(".sif-hit")].map((b) => b.getAttribute("data-sif-path") + ":" + b.getAttribute("data-sif-line"));
+      const summary = document.querySelector(".sif-summary");
+      return {
+        files,
+        hits,
+        marks: document.querySelectorAll(".sif-hit mark.tf-mark").length,
+        summary: summary ? summary.textContent || "" : "",
+        capped: summary ? summary.getAttribute("data-sif-capped") : "",
+      };
+    })()`;
+    const sifWait = (label, q, ok) =>
+      waitFor(
+        label,
+        async () => {
+          const v = await evaluate(sifState);
+          if (ok(v)) return { ok: true, ...v };
+          const sent = await sifSearch(q);
+          return { ok: false, sent, ...v };
+        },
+        { timeout: WAIT_MS, interval: 750 },
+      );
+    const rel = (name) => `smoke-search-in-files/${name}`;
+    await sifWait("search-in-files: matches grouped by file", sifNeedle, (v) =>
+      v.files.length === 2 &&
+      v.files.includes(rel("alpha.txt")) &&
+      v.files.includes(rel("beta.txt")) &&
+      v.hits.join(",") === [rel("alpha.txt") + ":3", rel("beta.txt") + ":1", rel("beta.txt") + ":7"].join(",") &&
+      v.marks === 3 &&
+      v.capped === "false",
+    );
+    await sifWait("search-in-files: no-results state", `${sifNeedle}-absent`, (v) =>
+      v.hits.length === 0 && v.summary.startsWith("No matches for") && v.capped === "false",
+    );
+    await sifWait("search-in-files: capped state", sifCap, (v) =>
+      v.hits.length === 20 && v.capped === "true" && v.summary.includes("results are partial"),
+    );
+    await sifWait("search-in-files: results again for click-to-line", sifNeedle, (v) => v.hits.length === 3);
+    const sifClicked = await evaluate(`(() => {
+      const b = document.querySelector('.sif-hit[data-sif-path=${JSON.stringify(rel("beta.txt"))}][data-sif-line="7"]');
+      if (!b) return "missing";
+      b.click();
+      return "clicked";
+    })()`);
+    if (sifClicked !== "clicked") {
+      throw new Error(`search-in-files: result button ${sifClicked}`);
+    }
+    await waitFor(
+      "search-in-files: document viewer opened the file at the line",
+      async () => {
+        const v = await evaluate(`(() => {
+          const doc = document.querySelector('[data-ev-root="open"]');
+          return {
+            path: doc ? doc.getAttribute("data-ev-path") || "" : "",
+            lines: doc ? doc.querySelectorAll(".ev-line").length : 0,
+            text: doc ? (doc.textContent || "").includes(${JSON.stringify(`again ${sifNeedle} below`)}) : false,
+          };
+        })()`);
+        return { ok: v.path.endsWith("beta.txt") && v.lines >= 7 && v.text, ...v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  } finally {
+    await rm(sifDir, { recursive: true, force: true });
+  }
   // Session delete (#1358): seed a session, close its root so it is
   // saved but not open, then delete it through the cockpit. Cancelling
   // the confirm must issue no request; confirming must remove it from
@@ -4721,6 +5089,50 @@ try {
         };
       })()`);
       return { ok: v.n === 1 && v.text === "took 4:12" && v.onSlow && v.body, ...v };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Compaction visibility (#1359): the replay's four valid markers render
+  // inline in order; the completed marker shows removed/kept with summary
+  // and residue in a collapsed fold. The schema-rejected payload must not
+  // break the transcript (everything after it still renders); if the
+  // daemon delivers it, it shows as a title-only marker. (Observed in CI:
+  // the daemon path did not deliver that line, so the minimal-marker
+  // rendering itself is covered by the Rust unit tests.)
+  await waitFor(
+    "compaction and budget markers in the replayed transcript",
+    async () => {
+      const v = await evaluate(`(() => {
+        const marks = [...document.querySelectorAll("article[data-compaction]")];
+        const done = marks.find((m) => m.getAttribute("data-compaction") === "completed");
+        const fold = done && done.querySelector("details.sx-fold");
+        const last = marks[marks.length - 1];
+        return {
+          kinds: marks.map((m) => m.getAttribute("data-compaction")).join(","),
+          titles: marks.map((m) => (m.querySelector(".sx-who")?.textContent || "").trim()).join("|"),
+          counts: done ? done.innerText.includes("Removed 6 messages, kept 2 messages") : false,
+          foldClosed: !!fold && !fold.open,
+          foldText: fold ? fold.textContent : "",
+          budget: (marks[3]?.innerText || "").includes("$4.00 of $5.00 session cost"),
+          extra: marks.length - 4,
+          extraTitleOnly: marks.length < 5 || !last.querySelector(".sx-body"),
+          after: document.body.innerText.includes("old answer"),
+        };
+      })()`);
+      return {
+        ok:
+          v.kinds.startsWith("fit,started,completed,budget") &&
+          v.titles.startsWith("Context near limit|Compacting context|Context compacted|Budget warning") &&
+          v.extra <= 1 &&
+          v.extraTitleOnly &&
+          v.counts &&
+          v.foldClosed &&
+          v.foldText.includes("Earlier the slow replay ran sleep 180.") &&
+          v.foldText.includes("bash slept for 180s") &&
+          v.budget &&
+          v.after,
+        ...v,
+      };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
