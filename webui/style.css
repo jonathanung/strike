@@ -3163,3 +3163,11 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .files-head .hint, .changes-head .hint { margin: 0; }
 /* feature:files-refresh end */
+
+/* feature:config-sources begin */
+.config-source-list { list-style: decimal; margin: var(--space-2) 0; padding-left: var(--space-5); }
+.config-source { display: grid; gap: var(--space-1); padding: var(--space-1) 0; }
+.config-source[data-exists="false"] .name { color: var(--muted); }
+.config-source .path { overflow-wrap: anywhere; }
+.config-source .meta { color: var(--muted); font-size: var(--type-sm); }
+/* feature:config-sources end */

@@ -1663,6 +1663,39 @@ try {
     `document.body.innerText.includes("diagnostic bundle downloaded")`,
     "diag download success confirmation",
   );
+  // #1493: Config sources lists the daemon's GET /v1/config-sources rows in
+  // daemon order, read-only. Global rows do not depend on the session root,
+  // so every one must render, in the same order, with the same exists flag.
+  {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/config-sources`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status !== 200) throw new Error(`config-sources HTTP ${res.status}`);
+    const wire = (await res.json()).sources || [];
+    const globals = wire.filter((s) => s.scope === "global");
+    const main = globals.find((s) => s.slot === "config");
+    if (!main || main.exists !== true) {
+      throw new Error(`smoke seeds ~/.strike/config, so the global main config must exist: ${JSON.stringify(wire).slice(0, 600)}`);
+    }
+    const want = JSON.stringify(globals.map((s) => [s.display, String(!!s.exists)]));
+    await waitUntil(
+      `(() => {
+        const want = ${JSON.stringify(want)};
+        const rows = [...document.querySelectorAll('[data-config-sources] li.config-source')]
+          .map((li) => [li.getAttribute("data-config-source"), li.getAttribute("data-exists")]);
+        const globals = JSON.parse(want);
+        let at = 0;
+        for (const g of globals) {
+          const i = rows.findIndex((r, k) => k >= at && r[0] === g[0] && r[1] === g[1]);
+          if (i < 0) return JSON.stringify({ missing: g, rows });
+          at = i + 1;
+        }
+        const text = document.querySelector("[data-config-sources]")?.innerText || "";
+        return text.includes("Main config") && text.includes("Global") && !document.querySelector("[data-config-sources-unavailable]");
+      })()`,
+      "config sources render the daemon's global rows in order",
+    );
+  }
   await evaluate(`document.querySelector('input[data-choice="lg"]').click()`);
   await evaluate(`document.querySelector('input[data-choice="compact"]').click()`);
   await waitUntil(

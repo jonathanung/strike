@@ -16,6 +16,7 @@ mod chat_mode;
 mod clipboard;
 mod confirm;
 mod composer_triggers;
+mod config_sources;
 mod diag;
 mod draft_size;
 mod editor;
@@ -1085,6 +1086,8 @@ fn App() -> impl IntoView {
     let ledger_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // Typed config-source list (#1493), from bootstrap `configFiles`.
+    let config_files_capable = RwSignal::new(false);
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -1695,6 +1698,7 @@ fn App() -> impl IntoView {
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
                                 ledger_capable.set(boot.capabilities.ledger);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                config_files_capable.set(boot.capabilities.config_files);
                                 skills.set(boot.skills);
                                 commands.set(boot.composer_commands);
                                 if !catalog_once.get_untracked() {
@@ -4719,6 +4723,7 @@ fn App() -> impl IntoView {
                 status=status
                 diag_capable=diag_capable
                 project_init_capable=project_init_capable
+                config_files_capable=config_files_capable
                 root=active_root
                 theme=theme_id
                 scheme=scheme_id
