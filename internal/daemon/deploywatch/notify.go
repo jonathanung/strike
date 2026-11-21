@@ -108,7 +108,10 @@ func (s *Service) postVerdict(ctx context.Context, w Watch) error {
 	if w.PR > 0 {
 		errs = append(errs, s.postPR(ctx, w, text))
 	}
-	if w.SessionID != "" && s.note != nil {
+	// Only a session linked by Started (which records its posture) gets the
+	// verdict. A sessionId supplied on create has no recorded posture, and
+	// continuing it with an empty mode would reset it to plan.
+	if w.SessionID != "" && w.SessionMode != "" && s.note != nil {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), notifyTimeout)
 		defer cancel()
 		if err := s.note.PostSession(ctx, w.SessionID, w.SessionMode, "", text); err != nil {
