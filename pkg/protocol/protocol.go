@@ -392,6 +392,10 @@ type ImageAttachment struct {
 type UserInput struct {
 	Text   string            `json:"text"`
 	Images []ImageAttachment `json:"images,omitempty"`
+	// LoopID names the session /loop (e.g. "l1") whose firing produced
+	// this input (#1827). Set only by the daemon's loop registry; the HTTP
+	// server clears it on client-submitted ops. Empty for ordinary sends.
+	LoopID string `json:"loopId,omitempty"`
 }
 
 // PermissionReply resolves a pending PermissionAsked event.
@@ -1282,6 +1286,9 @@ type UserMessage struct {
 	Correlation
 	Text   string            `json:"text"`
 	Images []ImageAttachment `json:"images,omitempty"`
+	// LoopID carries UserInput.LoopID into the transcript and the session
+	// log so live and replayed views can mark /loop firings (#1827).
+	LoopID string `json:"loopId,omitempty"`
 }
 
 // SessionTitled records the human-readable session title. Emitted once when

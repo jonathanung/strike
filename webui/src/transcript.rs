@@ -543,13 +543,16 @@ impl Transcript {
                 // #1324: a review-queue turn is labelled as a review, not
                 // shown as if the operator had typed it.
                 let review = crate::review_queue::is_review_turn(&text);
+                // #1827: a /loop firing is badged with its loop id so it
+                // does not read as something the operator typed.
+                let loop_badge = loop_badge(&field_str(&data, "loopId"));
                 let (ack_text, ack_shown) = (text.clone(), shown.clone());
                 let id = self.push(Message {
                     id: 0,
                     role: Role::You,
                     title: if review { "Review".into() } else { "You".into() },
                     body: shown.clone(),
-                    badge: if review { "review".into() } else { String::new() },
+                    badge: if review { "review".into() } else { loop_badge },
                     detail: String::new(),
                     key: String::new(),
                     call_id: String::new(),
@@ -2462,6 +2465,24 @@ fn args_value(data: &Value) -> Value {
     }
 }
 
+/// Badge prefix on a `/loop` firing's user line (#1827): "loop l1".
+pub const LOOP_BADGE_PREFIX: &str = "loop ";
+
+/// Badge text for a `user.message` `loopId`; empty for ordinary sends.
+fn loop_badge(loop_id: &str) -> String {
+    let id = loop_id.trim();
+    if id.is_empty() {
+        String::new()
+    } else {
+        format!("{LOOP_BADGE_PREFIX}{}", clip(id, 16))
+    }
+}
+
+/// The loop id a badge names, when it is a `/loop` firing badge.
+pub fn loop_badge_id(badge: &str) -> Option<&str> {
+    badge.strip_prefix(LOOP_BADGE_PREFIX).filter(|id| !id.is_empty())
+}
+
 fn field_str(data: &Value, key: &str) -> String {
     match data.get(key) {
         Some(Value::String(s)) => s.clone(),
@@ -2511,6 +2532,33 @@ pub fn provider_auth_headline(provider: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loop_firing_user_line_carries_loop_badge() {
+        // #1827: live and replayed lines are the same envelope shape.
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "check ci", "loopId": "l1"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({"stopReason": "end_turn"})));
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "hello"})));
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "blank", "loopId": "  "})));
+        let you: Vec<(String, String)> = t
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::You)
+            .map(|m| (m.body.clone(), m.badge.clone()))
+            .collect();
+        assert_eq!(
+            you,
+            vec![
+                ("check ci".to_string(), "loop l1".to_string()),
+                ("hello".to_string(), String::new()),
+                ("blank".to_string(), String::new()),
+            ]
+        );
+        assert_eq!(loop_badge_id("loop l1"), Some("l1"));
+        assert_eq!(loop_badge_id("review"), None);
+        assert_eq!(loop_badge_id("loop "), None);
+    }
 
     fn notices(t: &Transcript) -> Vec<(String, String)> {
         t.messages
