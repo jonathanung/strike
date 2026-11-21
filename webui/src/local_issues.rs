@@ -354,7 +354,7 @@ pub fn LocalIssuesPanel(
             <form class="storage-form" data-issues-form="true"
                 on:submit=move |ev| { ev.prevent_default(); create(); }>
                 <label class="grow">"Title"
-                    <input type="text" data-issues-title="true" maxlength="300"
+                    <input type="text" data-issues-title="true"
                         prop:value=move || title_in.get()
                         on:input=move |ev| title_in.set(event_target_value(&ev)) />
                 </label>
