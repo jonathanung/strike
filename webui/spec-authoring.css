@@ -1,0 +1,61 @@
+/* feature:spec-authoring begin */
+.spec-authoring {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-3);
+}
+.spec-list, .spec-main {
+  min-height: 0;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+.spec-main { display: flex; flex-direction: column; gap: var(--space-2); }
+.spec-create { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-3); }
+.spec-create label, .spec-req label, .spec-task label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: var(--type-sm); }
+.spec-create input, .spec-req input, .spec-req textarea, .spec-task input, .spec-task textarea, .spec-design {
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  min-height: var(--control);
+  color: var(--ink);
+}
+.spec-design { width: 100%; min-height: 240px; resize: vertical; font-family: var(--mono, monospace); font-size: var(--type-sm); }
+.spec-tabs { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.spec-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  color: var(--ink);
+}
+.spec-tab.on { border-color: var(--accent); }
+.spec-status { font-size: var(--type-sm); color: var(--muted); }
+.spec-status.approved { color: var(--success); }
+.spec-status.review { color: var(--warning); }
+.spec-reqs, .spec-tasks { display: flex; flex-direction: column; gap: var(--space-2); }
+.spec-req, .spec-task {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+}
+.spec-id { margin: 0; font-weight: 650; color: var(--ink); }
+.spec-lint { margin: 0; color: var(--warning); font-size: var(--type-sm); }
+.spec-coverage { margin: 0; font-weight: 650; }
+@media (max-width: 860px) {
+  .spec-authoring { grid-template-columns: 1fr; overflow: auto; }
+  .spec-list, .spec-main { overflow: visible; }
+}
+/* feature:spec-authoring end */

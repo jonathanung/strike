@@ -312,10 +312,17 @@ pub struct Transcript {
     /// `sessionId` of the turn in progress (from `turn.started`), so a
     /// child session's streams are not counted on the parent's turn.
     turn_session: String,
+    /// Opt-in reasoning (#1372), kept out of `messages` entirely; the
+    /// pane renders it only while its per-session toggle is on.
+    pub reasoning: crate::reasoning::ReasoningLog,
     /// Per-turn verification badges (#1373), keyed like `turn_elapsed` by
     /// the turn's final message id. Only turns whose `turn.completed`
     /// carried a verification report get an entry.
     pub turn_verify: HashMap<u32, crate::turn_verify::TurnVerify>,
+    /// Per-turn file-change summaries (#1365), keyed like `turn_elapsed`
+    /// by the turn's final message id. Only turns whose `turn.completed`
+    /// listed changed files get an entry.
+    pub turn_files: HashMap<u32, crate::turn_files::TurnFiles>,
     /// Steer acknowledgement markers (#1343), keyed by message id.
     pub steer_acks: crate::steer_ack::SteerAcks,
     /// Live `tool.output` tails (#1374), keyed by the tool card's message
@@ -348,7 +355,9 @@ impl Transcript {
             turn_usage: HashMap::new(),
             usage_acc: crate::turn_usage::TurnUsage::default(),
             turn_session: String::new(),
+            reasoning: crate::reasoning::ReasoningLog::default(),
             turn_verify: HashMap::new(),
+            turn_files: HashMap::new(),
             steer_acks: crate::steer_ack::SteerAcks::default(),
             tool_tails: HashMap::new(),
         }
@@ -358,6 +367,12 @@ impl Transcript {
     /// line of a completed turn whose payload carried a report (#1373).
     pub fn verify_for(&self, id: u32) -> Option<&crate::turn_verify::TurnVerify> {
         self.turn_verify.get(&id)
+    }
+
+    /// The file-change summary stamped on this message, if it is the final
+    /// line of a completed turn that changed files (#1365).
+    pub fn files_for(&self, id: u32) -> Option<&crate::turn_files::TurnFiles> {
+        self.turn_files.get(&id)
     }
 
     /// The live output tail of tool card `id`, while it has one (#1374).
@@ -522,6 +537,7 @@ impl Transcript {
             "user.message" => {
                 self.assistant_open = false;
                 self.trigger_note.clear();
+                self.attach_reasoning_to_last();
                 let text = field_str(&data, "text");
                 let shown = display_user_text(&strip_echo_progress(&text));
                 // #1324: a review-queue turn is labelled as a review, not
@@ -557,6 +573,18 @@ impl Transcript {
                 self.steer_acks.on_steered(&self.messages, &text, &mode);
             }
             "session.titled" => self.note_titled(&field_str(&data, "title")),
+            "session.rewound" => {
+                // #1361: the engine dropped the last root user turn
+                // (`rewind` op, TUI /rewind, or edit & resend). The
+                // transcript drops the same rows so live and replayed
+                // views read as if that turn was never sent. Child
+                // lineage rewinds do not touch the root transcript.
+                let child = !field_str(&data, "parentSessionId").is_empty()
+                    || data.get("depth").and_then(|d| d.as_i64()).unwrap_or(0) > 0;
+                if !child {
+                    self.drop_last_user_turn();
+                }
+            }
             "turn.started" => {
                 self.assistant_open = false;
                 // A new turn starting means every earlier turn has ended:
@@ -569,7 +597,15 @@ impl Transcript {
                 self.turn_session = field_str(&data, "sessionId");
             }
             "usage.reported" => self.usage_acc.absorb(&data, &self.turn_session),
-            "reasoning.delta" => {}
+            "reasoning.delta" => {
+                // #1372: recorded off-transcript; another session's
+                // stream (a child's) is not this turn's reasoning.
+                let session = field_str(&data, "sessionId");
+                if !self.turn_session.is_empty() && !session.is_empty() && session != self.turn_session {
+                    return;
+                }
+                self.reasoning.push_delta(&field_str(&data, "text"));
+            }
             "text.delta" => {
                 let chunk = field_str(&data, "text");
                 if chunk.is_empty() {
@@ -582,6 +618,8 @@ impl Transcript {
                             last.body = strip_echo_progress(&last.body);
                             last.copy_text = last.body.clone();
                             last.chips = chips_in(&last.body);
+                            let id = last.id;
+                            self.reasoning.attach_live(id);
                             return;
                         }
                     }
@@ -611,11 +649,13 @@ impl Transcript {
             }
             "turn.completed" => {
                 self.assistant_open = false;
+                self.attach_reasoning_to_last();
                 self.sweep_orphaned_at_turn_end(&field_str(&data, "turnId"));
                 self.absorb();
                 let usage = std::mem::take(&mut self.usage_acc);
                 let verify = crate::turn_verify::turn_verify(&data);
-                self.stamp_turn(at_ms, usage, verify);
+                let files = crate::turn_files::turn_files(&data);
+                self.stamp_turn(at_ms, usage, verify, files);
                 // #1371: an abnormal stop gets its own end-of-turn line,
                 // pushed after the turn is stamped so the elapsed/usage
                 // labels and fork keep-counts stay on the turn's real
@@ -834,6 +874,31 @@ impl Transcript {
                 });
             }
             "artifact.updated" => self.artifact_updates = self.artifact_updates.wrapping_add(1),
+            "model.fallback" => {
+                // #1350: a different model continued this turn. Name both
+                // so no reply is attributed to the wrong model.
+                let (title, body) = crate::fallback::notice_text(&data);
+                self.push(Message {
+                    id: 0,
+                    role: Role::Notice,
+                    title,
+                    body,
+                    badge: "fallback".into(),
+                    detail: field_str(&data, "error"),
+                    key: String::new(),
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: String::new(),
+                    reconnect: String::new(),
+                    at_ms,
+                    attachments: Vec::new(),
+                    turn_id: field_str(&data, "turnId"),
+                });
+            }
+            "files.invalidated" => self.note_files_invalidated(&data, at_ms),
             "compaction.started"
             | "compaction.completed"
             | "context.fit_warning"
@@ -1107,12 +1172,116 @@ impl Transcript {
             .unwrap_or_default()
     }
 
+    /// `files.invalidated` (#1380): one muted notice naming the paths
+    /// (TUI wording, capped). Back-to-back invalidations extend the
+    /// previous notice instead of stacking lines; `copy_text` keeps the
+    /// full path list (one per line), which is also the merge state.
+    fn note_files_invalidated(&mut self, data: &Value, at_ms: f64) {
+        use crate::files_invalidated::{merge_paths, notice_body, paths_from, KIND};
+        let paths = paths_from(data);
+        if paths.is_empty() {
+            return;
+        }
+        if let Some(last) = self.messages.last_mut() {
+            if last.role == Role::Notice && last.key == KIND {
+                let mut all: Vec<String> = last.copy_text.lines().map(str::to_string).collect();
+                merge_paths(&mut all, &paths);
+                last.body = notice_body(&all);
+                last.copy_text = all.join("\n");
+                return;
+            }
+        }
+        self.push(Message {
+            id: 0,
+            role: Role::Notice,
+            title: "Files changed".into(),
+            body: notice_body(&paths),
+            badge: String::new(),
+            detail: String::new(),
+            key: KIND.into(),
+            call_id: String::new(),
+            diff: None,
+            chips: Vec::new(),
+            keep_events: -1,
+            retry_text: String::new(),
+            copy_text: paths.join("\n"),
+            reconnect: String::new(),
+            at_ms,
+            turn_id: String::new(),
+            attachments: Vec::new(),
+        });
+    }
+
+    /// Rows reduced to what edit & resend (#1361) needs.
+    pub fn edit_rows(&self) -> Vec<edit_resend::Row> {
+        self.messages
+            .iter()
+            .map(|m| edit_resend::Row {
+                id: m.id,
+                role: match m.role {
+                    Role::You => edit_resend::Role::You,
+                    Role::Strike => edit_resend::Role::Strike,
+                    Role::Tool => edit_resend::Role::Tool,
+                    _ => edit_resend::Role::Other,
+                },
+                file_change: m.role == Role::Tool && edit_resend::is_file_tool(&m.key),
+            })
+            .collect()
+    }
+
+    /// Id of the newest user message (the one edit & resend can edit).
+    pub fn last_user_id(&self) -> Option<u32> {
+        self.messages
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::You)
+            .map(|m| m.id)
+    }
+
+    /// Exact text of message `id` as the user sent it.
+    pub fn sent_text(&self, id: u32) -> Option<String> {
+        self.messages
+            .iter()
+            .find(|m| m.id == id && m.role == Role::You)
+            .map(|m| m.retry_text.clone())
+    }
+
+    /// Apply `session.rewound`: drop the newest user message and every
+    /// row after it. Message ids are never reused, so a cursor or fold
+    /// keyed on a dropped id simply stops matching.
+    fn drop_last_user_turn(&mut self) {
+        let Some(cut) = edit_resend::rewind_cut(&self.edit_rows()) else {
+            return;
+        };
+        for m in &self.messages[cut..] {
+            self.turn_elapsed.remove(&m.id);
+            self.turn_usage.remove(&m.id);
+        }
+        self.messages.truncate(cut);
+        self.assistant_open = false;
+        self.turn_start = None;
+        self.usage_acc = crate::turn_usage::TurnUsage::default();
+    }
+
     fn push(&mut self, mut message: Message) -> u32 {
         self.next_id += 1;
         message.id = self.next_id;
         let id = message.id;
+        // #1372: reasoning streamed before this line belongs above it.
+        // A user line opens the next turn, so it never takes reasoning.
+        if message.role != Role::You {
+            self.reasoning.attach_live(id);
+        }
         self.messages.push(message);
         id
+    }
+
+    /// Settle reasoning still streaming at a turn boundary onto the
+    /// turn's last line (#1372).
+    fn attach_reasoning_to_last(&mut self) {
+        if let Some(id) = self.messages.last().map(|m| m.id) {
+            self.reasoning.attach_live(id);
+        }
     }
 
     fn find_tool(&self, call_id: &str, name: &str) -> Option<usize> {
@@ -1240,6 +1409,7 @@ impl Transcript {
         completed_ms: f64,
         usage: crate::turn_usage::TurnUsage,
         verify: Option<crate::turn_verify::TurnVerify>,
+        files: Option<crate::turn_files::TurnFiles>,
     ) {
         let Some(id) = self.turn_start else {
             return;
@@ -1280,6 +1450,11 @@ impl Transcript {
             // payload only; no report, no badge.
             if let Some(v) = verify {
                 self.turn_verify.insert(last_id, v);
+            }
+            // File-change summary (#1365): same final line; a turn with
+            // no file changes gets no entry and renders nothing.
+            if let Some(f) = files {
+                self.turn_files.insert(last_id, f);
             }
         }
         self.turn_start = None;
@@ -2613,6 +2788,49 @@ mod tests {
     }
 
     #[test]
+    fn reasoning_attaches_around_tools_and_turn_end() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "fix it"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"sessionId": "s1"})));
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"sessionId": "s1", "text": "check the file"})));
+        assert_eq!(t.reasoning.live(), "check the file");
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "c1", "name": "read", "args": {"path": "a.rs"}}),
+        ));
+        let tool_id = t.messages.last().unwrap().id;
+        assert_eq!(t.reasoning.for_message(tool_id), Some("check the file"));
+        t.apply_envelope(&env("tool.end", serde_json::json!({"callId": "c1", "name": "read", "output": "x"})));
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"text": "now answer"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "Fixed."})));
+        let answer = t.messages.last().unwrap().clone();
+        assert_eq!(answer.role, Role::Strike);
+        assert_eq!(t.reasoning.for_message(answer.id), Some("now answer"));
+        // Mid-answer reasoning appends to the answer's own entry.
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"text": " double-check"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": " Done."})));
+        assert_eq!(t.reasoning.for_message(answer.id), Some("now answer double-check"));
+        // Trailing reasoning settles on the turn's last line at turn end.
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"text": " wrap"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        assert_eq!(t.reasoning.live(), "");
+        assert_eq!(t.reasoning.for_message(answer.id), Some("now answer double-check wrap"));
+        // A child's reasoning on this stream is not this turn's.
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"sessionId": "child", "text": "nope"})));
+        assert_eq!(t.reasoning.live(), "");
+        assert!(t.messages.iter().all(|m| !m.body.contains("check the file")));
+    }
+
+    #[test]
+    fn no_reasoning_leaves_log_empty() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "hi"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "hello"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        assert!(t.reasoning.is_empty());
+    }
+
+    #[test]
     fn provider_auth_error_renders_actionable_notice() {
         let mut t = Transcript::new();
         t.apply_envelope(&env("user.message", serde_json::json!({"text": "fix the bug"})));
@@ -3255,8 +3473,14 @@ mod tests {
             serde_json::json!({"text": " to exercise the bash tool and the permission prompt."}),
         ));
         t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        // #1372: reasoning is opt-in and quarantined — never in a
+        // message body, copy text or the markdown export; it sits in the
+        // side log, attached to the answer it preceded.
         assert!(t.messages.iter().all(|m| !m.body.contains("secret chain")));
+        assert!(t.messages.iter().all(|m| !m.copy_text.contains("secret chain")));
+        assert!(!t.to_markdown().contains("secret chain"));
         let strike = t.messages.iter().find(|m| m.role == Role::Strike).unwrap();
+        assert_eq!(t.reasoning.for_message(strike.id), Some("secret chain"));
         assert!(!strike.body.contains("Tip:"));
         assert!(strike.body.contains("You said: hello"));
         assert_eq!(strike.keep_events, 5);
@@ -3646,6 +3870,93 @@ mod tests {
         assert!(matches!(blocks[0], Block::Paragraph(_)));
     }
 
+    #[test]
+    fn files_invalidated_adds_one_muted_notice_with_tui_wording() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "edit it"})));
+        t.apply_envelope(&env(
+            "files.invalidated",
+            serde_json::json!({"paths": ["src/a.rs"], "reason": "external"}),
+        ));
+        assert_eq!(t.messages.len(), 2);
+        let notice = &t.messages[1];
+        assert_eq!(notice.role, Role::Notice);
+        assert_eq!(notice.key, crate::files_invalidated::KIND);
+        assert_eq!(notice.body, "files changed — agent will re-read: src/a.rs");
+        assert!(notice.badge.is_empty());
+    }
+
+    #[test]
+    fn files_invalidated_burst_merges_into_one_capped_notice() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "files.invalidated",
+            serde_json::json!({"paths": ["a", "b"]}),
+        ));
+        t.apply_envelope(&env(
+            "files.invalidated",
+            serde_json::json!({"paths": ["b", "c", "d", "e"]}),
+        ));
+        assert_eq!(t.messages.len(), 1, "burst must not stack notices");
+        assert_eq!(
+            t.messages[0].body,
+            "files changed — agent will re-read: a, b, c +2 more"
+        );
+        assert_eq!(t.messages[0].copy_text, "a\nb\nc\nd\ne");
+    }
+
+    #[test]
+    fn files_invalidated_after_other_lines_starts_a_new_notice() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("files.invalidated", serde_json::json!({"paths": ["a"]})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "done"})));
+        t.apply_envelope(&env("files.invalidated", serde_json::json!({"paths": ["b"]})));
+        assert_eq!(t.messages.len(), 3);
+        assert_eq!(t.messages[2].body, "files changed — agent will re-read: b");
+    }
+
+    #[test]
+    fn files_invalidated_without_paths_adds_nothing() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("files.invalidated", serde_json::json!({"paths": []})));
+        t.apply_envelope(&env("files.invalidated", serde_json::json!({"paths": [""]})));
+        assert!(t.messages.is_empty());
+    }
+
+    #[test]
+    fn session_rewound_drops_the_last_user_turn() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "first"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "one"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "secnod typo"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "two"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        let last = t.last_user_id().expect("last user");
+        assert_eq!(t.sent_text(last).as_deref(), Some("secnod typo"));
+        // A child-lineage rewind leaves the root transcript alone.
+        t.apply_envelope(&env(
+            "session.rewound",
+            serde_json::json!({"parentSessionId": "root", "depth": 1}),
+        ));
+        assert_eq!(t.messages.len(), 4);
+        t.apply_envelope(&env("session.rewound", serde_json::json!({"removed": 2})));
+        let bodies: Vec<&str> = t.messages.iter().map(|m| m.body.as_str()).collect();
+        assert_eq!(bodies, vec!["first", "one"]);
+        assert_ne!(t.last_user_id(), Some(last));
+        // The resend lands as a fresh turn after the kept history.
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "second fixed"})));
+        assert_eq!(t.messages.last().map(|m| m.body.as_str()), Some("second fixed"));
+    }
+
+    #[test]
+    fn session_rewound_on_empty_transcript_is_a_no_op() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("session.rewound", serde_json::json!({})));
+        assert!(t.messages.is_empty());
+        assert_eq!(t.last_user_id(), None);
+    }
+
     // #1373: per-turn verification badge.
     fn verify_turn(t: &mut Transcript, prompt: &str, done: Value) -> u32 {
         t.apply_envelope(&env("user.message", serde_json::json!({"text": prompt})));
@@ -3754,5 +4065,42 @@ mod tests {
         t.settle_orphaned_tools();
         assert_eq!(t.messages[0].badge, NO_RESULT_BADGE);
         assert_eq!(t.tail_for(a).unwrap().text, "last words\n");
+    }
+
+    // #1365: per-turn file-change summary.
+    fn files_turn(t: &mut Transcript, prompt: &str, done: Value) -> u32 {
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": prompt})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "answer"})));
+        let last = t.messages.last().unwrap().id;
+        t.apply_envelope(&env("turn.completed", done));
+        last
+    }
+
+    #[test]
+    fn file_summary_attaches_to_its_own_turn() {
+        let mut t = Transcript::new();
+        let a = files_turn(
+            &mut t,
+            "one",
+            serde_json::json!({"files": [
+                {"path": "a.go", "kind": "update"},
+                {"path": "b.go", "kind": "create"}
+            ]}),
+        );
+        let b = files_turn(&mut t, "two", serde_json::json!({"files": []}));
+        let c = files_turn(
+            &mut t,
+            "three",
+            serde_json::json!({"files": [{"path": "old.go", "kind": "delete"}]}),
+        );
+        assert_eq!(t.files_for(a).unwrap().label(), "2 files changed · 1 updated, 1 created");
+        assert!(t.files_for(b).is_none(), "empty files renders nothing");
+        assert_eq!(t.files_for(c).unwrap().deleted, vec!["old.go"]);
+        assert_eq!(t.turn_files.len(), 2);
+        for m in &t.messages {
+            if m.id != a && m.id != c {
+                assert!(t.files_for(m.id).is_none(), "{}", m.id);
+            }
+        }
     }
 }

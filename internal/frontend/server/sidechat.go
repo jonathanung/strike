@@ -66,6 +66,11 @@ type SideChatCompletion struct {
 	Text     string
 	Provider string
 	Model    string
+	// Usage the provider reported for this call; zero when it reported
+	// none. UsageEstimated marks a synthetic estimate (echo).
+	InputTokens    int
+	OutputTokens   int
+	UsageEstimated bool
 }
 
 // SideChatModel answers one question. Implementations must not execute tools

@@ -1,0 +1,70 @@
+/* feature:ideas-inbox begin (#1323) */
+/* Ideas inbox page and its header badge (#1926). Existing tokens only. */
+.ideas-shell {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0 8px 8px;
+  padding: 12px;
+  background: var(--surface);
+  border: var(--border-width) solid var(--border-muted);
+  border-radius: var(--radius);
+  color: var(--ink);
+}
+.ideas-shell .ideas-list { display: grid; gap: 8px; margin: 8px 0; }
+.ideas-row {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+.ideas-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+.ideas-title { overflow-wrap: anywhere; }
+.ideas-why { margin: 0; overflow-wrap: anywhere; }
+.ideas-evidence { font-size: var(--type-sm); color: var(--muted); }
+.ideas-evidence a { color: inherit; overflow-wrap: anywhere; }
+.ideas-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.ideas-muted li { display: flex; gap: 8px; align-items: baseline; }
+.ideas-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 4px 8px;
+  border: var(--border-width) solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--type-sm);
+}
+.ideas-badge .badge {
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: var(--warning);
+  color: var(--ground);
+  font-variant-numeric: tabular-nums;
+}
+.nav-slot .ideas-badge { margin: 0; white-space: nowrap; }
+.ideas-quiet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+}
+.ideas-quiet .hint { flex-basis: 100%; margin: 0; }
+@media (max-width: 480px) {
+  .ideas-shell { margin: 0; border-radius: 0; }
+  .ideas-actions button { min-height: 44px; }
+  .nav-slot .ideas-badge { min-height: 44px; }
+  .nav-slot .ideas-badge-label { display: none; }
+}
+/* feature:ideas-inbox end */

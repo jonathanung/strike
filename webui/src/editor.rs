@@ -1857,6 +1857,16 @@ pub fn MarkdownView(text: String, #[prop(optional)] outline: bool) -> impl IntoV
                     }
                 }
                 MdBlock::Paragraph(text) => view! { <p><Inlines text=text /></p> }.into_any(),
+                MdBlock::Code { lang, text } if crate::mermaid::is_mermaid(&lang) => {
+                    // Mermaid fence → diagram, code block as source/fallback (#1368).
+                    let source = text.clone();
+                    view! {
+                        <crate::mermaid::MermaidBlock source=source>
+                            <MdCodeBlock lang=lang text=text />
+                        </crate::mermaid::MermaidBlock>
+                    }
+                    .into_any()
+                }
                 MdBlock::Code { lang, text } => view! { <MdCodeBlock lang=lang text=text /> }.into_any(),
                 MdBlock::Quote(text) => view! { <blockquote><Inlines text=text /></blockquote> }.into_any(),
                 MdBlock::List(items) => view! {

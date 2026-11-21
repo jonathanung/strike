@@ -1,15 +1,16 @@
 package server
 
 // Instance backup and restore (#1339): GET /v1/backup/export streams one
-// portable archive of this gateway's sessions, memory, schedules and
-// non-secret settings; POST /v1/backup/restore validates an archive and
-// either reports what it would do (?dryRun=1) or does it.
+// portable archive of this gateway's sessions, memory, knowledge pins,
+// schedules and non-secret settings; POST /v1/backup/restore validates an
+// archive and either reports what it would do (?dryRun=1) or does it.
 //
 // Restore never overwrites silently: a record the target already has
 // byte-for-byte is skipped, a differing one is restored as a copy under a
 // " (restored)" name or a fresh id, and every decision is reported. Every
 // write goes through the owning store's own API (session.Manager,
-// host.Memory, schedule.Service, host.Settings), never raw files.
+// host.Memory, host.Knowledge, schedule.Service, host.Settings), never raw
+// files.
 
 import (
 	"errors"
@@ -40,6 +41,16 @@ type backupMemory struct {
 	Author string   `json:"author,omitempty"`
 }
 
+// backupKnowledgePin is one pinned document path. Scope is project or
+// global. The path is the pin's identity, so a pin cannot be restored as a
+// copy: a differing note on the target is kept and reported.
+type backupKnowledgePin struct {
+	Scope  string `json:"scope"`
+	Path   string `json:"path"`
+	Note   string `json:"note,omitempty"`
+	Author string `json:"author,omitempty"`
+}
+
 // backupSettings is the non-secret, non-trust slice of user defaults.
 type backupSettings struct {
 	Provider string `json:"provider,omitempty"`
@@ -55,10 +66,10 @@ var backupAlwaysExcluded = []backup.Exclusion{
 	{Category: "provider credentials (~/.strike/auth.json, API keys, OAuth tokens)", Kind: backup.ExcludeSecret, Reason: "secrets never leave the gateway; sign in again on the target"},
 	{Category: "gateway bearer tokens and pairing codes", Kind: backup.ExcludeSecret, Reason: "a backup must not grant access to the gateway it came from"},
 	{Category: "secret references and environment values (secret://env/*)", Kind: backup.ExcludeSecret, Reason: "values live in the host environment, not in Strike"},
-	{Category: "credential-shaped text inside sessions, memory and schedule prompts", Kind: backup.ExcludeSecret, Reason: "scrubbed by the same redaction as session export"},
+	{Category: "credential-shaped text inside sessions, memory, knowledge pin notes and schedule prompts", Kind: backup.ExcludeSecret, Reason: "scrubbed by the same redaction as session export"},
 	{Category: "script schedules", Kind: backup.ExcludePolicy, Reason: "commands may embed credentials and must be re-armed on the target"},
 	{Category: "permission mode and sandbox dials (global and per schedule)", Kind: backup.ExcludePolicy, Reason: "trust dials are set deliberately on each gateway, never from a file"},
-	{Category: "knowledge pins, artifacts, attachments, goals/autopilot state, workspaces and their rules, issues, plans, ledger", Kind: backup.ExcludeLater, Reason: "not covered by archive version 1"},
+	{Category: "artifacts, attachments, goals/autopilot state, workspaces and their rules, issues, plans, ledger", Kind: backup.ExcludeLater, Reason: "not covered by archive version 1"},
 }
 
 func (s *Server) handleBackupExport(w http.ResponseWriter, r *http.Request) {
@@ -146,6 +157,18 @@ func (s *Server) buildBackup(now time.Time) (*backup.Archive, error) {
 		a.Exclude("memory", backup.ExcludeUnavailable, "this gateway has no memory store")
 	}
 
+	if k := s.backupKnowledgeService(); k != nil {
+		recs, unavailable := exportBackupKnowledge(k)
+		for _, msg := range unavailable {
+			a.Exclude(msg, backup.ExcludeUnavailable, "this gateway's pins in that scope could not be read")
+		}
+		if err := a.Add(backup.SectionKnowledge, len(recs), recs); err != nil {
+			return nil, err
+		}
+	} else {
+		a.Exclude("knowledge pins", backup.ExcludeUnavailable, "this gateway has no knowledge store")
+	}
+
 	if s.opts.Schedules != nil {
 		recs := exportBackupSchedules(s.opts.Schedules.List())
 		if err := a.Add(backup.SectionSchedules, len(recs), recs); err != nil {
@@ -180,6 +203,40 @@ func (s *Server) backupMemoryService() host.Memory {
 		return nil
 	}
 	return s.opts.Services.Memory
+}
+
+func (s *Server) backupKnowledgeService() host.Knowledge {
+	if s.opts.Services == nil {
+		return nil
+	}
+	return s.opts.Services.Knowledge
+}
+
+// backupKnowledgeScopes are exported and restored in this order.
+var backupKnowledgeScopes = []string{"project", "global"}
+
+// exportBackupKnowledge lists pins in both scopes, sorted by path. A scope
+// the host does not run (no global knowledge configured) is returned in
+// unavailable for the manifest instead of failing the export.
+func exportBackupKnowledge(k host.Knowledge) (recs []backupKnowledgePin, unavailable []string) {
+	recs = []backupKnowledgePin{}
+	for _, scope := range backupKnowledgeScopes {
+		pins, err := k.List(scope)
+		if err != nil {
+			unavailable = append(unavailable, scope+" knowledge pins: "+secret.Redact(err.Error()))
+			continue
+		}
+		sort.Slice(pins, func(i, j int) bool { return pins[i].Path < pins[j].Path })
+		for _, p := range pins {
+			recs = append(recs, backupKnowledgePin{
+				Scope:  scope,
+				Path:   p.Path,
+				Note:   secret.Redact(p.Note),
+				Author: p.Author,
+			})
+		}
+	}
+	return recs, unavailable
 }
 
 func exportBackupMemory(mem host.Memory) ([]backupMemory, error) {
@@ -255,6 +312,12 @@ func (s *Server) restoreBackup(a *backup.Archive, apply bool) (*backup.Report, e
 		return nil, err
 	} else if ok {
 		s.restoreBackupMemory(rep, mem, apply)
+	}
+	var pins []backupKnowledgePin
+	if ok, err := a.Section(backup.SectionKnowledge, &pins); err != nil {
+		return nil, err
+	} else if ok {
+		s.restoreBackupKnowledge(rep, pins, apply)
 	}
 	var schedules []backupSchedule
 	if ok, err := a.Section(backup.SectionSchedules, &schedules); err != nil {
@@ -404,6 +467,84 @@ func (s *Server) restoreBackupMemory(rep *backup.Report, recs []backupMemory, ap
 		// Later records in the same archive see this write in both modes,
 		// so the dry run predicts the same copy names the restore uses.
 		cur[key] = host.MemoryEntry{Key: key, Value: rec.Value}
+		rep.Add(it)
+	}
+}
+
+// restoreBackupKnowledge pins every path the target lacks. A path already
+// pinned is skipped: with the same note it is identical, with a different
+// note the target's note is kept (the path is the identity, so there is no
+// copy to make).
+func (s *Server) restoreBackupKnowledge(rep *backup.Report, recs []backupKnowledgePin, apply bool) {
+	k := s.backupKnowledgeService()
+	existing := map[string]map[string]host.KnowledgePin{}
+	load := func(scope string) (map[string]host.KnowledgePin, error) {
+		if m, ok := existing[scope]; ok {
+			return m, nil
+		}
+		pins, err := k.List(scope)
+		if err != nil {
+			return nil, err
+		}
+		m := make(map[string]host.KnowledgePin, len(pins))
+		for _, p := range pins {
+			m[p.Path] = p
+		}
+		existing[scope] = m
+		return m, nil
+	}
+	for _, rec := range recs {
+		scope := strings.TrimSpace(rec.Scope)
+		if scope == "" {
+			scope = "project"
+		}
+		// The store trims paths on Put, so match on the trimmed path: an
+		// untrimmed archive path must not slip past the existing-pin check
+		// and replace the target's note.
+		path := strings.TrimSpace(rec.Path)
+		it := backup.Item{Section: backup.SectionKnowledge, ID: scope + ":" + path, Label: path}
+		if k == nil {
+			it.Action, it.Detail = backup.ActionFail, "this gateway has no knowledge store"
+			rep.Add(it)
+			continue
+		}
+		if scope != "project" && scope != "global" {
+			it.Action, it.Detail = backup.ActionFail, fmt.Sprintf("unknown knowledge scope %q", scope)
+			rep.Add(it)
+			continue
+		}
+		if path == "" {
+			it.Action, it.Detail = backup.ActionFail, "knowledge pin has an empty path"
+			rep.Add(it)
+			continue
+		}
+		cur, err := load(scope)
+		if err != nil {
+			it.Action, it.Detail = backup.ActionFail, secret.Redact(err.Error())
+			rep.Add(it)
+			continue
+		}
+		if have, ok := cur[path]; ok {
+			it.Action = backup.ActionSkip
+			if strings.TrimSpace(have.Note) == strings.TrimSpace(rec.Note) {
+				it.Detail = "identical"
+			} else {
+				it.Detail = "already pinned; kept this gateway's note"
+			}
+			rep.Add(it)
+			continue
+		}
+		it.Action = backup.ActionCreate
+		if apply {
+			if _, err := k.Put(scope, path, rec.Note, rec.Author); err != nil {
+				it.Action, it.Detail = backup.ActionFail, secret.Redact(err.Error())
+				rep.Add(it)
+				continue
+			}
+		}
+		// A repeated path later in the same archive is reported as a skip
+		// in both modes, so the dry run matches the restore.
+		cur[path] = host.KnowledgePin{Path: path, Note: rec.Note, Scope: scope}
 		rep.Add(it)
 	}
 }

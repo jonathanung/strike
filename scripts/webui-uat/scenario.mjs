@@ -536,6 +536,24 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     );
     if (settingsUp) {
       await shoot("settings", ["mobile", "desk768", "desk1024", "desk1440"]);
+      // #1584: Settings → Isolation renders the daemon's real posture (host
+      // mode is a supported rung), or a visible error — never an empty panel.
+      const isolation = await waitUntil(
+        `Boolean(document.querySelector('#settings-isolation .container-posture-label, #settings-isolation .banner'))`,
+        20000,
+        "isolation panel",
+      );
+      const posture = await page.evaluate(`(() => {
+        const label = document.querySelector('#settings-isolation .container-posture-label');
+        const rungs = document.querySelectorAll('#settings-isolation .container-ladder .rung.on');
+        return { label: label ? label.textContent.trim() : "", active: rungs.length };
+      })()`);
+      check(Boolean(isolation) && posture.label !== "", "Settings → Isolation did not render a posture");
+      check(posture.active === 1, `isolation ladder has ${posture.active} active rungs, want 1`);
+      if (isolation) {
+        await page.evaluate(`document.querySelector('#settings-isolation')?.scrollIntoView()`);
+        await shoot("settings-isolation", ["mobile", "desk1024", "desk1440"]);
+      }
     }
     await page.evaluate(`document.querySelector('[data-nav="primary"] button')?.click()`);
 
@@ -744,6 +762,100 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       await delay(250);
       await shoot("shell-activity", ["desk1024", "desk1440"]);
 
+      // #1573: the live child row carries a Message action (bootstrap
+      // teamControl + live team). The composer posts team.message and
+      // renders the daemon's outcome, not a local echo.
+      const msgButton = await waitUntil(
+        `Boolean(document.querySelector(".activity-row [data-team-message-open]"))`,
+        8000,
+        "Message action on the child row",
+      );
+      check(Boolean(msgButton), "child row has no Message action while teamControl is live");
+      if (msgButton) {
+        await page.evaluate(`document.querySelector(".activity-row [data-team-message-open]").click()`);
+        // The echo child ends blocked: a closed mailbox. The composer must
+        // explain that instead of offering a send the daemon would refuse.
+        const terminal = await waitUntil(
+          `document.querySelector("[data-team-message-terminal]")?.textContent || ""`,
+          4000,
+          "terminal child explanation",
+        );
+        check(/cannot receive messages/.test(String(terminal)), `blocked child composer did not explain: ${terminal}`);
+        check(
+          Boolean(await page.evaluate(`!document.querySelector(".team-message-body")`)),
+          "blocked child still offered a message form",
+        );
+        await shoot("team-message-composer", ["desk1024", "desk1440", "mobile"]);
+        await page.evaluate(`document.querySelector('[data-team-message-target="all"]')?.click()`);
+        const form = await waitUntil(
+          `Boolean(document.querySelector('[data-team-message="open"] .team-message-body'))`,
+          4000,
+          "broadcast form",
+        );
+        check(Boolean(form), "All members target did not open the broadcast form");
+        if (form) {
+          await page.evaluate(`(() => {
+            const ta = document.querySelector(".team-message-body");
+            const proto = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+            proto.set.call(ta, "uat: wrap up");
+            ta.dispatchEvent(new InputEvent("input", { bubbles: true, data: "x" }));
+            return true;
+          })()`);
+          await page.evaluate(`document.querySelector("[data-team-message-send]").click()`);
+          const outcome = await waitUntil(
+            `document.querySelector("[data-team-message-outcome]")?.textContent || ""`,
+            20000,
+            "team broadcast outcome",
+          );
+          check(Boolean(outcome), "team broadcast rendered no daemon outcome");
+          check(!/^HTTP \d+$/.test(String(outcome).trim()), `team broadcast outcome is a raw status: ${outcome}`);
+          log(`team broadcast outcome: ${outcome}`);
+          await shoot("team-message-outcome", ["desk1024"]);
+        }
+        await page.evaluate(`document.querySelector('[data-team-message="open"] .team-message-head button')?.click()`);
+        const closed = await waitUntil(
+          `!document.querySelector('[data-team-message="open"]')`,
+          4000,
+          "team message composer closed",
+        );
+        check(Boolean(closed), "team message composer did not close");
+      }
+
+      // #1379: the child row carries a decorative identity disc beside the
+      // status dot; the dot and badge are unchanged.
+      const disc = await page.evaluate(`(() => {
+        const row = [...document.querySelectorAll(".activity-row")].find((el) =>
+          el.innerText.includes(${JSON.stringify(CHILD_NAME)}) || el.innerText.includes(${JSON.stringify(CHILD_OBJECTIVE)}));
+        const d = row && row.querySelector(".task-line .identity-disc");
+        return d ? {
+          text: d.textContent,
+          tone: d.getAttribute("data-tone"),
+          hidden: d.getAttribute("aria-hidden"),
+          dot: Boolean(row.querySelector(".task-line [data-status]")),
+        } : null;
+      })()`);
+      check(Boolean(disc), "child activity row has no identity disc");
+      if (disc) {
+        check(/^[0-5]$/.test(disc.tone || ""), `identity disc tone out of range: ${JSON.stringify(disc)}`);
+        check(disc.hidden === "true", "identity disc is not aria-hidden");
+        check(disc.dot, "status dot missing beside the identity disc");
+      }
+
+      // #1381: when the daemon's /v1/team carries delegations, the
+      // Activity tab renders them as the Delegations board.
+      const teamNow = await fetch(`${baseURL}/v1/team?root=${encodeURIComponent(root)}`).then((r) => r.json());
+      const delegationIds = Object.keys(teamNow.delegations || {});
+      log(`team delegations: ${delegationIds.length}`);
+      if (delegationIds.length > 0) {
+        const board = await waitUntil(
+          `document.querySelectorAll("[data-delegation-board] .delegation-row").length >= ${delegationIds.length}`,
+          10000,
+          "delegation board rows",
+        );
+        check(Boolean(board), `daemon has ${delegationIds.length} delegation(s) but the board did not render them`);
+        await shoot("shell-delegations", ["desk1024"]);
+      }
+
       // #1375: a lead -> child message the daemon accepts is aggregated
       // into /v1/team messages and must appear in the Activity feed.
       const team = await fetch(`${baseURL}/v1/team?root=${encodeURIComponent(root)}`).then((r) => r.json());
@@ -808,6 +920,10 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       "switch back to the first session",
     );
     check(Boolean(back), "clicking the other session did not switch");
+    const sessionDiscs = await page.evaluate(
+      `[...document.querySelectorAll(".session-row")].filter((r) => r.querySelector(".identity-disc")).length`,
+    );
+    check(sessionDiscs >= 2, `expected identity discs on at least two session rows, got ${sessionDiscs}`);
     await press("ArrowLeft", 1);
     await delay(500);
     const stillHere = await page.evaluate(

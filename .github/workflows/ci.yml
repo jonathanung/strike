@@ -103,8 +103,13 @@ jobs:
           cargo test --manifest-path webui/load-guard/Cargo.toml --locked
           cargo test --manifest-path webui/md-review/Cargo.toml --locked
           cargo test --manifest-path webui/transcript-window/Cargo.toml --locked
+          cargo test --manifest-path webui/dashboard-view/Cargo.toml --locked
+          cargo test --manifest-path webui/edit-resend/Cargo.toml --locked
+          cargo test --manifest-path webui/ideas-inbox/Cargo.toml --locked
           cargo test --manifest-path webui/status-card/Cargo.toml --locked
+          cargo test --manifest-path webui/mermaid-lite/Cargo.toml --locked
           cargo test --manifest-path webui/composer-drafts/Cargo.toml --locked
+          cargo test --manifest-path webui/away-briefing/Cargo.toml --locked
           cargo test --manifest-path webui/theme-catalog/Cargo.toml --locked
           cargo test --manifest-path webui/signin-flow/Cargo.toml --locked
           cargo test --manifest-path webui/table-export/Cargo.toml --locked
