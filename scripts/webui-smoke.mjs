@@ -597,6 +597,19 @@ try {
     join(sessionsDir, "elapsed-session.meta.json"),
     JSON.stringify({ title: "Elapsed replay" }) + "\n",
   );
+  // Regenerate title (#1370) fixture: the auto-title came from the first
+  // prompt, and the conversation has since drifted.
+  await writeFile(
+    join(sessionsDir, "retitle-session.jsonl"),
+    line("fix the login bug") +
+      JSON.stringify({ type: "session.titled", time: "2026-10-26T06:00:01Z", data: { title: "fix the login bug" } }) +
+      "\n" +
+      line("split the session store into packages"),
+  );
+  await writeFile(
+    join(sessionsDir, "retitle-session.meta.json"),
+    JSON.stringify({ title: "fix the login bug" }) + "\n",
+  );
   // files.invalidated (#1380) fixture: a replayed turn with two
   // back-to-back invalidations (five distinct paths). The cockpit must
   // render ONE muted notice (merged, capped at three names) and refetch
@@ -4724,7 +4737,92 @@ try {
       await new Promise((resolve) => fixture.close(resolve));
     }
   }
+  // PR watch (#1356): link the live session to a non-GitHub PR through its
+  // meta sidecar (the host's PR capture writes the same fields). The
+  // daemon must degrade GET /v1/sessions/{id}/pr to "tracking unavailable"
+  // without running gh and with polling off, and opening the Git tab must
+  // render that chip state with no "Fix in this session" action. The PR
+  // fields are removed from the sidecar again afterwards.
+  const prHeaders = { Authorization: `Bearer ${token}` };
+  const prSessions = await (await fetch(`http://127.0.0.1:${port}/v1/sessions`, { headers: prHeaders })).json();
+  const prLiveId = prSessions.liveId || "";
+  if (!prLiveId) {
+    throw new Error(`PR watch: no live session id in /v1/sessions\n${JSON.stringify(prSessions).slice(0, 300)}`);
+  }
+  const prMetaPath = join(sessionsDir, `${prLiveId}.meta.json`);
+  const readPRMeta = async () => {
+    try {
+      return JSON.parse(await readFile(prMetaPath, "utf8"));
+    } catch {
+      return {};
+    }
+  };
+  const prGitLab = "https://gitlab.example.com/acme/widgets/-/merge_requests/7";
+  await writeFile(
+    prMetaPath,
+    JSON.stringify({ ...(await readPRMeta()), prUrl: prGitLab, prNumber: 7, prState: "open" }) + "\n",
+  );
+  const prRes = await fetch(`http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(prLiveId)}/pr`, {
+    headers: prHeaders,
+  });
+  const prBody = await prRes.json();
+  if (
+    !prRes.ok ||
+    !prBody.linked ||
+    prBody.available ||
+    prBody.poll ||
+    prBody.attention ||
+    !String(prBody.reason || "").includes("GitHub pull requests only")
+  ) {
+    throw new Error(`PR watch route: HTTP ${prRes.status} ${JSON.stringify(prBody)}`);
+  }
+  const prList = await (await fetch(`http://127.0.0.1:${port}/v1/sessions`, { headers: prHeaders })).json();
+  const prRow = (prList.sessions || []).find((s) => s.id === prLiveId);
+  if (prRow && (prRow.prUrl !== prGitLab || prRow.prNumber !== 7 || prRow.prState !== "open")) {
+    throw new Error(`PR watch: /v1/sessions row lacks PR fields: ${JSON.stringify(prRow)}`);
+  }
+  const prDraft = await fetch(
+    `http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(prLiveId)}/pr/fix-draft`,
+    { method: "POST", headers: prHeaders },
+  );
+  if (prDraft.status !== 409) {
+    throw new Error(`PR watch: fix-draft on an untracked PR should be 409, got ${prDraft.status}`);
+  }
   await clickSideTab("Git", "Staged");
+  await waitFor(
+    "PR watch chip shows tracking unavailable (data-pr-watch)",
+    async () => {
+      const raw = await evaluate(`JSON.stringify((() => {
+        const root = document.querySelector("[data-pr-watch]");
+        if (!root) return null;
+        const chip = root.querySelector("[data-pr-chip]");
+        const why = root.querySelector("[data-pr-unavailable]");
+        return {
+          tone: root.getAttribute("data-pr-tone"),
+          chip: chip ? chip.textContent : "",
+          why: why ? why.textContent : "",
+          fix: !!root.querySelector("[data-pr-fix]"),
+        };
+      })())`);
+      const got = JSON.parse(raw || "null");
+      const ok =
+        !!got &&
+        got.tone === "unavailable" &&
+        got.chip.includes("PR #7") &&
+        got.why.includes("GitHub pull requests only") &&
+        !got.fix;
+      return { ok, got };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  {
+    const meta = await readPRMeta();
+    delete meta.prUrl;
+    delete meta.prNumber;
+    delete meta.prState;
+    delete meta.prUpdatedAt;
+    await writeFile(prMetaPath, JSON.stringify(meta) + "\n");
+  }
   // Pre-push review (#1487): the preview route sizes the diff and names the
   // read-only reviewer profile, a start without confirm never spawns (400),
   // and the Git tab's "Review this branch" panel renders the same state
@@ -5965,6 +6063,65 @@ try {
     }),
     { timeout: STEP_MS, interval: 250 },
   );
+  // Regenerate title (#1370): the row action proposes a title from the
+  // drifted conversation in the shared confirm. Cancel must leave the
+  // daemon's title untouched; Confirm must store the proposal and update
+  // the list entry.
+  const retitleID = "retitle-session";
+  const retitleSel = `[data-ss-regen-id="${retitleID}"]`;
+  const savedTitle = async (id) =>
+    ((await listJSON("/v1/sessions")).sessions || []).find((s) => s.id === id)?.title || "";
+  await waitFor(
+    "regenerate title row action",
+    async () => ({ ok: (await evaluate(`!!document.querySelector(${JSON.stringify(retitleSel)})`)) === true }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await clickSel(retitleSel);
+  const proposalText = await waitFor(
+    "regenerate title proposal in the confirm",
+    async () => {
+      const t = (await dialogText()) || "";
+      return { ok: t.includes("split the session store") && t.includes("fix the login bug"), text: t };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!proposalText.text.includes("Rename to")) {
+    throw new Error(`regenerate confirm copy wrong: ${proposalText.text.slice(0, 300)}`);
+  }
+  await clickSel("[data-confirm='cancel']");
+  await waitFor(
+    "regenerate confirm to close on cancel",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === false,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if ((await savedTitle(retitleID)) !== "fix the login bug") {
+    throw new Error(`cancelled regenerate changed the title to ${await savedTitle(retitleID)}`);
+  }
+  await clickSel(retitleSel);
+  await waitFor(
+    "regenerate confirm to reopen",
+    async () => ({ ok: ((await dialogText()) || "").includes("split the session store") }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await clickSel("[data-confirm='accept']");
+  await waitFor(
+    "confirmed regenerate stores the new title and updates the row",
+    async () => {
+      const stored = await savedTitle(retitleID);
+      const row = (await evaluate(
+        `(() => { const r = document.querySelector(${JSON.stringify(rowSel(retitleID))}); return r ? r.innerText : ""; })()`,
+      )) || "";
+      return {
+        ok: stored.startsWith("split the session store") && row.includes("split the session store"),
+        stored,
+        row,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+
   const openIDs = await rootIDs();
   if (!openIDs.length) {
     throw new Error("session-delete 409 check found no open root");
@@ -7466,6 +7623,158 @@ try {
       const body = (await evaluate(`document.body ? document.body.innerText : ""`)) || "";
       return { ok: body.includes("Approval · Yolo"), body: body.slice(0, 240) };
     },
+    { timeout: STEP_MS, interval: 200 },
+  );
+
+  // Prompt library (#1357): save the draft as a named prompt (browser-
+  // local, strike.prompts), reject a malformed placeholder at save time,
+  // insert through the searchable picker with a {{variable}} fill-in
+  // form (a repeated placeholder is asked once), never auto-send, and
+  // delete behind the shared confirm.
+  const libField = async (sel, value) => {
+    const ok = await evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(sel)});
+      if (!el) return false;
+      el.focus();
+      const proto = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value");
+      proto.set.call(el, ${JSON.stringify(value)});
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
+      return el.value === ${JSON.stringify(value)};
+    })()`);
+    if (ok !== true) throw new Error(`prompt library: ${sel} did not accept ${JSON.stringify(value)}`);
+  };
+  const libClick = async (sel) => {
+    const ok = await evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (el) el.click(); return !!el; })()`);
+    if (ok !== true) throw new Error(`prompt library: ${sel} missing`);
+  };
+  const libKey = async (sel, key) =>
+    evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(sel)});
+      if (!el) return false;
+      el.focus();
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, code: ${JSON.stringify(key)}, bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+  const libPlus = async (sel) => {
+    await waitFor(
+      `composer + menu row ${sel}`,
+      async () => {
+        const has = await evaluate(`!!document.querySelector(${JSON.stringify(sel)})`);
+        if (!has) await evaluate(`document.querySelector('[data-composer-triggers="plus-button"]')?.click()`);
+        return { ok: has === true };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await libClick(sel);
+  };
+  const libStored = async () => JSON.parse((await evaluate(`localStorage.getItem("strike.prompts") || "[]"`)) || "[]");
+  const libBody = "Review {{file}} for {{concern}}, then re-read {{file}}.";
+  await setDraft(libBody);
+  await libPlus("[data-prompts-save-menu]");
+  await waitFor(
+    "save-as-prompt editor prefilled from the draft",
+    async () => {
+      const body = await evaluate(`document.querySelector("[data-prompt-body]")?.value ?? null`);
+      return { ok: body === libBody, body };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libField("[data-prompt-name]", "Smoke review");
+  await libClick("[data-prompt-save]");
+  await waitFor(
+    "prompt saved browser-locally and editor closed",
+    async () => {
+      const list = await libStored();
+      const open = await evaluate(`!!document.querySelector("[data-prompt-library]")`);
+      return { ok: !open && list.length === 1 && list[0].name === "Smoke review" && list[0].body === libBody, list, open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  // Malformed placeholder: rejected at save time, nothing stored.
+  await setDraft("fix {{file");
+  await libPlus("[data-prompts-save-menu]");
+  await waitFor(
+    "malformed-placeholder editor open",
+    async () => ({ ok: (await evaluate(`document.querySelector("[data-prompt-body]")?.value ?? null`)) === "fix {{file" }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libField("[data-prompt-name]", "Broken");
+  await libClick("[data-prompt-save]");
+  await waitFor(
+    "unclosed placeholder rejected at save time",
+    async () => {
+      const err = (await evaluate(`document.querySelector("[data-prompt-error]")?.innerText || ""`)) || "";
+      const list = await libStored();
+      return { ok: /unclosed/i.test(err) && list.length === 1, err, count: list.length };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libKey("[data-prompt-name]", "Escape");
+  await setDraft("");
+  // Picker: search, Enter, fill-in form, insert into the composer.
+  await libPlus("[data-prompts-open-menu]");
+  await waitFor(
+    "prompt library picker open",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-prompt-search]")`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libField("[data-prompt-search]", "smoke");
+  await waitFor(
+    "search filters to the saved prompt",
+    async () => {
+      const rows = await evaluate(`document.querySelectorAll("[data-prompt-row]").length`);
+      return { ok: rows === 1, rows };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libKey("[data-prompt-search]", "Enter");
+  await waitFor(
+    "fill-in form asks each placeholder once",
+    async () => {
+      const vars = JSON.parse((await evaluate(`JSON.stringify([...document.querySelectorAll("[data-prompt-var]")].map((el) => el.getAttribute("data-prompt-var")))`)) || "[]");
+      return { ok: vars.join(",") === "file,concern", vars };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libField('[data-prompt-var="file"]', "a.go");
+  await libField('[data-prompt-var="concern"]', "races");
+  await libClick("[data-prompt-fill-insert]");
+  await waitFor(
+    "filled prompt lands in the composer, not sent",
+    async () => {
+      const value = await evaluate(`document.querySelector("#composer-input")?.value ?? null`);
+      const open = await evaluate(`!!document.querySelector("[data-prompt-library]")`);
+      return { ok: !open && value === "Review a.go for races, then re-read a.go.", value, open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  // Delete with confirm.
+  await setDraft("");
+  await libPlus("[data-prompts-open-menu]");
+  await waitFor(
+    "library lists the prompt for delete",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-prompt-delete]")`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libClick("[data-prompt-delete]");
+  await waitFor(
+    "delete asks the shared confirm first",
+    async () => {
+      const open = await evaluate(`!!document.querySelector("[data-confirm='dialog']")`);
+      return { ok: open && (await libStored()).length === 1, open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libClick("[data-confirm='accept']");
+  await waitFor(
+    "prompt deleted after confirm",
+    async () => ({ ok: (await libStored()).length === 0 }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libKey("[data-prompt-search]", "Escape");
+  await waitFor(
+    "prompt library closed",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-prompt-library]")`)) === false }),
     { timeout: STEP_MS, interval: 200 },
   );
 
