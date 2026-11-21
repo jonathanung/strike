@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/persist/spec"
@@ -209,20 +210,46 @@ func (s *Server) handleSpecHandOff(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "ownerRoot is required"})
 		return
 	}
-	sp, err := st.HandOff(strings.TrimSpace(r.PathValue("name")), body.ExpectedVersion, func(title string, secs []spec.PlanSection) (string, error) {
-		sections := make([]host.PlanSection, 0, len(secs))
-		for _, sec := range secs {
-			sections = append(sections, host.PlanSection{Title: sec.Title, Body: sec.Body})
-		}
-		p, err := plans.Create(owner, title, sections)
-		if err != nil {
-			return "", err
-		}
-		return p.ID, nil
-	})
+	sp, err := st.HandOff(strings.TrimSpace(r.PathValue("name")), body.ExpectedVersion, specPlanner{plans: plans, owner: owner})
 	if err != nil {
 		writeSpecError(w, err)
 		return
 	}
 	s.writeSpec(w, http.StatusOK, sp, root)
+}
+
+// specPlanner creates hand-off plans through host.Plans and, for a retried
+// hand-off whose plan id was lost, finds the plan the interrupted attempt
+// created: same owner and title, created at or after the recorded intent.
+type specPlanner struct {
+	plans host.Plans
+	owner string
+}
+
+func (p specPlanner) Create(title string, secs []spec.PlanSection) (string, error) {
+	sections := make([]host.PlanSection, 0, len(secs))
+	for _, sec := range secs {
+		sections = append(sections, host.PlanSection{Title: sec.Title, Body: sec.Body})
+	}
+	pl, err := p.plans.Create(p.owner, title, sections)
+	if err != nil {
+		return "", err
+	}
+	return pl.ID, nil
+}
+
+func (p specPlanner) Find(title string, since time.Time) (string, error) {
+	metas, err := p.plans.List()
+	if err != nil {
+		return "", err
+	}
+	// List is newest first; the earliest match after the intent is the
+	// plan the interrupted attempt made.
+	found := ""
+	for _, m := range metas {
+		if m.OwnerRoot == p.owner && m.Title == title && !m.CreatedAt.Before(since) {
+			found = m.ID
+		}
+	}
+	return found, nil
 }

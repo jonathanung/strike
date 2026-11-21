@@ -19,6 +19,9 @@ type Store struct {
 	mu   sync.Mutex
 	root string
 	now  func() time.Time
+	// beforeSave, when set, runs before each spec.json write. Tests use it
+	// to fail the write after a plan exists; nil in production.
+	beforeSave func(Spec) error
 }
 
 // Open returns a store rooted at dir. The directory is created on first
@@ -94,6 +97,11 @@ func writeAtomic(path string, data []byte) error {
 
 // save writes spec.json plus the markdown mirrors.
 func (s *Store) save(sp Spec) error {
+	if s.beforeSave != nil {
+		if err := s.beforeSave(sp); err != nil {
+			return err
+		}
+	}
 	dir := s.dir(sp.Name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -260,11 +268,111 @@ func (s *Store) SetPhaseStatus(name, phase, status string, expected int) (Spec, 
 	})
 }
 
-// HandOff converts approved, fully covered tasks into a plan via create
-// and records the plan id. The spec is read-only afterwards. create runs
-// under the store lock so a spec hands off at most once.
-func (s *Store) HandOff(name string, expected int, create func(title string, sections []PlanSection) (string, error)) (Spec, error) {
-	return s.mutate(name, expected, func(sp *Spec) error {
+// Planner creates the plan a hand-off produces and finds one an earlier,
+// interrupted hand-off already created.
+type Planner interface {
+	// Create makes the plan and returns its id.
+	Create(title string, sections []PlanSection) (string, error)
+	// Find returns the id of a plan titled title that was created at or
+	// after since, or "" when there is none. It covers a crash between
+	// creating the plan and journaling its id.
+	Find(title string, since time.Time) (string, error)
+}
+
+// PlannerFuncs adapts two functions to Planner. A nil FindFn finds nothing.
+type PlannerFuncs struct {
+	CreateFn func(title string, sections []PlanSection) (string, error)
+	FindFn   func(title string, since time.Time) (string, error)
+}
+
+// Create calls CreateFn.
+func (p PlannerFuncs) Create(title string, sections []PlanSection) (string, error) {
+	return p.CreateFn(title, sections)
+}
+
+// Find calls FindFn, or finds nothing when it is nil.
+func (p PlannerFuncs) Find(title string, since time.Time) (string, error) {
+	if p.FindFn == nil {
+		return "", nil
+	}
+	return p.FindFn(title, since)
+}
+
+// handOffJournal is <spec>/handoff.json: the intent recorded before the
+// plan is created, then the plan id once it exists. It makes a hand-off
+// retried after a failed spec write reuse the plan instead of creating a
+// second one. Version ties it to the spec revision being handed off; an
+// edit between attempts bumps the version and voids the journal.
+type handOffJournal struct {
+	Version   int       `json:"version"`
+	StartedAt time.Time `json:"startedAt"`
+	PlanID    string    `json:"planId,omitempty"`
+}
+
+func (s *Store) journalPath(name string) string {
+	return filepath.Join(s.dir(name), "handoff.json")
+}
+
+func (s *Store) readJournal(name string) (handOffJournal, bool) {
+	data, err := os.ReadFile(s.journalPath(name))
+	if err != nil {
+		return handOffJournal{}, false
+	}
+	var j handOffJournal
+	if json.Unmarshal(data, &j) != nil {
+		return handOffJournal{}, false
+	}
+	return j, true
+}
+
+func (s *Store) writeJournal(name string, j handOffJournal) error {
+	data, err := json.Marshal(j)
+	if err != nil {
+		return err
+	}
+	return writeAtomic(s.journalPath(name), append(data, '\n'))
+}
+
+// handOffPlan returns the plan for this hand-off attempt: the journaled
+// one, one an interrupted attempt created, or a new one. Callers hold mu.
+func (s *Store) handOffPlan(sp Spec, planner Planner) (string, error) {
+	j, ok := s.readJournal(sp.Name)
+	if ok && j.Version == sp.Version {
+		if j.PlanID != "" {
+			return j.PlanID, nil
+		}
+		// Intent without an id: the plan may exist but its id was lost.
+		id, err := planner.Find(sp.Title, j.StartedAt)
+		if err != nil {
+			return "", err
+		}
+		if id != "" {
+			j.PlanID = id
+			_ = s.writeJournal(sp.Name, j)
+			return id, nil
+		}
+	}
+	j = handOffJournal{Version: sp.Version, StartedAt: s.now()}
+	if err := s.writeJournal(sp.Name, j); err != nil {
+		return "", fmt.Errorf("record hand-off intent: %w", err)
+	}
+	id, err := planner.Create(sp.Title, PlanSections(sp))
+	if err != nil {
+		_ = os.Remove(s.journalPath(sp.Name))
+		return "", err
+	}
+	j.PlanID = id
+	// Best effort: if this write fails, a retry finds the plan via Find.
+	_ = s.writeJournal(sp.Name, j)
+	return id, nil
+}
+
+// HandOff converts approved, fully covered tasks into a plan and records
+// the plan id. The spec is read-only afterwards. Planning runs under the
+// store lock so a spec hands off at most once, and a retry after a failed
+// spec write reuses the plan the failed attempt created.
+func (s *Store) HandOff(name string, expected int, planner Planner) (Spec, error) {
+	sp, err := s.mutate(name, expected, func(sp *Spec) error {
 		for _, p := range Phases {
 			if sp.Status[p] != StatusApproved {
 				return fmt.Errorf("%w: approve %s before hand-off", ErrGate, p)
@@ -277,7 +385,7 @@ func (s *Store) HandOff(name string, expected int, create func(title string, sec
 		if len(cov.UnknownRefs) > 0 {
 			return fmt.Errorf("%w: tasks cite unknown requirements: %s", ErrGate, strings.Join(cov.UnknownRefs, ", "))
 		}
-		planID, err := create(sp.Title, PlanSections(*sp))
+		planID, err := s.handOffPlan(*sp, planner)
 		if err != nil {
 			return err
 		}
@@ -286,4 +394,8 @@ func (s *Store) HandOff(name string, expected int, create func(title string, sec
 		sp.HandedOffAt = &now
 		return nil
 	})
+	if err == nil {
+		_ = os.Remove(s.journalPath(name))
+	}
+	return sp, err
 }

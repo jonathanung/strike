@@ -644,6 +644,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /v1/specs/{name}/{phase}", s.handleSpecPhaseSave)
 	s.mux.HandleFunc("POST /v1/specs/{name}/phases/{phase}", s.handleSpecPhaseStatus)
 	s.mux.HandleFunc("POST /v1/specs/{name}/handoff", s.handleSpecHandOff)
+	s.mux.HandleFunc("POST /v1/specs/{name}/requirements/draft", s.handleSpecDraftRequirements)
 	s.mux.HandleFunc("POST /v1/plans/{id}/run", s.handleTaskRunPost)
 	// Best-of-N (#1346): one prompt across 2–4 models, then adopt or keep none.
 	s.mux.HandleFunc("GET /v1/bestofn", s.handleBestOfNList)

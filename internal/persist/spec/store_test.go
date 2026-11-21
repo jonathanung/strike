@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -165,10 +166,10 @@ func TestHandOffRefusesUncoveredAndHandsOffOnce(t *testing.T) {
 	st, _ := openStore(t)
 	sp := approvedSpec(t, st, "partial", []Task{{Title: "only one", Requirements: []string{"R1"}}})
 	calls := 0
-	create := func(title string, secs []PlanSection) (string, error) {
+	create := PlannerFuncs{CreateFn: func(title string, secs []PlanSection) (string, error) {
 		calls++
 		return "plan-1", nil
-	}
+	}}
 	if _, err := st.HandOff("partial", sp.Version, create); !errors.Is(err, ErrGate) || !strings.Contains(err.Error(), "R2") {
 		t.Fatalf("uncovered hand-off err = %v", err)
 	}
@@ -182,10 +183,10 @@ func TestHandOffRefusesUncoveredAndHandsOffOnce(t *testing.T) {
 	})
 	var gotTitle string
 	var gotSecs []PlanSection
-	done, err := st.HandOff("full", full.Version, func(title string, secs []PlanSection) (string, error) {
+	done, err := st.HandOff("full", full.Version, PlannerFuncs{CreateFn: func(title string, secs []PlanSection) (string, error) {
 		gotTitle, gotSecs = title, secs
 		return "plan-9", nil
-	})
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +212,7 @@ func TestHandOffCreateErrorLeavesSpecEditable(t *testing.T) {
 	st, _ := openStore(t)
 	sp := approvedSpec(t, st, "fail", []Task{{Title: "t", Requirements: []string{"R1", "R2"}}})
 	boom := errors.New("plans unavailable")
-	if _, err := st.HandOff("fail", sp.Version, func(string, []PlanSection) (string, error) { return "", boom }); !errors.Is(err, boom) {
+	if _, err := st.HandOff("fail", sp.Version, PlannerFuncs{CreateFn: func(string, []PlanSection) (string, error) { return "", boom }}); !errors.Is(err, boom) {
 		t.Fatalf("err = %v", err)
 	}
 	got, err := st.Get("fail")
@@ -220,6 +221,122 @@ func TestHandOffCreateErrorLeavesSpecEditable(t *testing.T) {
 	}
 	if got.HandedOffAt != nil || got.Version != sp.Version {
 		t.Fatalf("failed hand-off mutated spec: %+v", got)
+	}
+}
+
+// fakePlanner records created plans like a plan store would.
+type fakePlanner struct {
+	plans []fakePlan
+	now   func() time.Time
+}
+
+type fakePlan struct {
+	id, title string
+	created   time.Time
+}
+
+func (f *fakePlanner) Create(title string, _ []PlanSection) (string, error) {
+	id := "plan-" + strconv.Itoa(len(f.plans)+1)
+	f.plans = append(f.plans, fakePlan{id: id, title: title, created: f.now()})
+	return id, nil
+}
+
+func (f *fakePlanner) Find(title string, since time.Time) (string, error) {
+	for _, p := range f.plans {
+		if p.title == title && !p.created.Before(since) {
+			return p.id, nil
+		}
+	}
+	return "", nil
+}
+
+// TestHandOffRetryAfterSpecWriteFailureCreatesOnePlan covers #1911: the
+// plan exists but the spec write fails; a retry must reuse that plan.
+func TestHandOffRetryAfterSpecWriteFailureCreatesOnePlan(t *testing.T) {
+	tests := []struct {
+		name string
+		// loseJournalID simulates a crash before the plan id was journaled,
+		// so the retry has to find the plan by title and start time.
+		loseJournalID bool
+	}{
+		{name: "journaled plan id"},
+		{name: "intent only, plan found", loseJournalID: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			st, dir := openStore(t)
+			sp := approvedSpec(t, st, "retry", []Task{{Title: "t", Requirements: []string{"R1", "R2"}}})
+			planner := &fakePlanner{now: st.now}
+			boom := errors.New("disk full")
+			st.beforeSave = func(s Spec) error {
+				if s.HandedOffAt != nil {
+					return boom
+				}
+				return nil
+			}
+			if _, err := st.HandOff("retry", sp.Version, planner); !errors.Is(err, boom) {
+				t.Fatalf("first hand-off err = %v", err)
+			}
+			if len(planner.plans) != 1 {
+				t.Fatalf("plans after failed write = %d", len(planner.plans))
+			}
+			if tc.loseJournalID {
+				j, ok := st.readJournal("retry")
+				if !ok || j.PlanID == "" {
+					t.Fatalf("journal = %+v ok=%v", j, ok)
+				}
+				j.PlanID = ""
+				if err := st.writeJournal("retry", j); err != nil {
+					t.Fatal(err)
+				}
+			}
+			st.beforeSave = nil
+			done, err := st.HandOff("retry", sp.Version, planner)
+			if err != nil {
+				t.Fatalf("retry: %v", err)
+			}
+			if len(planner.plans) != 1 {
+				t.Fatalf("retry created another plan: %+v", planner.plans)
+			}
+			if done.PlanID != "plan-1" || done.HandedOffAt == nil {
+				t.Fatalf("retry recorded %+v", done)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "retry", "handoff.json")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("journal left after hand-off: %v", err)
+			}
+		})
+	}
+}
+
+func TestHandOffJournalVoidedByEdit(t *testing.T) {
+	st, _ := openStore(t)
+	sp := approvedSpec(t, st, "edited", []Task{{Title: "t", Requirements: []string{"R1", "R2"}}})
+	planner := &fakePlanner{now: st.now}
+	boom := errors.New("disk full")
+	st.beforeSave = func(s Spec) error {
+		if s.HandedOffAt != nil {
+			return boom
+		}
+		return nil
+	}
+	if _, err := st.HandOff("edited", sp.Version, planner); !errors.Is(err, boom) {
+		t.Fatalf("first hand-off err = %v", err)
+	}
+	st.beforeSave = nil
+	// The user edits tasks and re-approves: the old plan no longer matches.
+	sp, err := st.SaveTasks("edited", []Task{{Title: "new", Requirements: []string{"R1", "R2"}}}, sp.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sp, err = st.SetPhaseStatus("edited", PhaseTasks, StatusApproved, sp.Version); err != nil {
+		t.Fatal(err)
+	}
+	done, err := st.HandOff("edited", sp.Version, planner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(planner.plans) != 2 || done.PlanID != "plan-2" {
+		t.Fatalf("edited spec reused stale plan: %+v / %s", planner.plans, done.PlanID)
 	}
 }
 
