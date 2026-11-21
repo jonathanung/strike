@@ -172,6 +172,23 @@ func TestSecretBearingRepetitionArrivesRedacted(t *testing.T) {
 	}
 }
 
+func TestSkillName(t *testing.T) {
+	cases := []struct {
+		common, fallback []string
+		want             string
+	}{
+		{[]string{"bump", "version", "update", "changelog"}, nil, "bump-version-update"},
+		{nil, []string{"deploy", "staging"}, "deploy-staging"},
+		{[]string{"model"}, nil, "model-workflow"},
+		{nil, nil, "repeated-workflow"},
+	}
+	for _, tc := range cases {
+		if got := skillName(tc.common, tc.fallback); got != tc.want {
+			t.Errorf("skillName(%v, %v) = %q, want %q", tc.common, tc.fallback, got, tc.want)
+		}
+	}
+}
+
 func TestSimilarityHelpers(t *testing.T) {
 	cases := []struct {
 		a, b []string

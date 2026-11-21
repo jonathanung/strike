@@ -404,11 +404,15 @@ func skillName(common, fallback []string) string {
 	if len(src) > 3 {
 		src = src[:3]
 	}
-	name := strings.Join(src, "-")
-	if name == "" {
+	switch len(src) {
+	case 0:
 		return "repeated-workflow"
+	case 1:
+		// Single words collide with reserved skill names ("model",
+		// "agent", …) that Accept would refuse.
+		return src[0] + "-workflow"
 	}
-	return name
+	return strings.Join(src, "-")
 }
 
 // patternID keys a pattern for dismissal: the common words (sorted) and the
