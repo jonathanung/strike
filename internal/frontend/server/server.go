@@ -781,7 +781,9 @@ func (s *Server) applySecurityHeaders(w http.ResponseWriter) {
 	for _, h := range s.scriptCSPHashes {
 		scriptSrc += " " + h
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self' ws: wss: http: https:; img-src 'self' data: blob:; style-src 'self'; "+scriptSrc+"; font-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+	// media-src blob: lets composer audio/video chips play their local
+	// File preview (#1390); without it media falls back to default-src.
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self' ws: wss: http: https:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self'; "+scriptSrc+"; font-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
