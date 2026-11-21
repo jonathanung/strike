@@ -1,0 +1,18 @@
+/* feature:compaction-visibility begin (#1359) */
+/* Compaction and budget markers: inline notice lines at the point the
+   event happened. Compaction itself is informational, so its rule uses the
+   muted border token instead of the notice warning tone; fit and budget
+   warnings keep the warning rule, and a critical fit badge switches to
+   danger. Summary and residue live in the shared detail fold. */
+.sx-msg.sx-notice[data-compaction="started"],
+.sx-msg.sx-notice[data-compaction="completed"] {
+  border-left-color: var(--border-muted);
+}
+.sx-msg.sx-notice[data-compaction] .sx-body {
+  color: var(--muted);
+}
+.sx-msg.sx-notice[data-compaction="fit"] .sx-status-critical {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+/* feature:compaction-visibility end */
