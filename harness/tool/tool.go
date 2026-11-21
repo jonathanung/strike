@@ -865,6 +865,11 @@ type Context struct {
 	// applied in this turn and not yet acknowledged (turn.steer_ack, #1860).
 	// It errors when no such steer exists. Nil disables steer_ack.
 	AckSteer func(ack SteerAck) error
+	// DebugSession applies one agent debug op (hypotheses, evidence, mark)
+	// to the session's active debug session and returns a one-line state
+	// summary (debug_session, #1961). User-only actions are refused. Nil
+	// disables debug_session.
+	DebugSession func(op DebugOp) (string, error)
 	// ReportOutput streams retained output chunks (already size-capped by the
 	// tool) for live UI. Nil disables streaming; tools must still return the
 	// full Result.Output at the end.
@@ -888,6 +893,11 @@ type Context struct {
 	// caller is itself a root. Artifact tools use it as the team boundary
 	// (access=team shares within the same root lineage).
 	RootSessionID string
+	// ToolVisible, when set, reports whether a registry tool is in this
+	// session's tool set. The registry is process-wide; Powers (#1943) attach
+	// pack tools for one session only, so registry-wide listings such as
+	// toolsearch must skip names it rejects. Nil means every tool is visible.
+	ToolVisible func(name string) bool
 	// MemoryMode is the calling session's storage mode: normal, incognito,
 	// or temporary. Empty means normal. Tools that persist memory or
 	// knowledge must refuse writes in incognito and refuse both reads and
@@ -1029,4 +1039,13 @@ type Tool interface {
 	Description() string
 	Schema() json.RawMessage // JSON Schema for the tool's parameters
 	Execute(ctx context.Context, args json.RawMessage, tc *Context) (Result, error)
+}
+
+// SessionDescriber is optional: a tool whose description depends on the
+// calling lineage (e.g. skill, listing Powers skills active in that session
+// only, #1943). The engine uses DescriptionFor(rootSessionID) instead of
+// Description when building that session's provider tools. An empty return
+// keeps Description.
+type SessionDescriber interface {
+	DescriptionFor(rootSession string) string
 }

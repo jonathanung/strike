@@ -601,6 +601,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/memory/export", s.handleMemoryExport)
 	s.mux.HandleFunc("POST /v1/memory/import", s.handleMemoryImport)
 	// Whole-gateway backup/restore (#1339). Secrets are never exported.
+	s.mux.HandleFunc("GET /v1/backup/estimate", s.handleBackupEstimate)
 	s.mux.HandleFunc("GET /v1/backup/export", s.handleBackupExport)
 	s.mux.HandleFunc("POST /v1/backup/restore", s.handleBackupRestore)
 	s.mux.HandleFunc("GET /v1/memory/mode", s.handleMemoryModeGet)
@@ -644,6 +645,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /v1/specs/{name}/{phase}", s.handleSpecPhaseSave)
 	s.mux.HandleFunc("POST /v1/specs/{name}/phases/{phase}", s.handleSpecPhaseStatus)
 	s.mux.HandleFunc("POST /v1/specs/{name}/handoff", s.handleSpecHandOff)
+	s.mux.HandleFunc("POST /v1/specs/{name}/requirements/draft", s.handleSpecDraftRequirements)
 	s.mux.HandleFunc("POST /v1/plans/{id}/run", s.handleTaskRunPost)
 	// Best-of-N (#1346): one prompt across 2–4 models, then adopt or keep none.
 	s.mux.HandleFunc("GET /v1/bestofn", s.handleBestOfNList)
@@ -651,6 +653,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/bestofn/{id}", s.handleBestOfNGet)
 	s.mux.HandleFunc("POST /v1/bestofn/{id}/adopt", s.handleBestOfNAdopt)
 	s.mux.HandleFunc("POST /v1/bestofn/{id}/cancel", s.handleBestOfNCancel)
+	s.mux.HandleFunc("POST /v1/bestofn/{id}/compare", s.handleBestOfNCompare)
 	s.mux.HandleFunc("POST /v1/bestofn/{id}/keep-none", s.handleBestOfNKeepNone)
 	s.mux.HandleFunc("GET /v1/goals", s.handleGoalsList)
 	s.mux.HandleFunc("POST /v1/goals", s.handleGoalsSet)

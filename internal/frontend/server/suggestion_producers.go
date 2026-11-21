@@ -1,10 +1,15 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/jonathanung/strike/internal/daemon/trigger"
+	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/persist/suggestion"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 // In-process Ideas inbox producers (#1926). Each files through
@@ -17,6 +22,13 @@ import (
 const (
 	kindScheduleFailure = "schedule-failure"
 	kindTriggerFailure  = "trigger-failure"
+	kindChildFollowUp   = "child-follow-up"
+	kindGoalStopped     = "goal-stopped"
+
+	// maxEvidenceKey mirrors the store's evidence-key limit.
+	maxEvidenceKey = 200
+	// maxChildBlockers bounds how many child blockers reach the why text.
+	maxChildBlockers = 3
 )
 
 // DepositSuggestion files d from the in-process producer source. Nil-safe.
@@ -108,4 +120,140 @@ func (s *Server) SuggestTriggerProblem(p trigger.Problem) {
 		return
 	}
 	_, _, _ = s.DepositSuggestion(suggestion.SourceTrigger, d)
+}
+
+// childFollowUpDraft is the child-agent producer's idea for a finished
+// child whose handoff names a next step or unresolved blockers (#1950).
+// A clean finish with nothing left to do, and a cancel, file nothing. The
+// key is per (parent session, child name), so a re-run teammate updates
+// one row. rootSession is the drain's root id, used when the event has no
+// parent correlation. Only the handoff's next action and blockers are
+// copied, scrubbed and clamped: no patch, files or verification output.
+func childFollowUpDraft(rootSession string, cc protocol.ChildCompleted) (suggestion.Draft, bool) {
+	status := strings.ToLower(strings.TrimSpace(string(cc.Status)))
+	switch protocol.ChildStatus(status) {
+	case protocol.ChildStatusCompleted, protocol.ChildStatusBlocked, protocol.ChildStatusFailed:
+	default:
+		return suggestion.Draft{}, false
+	}
+	parent := firstSafe(cc.ParentSessionID, rootSession)
+	if parent == "" {
+		return suggestion.Draft{}, false
+	}
+	child := firstSafe(cc.Name, cc.SessionID)
+	if child == "" {
+		return suggestion.Draft{}, false
+	}
+	next := safeLabel(cc.Handoff.RecommendedNextAction, 300)
+	var blockers []string
+	for _, b := range cc.Handoff.Blockers {
+		if len(blockers) == maxChildBlockers {
+			break
+		}
+		if v := safeLabel(b, 200); v != "" {
+			blockers = append(blockers, v)
+		}
+	}
+	if next == "" && len(blockers) == 0 {
+		return suggestion.Draft{}, false
+	}
+	who := safeLabel(cc.Name, 40)
+	if who == "" {
+		who = "Delegated child"
+	}
+	key := "child:" + parent + ":" + child
+	if len(key) > maxEvidenceKey {
+		sum := sha256.Sum256([]byte(parent + "\n" + child))
+		key = "child:" + hex.EncodeToString(sum[:16])
+	}
+	var title, why, prompt string
+	if next != "" {
+		title = who + ": " + next
+		why = fmt.Sprintf("%s %s and recommended a next step: %s", who, status, next)
+		prompt = fmt.Sprintf("A delegated child (%s) of session %s %s and recommended: %s", who, parent, status, next)
+	} else {
+		title = who + " is blocked"
+		why = fmt.Sprintf("%s %s with unresolved blockers", who, status)
+		prompt = fmt.Sprintf("A delegated child (%s) of session %s %s with unresolved blockers", who, parent, status)
+	}
+	if len(blockers) > 0 {
+		why += ". Blockers: " + strings.Join(blockers, "; ")
+		prompt += ". Blockers: " + strings.Join(blockers, "; ")
+	}
+	why += "."
+	prompt += ". Open that session's handoff, confirm it still applies, and propose how to do it. Ask before changing anything."
+	return suggestion.Draft{
+		Title:       clampRunes(title, 120),
+		Why:         why,
+		Prompt:      prompt,
+		Kind:        kindChildFollowUp,
+		EvidenceKey: key,
+		Evidence:    []suggestion.Evidence{{Label: "Handoff from " + who, SessionID: parent}},
+	}, true
+}
+
+// SuggestChildFollowUp deposits the child-agent producer's idea for one
+// child.completed event. Refusals are dropped.
+func (s *Server) SuggestChildFollowUp(rootSession string, cc protocol.ChildCompleted) {
+	d, ok := childFollowUpDraft(rootSession, cc)
+	if !ok {
+		return
+	}
+	_, _, _ = s.DepositSuggestion(suggestion.SourceChildAgent, d)
+}
+
+// goalStoppedDraft is the goal-autopilot producer's idea for an autopilot
+// goal that stopped without finishing: failed (a guard tripped) or blocked
+// (waiting on a person). The key is goal:<id>:<status>, so a goal that
+// stops the same way again does not file twice. Manual goals, finished,
+// paused and aborted ones file nothing: the person already acted.
+func goalStoppedDraft(g host.Goal) (suggestion.Draft, bool) {
+	if !g.Autopilot {
+		return suggestion.Draft{}, false
+	}
+	status := strings.ToLower(strings.TrimSpace(g.Status))
+	if status != "failed" && status != "blocked" {
+		return suggestion.Draft{}, false
+	}
+	id, ok := safeID(g.ID)
+	if !ok {
+		return suggestion.Draft{}, false
+	}
+	desc := safeLabel(g.Description, 80)
+	if desc == "" {
+		desc = "Goal " + id
+	}
+	reason := safeLabel(g.FailReason, 300)
+	verb := "failed"
+	ask := "Read the goal's iteration log, find why it stopped, and propose a change to the goal or its limits. Do not restart it without asking."
+	if status == "blocked" {
+		verb = "is waiting on you"
+		ask = "Read the goal's iteration log, work out what it needs from a person, and propose the answer. Do not resume it without asking."
+	}
+	why := fmt.Sprintf("The autopilot goal %q %s after %d iteration(s).", desc, verb, g.LastIteration)
+	if reason != "" {
+		why += " Reason: " + reason
+	}
+	prompt := fmt.Sprintf("The autopilot goal %q (id %s) %s after %d iteration(s).", desc, id, verb, g.LastIteration)
+	if reason != "" {
+		prompt += " Reason: " + reason + "."
+	}
+	return suggestion.Draft{
+		Title:       clampRunes("Autopilot goal "+verb+": "+desc, 120),
+		Why:         why,
+		Prompt:      prompt + " " + ask,
+		Kind:        kindGoalStopped,
+		EvidenceKey: "goal:" + id + ":" + status,
+		Evidence:    []suggestion.Evidence{{Label: "Goal " + desc}},
+	}, true
+}
+
+// SuggestGoalOutcome deposits the goal-autopilot producer's idea after a
+// goal run returns. Refusals are dropped.
+func (s *Server) SuggestGoalOutcome(g host.Goal) {
+	d, ok := goalStoppedDraft(g)
+	if !ok {
+		return
+	}
+	_, _, _ = s.DepositSuggestion(suggestion.SourceAutopilot, d)
 }

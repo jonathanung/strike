@@ -310,7 +310,7 @@ files are inspected and edited.
 
 ## Powers
 
-The daemon side is in place but no chip is drawn yet (#1347, #1867).
+The daemon side is in place but no chip is drawn yet (#1347, #1867, #1943).
 `internal/integrate/powers` loads packs from
 `<workspace>/.strike/powers/<pack>/` and `~/.strike/powers/<pack>/`, and
 the workspace copy wins on a name clash. Workspace packs load only in a
@@ -340,14 +340,23 @@ Routes: `GET /v1/powers?session=`, `POST /v1/powers/suggest`
 and `POST /v1/powers/mute` `{name, muted}`. The mutating routes refuse
 `--read-only`. Closing a root or deleting a session unloads its Powers.
 
-Not built yet (#1943):
-- skills loaded into context per session;
-- per-session tool scoping (the MCP registry is process-wide, so a pack's
-  tools are visible to every root until the last session releases them);
-- the composer chip row with context cost (#1259);
+Activations key on the root engine's session id; the routes accept the
+root id or the session id. A pack's tools and skills are scoped to the
+session that activated it (#1943): tools bridged from a server Powers
+attached are hidden from every other root (provider tools, the tools
+prompt layer and `toolsearch`, and refused at dispatch), and children of
+the root inherit its set. A failed server is not in the set. Pack skills
+are listed in that session's `skill` tool and loadable there only, while
+the pack is active; a configured skill of the same name wins. Servers
+configured outside Powers stay shared. Mute state and last-used times
+persist in `~/.strike/powers-state.json`.
+
+Not built yet (#1974):
+- the composer chip row with context cost (#1259) and the failure state;
+- the "Activate <name>?" suggestion chip;
 - pack membership on Customize;
 - goal-declared Powers (#1284);
-- persisted mute and last-used time.
+- a webui-smoke check and the UAT evidence.
 
 ## Composer triggers
 
@@ -533,11 +542,19 @@ cap); a pattern that matches empty text, a non-http(s) template, a
 template whose host comes from `{match}`, and more than 50 rules are
 refused inline in Settings and never applied.
 
-Persistence choice: rules live in this browser's localStorage
-(`strike.linkPatterns`), like the other cockpit view prefs, so a phone
-and a desktop keep separate lists for now. Sharing them through the
-gateway needs a settings field on the host contract and a config key; that is
-a follow-up issue, not part of this slice.
+Persistence (#1879): rules live on the gateway as `webui.linkPatterns`
+in the global `~/.strike/config`, read and written through
+`GET`/`PATCH /v1/settings`, so every device paired to one gateway shares
+one list (a rule saved on the desktop links on the phone after reload).
+The gateway validates the whole list with the same rules (Go RE2, ≤512-byte
+patterns under a compiled-program size cap) and refuses an invalid one with
+400; nothing is stored. On first load the cockpit moves a list it kept in
+this browser's localStorage (`strike.linkPatterns`, slice 1) to the gateway,
+appending only rules the gateway does not already have, then deletes the
+local key; if the move fails the key stays and the move is retried on the
+next load. A gateway too old to report `linkPatterns` keeps the per-browser
+list, and Settings says so.
+
 ## Review queue
 
 The Review side tab (`webui/src/review_queue.rs`, daemon routes in
@@ -616,9 +633,20 @@ unlock (naming any override reason), mark fixed and the summary are also
 transcript notices. At phone width the panel collapses to a status chip
 that opens a bottom sheet.
 
-Not drawn yet: the agent cannot write hypotheses or attach evidence
-itself (no model-facing tool; the user does it in the panel). Bash is not
-inspected by the gate; the permission layer still governs it.
+Agent side (#1961): while a session is active the deferred
+`debug_session` tool is activated and a system note (prompt layer
+`debug:<phase>`) states the phase, the marker convention and the gate.
+The tool sets 2–5 ranked hypotheses, attaches evidence and marks verdicts
+through the same `debugmode.Session`, emitting `debug.updated` so the
+cards appear in the panel. Start, unlock / override, mark fixed and end
+stay user-only: the engine refuses them with a reason. Fix still unlocks
+only through the explicit Unlock button, not automatically on a confirmed
+hypothesis.
+
+Not drawn yet: bash is not inspected by the gate; the permission layer
+still governs it. UAT screenshots / video for #1345 are owed (no local
+serve in the agent lanes that shipped this).
+
 ## Steer acknowledgement
 
 Shipped (#1343): a steered message carries a marker driven only by the
@@ -677,6 +705,7 @@ Daemon wiring shipped (#1881): `team.spawn` takes optional `model` and
 | `GET /v1/bestofn?root=` | This session's runs, newest first |
 | `GET /v1/bestofn/{id}` | One run: per-candidate status, elapsed, summary, diffstat, verification |
 | `POST /v1/bestofn/{id}/cancel` | Interrupt every running candidate (`team.child_interrupt`) |
+| `POST /v1/bestofn/{id}/compare` | Ask the owner session for commentary on how the runs differ (one user turn; once per run; only after every run stopped and before a decision) |
 | `POST /v1/bestofn/{id}/adopt` | `{childId}`: apply the winner's patch, then remove every candidate worktree |
 | `POST /v1/bestofn/{id}/keep-none` | Discard all and remove every candidate worktree |
 
@@ -696,8 +725,17 @@ Cancel all, Adopt (confirmed) and Keep none (confirmed). Wording and
 parsing live in `webui/best-of-n` (unit-tested in CI); the browser check
 is `scripts/webui-best-of-n-check.mjs`.
 
-Not built yet: parent-agent commentary on how the results differ, and
-per-candidate tokens/cost (`child.completed` does not carry usage today).
+Commentary and usage (#1962): `child.completed` carries optional `usage`
+(tokens summed over the child's streams, `costUsd` when the model is
+priced), and each candidate row shows it. A provider that reports nothing
+shows nothing, never a zero. **Compare** appears once every run stopped:
+it submits one user turn to the owning session asking for a short note
+on how the runs differ, explicitly not a verdict or ranking. It spends a
+parent turn, so it runs only on click and once per run; a busy session
+refuses with a retry hint. Adopt stays a separate confirmed step.
+
+Not built yet: UAT screenshots / video for #1346 (owed on the PR; no
+local `strike serve` was allowed in the lane that shipped #1962).
 
 ## MCP elicitation
 

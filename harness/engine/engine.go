@@ -97,7 +97,13 @@ type Options struct {
 	SessionID string
 	Select    SelectFunc
 	Registry  *tool.Registry
-	WorkDir   string
+	// ToolVisible, when set, scopes the shared Registry to one lineage
+	// (Powers, #1943). It is called with the root session id and a tool name;
+	// a rejected tool is left out of the provider tools, the tools prompt
+	// layer and toolsearch, and refused at dispatch as unknown. Children
+	// inherit it (and the root id), so a delegated child sees its root's set.
+	ToolVisible func(rootSession, name string) bool
+	WorkDir     string
 	// WorkspaceRoots are the directories a delegated child's working directory
 	// must stay inside (the workspace plus its extra roots). Empty means the
 	// session is unbound: child cwd is not checked, so plain strike serve

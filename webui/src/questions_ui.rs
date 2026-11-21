@@ -233,7 +233,7 @@ fn QuestionCard(
             <Show when=move || !error.get().is_empty()>
                 <p class="question-error" role="alert">{move || error.get()}</p>
             </Show>
-            <p class="hint">"Enter goes on, 1-9 pick a choice. Escape dismisses the question and stops the turn."</p>
+            <p class="hint keys">"Enter goes on, 1-9 pick a choice. Escape dismisses the question and stops the turn."</p>
             <div class="question-actions">
                 <button
                     type="button"

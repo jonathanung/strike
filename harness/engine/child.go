@@ -485,6 +485,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		return tool.TaskResult{}, err
 	}
 
+	fbProvider, fbModel := e.fallbackPair()
 	child := New(Options{
 		debugFrom:                  e,
 		SessionID:                  childID,
@@ -497,6 +498,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		Team:                       e.team, // share lead roster; nested enrolls on same team
 		Select:                     e.opts.Select,
 		Registry:                   childReg,
+		ToolVisible:                e.opts.ToolVisible,
 		WorkDir:                    childWorkDir,
 		WorkspaceRoots:             append([]string(nil), e.opts.WorkspaceRoots...),
 		ProjectRoot:                e.opts.ProjectRoot,
@@ -523,6 +525,8 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		InitialAgent:               agentName,
 		InitialProvider:            e.provName,
 		InitialModel:               e.model,
+		InitialFallbackProvider:    fbProvider, // inherited (#1963)
+		InitialFallbackModel:       fbModel,
 		InitialEffort:              childEffort,
 		InitialTitled:              title != "",
 		SandboxMode:                e.opts.SandboxMode,
@@ -758,6 +762,12 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 			case protocol.TeamRoster:
 				// Nested engines share the lead team; bubble roster snapshots.
 				e.emit(ev)
+			case protocol.ModelFallback:
+				// A child answered on the inherited fallback (#1963):
+				// mark it in the parent's activity view (child
+				// correlation retained, so it never flips the parent's
+				// own fallback state).
+				e.emit(ev)
 			case protocol.PathOverlap:
 				// Multi-agent path conflicts from child writers surface on the
 				// parent stream for lead/UI visibility.
@@ -915,6 +925,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 			Verification: verification,
 			BudgetKind:   budgetKind,
 			Finalization: finalization,
+			Usage:        h.usageSnapshot(),
 		}
 		// Prefer verification summary on blocked terminal Summary field.
 		if status == protocol.ChildStatusBlocked && verification != nil && verification.Summary != "" {
@@ -1242,6 +1253,9 @@ func (h *childHandle) noteEvent(ev protocol.Event) {
 			if ev.CacheCreation.Known {
 				tokens += ev.CacheCreation.N
 			}
+		}
+		if h.budget != nil && (ev.Used.Known || ev.Input.Known || ev.Output.Known || ev.CacheRead.Known || ev.CacheCreation.Known) {
+			h.budget.usageReported = true
 		}
 		if h.budget != nil && tokens > 0 {
 			h.budget.noteUsage(tokens, now)
@@ -2403,14 +2417,20 @@ func (e *Engine) validateCatalogModel(ctx context.Context, providerName, model s
 // applyChildProviderModel sets the child's live provider/model from either a
 // resolved task pin or parent inheritance.
 func (e *Engine) applyChildProviderModel(child *Engine, pin taskModelPin) {
+	// While this turn runs on the fallback, children still start on the
+	// session primary; they inherit the fallback separately (#1963).
+	prov, provName, model := e.prov, e.provName, e.model
+	if e.primaryHold != nil {
+		prov, provName, model = e.primaryHold.prov, e.primaryHold.name, e.primaryHold.model
+	}
 	if pin.lock {
 		if pin.prov != nil {
 			child.prov = pin.prov
 			child.provName = CanonicalProviderID(pin.provider)
 			child.model = pin.model
 		} else {
-			child.prov = e.prov
-			child.provName = e.provName
+			child.prov = prov
+			child.provName = provName
 			child.model = pin.model
 		}
 		child.priority = e.priority
@@ -2418,10 +2438,10 @@ func (e *Engine) applyChildProviderModel(child *Engine, pin taskModelPin) {
 		child.opts.InitialModel = ""
 		return
 	}
-	if e.prov != nil {
-		child.prov = e.prov
-		child.provName = e.provName
-		child.model = e.model
+	if prov != nil {
+		child.prov = prov
+		child.provName = provName
+		child.model = model
 		child.priority = e.priority
 		child.opts.InitialProvider = ""
 		child.opts.InitialModel = ""

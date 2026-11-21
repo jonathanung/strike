@@ -3649,6 +3649,22 @@
           "name": "finalization",
           "type": "string",
           "omitEmpty": true
+        },
+        {
+          "name": "usage",
+          "type": "object",
+          "omitEmpty": true,
+          "fields": [
+            {
+              "name": "tokens",
+              "type": "number"
+            },
+            {
+              "name": "costUsd",
+              "type": "float",
+              "omitEmpty": true
+            }
+          ]
         }
       ]
     },

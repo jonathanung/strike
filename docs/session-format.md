@@ -1194,6 +1194,9 @@ Go `ChildCompleted`.
 | `verification.durationMs` | number | yes |
 | `budgetKind` | string | yes |
 | `finalization` | string | yes |
+| `usage` | object | yes |
+| `usage.tokens` | number |  |
+| `usage.costUsd` | float | yes |
 
 #### `child.escalated`
 

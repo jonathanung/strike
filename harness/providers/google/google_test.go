@@ -263,3 +263,55 @@ func TestStreamAlwaysUsesAPIKeyHeader(t *testing.T) {
 		t.Errorf("Authorization = %q, want empty", gotBearer)
 	}
 }
+
+// TestStreamClassifiesRefusals pins #1963: Gemini safety and policy
+// finishReasons, and a blocked prompt, are the typed refusal stop reason;
+// other finishReasons pass through.
+func TestStreamClassifiesRefusals(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantStop string
+		wantText string
+	}{
+		{"safety", `{"candidates":[{"content":{"parts":[]},"finishReason":"SAFETY"}]}`, provider.StopReasonRefusal, ""},
+		{"prohibited content", `{"candidates":[{"content":{"parts":[{"text":"no"}]},"finishReason":"PROHIBITED_CONTENT"}]}`, provider.StopReasonRefusal, "no"},
+		{"blocklist", `{"candidates":[{"content":{},"finishReason":"BLOCKLIST"}]}`, provider.StopReasonRefusal, ""},
+		{"spii", `{"candidates":[{"content":{},"finishReason":"SPII"}]}`, provider.StopReasonRefusal, ""},
+		{"blocked prompt", `{"promptFeedback":{"blockReason":"SAFETY"}}`, provider.StopReasonRefusal, ""},
+		{"stop passes through", `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`, "STOP", "ok"},
+		{"max tokens passes through", `{"candidates":[{"content":{"parts":[{"text":"ok"}]},"finishReason":"MAX_TOKENS"}]}`, "MAX_TOKENS", "ok"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, tt.body)
+			}))
+			defer srv.Close()
+			p := New(func(context.Context) (string, error) { return "k", nil })
+			p.baseURL = srv.URL
+			stream, err := p.Stream(context.Background(), provider.Request{
+				Model:    "gemini-2.5-pro",
+				Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+			})
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+			var text, stop string
+			for ev := range stream {
+				switch ev.Type {
+				case provider.EventTextDelta:
+					text += ev.Text
+				case provider.EventDone:
+					stop = ev.StopReason
+				case provider.EventError:
+					t.Fatalf("stream error: %v", ev.Err)
+				}
+			}
+			if stop != tt.wantStop || text != tt.wantText {
+				t.Errorf("stop=%q text=%q, want stop=%q text=%q", stop, text, tt.wantStop, tt.wantText)
+			}
+		})
+	}
+}

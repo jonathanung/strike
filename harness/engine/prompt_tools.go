@@ -50,15 +50,42 @@ func (e *Engine) effectiveToolSchemas() (schemas []provider.ToolSchema, omitted 
 		if name == "" {
 			continue
 		}
+		if !e.toolVisible(name) {
+			continue // another session's Powers tool (#1943)
+		}
 		perm := tool.PermissionName(name)
 		if e.perms != nil && e.perms.Peek(perm) == permission.Deny {
 			omitted++
 			continue
 		}
+		if t, ok := e.opts.Registry.Get(name); ok {
+			if sd, ok := t.(tool.SessionDescriber); ok {
+				if d := sd.DescriptionFor(e.rootSessionID()); d != "" {
+					s.Description = d
+				}
+			}
+		}
 		s.Description = tool.CompactSchemaDescription(name, s.Description)
 		out = append(out, s)
 	}
 	return out, omitted
+}
+
+// toolVisible reports whether name is in this lineage's tool set
+// (Options.ToolVisible; nil means every registry tool is visible).
+func (e *Engine) toolVisible(name string) bool {
+	if e == nil || e.opts.ToolVisible == nil {
+		return true
+	}
+	return e.opts.ToolVisible(e.rootSessionID(), name)
+}
+
+// toolVisibleFunc binds toolVisible for tool.Context (nil when unscoped).
+func (e *Engine) toolVisibleFunc() func(string) bool {
+	if e == nil || e.opts.ToolVisible == nil {
+		return nil
+	}
+	return e.toolVisible
 }
 
 // discoverToolsFromHistory promotes deferred tools that already appear as
@@ -143,6 +170,9 @@ func (e *Engine) deferredPendingVisibleNames() []string {
 	}
 	out := make([]string, 0, len(pending))
 	for _, name := range pending {
+		if !e.toolVisible(name) {
+			continue
+		}
 		if e.perms != nil && e.perms.Peek(tool.PermissionName(name)) == permission.Deny {
 			continue
 		}

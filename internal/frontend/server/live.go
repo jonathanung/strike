@@ -1130,6 +1130,10 @@ func (l *Live) applyStatus(ev protocol.Event) {
 	case protocol.AutonomySelected:
 		l.status.Autonomy = string(e.Mode)
 	case protocol.FallbackModelSelected:
+		// A child's inherited pick (#1963) never replaces the root's.
+		if e.Depth > 0 {
+			break
+		}
 		l.status.FallbackProvider = e.Provider
 		l.status.FallbackModel = e.Model
 		l.status.FallbackActive = e.Active

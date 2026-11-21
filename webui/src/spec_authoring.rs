@@ -6,6 +6,12 @@
 //! EARS lint and requirement coverage are computed by the daemon; this
 //! page renders them and surfaces refusals verbatim. Approving a phase is
 //! only ever a button press (keyboard-reachable), never a side effect.
+//!
+//! "Draft with model" (#1911) asks the daemon for requirement rows drafted
+//! from a one-paragraph description. The rows land as an unsaved draft in
+//! the editor; saving and approving remain the user's button presses. The
+//! design phase is edited with a Markdown preview rendered by the document
+//! viewer's shared `editor::MarkdownView` (#1269).
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -57,6 +63,8 @@ pub struct SpecView {
     #[serde(default)]
     pub title: String,
     #[serde(default)]
+    pub description: String,
+    #[serde(default)]
     pub requirements: Vec<Requirement>,
     #[serde(default)]
     pub design: String,
@@ -83,6 +91,12 @@ pub struct SpecSummary {
     pub title: String,
     #[serde(default, rename = "planId")]
     pub plan_id: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct DraftReply {
+    #[serde(default)]
+    requirements: Vec<Requirement>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -152,6 +166,23 @@ pub fn lint_for(lint: &HashMap<String, Vec<String>>, id: &str) -> Vec<String> {
         .collect()
 }
 
+/// Rows after a model draft: the user's rows with a story are kept, blank
+/// rows are dropped, and the drafted rows follow (ids are left empty so the
+/// daemon assigns them on save).
+pub fn merge_drafted(existing: Vec<Requirement>, drafted: Vec<Requirement>) -> Vec<Requirement> {
+    existing
+        .into_iter()
+        .filter(|r| !r.story.trim().is_empty())
+        .chain(drafted.into_iter().map(|r| Requirement { id: String::new(), ..r }))
+        .collect()
+}
+
+/// "Drafted 3 requirements. …" — the notice after a model draft.
+pub fn drafted_note(n: usize) -> String {
+    let noun = if n == 1 { "requirement" } else { "requirements" };
+    format!("Drafted {n} {noun}. Nothing is saved yet: edit the rows, then Save phase. Approval stays your call.")
+}
+
 /// `HTTP 422 {"error":"spec: phase gate: approve requirements first"}` → reason.
 pub fn spec_error(raw: &str) -> String {
     let body = raw
@@ -199,6 +230,9 @@ pub fn SpecAuthoringPage(
     let reqs = RwSignal::new(Vec::<ReqRow>::new());
     let tasks = RwSignal::new(Vec::<TaskRow>::new());
     let design = RwSignal::new(String::new());
+    let design_preview = RwSignal::new(false);
+    let draft_desc = RwSignal::new(String::new());
+    let drafting = RwSignal::new(false);
     let next_key = RwSignal::new(1u64);
 
     let key = move || {
@@ -233,7 +267,22 @@ pub fn SpecAuthoringPage(
                 .collect(),
         );
         design.set(v.design.clone());
+        if current.with_untracked(|c| c.as_ref().map(|c| c.name != v.name).unwrap_or(true)) {
+            draft_desc.set(v.description.clone());
+            design_preview.set(false);
+        }
         current.set(Some(v));
+    };
+
+    let to_rows = move |list: Vec<Requirement>| -> Vec<ReqRow> {
+        list.into_iter()
+            .map(|r| ReqRow {
+                key: key(),
+                id: RwSignal::new(r.id),
+                story: RwSignal::new(r.story),
+                criteria: RwSignal::new(r.criteria.join("\n")),
+            })
+            .collect()
     };
 
     let load_list = move || {
@@ -357,6 +406,54 @@ pub fn SpecAuthoringPage(
         });
     };
 
+    // Draft with model (#1911): fills unsaved rows only.
+    let draft_reqs = move || {
+        let Some(v) = current.get_untracked() else { return };
+        if drafting.get_untracked() {
+            return;
+        }
+        let desc = draft_desc.get_untracked().trim().to_string();
+        if desc.is_empty() {
+            notice.set("Describe the feature in a paragraph first.".into());
+            return;
+        }
+        let root = active_root.get_untracked();
+        let mut path = format!("/v1/specs/{}/requirements/draft", js_encode(&v.name));
+        if !root.is_empty() {
+            path.push_str(&format!("?root={}", js_encode(&root)));
+        }
+        let body = json!({ "description": desc });
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        drafting.set(true);
+        notice.set("Drafting requirements with the session's model…".into());
+        spawn_local(async move {
+            let res = post_json_value(&b, &t, &path, body).await;
+            drafting.set(false);
+            // Drop the result if the user opened another spec meanwhile.
+            if current.with_untracked(|c| c.as_ref().map(|c| c.name != v.name).unwrap_or(true)) {
+                return;
+            }
+            match res.map(serde_json::from_value::<DraftReply>) {
+                Ok(Ok(reply)) => {
+                    let n = reply.requirements.len();
+                    let existing: Vec<Requirement> = reqs
+                        .get_untracked()
+                        .iter()
+                        .map(|r| Requirement {
+                            id: r.id.get_untracked(),
+                            story: r.story.get_untracked(),
+                            criteria: criteria_lines(&r.criteria.get_untracked()),
+                        })
+                        .collect();
+                    reqs.set(to_rows(merge_drafted(existing, reply.requirements)));
+                    notice.set(drafted_note(n));
+                }
+                Ok(Err(e)) => notice.set(format!("Unreadable draft: {e}")),
+                Err(e) => notice.set(spec_error(&e)),
+            }
+        });
+    };
+
     let read_only = move || current.with(|c| c.as_ref().map(|v| !v.plan_id.is_empty()).unwrap_or(false));
     let phase_status = move |phase: &str| {
         current.with(|c| {
@@ -461,6 +558,12 @@ pub fn SpecAuthoringPage(
                     </div>
                     <Show when=move || tab.get() == "requirements">
                         <p class="hint">"One user story per requirement; one EARS criterion per line, e.g. WHEN ‹condition› THE SYSTEM SHALL ‹behaviour›. EARS warnings never block saving."</p>
+                        <div class="spec-draft" data-spec-draft="true">
+                            <label>"Feature description (one paragraph)"<textarea id="spec-draft-desc" class="spec-draft-desc" rows="3" prop:disabled=read_only prop:value=move || draft_desc.get() on:input=move |ev| draft_desc.set(event_target_value(&ev))></textarea></label>
+                            <button type="button" class="secondary" data-action="spec-draft-model" disabled=move || read_only() || drafting.get() on:click=move |_| draft_reqs()>
+                                {move || if drafting.get() { "Drafting…" } else { "Draft with model" }}
+                            </button>
+                        </div>
                         <ol class="plain spec-reqs">
                             <For each=move || reqs.get() key=|r| r.key children=move |r: ReqRow| {
                                 let warnings = move || current.with(|c| c.as_ref().map(|v| lint_for(&v.lint, &r.id.get())).unwrap_or_default());
@@ -482,7 +585,28 @@ pub fn SpecAuthoringPage(
                     </Show>
                     <Show when=move || tab.get() == "design">
                         <p class="hint">"Architecture, interfaces, error handling. Saved as design.md in the spec folder."</p>
-                        <textarea id="spec-design" class="spec-design" rows="16" prop:disabled=read_only prop:value=move || design.get() on:input=move |ev| design.set(event_target_value(&ev))></textarea>
+                        <div class="spec-design-modes" role="group" aria-label="Design view">
+                            <button type="button" data-action="spec-design-edit" aria-pressed=move || (!design_preview.get()).to_string()
+                                class=move || if design_preview.get() { "spec-tab" } else { "spec-tab on" }
+                                on:click=move |_| design_preview.set(false)>"Edit"</button>
+                            <button type="button" data-action="spec-design-preview" aria-pressed=move || design_preview.get().to_string()
+                                class=move || if design_preview.get() { "spec-tab on" } else { "spec-tab" }
+                                on:click=move |_| design_preview.set(true)>"Preview"</button>
+                        </div>
+                        <Show when=move || design_preview.get() || read_only() fallback=move || view! {
+                            <textarea id="spec-design" class="spec-design" rows="16" prop:value=move || design.get() on:input=move |ev| design.set(event_target_value(&ev))></textarea>
+                        }>
+                            <div class="spec-design-preview" data-spec-design-preview="true">
+                                {move || {
+                                    let text = design.get();
+                                    if text.trim().is_empty() {
+                                        view! { <p class="hint">"No design yet."</p> }.into_any()
+                                    } else {
+                                        view! { <crate::editor::MarkdownView text=text /> }.into_any()
+                                    }
+                                }}
+                            </div>
+                        </Show>
                     </Show>
                     <Show when=move || tab.get() == "tasks">
                         <p class="spec-coverage" data-spec-coverage="true">{move || current.with(|c| c.as_ref().map(|v| coverage_line(&v.coverage)).unwrap_or_default())}</p>
@@ -548,6 +672,34 @@ mod tests {
         lint.insert("R20#0".to_string(), vec!["other".to_string()]);
         let got = lint_for(&lint, "R2");
         assert_eq!(got, vec!["requirement: no acceptance criteria".to_string(), "criterion 1: no SHALL".to_string()]);
+    }
+
+    #[test]
+    fn merge_drafted_keeps_written_rows_and_clears_model_ids() {
+        let existing = vec![
+            Requirement { id: "R1".into(), story: "mine".into(), criteria: vec!["c".into()] },
+            Requirement { id: String::new(), story: "  ".into(), criteria: vec![] },
+        ];
+        let drafted = vec![Requirement { id: "R9".into(), story: "drafted".into(), criteria: vec!["THE SYSTEM SHALL x".into()] }];
+        let got = merge_drafted(existing, drafted);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].id, "R1");
+        assert_eq!(got[1].story, "drafted");
+        assert!(got[1].id.is_empty());
+    }
+
+    #[test]
+    fn drafted_note_says_nothing_is_saved() {
+        assert!(drafted_note(1).starts_with("Drafted 1 requirement."));
+        assert!(drafted_note(3).starts_with("Drafted 3 requirements."));
+        assert!(drafted_note(3).contains("Nothing is saved"));
+    }
+
+    #[test]
+    fn draft_reply_parses_daemon_shape() {
+        let r: DraftReply = serde_json::from_str(r#"{"requirements":[{"id":"","story":"s","criteria":["c"]}],"model":"m"}"#).unwrap();
+        assert_eq!(r.requirements.len(), 1);
+        assert_eq!(r.requirements[0].criteria, vec!["c"]);
     }
 
     #[test]

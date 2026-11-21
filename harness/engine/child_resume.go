@@ -134,6 +134,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		initialEffort = e.effort
 	}
 
+	fbProvider, fbModel := e.fallbackPair()
 	child := New(Options{
 		debugFrom:                  e,
 		SessionID:                  childID,
@@ -146,6 +147,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		Team:                       e.team,
 		Select:                     e.opts.Select,
 		Registry:                   childReg,
+		ToolVisible:                e.opts.ToolVisible,
 		WorkDir:                    e.opts.WorkDir,
 		WorkspaceRoots:             append([]string(nil), e.opts.WorkspaceRoots...),
 		ProjectRoot:                e.opts.ProjectRoot,
@@ -171,6 +173,8 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		InitialAgent:               agentName,
 		InitialProvider:            initialProvider,
 		InitialModel:               initialModel,
+		InitialFallbackProvider:    fbProvider, // #1963
+		InitialFallbackModel:       fbModel,
 		InitialEffort:              initialEffort,
 		InitialMessages:            restored.Messages,
 		InitialPriority:            restored.Priority,
@@ -372,6 +376,9 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 				e.emit(ev)
 			case protocol.TeamRoster:
 				e.emit(ev)
+			case protocol.ModelFallback:
+				// Child fallback turn (#1963): mark it in the parent.
+				e.emit(ev)
 			case protocol.PathOverlap:
 				e.emit(ev)
 			case protocol.SchedulerQueued, protocol.SchedulerAdmitted, protocol.SchedulerCanceled:
@@ -463,6 +470,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 			DelegationID: delegID,
 			BudgetKind:   budgetKind,
 			Finalization: finalization,
+			Usage:        h.usageSnapshot(),
 		}
 		e.emit(completed)
 		e.persistChildEvent(childID, completed)

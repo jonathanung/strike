@@ -36,3 +36,14 @@ func TestStatusTracksStickyFallback(t *testing.T) {
 		}
 	}
 }
+
+// TestStatusIgnoresChildFallbackSelection pins #1963: a delegated child's
+// inherited fallback.selected never replaces the root's reported fallback.
+func TestStatusIgnoresChildFallbackSelection(t *testing.T) {
+	l := &Live{}
+	l.applyStatus(protocol.FallbackModelSelected{Correlation: protocol.Correlation{SessionID: "s1"}, Provider: "openai", Model: "gpt"})
+	l.applyStatus(protocol.FallbackModelSelected{Correlation: protocol.Correlation{SessionID: "c1", ParentSessionID: "s1", Depth: 1}, Provider: "other", Model: "x", Active: true})
+	if l.status.FallbackProvider != "openai" || l.status.FallbackModel != "gpt" || l.status.FallbackActive {
+		t.Errorf("status = %q/%q active=%v, want openai/gpt inactive", l.status.FallbackProvider, l.status.FallbackModel, l.status.FallbackActive)
+	}
+}

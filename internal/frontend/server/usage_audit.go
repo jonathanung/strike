@@ -302,6 +302,9 @@ func settingsPatchFields(body settingsPatchBody) []string {
 	if body.PermissionAutoApproveExclude != nil {
 		out = append(out, "permissionAutoApproveExclude")
 	}
+	if body.LinkPatterns != nil {
+		out = append(out, "linkPatterns")
+	}
 	g := body.guardrailDials()
 	add("turnTimeoutS", g.TurnTimeout)
 	add("maxSessionCostUSD", g.MaxSessionCostUSD)

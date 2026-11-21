@@ -129,6 +129,9 @@ func (t *toolSearchTool) Execute(ctx context.Context, args json.RawMessage, tc *
 	var matches []string
 	var matchNames []string
 	for _, s := range schemas {
+		if tc != nil && tc.ToolVisible != nil && !tc.ToolVisible(s.Name) {
+			continue // another session's Powers tool (#1943)
+		}
 		hay := strings.ToLower(s.Name + " " + s.Description)
 		ok := true
 		for _, tok := range tokens {
