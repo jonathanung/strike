@@ -113,11 +113,13 @@ type Options struct {
 	// (~/.strike/workspace-trust.json) behind GET/POST /v1/workspace/trust
 	// (#1781). Empty disables the routes (501).
 	WorkspaceTrustPath string
-	// WorkspaceTrustAtStart reports the trust decision the running sessions
-	// were assembled with for a canonical workspace root (known=false when
-	// that root was not assembled by this process). Used to flag that a
-	// grant/revoke takes effect on the next start. Nil means unknown.
-	WorkspaceTrustAtStart func(root string) (trusted, known bool)
+	// WorkspaceTrustAssembled is the workspace this daemon's sessions were
+	// assembled for and the trust decision they were built with. Every root
+	// of one strike serve shares that assembly (session worktrees included),
+	// so when set it is the workspace /v1/workspace/trust reports and
+	// changes, and a decision that differs from Trusted sets
+	// restartRequired. Nil (attach-only) falls back to the live root's CWD.
+	WorkspaceTrustAssembled *WorkspaceTrustAssembly
 	// WorkDir is the process working directory. Customize uses it as the
 	// workspace scope when no live session is attached. Apps uses it as the
 	// git workspace for GitHub triage. The browser cannot choose it. Empty

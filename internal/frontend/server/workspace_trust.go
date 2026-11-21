@@ -36,6 +36,15 @@ type workspaceTrustResponse struct {
 	Error           string `json:"error,omitempty"`
 }
 
+// WorkspaceTrustAssembly records the workspace a daemon assembled its
+// sessions for (#1781): Dir is the launch directory, Root the canonical
+// workspace root the trust store is keyed on, Trusted the decision applied.
+type WorkspaceTrustAssembly struct {
+	Dir     string
+	Root    string
+	Trusted bool
+}
+
 // workspaceTrustRequest is the POST body. The workspace is never taken from
 // the request: it is always the live root's own working directory, so a
 // browser cannot trust an arbitrary path.
@@ -53,9 +62,10 @@ func (s *Server) workspaceTrustMutable() bool {
 	return s.workspaceTrustCapable() && s.hasLive() && !s.opts.ReadOnly
 }
 
-// workspaceTrustRoot resolves the canonical workspace root for the request's
-// live root (its CWD), falling back to the daemon WorkDir. It writes the
-// error response and returns ok=false when nothing resolves.
+// workspaceTrustRoot resolves the workspace the request is about: the
+// daemon's assembled workspace when known (all roots share it), else the
+// request's live root CWD, else the daemon WorkDir. It writes the error
+// response and returns ok=false when nothing resolves.
 func (s *Server) workspaceTrustRoot(w http.ResponseWriter, r *http.Request) (workDir, root string, ok bool) {
 	if !s.workspaceTrustCapable() {
 		capabilityUnavailable(w, "workspaceTrust")
@@ -64,6 +74,13 @@ func (s *Server) workspaceTrustRoot(w http.ResponseWriter, r *http.Request) (wor
 	if id := rootParam(r); id != "" && s.opts.LiveHub != nil && s.opts.LiveHub.LiveFor(id) == nil {
 		writeJSON(w, http.StatusNotFound, opErrorResponse{Error: "root not found"})
 		return "", "", false
+	}
+	if a := s.opts.WorkspaceTrustAssembled; a != nil && strings.TrimSpace(a.Root) != "" {
+		dir := strings.TrimSpace(a.Dir)
+		if dir == "" {
+			dir = a.Root
+		}
+		return dir, a.Root, true
 	}
 	workDir = strings.TrimSpace(s.currentCWD(r))
 	if workDir == "" {
@@ -100,10 +117,8 @@ func (s *Server) workspaceTrustStatus(store *workspacetrust.Store, workDir, root
 		resp.TrustedAt = rec.TrustedAt
 	}
 	resp.Untrustable = workspacetrust.Untrustable(root)
-	if s.opts.WorkspaceTrustAtStart != nil {
-		if was, known := s.opts.WorkspaceTrustAtStart(root); known && was != resp.Trusted {
-			resp.RestartRequired = true
-		}
+	if a := s.opts.WorkspaceTrustAssembled; a != nil && a.Root == root && a.Trusted != resp.Trusted {
+		resp.RestartRequired = true
 	}
 	return resp
 }

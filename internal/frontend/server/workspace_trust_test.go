@@ -41,19 +41,23 @@ type trustFixture struct {
 	storePath string
 }
 
-func newTrustFixture(t *testing.T, readOnly bool, atStart func(string) (bool, bool)) trustFixture {
+func newTrustFixture(t *testing.T, readOnly bool, assembled func(repo string) *WorkspaceTrustAssembly) trustFixture {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	repo := writeTrustRepo(t)
 	storePath := filepath.Join(t.TempDir(), "workspace-trust.json")
 	live := NewLive("sess-trust", repo, nil, make(chan protocol.Op))
 	t.Cleanup(live.Close)
+	var asm *WorkspaceTrustAssembly
+	if assembled != nil {
+		asm = assembled(repo)
+	}
 	srv, err := New(Options{
-		SessionDir:            t.TempDir(),
-		Live:                  live,
-		ReadOnly:              readOnly,
-		WorkspaceTrustPath:    storePath,
-		WorkspaceTrustAtStart: atStart,
+		SessionDir:              t.TempDir(),
+		Live:                    live,
+		ReadOnly:                readOnly,
+		WorkspaceTrustPath:      storePath,
+		WorkspaceTrustAssembled: asm,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -143,15 +147,9 @@ func TestWorkspaceTrustGrantThenRevoke(t *testing.T) {
 }
 
 func TestWorkspaceTrustRestartRequired(t *testing.T) {
-	var root string
-	atStart := func(r string) (bool, bool) {
-		if r != root {
-			return false, false
-		}
-		return false, true // assembled untrusted
-	}
-	f := newTrustFixture(t, false, atStart)
-	root = trustCanonical(t, f.repo)
+	f := newTrustFixture(t, false, func(repo string) *WorkspaceTrustAssembly {
+		return &WorkspaceTrustAssembly{Dir: repo, Root: trustCanonical(t, repo), Trusted: false}
+	})
 
 	_, got, _ := trustRequest(t, f.srv, http.MethodGet, "/v1/workspace/trust", "")
 	if got.RestartRequired {
@@ -164,6 +162,38 @@ func TestWorkspaceTrustRestartRequired(t *testing.T) {
 	_, got, _ = trustRequest(t, f.srv, http.MethodPost, "/v1/workspace/trust", `{"action":"revoke"}`)
 	if got.RestartRequired {
 		t.Fatal("restartRequired = true after reverting to the assembled state")
+	}
+}
+
+// A session bound to a strike worktree has a CWD outside the launch repo,
+// but it runs on the daemon's one assembly: trust must key on the
+// assembled workspace, not the worktree path.
+func TestWorkspaceTrustUsesAssembledWorkspaceOverRootCWD(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	launch := writeTrustRepo(t)
+	worktree := t.TempDir()
+	live := NewLive("sess-wt", worktree, nil, make(chan protocol.Op))
+	defer live.Close()
+	storePath := filepath.Join(t.TempDir(), "workspace-trust.json")
+	srv, err := New(Options{
+		SessionDir:              t.TempDir(),
+		Live:                    live,
+		WorkspaceTrustPath:      storePath,
+		WorkspaceTrustAssembled: &WorkspaceTrustAssembly{Dir: launch, Root: trustCanonical(t, launch)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, got, raw := trustRequest(t, srv, http.MethodPost, "/v1/workspace/trust", `{"action":"grant"}`)
+	if code != http.StatusOK || got.Root != trustCanonical(t, launch) || len(got.Surfaces.MCP) != 1 {
+		t.Fatalf("grant = %d %s, want the launch workspace", code, raw)
+	}
+	store, err := workspacetrust.Open(storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !store.Trusted(launch) || store.Trusted(worktree) {
+		t.Fatalf("trusted roots = %v, want only %s", store.Roots(), launch)
 	}
 }
 
