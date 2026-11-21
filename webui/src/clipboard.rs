@@ -11,7 +11,7 @@
 //! local-files paths (#1555) and the Git panel diff (#1580).
 
 use wasm_bindgen::closure::Closure;
-use wasm_bindgen::JsCast;
+use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
 /// Shown when a clipboard write cannot be completed. Deliberately generic:
@@ -26,13 +26,61 @@ pub const PAIRING_COPY_FAILED: &str =
 
 /// Write `text` to the clipboard, resolving only once the browser has
 /// accepted it. `Err` carries [`COPY_FAILED`], not the raw rejection.
+///
+/// Where the async clipboard API is missing (non-secure context, older
+/// WebView: `navigator.clipboard` is undefined) this falls back to the
+/// legacy selected-textarea `execCommand("copy")` path instead of
+/// throwing, and still reports `Err` if that copy is refused (#1505).
 pub async fn copy_text(text: &str) -> Result<(), String> {
     let win = web_sys::window().ok_or_else(|| COPY_FAILED.to_string())?;
-    let promise = win.navigator().clipboard().write_text(text);
-    JsFuture::from(promise)
+    let nav = win.navigator();
+    let has_async = js_sys::Reflect::get(&nav, &JsValue::from_str("clipboard"))
+        .map(|v| !v.is_undefined() && !v.is_null())
+        .unwrap_or(false);
+    if !has_async {
+        return legacy_copy(&win, text);
+    }
+    JsFuture::from(nav.clipboard().write_text(text))
         .await
         .map(|_| ())
         .map_err(|_| COPY_FAILED.to_string())
+}
+
+/// `execCommand("copy")` from an off-screen, read-only textarea. Focus
+/// returns to whatever held it (the Copy button on the keyboard path).
+fn legacy_copy(win: &web_sys::Window, text: &str) -> Result<(), String> {
+    let fail = || COPY_FAILED.to_string();
+    let doc = win.document().ok_or_else(fail)?;
+    let body = doc.body().ok_or_else(fail)?;
+    let area: web_sys::HtmlTextAreaElement = doc
+        .create_element("textarea")
+        .map_err(|_| fail())?
+        .dyn_into()
+        .map_err(|_| fail())?;
+    area.set_value(text);
+    let _ = area.set_attribute("readonly", "");
+    let _ = area.set_attribute("aria-hidden", "true");
+    let _ = area
+        .style()
+        .set_css_text("position:fixed;top:0;left:-9999px;opacity:0;");
+    let prior = doc
+        .active_element()
+        .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok());
+    body.append_child(&area).map_err(|_| fail())?;
+    area.select();
+    let copied = doc
+        .dyn_ref::<web_sys::HtmlDocument>()
+        .and_then(|d| d.exec_command("copy").ok())
+        .unwrap_or(false);
+    area.remove();
+    if let Some(el) = prior {
+        let _ = el.focus();
+    }
+    if copied {
+        Ok(())
+    } else {
+        Err(fail())
+    }
 }
 
 /// Run `f` after `ms` milliseconds (transient "Copied" labels reverting).
