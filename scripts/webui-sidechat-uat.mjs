@@ -317,6 +317,43 @@ try {
   log("answered");
   await shoot("after-answer");
 
+  // #1363: Add to main chat inserts the answer as an unsent, attributed
+  // draft below whatever the main composer already holds.
+  const promoted = await page.evaluate(`(() => {
+    const main = document.querySelector('[data-feature="composer-triggers"] textarea');
+    if (!main) return { ok: false, why: "no main composer" };
+    const proto = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+    proto.set.call(main, "keep this draft");
+    main.dispatchEvent(new InputEvent("input", { bubbles: true, data: "keep this draft" }));
+    const btn = [...document.querySelectorAll("[data-side-chat-promote]")].pop();
+    if (!btn) return { ok: false, why: "no Add to main chat button" };
+    btn.click();
+    return { ok: true };
+  })()`);
+  check(promoted.ok, `Add to main chat: ${promoted.why || ""}`);
+  const drafted = await waitUntil(
+    `(() => {
+      const main = document.querySelector('[data-feature="composer-triggers"] textarea');
+      const v = main ? main.value : "";
+      return v.startsWith("keep this draft") && v.includes("> From side chat:") && v.includes("You said:");
+    })()`,
+    5000,
+    "promoted draft",
+  );
+  check(Boolean(drafted), "Add to main chat did not append an attributed draft below the existing text");
+  const promotedNote = await page.evaluate(
+    `(document.querySelector("[data-side-chat-note]")?.innerText || "")`,
+  );
+  check(promotedNote.includes("Nothing was sent"), `promote note missing: ${promotedNote}`);
+  await shoot("after-promote");
+  await page.evaluate(`(() => {
+    const main = document.querySelector('[data-feature="composer-triggers"] textarea');
+    if (!main) return;
+    const proto = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+    proto.set.call(main, "");
+    main.dispatchEvent(new InputEvent("input", { bubbles: true, data: "" }));
+  })()`);
+
   const errorAsk = await page.evaluate(`(() => {
     const input = document.getElementById("side-chat-input");
     if (!input) return false;
