@@ -503,6 +503,9 @@ try {
     envLine("text.delta", "2026-10-26T06:04:00Z", { text: "slow answer" }) +
     envLine("turn.completed", "2026-10-26T06:04:12Z", { stopReason: "end_turn" }) +
     envLine("user.message", "2026-10-26T06:10:00Z", { text: "quick follow up" }) +
+    // Reasoning visibility (#1372): one reasoning delta before the answer;
+    // hidden until the per-session toggle is switched on.
+    envLine("reasoning.delta", "2026-10-26T06:10:05Z", { text: "weighing the quick reply" }) +
     envLine("text.delta", "2026-10-26T06:10:10Z", { text: "fast answer" }) +
     envLine("turn.completed", "2026-10-26T06:10:20Z", { stopReason: "end_turn" }) +
     // Compaction visibility (#1359): markers between turns (outside any
@@ -2367,7 +2370,7 @@ try {
     `(() => { const w = document.querySelector("[data-attach-warning]"); return !!w && w.offsetParent !== null && w.innerText.includes("honesty-shot.png") && w.innerText.includes("echo provider does not accept attachments"); })()`,
     "composer warns that echo drops the attachment",
   );
-  await evaluate(`(() => { const b = [...document.querySelectorAll(".attach-chip button")].find((x) => x.closest(".attach-chip")?.innerText.includes("honesty-shot.png")); b?.click(); return !!b; })()`);
+  await evaluate(`(() => { const b = [...document.querySelectorAll('.attach-chip button[aria-label="Remove attachment"]')].find((x) => x.closest(".attach-chip")?.innerText.includes("honesty-shot.png")); b?.click(); return !!b; })()`);
   await waitUntil(`!document.querySelector("[data-attach-warning]")`, "attachment warning clears with the file");
   // Office + media classification (#1390): a docx with its real browser
   // MIME is accepted as a document, an mp4 header as video, a plain zip
@@ -2456,8 +2459,82 @@ try {
     `(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); const v = chip && chip.querySelector("video.attach-media"); return !!v && v.controls && v.src.startsWith("blob:"); })()`,
     "mp4 composer chip shows video controls",
   );
-  await evaluate(`(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); chip?.querySelector("button")?.click(); return !!chip; })()`);
+  await evaluate(`(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); chip?.querySelector('button[aria-label="Remove attachment"]')?.click(); return !!chip; })()`);
   await waitUntil(`![...document.querySelectorAll(".attach-chip")].some((c) => c.innerText.includes("smoke-clip.mp4"))`, "mp4 chip removed");
+  // Visual annotate (#1545): attach an image, drop a pin with a note,
+  // send, and the single turn carries the coordinate block; removing an
+  // image with unsent marks asks first.
+  const attachPng = (name) => evaluate(`(() => {
+    const input = document.querySelector('input[data-chat-attach="true"]');
+    const bytes = Uint8Array.from(atob(${JSON.stringify(png)}), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], ${JSON.stringify(name)}, { type: "image/png" }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  const chipFor = (name) => `[...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes(${JSON.stringify(name)}))`;
+  const placePin = async (name, note) => {
+    await waitUntil(`!!(${chipFor(name)})?.querySelector('[data-annotate-open]')`, `annotate action on ${name}`);
+    await evaluate(`(${chipFor(name)}).querySelector('[data-annotate-open]').click()`);
+    await waitUntil(`(() => { const img = document.querySelector('[data-annotate] .annotate-canvas img'); return !!img && img.complete && img.getBoundingClientRect().width > 0; })()`, "annotate overlay image");
+    await evaluate(`(() => {
+      const canvas = document.querySelector('[data-annotate] .annotate-canvas');
+      const r = canvas.querySelector('img').getBoundingClientRect();
+      const at = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0, pointerId: 7, bubbles: true, isPrimary: true };
+      canvas.dispatchEvent(new PointerEvent("pointerdown", at));
+      canvas.dispatchEvent(new PointerEvent("pointerup", at));
+      return true;
+    })()`);
+    await waitUntil(`document.querySelectorAll('[data-annotate-marks] li').length === 1 && document.querySelector('[data-annotate-marks]').innerText.includes("[pin x=50%, y=50%]")`, "pin listed with coordinates");
+    await evaluate(`(() => {
+      const input = document.querySelector('[data-annotate-marks] input');
+      input.value = ${JSON.stringify(note)};
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      document.querySelector('[data-annotate-done]').click();
+      return true;
+    })()`);
+    await waitUntil(`!document.querySelector('[data-annotate]') && (${chipFor(name)})?.querySelector('[data-attach-marks]')?.innerText === "1 mark"`, "overlay closed and chip shows 1 mark");
+  };
+  await attachPng("annotate-discard.png");
+  await placePin("annotate-discard.png", "throwaway");
+  await evaluate(`(${chipFor("annotate-discard.png")}).querySelector('button[aria-label="Remove attachment"]').click()`);
+  await waitUntil(`(() => { const d = document.querySelector(".confirm-dialog"); return !!d && d.innerText.includes("1 mark"); })()`, "removing an annotated image asks first");
+  await evaluate(`document.querySelector('[data-confirm="accept"]').click()`);
+  await waitUntil(`!(${chipFor("annotate-discard.png")})`, "annotated image removed after explicit yes");
+  await attachPng("annotate-shot.png");
+  await placePin("annotate-shot.png", "move this button");
+  await evaluate(`(() => {
+    const ta = document.getElementById("composer-input");
+    const proto = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+    proto.set.call(ta, "annotate smoke 1545");
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    document.getElementById("send-primary").click();
+    return true;
+  })()`);
+  await waitUntil(
+    `(() => {
+      const draft = document.getElementById("composer-input")?.value || "";
+      const chips = document.querySelectorAll(".attach-chip").length;
+      if (draft === "" && chips === 0) return true;
+      return JSON.stringify({ draft, chips, notes: [...document.querySelectorAll(".hint, .queue-note, [role=status]")].map((n) => n.innerText).filter(Boolean).slice(0, 8) });
+    })()`,
+    "annotated send accepted (composer cleared)",
+  );
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+  });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await waitUntil(
+    `(() => {
+      const t = document.body.innerText;
+      const sent = [...document.querySelectorAll("[data-sent-attachments]")].some((el) => el.innerText.includes("annotate-shot-annotated.png"));
+      if (sent && t.includes("annotate smoke 1545") && t.includes("Annotations on annotate-shot.png") && t.includes('[pin x=50%, y=50%] "move this button"')) return true;
+      const msgs = [...document.querySelectorAll(".sx-msg")].slice(-3).map((m) => m.innerText.slice(0, 300));
+      return JSON.stringify({ sent, msgs });
+    })()`,
+    "sent turn carries the composite and the annotation block after reload",
+  );
   await send("Runtime.evaluate", {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
   });
@@ -5179,6 +5256,66 @@ try {
           v.after,
         ...v,
       };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Reasoning visibility (#1372): off by default the reasoning leaves no
+  // trace in the DOM, only the toggle; switched on, a labelled block sits
+  // directly above the answer it preceded and stays out of the answer's
+  // own text; switched off again, it is gone.
+  const reasoningProbe = `(() => {
+    const toggle = document.querySelector("[data-reasoning-toggle]");
+    const blocks = [...document.querySelectorAll(".sx-reasoning")];
+    const answer = [...document.querySelectorAll("article.sx-msg")].find((a) =>
+      (a.innerText || "").includes("fast answer"),
+    );
+    return {
+      toggle: !!toggle,
+      pressed: toggle ? toggle.getAttribute("aria-pressed") : "",
+      label: toggle ? toggle.textContent.trim() : "",
+      blocks: blocks.length,
+      text: blocks[0] ? blocks[0].innerText : "",
+      aboveAnswer: !!blocks[0] && !!answer && blocks[0].nextElementSibling === answer,
+      inAnswer: answer ? (answer.innerText || "").includes("weighing the quick reply") : true,
+      leaked: !blocks.length && document.body.innerText.includes("weighing the quick reply"),
+    };
+  })()`;
+  await waitFor(
+    "reasoning hidden by default behind its toggle",
+    async () => {
+      const v = await evaluate(reasoningProbe);
+      return {
+        ok: v.toggle && v.pressed === "false" && v.label === "Show reasoning" && v.blocks === 0 && !v.leaked,
+        ...v,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => { document.querySelector("[data-reasoning-toggle]").click(); return true; })()`);
+  await waitFor(
+    "reasoning block above the answer once toggled on",
+    async () => {
+      const v = await evaluate(reasoningProbe);
+      return {
+        ok:
+          v.pressed === "true" &&
+          v.label === "Hide reasoning" &&
+          v.blocks === 1 &&
+          v.text.includes("weighing the quick reply") &&
+          v.text.includes("not part of the answer") &&
+          v.aboveAnswer &&
+          !v.inAnswer,
+        ...v,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => { document.querySelector("[data-reasoning-toggle]").click(); return true; })()`);
+  await waitFor(
+    "reasoning gone again once toggled off",
+    async () => {
+      const v = await evaluate(reasoningProbe);
+      return { ok: v.pressed === "false" && v.blocks === 0 && !v.leaked, ...v };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
