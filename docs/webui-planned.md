@@ -308,6 +308,32 @@ page. Plugin install and removal stay on `/v1/plugins`. The composer expands
 `$skill` through the daemon (see Composer triggers); this page is where those
 files are inspected and edited.
 
+## Powers
+
+The daemon side is in place but no chip is drawn yet (#1347).
+`internal/integrate/powers` loads packs from
+`<workspace>/.strike/powers/<pack>/` and `~/.strike/powers/<pack>/`, and
+the workspace copy wins on a name clash. Each pack is an Agent Plugins
+package: `plugin.json` holds `name` and `keywords`, `mcp.json` holds
+`mcpServers`, and `skills/<name>/SKILL.md` holds skills. These are
+references by name, not copies.
+
+A pack is suggested when a keyword appears in the prompt as a whole word
+or phrase. Packs that are muted or already active are not suggested, and
+nothing activates on its own. Activation is per session and
+reference-counted: packs that share a server keep it until the last one is
+deactivated, and ending one session never disconnects another session's
+servers. If a server fails to connect, it is listed as failed and left
+out of the session, and the chip and the tool set read the same result.
+If a pack names a deny-listed server, the whole pack stays inactive and
+the reason is shown.
+
+Not built yet:
+- a `Connector` connected to the MCP session manager, and the daemon routes for it;
+- the composer chip row with context cost (#1259);
+- pack membership on Customize;
+- goal-declared Powers (#1284).
+
 ## Composer triggers
 
 `user.input` and `steer` expand in the daemon (`internal/composer/triggers`,
@@ -389,8 +415,17 @@ patterns, tool output, handoff files, and verification reports are not
 copied.
 
 Per-session mute and quiet hours live in
-`PUT /v1/notifications/prefs`. They suppress browser banners. The record
-stays in the centre until this browser marks it read.
+`PUT /v1/notifications/prefs`. They suppress browser banners.
+
+Read state is daemon-side (#1392): `GET /v1/notifications` returns
+`seen: {upTo, ids}` and `POST /v1/notifications/seen` takes `{"ids":[...]}`
+(one row opened) or `{"upTo": seq}` ("Mark all read" up to the newest row
+the browser showed). A row is read when `seq <= upTo` or its id is listed.
+Reads are monotonic and shared by every browser on the gateway; ids are
+pruned to the 200-row window. Each browser keeps its own copy in
+`localStorage` as an offline cache and pushes reads made offline on the next
+load. Dismissing a row ("Clear read") stays per-browser. Not built yet:
+collapsing consecutive same-kind, same-session rows into one counted row.
 
 Not built: a third-party web-push service, and an operating-system banner
 while the browser process is quit. Nothing can wake a quit browser without
@@ -409,6 +444,25 @@ collapsed content (child-card details and long tool dumps the
 transcript folds away) are not searched and find does not expand
 collapsed cards to reveal a match; a case-sensitive toggle is likewise
 deferred until someone asks for it.
+
+## Debug mode
+
+Engine state shipped, panel not drawn (#1345). `harness/debugmode` holds
+one debug session: 2–5 ranked hypotheses with attached evidence, each
+open / confirmed / refuted (confirming requires evidence). In the
+`hypothesis` phase the gate allows reads and only edits whose every
+changed line carries the `debugmode.Marker` tag; untagged edits, whole-file
+writes, deletes and moves are denied with a reason (`*GateError`). Fix edits unlock when a
+hypothesis is confirmed or the user gives an override reason, which the
+session keeps for the transcript. Ending the session requires the user to
+mark the bug fixed; it then sweeps every whole line containing the marker
+under the workspace (skipping `.git`, binaries and files over 4 MiB) and
+closes only when a rescan finds zero.
+
+Not drawn yet: the session flag in the engine turn loop, the protocol
+events, and the cockpit Debug panel (hypothesis card, instrumentation
+list, reproduce checklist, mobile chip). Bash is not inspected by the
+gate; the permission layer still governs it.
 
 ## Agent questions
 
@@ -431,6 +485,7 @@ Not built:
   session. Recommended default: no; the card is the only answer surface.
 - Timeouts. An unanswered question blocks until answered, dismissed, or the
   turn is stopped (recommended default: keep blocking).
+
 
 ## Not planned as a copy
 
