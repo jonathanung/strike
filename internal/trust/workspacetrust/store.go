@@ -183,6 +183,16 @@ func (s *Store) Record(root string) (Record, bool) {
 	return r, ok
 }
 
+// Untrustable reports whether root can never accept a grant (the filesystem
+// root or the user's home directory, after canonicalization).
+func Untrustable(root string) bool {
+	key, err := CanonicalRoot(root)
+	if err != nil {
+		return false
+	}
+	return untrustable(key)
+}
+
 // untrustable reports roots that never accept a grant: the filesystem root
 // and the user's home directory (canonical form).
 func untrustable(key string) bool {

@@ -101,6 +101,7 @@ jobs:
           fi
           cargo test --manifest-path webui/protocol-schema/Cargo.toml --locked
           cargo test --manifest-path webui/load-guard/Cargo.toml --locked
+          cargo test --manifest-path webui/md-review/Cargo.toml --locked
           cargo test --manifest-path webui/transcript-window/Cargo.toml --locked
           cargo test --manifest-path webui/dashboard-view/Cargo.toml --locked
           cargo test --manifest-path webui/status-card/Cargo.toml --locked

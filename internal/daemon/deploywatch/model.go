@@ -135,8 +135,12 @@ type Watch struct {
 	LastPolledAt     time.Time     `json:"lastPolledAt,omitzero"`
 	// NotifyError is the last failure to post the plan or verdict to the PR
 	// or session. Posting is best effort; it never changes the verdict.
-	NotifyError string    `json:"notifyError,omitempty"`
-	FinishedAt  time.Time `json:"finishedAt,omitzero"`
+	NotifyError string `json:"notifyError,omitempty"`
+	// FixSession and RevertPR record the confirmed regression handoffs
+	// (#1784). Each runs at most once per watch.
+	FixSession *Handoff  `json:"fixSession,omitempty"`
+	RevertPR   *Handoff  `json:"revertPr,omitempty"`
+	FinishedAt time.Time `json:"finishedAt,omitzero"`
 }
 
 // Active reports whether the watch still polls.
