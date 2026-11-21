@@ -36,6 +36,64 @@ type skillTool struct {
 	skills []SkillInfo
 	loader SkillLoader
 	desc   string
+	// session, when set, supplies extra skills for one root session (Powers
+	// packs active there, #1943). They are listed and loadable only in that
+	// session; a base skill of the same name always wins.
+	session func(rootSession string) []SkillInfo
+}
+
+// SessionSkillSetter is implemented by the skill tool. SetSessionSkills wires
+// the per-session skill source after the registry is built (Powers are
+// assembled later). Nil clears it.
+type SessionSkillSetter interface {
+	SetSessionSkills(fn func(rootSession string) []SkillInfo)
+}
+
+// SetSessionSkills sets the per-session skill source.
+func (t *skillTool) SetSessionSkills(fn func(rootSession string) []SkillInfo) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.session = fn
+}
+
+// forSession returns the base catalog plus skills supplied for rootSession,
+// skipping any whose name the base catalog already has.
+func (t *skillTool) forSession(rootSession string) []SkillInfo {
+	base := t.snapshot()
+	t.mu.Lock()
+	fn := t.session
+	t.mu.Unlock()
+	if fn == nil || strings.TrimSpace(rootSession) == "" {
+		return base
+	}
+	extra := fn(rootSession)
+	if len(extra) == 0 {
+		return base
+	}
+	seen := make(map[string]bool, len(base)+len(extra))
+	for _, s := range base {
+		seen[s.Name] = true
+	}
+	for _, s := range extra {
+		if s.Name == "" || seen[s.Name] {
+			continue
+		}
+		seen[s.Name] = true
+		base = append(base, s)
+	}
+	return base
+}
+
+// DescriptionFor implements tool.SessionDescriber: the description lists the
+// skills available in rootSession, Powers skills included.
+func (t *skillTool) DescriptionFor(rootSession string) string {
+	t.mu.Lock()
+	fn := t.session
+	t.mu.Unlock()
+	if fn == nil {
+		return ""
+	}
+	return skillDescription(t.forSession(rootSession))
 }
 
 // NewSkill returns a tool that loads named skill templates into the conversation.
@@ -76,8 +134,12 @@ func (t *skillTool) rebuildDesc() {
 }
 
 func (t *skillTool) rebuildDescLocked() {
-	names := make([]string, 0, len(t.skills))
-	for _, s := range t.skills {
+	t.desc = skillDescription(t.skills)
+}
+
+func skillDescription(skills []SkillInfo) string {
+	names := make([]string, 0, len(skills))
+	for _, s := range skills {
 		names = append(names, s.Name)
 	}
 	var list string
@@ -86,7 +148,7 @@ func (t *skillTool) rebuildDescLocked() {
 	} else {
 		list = strings.Join(names, ", ")
 	}
-	t.desc = fmt.Sprintf(`Load a specialized skill when the task matches one of the available skills.
+	return fmt.Sprintf(`Load a specialized skill when the task matches one of the available skills.
 
 Use this tool to inject the skill's instructions into the current conversation. The output may contain detailed workflow guidance. Optional resource paths load adjacent files under the skill's source root (traversal-protected).
 
@@ -134,7 +196,14 @@ func (t *skillTool) Execute(ctx context.Context, args json.RawMessage, tc *tool.
 		return tool.Result{}, fmt.Errorf("name is required")
 	}
 
-	skills := t.snapshot()
+	var root string
+	if tc != nil {
+		root = tc.RootSessionID
+		if root == "" {
+			root = tc.SessionID
+		}
+	}
+	skills := t.forSession(root)
 	var found *SkillInfo
 	names := make([]string, 0, len(skills))
 	for i := range skills {

@@ -1430,6 +1430,9 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	// err already declared from pre-tool hooks; reuse for Execute outcome.
 	err = nil
 	t, ok := e.opts.Registry.Get(call.Name)
+	if ok && !e.toolVisible(call.Name) {
+		ok = false // another session's Powers tool (#1943)
+	}
 	if !ok {
 		err = fmt.Errorf("unknown tool %q; available tools: %s", call.Name, e.toolNames())
 	} else if e.toolLoop != nil && e.toolLoop.wouldTrip(call.Name, call.Args) {
@@ -1485,6 +1488,7 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			Files:         e.files,
 			SessionID:     e.opts.SessionID,
 			RootSessionID: e.rootSessionID(),
+			ToolVisible:   e.toolVisibleFunc(),
 			MemoryMode:    e.MemoryMode(),
 			NotifyArtifact: func(op string, payload any) {
 				if e.opts.ProjectArtifact == nil {

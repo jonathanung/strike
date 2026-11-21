@@ -310,7 +310,7 @@ files are inspected and edited.
 
 ## Powers
 
-The daemon side is in place but no chip is drawn yet (#1347, #1867).
+The daemon side is in place but no chip is drawn yet (#1347, #1867, #1943).
 `internal/integrate/powers` loads packs from
 `<workspace>/.strike/powers/<pack>/` and `~/.strike/powers/<pack>/`, and
 the workspace copy wins on a name clash. Workspace packs load only in a
@@ -340,14 +340,23 @@ Routes: `GET /v1/powers?session=`, `POST /v1/powers/suggest`
 and `POST /v1/powers/mute` `{name, muted}`. The mutating routes refuse
 `--read-only`. Closing a root or deleting a session unloads its Powers.
 
-Not built yet (#1943):
-- skills loaded into context per session;
-- per-session tool scoping (the MCP registry is process-wide, so a pack's
-  tools are visible to every root until the last session releases them);
-- the composer chip row with context cost (#1259);
+Activations key on the root engine's session id; the routes accept the
+root id or the session id. A pack's tools and skills are scoped to the
+session that activated it (#1943): tools bridged from a server Powers
+attached are hidden from every other root (provider tools, the tools
+prompt layer and `toolsearch`, and refused at dispatch), and children of
+the root inherit its set. A failed server is not in the set. Pack skills
+are listed in that session's `skill` tool and loadable there only, while
+the pack is active; a configured skill of the same name wins. Servers
+configured outside Powers stay shared. Mute state and last-used times
+persist in `~/.strike/powers-state.json`.
+
+Not built yet (#1974):
+- the composer chip row with context cost (#1259) and the failure state;
+- the "Activate <name>?" suggestion chip;
 - pack membership on Customize;
 - goal-declared Powers (#1284);
-- persisted mute and last-used time.
+- a webui-smoke check and the UAT evidence.
 
 ## Composer triggers
 

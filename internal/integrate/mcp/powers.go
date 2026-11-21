@@ -78,6 +78,25 @@ func (m *Manager) DetachServer(name string) {
 	m.mu.Unlock()
 }
 
+// ToolServer reports which server's bridge registered the registry tool
+// name. Bridges register before the manager records them, so a tool can be
+// briefly in the registry and unknown here.
+func (m *Manager) ToolServer(name string) (string, bool) {
+	if m == nil {
+		return "", false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for srv, names := range m.tools {
+		for _, n := range names {
+			if n == name {
+				return srv, true
+			}
+		}
+	}
+	return "", false
+}
+
 // PackConnector implements powers.Connector over a Manager. The manager and
 // its tool registry are process-wide, so a server is attached once and
 // shared by every session that activates a pack naming it; it is detached
@@ -89,28 +108,76 @@ type PackConnector struct {
 	detach  func(name string)
 	timeout time.Duration
 
-	mu    sync.Mutex
-	locks map[string]*sync.Mutex // server -> serializes attach/detach
-	refs  map[string]int         // server -> sessions holding it
-	owned map[string]bool        // server -> attached by us
+	// toolServer maps a registry tool to its server (Manager.ToolServer).
+	toolServer func(tool string) (string, bool)
+
+	mu        sync.Mutex
+	locks     map[string]*sync.Mutex // server -> serializes attach/detach
+	refs      map[string]int         // server -> sessions holding it
+	owned     map[string]bool        // server -> attached by us
+	attaching map[string]bool        // server -> attach in flight
 }
 
 // NewPackConnector builds a connector. resolve maps a pack server name to
 // its configuration.
 func NewPackConnector(m *Manager, resolve func(server string) (ServerConfig, bool)) *PackConnector {
-	return newPackConnector(resolve, m.AttachServer, m.DetachServer)
+	c := newPackConnector(resolve, m.AttachServer, m.DetachServer)
+	c.toolServer = m.ToolServer
+	return c
 }
 
 func newPackConnector(resolve func(string) (ServerConfig, bool), attach func(context.Context, ServerConfig) (bool, error), detach func(string)) *PackConnector {
 	return &PackConnector{
-		resolve: resolve,
-		attach:  attach,
-		detach:  detach,
-		timeout: 45 * time.Second,
-		locks:   map[string]*sync.Mutex{},
-		refs:    map[string]int{},
-		owned:   map[string]bool{},
+		resolve:   resolve,
+		attach:    attach,
+		detach:    detach,
+		timeout:   45 * time.Second,
+		locks:     map[string]*sync.Mutex{},
+		refs:      map[string]int{},
+		owned:     map[string]bool{},
+		attaching: map[string]bool{},
 	}
+}
+
+// ScopedTool reports whether the registry tool name belongs to a server
+// Powers attached (or is attaching), and which one. Those tools are session
+// scoped (#1943); a server configured outside Powers is shared and never
+// reported. When the manager has not recorded the tool yet it falls back to
+// the mcp_<server>_ name prefix, so a tool that appears mid-attach is
+// treated as scoped rather than leaking to every session.
+func (c *PackConnector) ScopedTool(name string) (string, bool) {
+	c.mu.Lock()
+	scoped := make([]string, 0, len(c.owned)+len(c.attaching))
+	for srv, own := range c.owned {
+		if own {
+			scoped = append(scoped, srv)
+		}
+	}
+	for srv := range c.attaching {
+		if !c.owned[srv] {
+			scoped = append(scoped, srv)
+		}
+	}
+	c.mu.Unlock()
+	if len(scoped) == 0 {
+		return "", false
+	}
+	if c.toolServer != nil {
+		if srv, ok := c.toolServer(name); ok {
+			for _, s := range scoped {
+				if s == srv {
+					return srv, true
+				}
+			}
+			return "", false
+		}
+	}
+	for _, s := range scoped {
+		if strings.HasPrefix(name, "mcp_"+sanitizeName(s)+"_") {
+			return s, true
+		}
+	}
+	return "", false
 }
 
 func (c *PackConnector) serverLock(server string) *sync.Mutex {
@@ -143,15 +210,18 @@ func (c *PackConnector) Connect(_ string, server string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
-	attached, err := c.attach(ctx, cfg)
-	if err != nil {
-		return err
-	}
 	c.mu.Lock()
-	c.refs[server] = 1
-	c.owned[server] = attached
+	c.attaching[server] = true
 	c.mu.Unlock()
-	return nil
+	attached, err := c.attach(ctx, cfg)
+	c.mu.Lock()
+	delete(c.attaching, server)
+	if err == nil {
+		c.refs[server] = 1
+		c.owned[server] = attached
+	}
+	c.mu.Unlock()
+	return err
 }
 
 // Disconnect releases session's hold on server, detaching it when no

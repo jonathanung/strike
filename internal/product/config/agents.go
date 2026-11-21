@@ -535,6 +535,14 @@ func splitSkillRoots(workDir string) (global, project []skillSource) {
 	return global, project
 }
 
+// ParseSkillFile parses one skill markdown file (frontmatter name and
+// description, body as template). Powers (#1943) use it for pack skills,
+// which live outside the skill discovery roots. A file with no usable
+// content returns nil, nil.
+func ParseSkillFile(path string) (*Skill, error) {
+	return parseSkillFile(path)
+}
+
 func parseSkillFile(path string) (*Skill, error) {
 	skill, _, err := parseSkillFileNotes(path)
 	return skill, err
