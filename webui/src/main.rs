@@ -3006,7 +3006,11 @@ fn App() -> impl IntoView {
     });
     let on_rewound = Callback::new(move |(prompt, mode, turns): (String, rewind::Mode, u32)| {
         let what = if mode.restores_files() { "conversation and code" } else { "conversation" };
-        ux_note.set(format!("Rewound {turns} turn(s) ({what}). The prompt is back in the composer."));
+        // The ops were accepted; the engine reports each undone turn (or a
+        // refusal) in the transcript, so this note does not claim more.
+        ux_note.set(format!(
+            "Requested a rewind of {turns} turn(s) ({what}); the transcript shows each undone turn. The prompt is back in the composer."
+        ));
         if !prompt.trim().is_empty() {
             draft.set(prompt);
             sync_composer_height_soon();
