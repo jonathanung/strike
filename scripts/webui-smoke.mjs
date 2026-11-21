@@ -455,6 +455,33 @@ try {
     join(sessionsDir, "tail-session.meta.json"),
     JSON.stringify({ title: "Tool tail replay" }) + "\n",
   );
+  // Verification badge (#1373) fixture: one turn per state plus a turn
+  // with no verification payload, which must render no badge.
+  const verifyTurn = (n, text, verification) =>
+    envLine("user.message", `2026-10-28T06:0${n}:00Z`, { text: `verify prompt ${n}` }) +
+    envLine("text.delta", `2026-10-28T06:0${n}:05Z`, { text }) +
+    envLine(
+      "turn.completed",
+      `2026-10-28T06:0${n}:10Z`,
+      verification ? { stopReason: "end_turn", verification } : { stopReason: "end_turn" },
+    );
+  const verifySession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-28T06:00:00Z" }) +
+    "\n" +
+    verifyTurn(1, "answer gated", { passed: true, claimed: true, verified: true, summary: "go test passed" }) +
+    verifyTurn(2, "answer claimed", { passed: false, claimed: true, verified: false }) +
+    verifyTurn(3, "answer failed", {
+      passed: false,
+      claimed: false,
+      verified: true,
+      checks: [{ kind: "cmd", value: "go test ./...", passed: false }],
+    }) +
+    verifyTurn(4, "answer ungated", null);
+  await writeFile(join(sessionsDir, "verify-session.jsonl"), verifySession);
+  await writeFile(
+    join(sessionsDir, "verify-session.meta.json"),
+    JSON.stringify({ title: "Verification replay" }) + "\n",
+  );
   const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
     throw new Error(`content search ${found.status} ${found.text.slice(0, 300)}`);
@@ -4535,6 +4562,59 @@ try {
           v.quick,
         ...v,
       };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // Verification badge (#1373): resume the seeded session; each gated
+  // turn's final line carries the TUI label for its state, and the turn
+  // without a payload carries none.
+  let verifyClicked = "missing";
+  try {
+    await waitFor(
+      "verification badge resume row",
+      async () => {
+        verifyClicked = await evaluate(`(() => {
+          const row = document.querySelector('[data-session-id="verify-session"]');
+          const btn = row && row.querySelector(".ss-main");
+          if (!btn) return "missing";
+          btn.click();
+          return "clicked";
+        })()`);
+        return { ok: verifyClicked === "clicked", clicked: verifyClicked };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  } catch {
+    // reported below with the last observed state
+  }
+  if (verifyClicked !== "clicked") {
+    throw new Error(`verification badge resume click -> ${verifyClicked}`);
+  }
+  await waitFor(
+    "verification badges per turn state",
+    async () => {
+      const v = await evaluate(`(() => {
+        const badges = [...document.querySelectorAll(".turn-verify")].map((b) => ({
+          state: b.getAttribute("data-verify"),
+          text: b.textContent.trim(),
+          on: (b.closest("article")?.innerText || "").split("\\n").find((l) => l.startsWith("answer")) || "",
+        }));
+        const ungated = [...document.querySelectorAll("article")].find((a) =>
+          (a.innerText || "").includes("answer ungated"),
+        );
+        return {
+          badges: JSON.stringify(badges),
+          ungatedFound: Boolean(ungated),
+          ungatedBadge: Boolean(ungated && ungated.querySelector(".turn-verify")),
+        };
+      })()`);
+      const want = JSON.stringify([
+        { state: "verified", text: "verified", on: "answer gated" },
+        { state: "claimed", text: "claimed", on: "answer claimed" },
+        { state: "unverified", text: "unverified", on: "answer failed" },
+      ]);
+      return { ok: v.badges === want && v.ungatedFound && !v.ungatedBadge, ...v };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
