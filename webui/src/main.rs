@@ -59,6 +59,7 @@ mod model;
 mod notify;
 mod outcome;
 mod project_init;
+mod prompt_sharpen;
 mod onboarding;
 mod outbox;
 mod park;
@@ -3482,6 +3483,15 @@ fn App() -> impl IntoView {
         roots.get().iter().any(|r| r.id == root && r.busy)
             || (live_busy.get() && live_busy_root.get() == root)
     });
+    // Prompt sharpen (#1385): App-owned so the binding outlives the
+    // chat view's remounts.
+    let sharpen = prompt_sharpen::Sharpen::new(
+        draft,
+        active_root,
+        Signal::derive(move || session_busy_now.get()),
+        base,
+        token,
+    );
 
     Effect::new(move |_| {
         if model_menu.get() {
@@ -5731,6 +5741,13 @@ fn App() -> impl IntoView {
                                     <span class="name">"Use a skill"</span>
                                     <span class="path">"Skills loaded for this daemon"</span>
                                 </button>
+                                <button type="button" class="palette-row" data-sharpen-menu="true" on:click=move |_| {
+                                    plus_open.set(false);
+                                    let _ = sharpen.start();
+                                }>
+                                    <span class="name">"Sharpen prompt"</span>
+                                    <span class="path">"Rewrite the draft with the session model (Alt+P)"</span>
+                                </button>
                                 <button type="button" class="palette-row" data-chat-attach="menu" on:click=move |_| {
                                     plus_open.set(false);
                                     if let Some(el) = file_input.get() {
@@ -5972,6 +5989,7 @@ fn App() -> impl IntoView {
                                     }
                                 }
                             />
+                            {move || prompt_sharpen::bar_view(sharpen)}
                             <textarea
                                 id="composer-input"
                                 aria-label="Message this session"
@@ -5999,6 +6017,19 @@ fn App() -> impl IntoView {
                                     }
                                 }
                                 on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                    // Prompt sharpen (#1385): Alt+P rewrites the
+                                    // draft; `code` also matches macOS, where
+                                    // Option+P types a symbol.
+                                    if ev.alt_key() && !ev.ctrl_key() && !ev.meta_key()
+                                        && (ev.key().eq_ignore_ascii_case("p") || ev.code() == "KeyP")
+                                    {
+                                        // The chord is consumed here: it must not
+                                        // bubble on to page-level key handlers.
+                                        ev.prevent_default();
+                                        ev.stop_propagation();
+                                        let _ = sharpen.start();
+                                        return;
+                                    }
                                     if ev.key() == "ArrowDown" || ev.key() == "ArrowUp" {
                                         let items = ac_items.get_untracked();
                                         if ac_open.get_untracked() && items.iter().any(|item| item.selectable) {
@@ -6754,7 +6785,17 @@ mod composer_grow_history_tests {
     }
 }
 
+#[wasm_bindgen::prelude::wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console, js_name = error)]
+    fn console_error(s: &str);
+}
+
 fn main() {
+    // A wasm panic otherwise surfaces only as "RuntimeError: unreachable";
+    // log the message and location so the console (and the smoke's
+    // console dump) says what broke.
+    std::panic::set_hook(Box::new(|info| console_error(&format!("strike-webui panic: {info}"))));
     // A share link (#1565) gets only the read-only transcript shell: no
     // cockpit, no session list, no gateway credential.
     if let Some(token) = share::share_token_from_location() {
