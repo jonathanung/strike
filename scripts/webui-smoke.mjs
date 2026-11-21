@@ -15,6 +15,13 @@ import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
+import { seedRepeatedWorkflow, skillProposalsCheck } from "./webui-skill-proposals-check.mjs";
+import {
+  BROKEN_SKILL,
+  BROKEN_SKILL_BODY,
+  loadWarningCustomizeCheck,
+  loadWarningNoticeCheck,
+} from "./webui-load-warnings-check.mjs";
 import { mdReviewBrowserCheck } from "./webui-md-review-check.mjs";
 import { seedSkillUsage, skillUsageCheck } from "./webui-skill-usage-check.mjs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -2502,8 +2509,10 @@ try {
   });
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitUntil(
+    // Right after Page.navigate the new document may not have a body yet;
+    // read it as empty so the wait retries instead of throwing.
     `(() => {
-      const t = document.body.innerText;
+      const t = document.body?.innerText ?? "";
       const sent = [...document.querySelectorAll("[data-sent-attachments]")].some((el) => el.innerText.includes("annotate-shot-annotated.png"));
       if (sent && t.includes("annotate smoke 1545") && t.includes("Annotations on annotate-shot.png") && t.includes('[pin x=50%, y=50%] "move this button"')) return true;
       const msgs = [...document.querySelectorAll(".sx-msg")].slice(-3).map((m) => m.innerText.slice(0, 300));
@@ -2629,6 +2638,109 @@ try {
       };
     },
     { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // LSP diagnostics (#1404). First the real daemon: the pane must show
+  // the daemon's own empty/unavailable text verbatim. Then a stubbed
+  // /v1/diagnostics payload (CDP Fetch interception): entries grouped by
+  // file, the editor badge counting errors only, and click-to-line
+  // landing in the document viewer.
+  const daemonDiagTexts = [
+    "no language servers configured (add lsp.servers in config)",
+    "no live language servers (see servers status; try retry)",
+    "no diagnostics",
+    "lsp capability unavailable on this host",
+  ];
+  await runPalette("Code diagnostics");
+  await waitFor(
+    "diagnostics pane shows the daemon's own note",
+    async () => {
+      const v = await evaluate(`(() => {
+        const pane = document.querySelector("[data-diagnostics-pane]");
+        const note = document.querySelector("[data-diag-note]");
+        const err = document.querySelector("[data-diag-error] span");
+        return {
+          pane: !!pane,
+          text: ((note && note.textContent) || (err && err.textContent) || "").trim(),
+        };
+      })()`);
+      return { ok: v.pane && daemonDiagTexts.includes(v.text), ...v };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const diagStub = JSON.stringify({
+    diagnostics: [
+      { path: "cmd/strike/main.go", line: 10, character: 1, severity: "error", source: "smoke", code: "E1", message: "smoke diag error ten" },
+      { path: "cmd/strike/main.go", line: 12, character: 3, severity: "warning", source: "smoke", message: "smoke diag warning twelve" },
+      { path: "go.mod", line: 1, character: 1, severity: "error", source: "smoke", message: "smoke diag go mod" },
+    ],
+    count: 3,
+  });
+  const onDiagPaused = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.method !== "Fetch.requestPaused") return;
+    send("Fetch.fulfillRequest", {
+      requestId: msg.params.requestId,
+      responseCode: 200,
+      responseHeaders: [{ name: "Content-Type", value: "application/json" }],
+      body: Buffer.from(diagStub).toString("base64"),
+    });
+  };
+  ws.addEventListener("message", onDiagPaused);
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*/v1/diagnostics*", requestStage: "Request" }] });
+  try {
+    await waitFor(
+      "stubbed diagnostics grouped by file",
+      async () => {
+        const v = await evaluate(`(() => {
+          const files = [...document.querySelectorAll("[data-diag-file]")].map((el) => el.getAttribute("data-diag-file"));
+          const entries = [...document.querySelectorAll(".diag-entry")].map((b) => b.getAttribute("data-diag-path") + ":" + b.getAttribute("data-diag-line"));
+          if (files.length === 0) document.querySelector("[data-diag-refresh]")?.click();
+          return { files, entries };
+        })()`);
+        return {
+          ok: v.files.join(",") === "cmd/strike/main.go,go.mod" && v.entries.join(",") === "cmd/strike/main.go:10,cmd/strike/main.go:12,go.mod:1",
+          ...v,
+        };
+      },
+      { timeout: WAIT_MS, interval: 500 },
+    );
+    const diagClicked = await evaluate(`(() => {
+      const b = document.querySelector('.diag-entry[data-diag-path="cmd/strike/main.go"][data-diag-line="10"]');
+      if (!b) return "missing";
+      b.click();
+      return "clicked";
+    })()`);
+    if (diagClicked !== "clicked") {
+      throw new Error(`diagnostics entry ${diagClicked}`);
+    }
+    await waitFor(
+      "diagnostic click opens the file at its line, badge counts errors only",
+      async () => {
+        const v = await evaluate(`(() => {
+          const doc = document.querySelector('[data-ev-root="open"]');
+          const badge = document.querySelector("[data-diag-badge]");
+          return {
+            path: doc ? doc.getAttribute("data-ev-path") || "" : "",
+            lines: doc ? doc.querySelectorAll(".ev-line").length : 0,
+            badge: badge ? (badge.textContent || "").trim() : "",
+          };
+        })()`);
+        return { ok: v.path.endsWith("cmd/strike/main.go") && v.lines >= 10 && v.badge === "1 error", ...v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  } finally {
+    await send("Fetch.disable", {});
+    ws.removeEventListener("message", onDiagPaused);
+  }
+  // Close the document again: the viewer takes the transcript's place,
+  // and later steps read transcript rows.
+  await evaluate(`document.querySelector("[data-ev-back]")?.click()`);
+  await waitFor(
+    "diagnostics check closes the document viewer",
+    async () => ({ ok: (await evaluate(`!document.querySelector('[data-ev-root="open"]')`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
   );
 
   await runPalette("Memory");
@@ -3763,6 +3875,50 @@ try {
   if (still !== true) {
     throw new Error("main composer lost its approval chip");
   }
+
+  // #1384: read replies aloud. The speech engine is mocked at the browser
+  // boundary (CI Chrome has no reliable voices): an on-device voice reads
+  // the cleaned reply and marks the line playing until the engine ends;
+  // with no voices the control explains instead of pretending to play.
+  await evaluate(`(() => {
+    const spoken = [];
+    window.__ttsSpoken = spoken;
+    window.__ttsVoices = [{ name: "Smoke Voice", lang: "en-US", localService: true, default: true, voiceURI: "smoke-voice" }];
+    window.SpeechSynthesisUtterance = function (text) { this.text = text; };
+    const fake = {
+      current: null,
+      getVoices() { return window.__ttsVoices; },
+      speak(u) { spoken.push(u.text); this.current = u; },
+      cancel() { const u = this.current; this.current = null; if (u && u.onerror) u.onerror({ error: "canceled" }); },
+      pause() {}, resume() {},
+    };
+    Object.defineProperty(window, "speechSynthesis", { configurable: true, value: fake });
+    return true;
+  })()`);
+  await waitUntil(
+    `!!document.querySelector('article[data-role="strike"] [data-action="read-aloud"]')`,
+    "read-aloud control on an assistant reply",
+  );
+  const ttsRoles = await evaluate(`JSON.stringify([...document.querySelectorAll('[data-action="read-aloud"]')].map((b) => b.closest("article")?.getAttribute("data-role")))`);
+  if (JSON.parse(ttsRoles).some((r) => r !== "strike")) {
+    throw new Error(`read-aloud on non-assistant lines: ${ttsRoles}`);
+  }
+  await evaluate(`document.querySelector('article[data-role="strike"] [data-action="read-aloud"]').focus()`);
+  await evaluate(`document.activeElement.click()`);
+  await waitUntil(
+    `window.__ttsSpoken.length === 1 && window.__ttsSpoken[0].length > 0 && !window.__ttsSpoken[0].includes("\u0060\u0060\u0060") && !!document.querySelector('article[data-role="strike"] .sx-tts[data-tts-playing="true"]') && document.activeElement.textContent.includes("Stop")`,
+    "read-aloud plays and marks the line",
+  );
+  await evaluate(`(() => { const u = window.speechSynthesis.current; window.speechSynthesis.current = null; u.onend({}); return true; })()`);
+  await waitUntil(
+    `!document.querySelector('.sx-tts[data-tts-playing="true"]') && document.querySelector('article[data-role="strike"] [data-action="read-aloud"]').textContent.includes("Read aloud")`,
+    "read-aloud clears when the engine finishes",
+  );
+  await evaluate(`window.__ttsVoices = []; document.querySelector('article[data-role="strike"] [data-action="read-aloud"]').click()`);
+  await waitUntil(
+    `!!document.querySelector('[data-tts-note]') && document.querySelector('[data-tts-note]').textContent.includes("no speech voice") && window.__ttsSpoken.length === 1`,
+    "read-aloud explains when no voice is available",
+  );
 
   // Mermaid diagrams (#1368). A seeded message with a flowchart (one
   // label carrying HTML/script markup), a sequence diagram and a broken
@@ -6903,6 +7059,7 @@ try {
     join(home, ".strike", "skills", "smoke-note.md"),
     "---\nname: smoke-note\ndescription: seeded note\n---\nSay hello from smoke.\n",
   );
+  await writeFile(join(home, ".strike", "skills", `${BROKEN_SKILL}.md`), BROKEN_SKILL_BODY);
   await seedSkillUsage(home);
   await writeFile(
     join(home, ".strike", "mcp.json"),
@@ -6968,7 +7125,10 @@ try {
   await evalJson(`document.querySelector('.settings-page input[data-theme-choice="${smokeTheme.id}"]').click()`);
   await themePainted("user theme applied from the catalog", smokeTheme.id);
 
-  await evalJson(`localStorage.setItem("strike.token", ${JSON.stringify(token)})`);
+  // The page polls bootstrap every 2s and may already have announced the
+  // seeded broken skill; forget announced fingerprints so the reload's
+  // session-start notice is deterministic (#1386).
+  await evalJson(`(() => { localStorage.setItem("strike.token", ${JSON.stringify(token)}); localStorage.removeItem("strike.loadWarningsSeen"); return true; })()`);
   await send("Page.reload", { ignoreCache: true });
   for (let i = 0; i < 40; i++) {
     const body = await evalJson(`document.body ? document.body.innerText : ""`);
@@ -6979,6 +7139,7 @@ try {
     if (i === 39) throw new Error(`reload did not show the cockpit: ${String(body).slice(0, 300)}`);
     await delay(250);
   }
+  await loadWarningNoticeCheck({ send });
   await themePainted("user theme persisted across reload", smokeTheme.id);
   await evalJson(`document.querySelector('[data-action="open-settings"]')?.click()`);
   for (let i = 0; i < 60; i++) {
@@ -7007,6 +7168,7 @@ try {
   if (!customizeText.includes("smoke-note")) {
     throw new Error(`customize catalog missing smoke-note: ${customizeText.slice(0, 500)}`);
   }
+  await loadWarningCustomizeCheck({ send });
   await skillUsageCheck({ send });
 
   // #1570: Customize > Plugins lifecycle lists GET /v1/plugins, and remove
@@ -7180,6 +7342,9 @@ try {
     const docHead = docEv.result?.result?.value || JSON.stringify(docEv).slice(0, 600);
     throw new Error(`mcp form did not mask env err=${extra} doc=${docHead} values=${values.slice(0, 300)} body=${mcpText.slice(0, 300)}`);
   }
+
+  await seedRepeatedWorkflow({ home, port, token });
+  await skillProposalsCheck({ send, repoDir: process.cwd() });
 
   console.log("webui-smoke ok");
 } catch (err) {

@@ -25,6 +25,7 @@ mod context_doctor;
 mod composer_triggers;
 mod config_sources;
 mod diag;
+mod diagnostics;
 mod draft_size;
 mod drafts;
 mod editor;
@@ -32,6 +33,7 @@ mod lessons;
 mod elicitation;
 mod elicitation_ui;
 mod load_epoch;
+mod load_warnings;
 mod markdown_review;
 mod local_issues;
 mod mermaid;
@@ -90,6 +92,7 @@ mod session_delete;
 mod session_restore;
 mod share;
 mod shell;
+mod skill_proposals;
 mod skill_usage;
 mod side_chat;
 mod side_chat_promote;
@@ -101,6 +104,7 @@ mod terminal;
 mod transcript;
 mod transcript_attachments;
 mod transcript_view;
+mod tts;
 mod update_check;
 mod triggers;
 mod turn_elapsed;
@@ -1284,6 +1288,12 @@ fn App() -> impl IntoView {
     let meta_base = RwSignal::new(load("strike.base"));
     let tick = RwSignal::new(0u32);
     let stream_note = RwSignal::new(String::new());
+    // #1386: one notice per session start for skill/agent load diagnostics
+    // this browser has not announced yet. Cleared only by the user.
+    let load_notice = RwSignal::new(String::new());
+    // Keys announced this page load, merged with the stored list so a
+    // browser that refuses localStorage writes still never re-nags.
+    let warn_announced = RwSignal::new(Vec::<String>::new());
     let load_error = RwSignal::new(String::new());
     let gateway = RwSignal::new("checking".to_string());
     // Offline outbox (#1325): text sends queued while the gateway is down.
@@ -1498,6 +1508,12 @@ fn App() -> impl IntoView {
     let doc_path = RwSignal::new(String::new());
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
+    // LSP diagnostics (#1404): last /v1/diagnostics result, a refresh
+    // counter, and a generation so a slow older fetch cannot overwrite a
+    // newer one.
+    let diag_state = RwSignal::new(diagnostics::DiagState::Idle);
+    let diag_rev = RwSignal::new(0u32);
+    let diag_gen = RwSignal::new(0u32);
     // Search in files (#1406): the Files-pane box's query and a run
     // counter the palette command bumps to start a search.
     let sif_query = RwSignal::new(String::new());
@@ -1970,6 +1986,19 @@ fn App() -> impl IntoView {
                                 config_files_capable.set(boot.capabilities.config_files);
                                 crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
                                 skills.set(boot.skills);
+                                {
+                                    let mut announced = crate::load_warnings::parse_seen(&load(crate::load_warnings::SEEN_KEY));
+                                    announced.extend(warn_announced.get_untracked());
+                                    let fresh = crate::load_warnings::unseen(&boot.load_warnings, &announced);
+                                    if !fresh.is_empty() {
+                                        load_notice.set(crate::load_warnings::notice_text(&fresh));
+                                        let kept = crate::load_warnings::remember(&announced, &fresh);
+                                        warn_announced.set(kept.clone());
+                                        if let Ok(raw) = serde_json::to_string(&kept) {
+                                            save(crate::load_warnings::SEEN_KEY, &raw);
+                                        }
+                                    }
+                                }
                                 agent_list.set(boot.agents);
                                 loops_capable.set(boot.capabilities.loops);
                                 commands.set(if boot.capabilities.loops {
@@ -3632,6 +3661,31 @@ fn App() -> impl IntoView {
         });
     };
 
+    // Diagnostics (#1404) load while the pane is shown or a document is
+    // open (for the editor badge), and again on every Refresh / palette
+    // open (diag_rev). The previous result stays visible while reloading.
+    Effect::new(move |_| {
+        let _ = diag_rev.get();
+        let shown = side_tab.get() == "diagnostics";
+        let doc_open = !doc_path.get().is_empty();
+        if !shown && !doc_open {
+            return;
+        }
+        let gen = diag_gen.get_untracked().wrapping_add(1);
+        diag_gen.set(gen);
+        if !matches!(diag_state.get_untracked(), diagnostics::DiagState::Ready(_)) {
+            diag_state.set(diagnostics::DiagState::Loading);
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let res = api::get_text(&b, &t, diagnostics::PATH).await;
+            if diag_gen.get_untracked() != gen {
+                return;
+            }
+            diag_state.set(diagnostics::state_from(res));
+        });
+    });
+
     Effect::new(move |_| {
         let tab = side_tab.get();
         let _ = files_path.get();
@@ -5104,6 +5158,15 @@ fn App() -> impl IntoView {
         }),
     );
     shell::bind(
+        "lsp-diagnostics.open",
+        Rc::new(move |_| {
+            side_tab.set("diagnostics".into());
+            mode.set("chat".into());
+            diag_rev.update(|n| *n = n.wrapping_add(1));
+            Ok(())
+        }),
+    );
+    shell::bind(
         "search-in-files.run",
         Rc::new(move |args: &str| {
             let q = args.trim();
@@ -5748,9 +5811,29 @@ fn App() -> impl IntoView {
                     <Show when=move || !stream_note.get().is_empty()>
                         <p class="hint banner">{move || stream_note.get()}</p>
                     </Show>
+                    <Show when=move || !load_notice.get().is_empty()>
+                        <div class="notice" role="status" data-load-warning-notice="true">
+                            <span>{move || load_notice.get()}</span>
+                            <span class="load-warning-actions">
+                                <button class="secondary" data-load-warning-open="true" on:click=move |_| {
+                                    load_notice.set(String::new());
+                                    let _ = shell::set_view("customize");
+                                }>"Open Customize"</button>
+                                <button class="secondary" data-load-warning-dismiss="true" on:click=move |_| load_notice.set(String::new())>"Dismiss"</button>
+                            </span>
+                        </div>
+                    </Show>
                     // #1785: a deploy watch session shows its verdict card.
                     <deploy_watch::DeployWatchCard base=base token=token active=active_root tick=tick />
                     <Show when=move || !doc_path.get().is_empty()>
+                        <diagnostics::DocBadge
+                            state=diag_state
+                            doc_path=doc_path
+                            on_click=Callback::new(move |_| {
+                                side_tab.set("diagnostics".into());
+                                diag_rev.update(|n| *n = n.wrapping_add(1));
+                            })
+                        />
                         <DocumentPane
                             base=base
                             token=token
@@ -6876,6 +6959,17 @@ fn App() -> impl IntoView {
                             memory_mode=memory_mode
                             status=status
                             storage_rev=storage_rev
+                        />
+                    </Show>
+                    <Show when=move || side_tab.get() == "diagnostics">
+                        <diagnostics::DiagnosticsPane
+                            state=diag_state
+                            on_refresh=Callback::new(move |_| diag_rev.update(|n| *n = n.wrapping_add(1)))
+                            on_open=Callback::new(move |(path, line): (String, u32)| {
+                                doc_diff.set(false);
+                                doc_line.set(line);
+                                doc_path.set(path);
+                            })
                         />
                     </Show>
                     <Show when=move || side_tab.get() == "issues" && issues_capable.get()>
