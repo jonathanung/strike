@@ -23,7 +23,14 @@ type Workspace struct {
 	// weekly cadence (#1913) needs it to read installed skills with no
 	// request in hand; a workspace with no Dir is never scanned on cadence.
 	Dir string `json:"dir,omitempty"`
+	// ModelDraft lets the operator's configured provider rewrite each
+	// draft (#1958). Off by default, and it never runs while Enabled is
+	// off.
+	ModelDraft bool `json:"modelDraft,omitempty"`
 }
+
+// ModelDrafting reports whether model drafting may run for w now.
+func (w Workspace) ModelDrafting() bool { return w.Enabled && w.ModelDraft }
 
 // EffectiveThreshold is Threshold, or the default when unset.
 func (w Workspace) EffectiveThreshold() int {
@@ -154,10 +161,24 @@ func (s *Store) Scan(key string, wfs []Workflow, installed map[string]bool, now 
 		for _, id := range ws.Dismissed {
 			dismissed[id] = true
 		}
+		// A model draft of the same pattern from the same number of
+		// sessions is kept while model drafting stays on, so a rescan
+		// does not pay for the same draft twice.
+		drafted := map[string]Proposal{}
+		if ws.ModelDraft {
+			for _, p := range ws.Pending {
+				if p.Model != "" {
+					drafted[p.ID] = p
+				}
+			}
+		}
 		var pending []Proposal
 		for _, p := range Mine(wfs, ws.EffectiveThreshold(), now) {
 			if dismissed[p.ID] || installed[p.Name] {
 				continue
+			}
+			if old, ok := drafted[p.ID]; ok && old.Count == p.Count {
+				p.Description, p.Body, p.DraftedBy, p.Model = old.Description, old.Body, old.DraftedBy, old.Model
 			}
 			pending = append(pending, p)
 		}
@@ -200,4 +221,32 @@ func (s *Store) Find(key, id string) (Proposal, error) {
 		}
 	}
 	return Proposal{}, ErrNotFound
+}
+
+// SetModelDraft turns model drafting on or off for key. Turning it off
+// keeps existing drafts; the next scan replaces them with local drafts.
+func (s *Store) SetModelDraft(key string, on bool) (Workspace, error) {
+	return s.update(key, func(ws *Workspace) error {
+		ws.ModelDraft = on
+		return nil
+	})
+}
+
+// ApplyModelDraft replaces the pending proposal with p's id by p. It is
+// refused with ErrDisabled when the scan or model drafting was turned off
+// while the model ran, and with ErrNotFound when the proposal was
+// accepted, dismissed, or replaced by a newer scan meanwhile.
+func (s *Store) ApplyModelDraft(key string, p Proposal) (Workspace, error) {
+	return s.update(key, func(ws *Workspace) error {
+		if !ws.ModelDrafting() {
+			return ErrDisabled
+		}
+		for i := range ws.Pending {
+			if ws.Pending[i].ID == p.ID && ws.Pending[i].Name == p.Name && ws.Pending[i].Count == p.Count {
+				ws.Pending[i] = p
+				return nil
+			}
+		}
+		return ErrNotFound
+	})
 }

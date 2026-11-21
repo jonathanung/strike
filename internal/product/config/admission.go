@@ -27,13 +27,7 @@ func ResolveAdmission(cfg Config) (admission.Policy, error) {
 func FilterSkills(pol admission.Policy, skills []Skill, workDir string) (admitted []Skill, verdicts []admission.Verdict) {
 	admitted = make([]Skill, 0, len(skills))
 	for _, s := range skills {
-		v := admission.AdmitSkill(pol, admission.SkillSubject{
-			Name:     s.Name,
-			Path:     s.Path,
-			Template: s.Template,
-			Builtin:  s.Builtin,
-			WorkDir:  workDir,
-		})
+		v := admitSkill(pol, s, workDir)
 		if v.Action != admission.ActionAllow || len(v.Findings) > 0 || v.ScanError != "" {
 			verdicts = append(verdicts, v)
 		}
@@ -47,6 +41,29 @@ func FilterSkills(pol admission.Policy, skills []Skill, workDir string) (admitte
 		admitted = append(admitted, s)
 	}
 	return admitted, verdicts
+}
+
+func admitSkill(pol admission.Policy, s Skill, workDir string) admission.Verdict {
+	return admission.AdmitSkill(pol, admission.SkillSubject{
+		Name:     s.Name,
+		Path:     s.Path,
+		Template: s.Template,
+		Builtin:  s.Builtin,
+		WorkDir:  workDir,
+	})
+}
+
+// AdmittedSkills is FilterSkills without verdicts or stderr output, for a
+// catalog re-read on every use (#1958): the startup load already reported
+// each verdict once.
+func AdmittedSkills(pol admission.Policy, skills []Skill, workDir string) []Skill {
+	out := make([]Skill, 0, len(skills))
+	for _, s := range skills {
+		if admitSkill(pol, s, workDir).BindsTools() {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // AdmitPlugins runs admission on discovered plugins and returns verdicts.

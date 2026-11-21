@@ -75,7 +75,10 @@ type Proposal struct {
 	Count       int        `json:"count"`
 	Sessions    []Evidence `json:"sessions"`
 	DraftedBy   string     `json:"draftedBy"`
-	CreatedAt   time.Time  `json:"createdAt"`
+	// Model is the model that rewrote the local draft (#1958). Empty for
+	// a local, model-free draft.
+	Model     string    `json:"model,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 var lineLimit = 32 << 20

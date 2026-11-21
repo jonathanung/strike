@@ -9203,7 +9203,7 @@ try {
   }
 
   await seedRepeatedWorkflow({ home, port, token });
-  await skillProposalsCheck({ send, repoDir: process.cwd(), port, token });
+  await skillProposalsCheck({ send, repoDir: process.cwd(), port, token, home });
   await debugModeCheck({ send, port, token });
   // #1944: loop rows follow loops.changed on the live stream, no polling.
   await sessionLoopsCheck({ send, port, token });

@@ -964,7 +964,17 @@ pub fn CustomizePane(
                                 editing.set(false);
                                 clear_diff();
                             }
-                        >{section_label(id)}</button>
+                        >
+                            {section_label(id)}
+                            // #1958: pending skill proposals to review.
+                            {move || (id == "skills")
+                                .then(|| crate::skill_proposals::badge_count(&proposals.get()))
+                                .flatten()
+                                .map(|n| {
+                                    let label = format!("{n} skill proposals to review");
+                                    view! { <span class="badge cz-tab-badge" data-cz-proposals-badge=n.clone() aria-label=label>{n.clone()}</span> }
+                                })}
+                        </button>
                     }
                 }).collect_view()}
             </nav>
@@ -1033,6 +1043,16 @@ pub fn CustomizePane(
                             >"Look now"</button>
                         </div>
                         <p class="hint">{move || crate::skill_proposals::rule_text(&proposals.get())}</p>
+                        <div class="cz-proposals-model">
+                            <button type="button" class="secondary" data-cz-proposals-model=move || proposals.get().model_draft.to_string()
+                                disabled=move || proposals_busy.get() || (!proposals.get().model_draft_available && !proposals.get().model_draft)
+                                on:click=move |_| {
+                                    let on = !proposals.get_untracked().model_draft;
+                                    proposals_call("PATCH", "/v1/skill-proposals", json!({"modelDraft": on}), false);
+                                }
+                            >{move || crate::skill_proposals::model_draft_label(&proposals.get())}</button>
+                            <p class="hint">{move || crate::skill_proposals::model_draft_hint(&proposals.get())}</p>
+                        </div>
                         <p class="hint" data-cz-proposals-status="true">{move || crate::skill_proposals::status_text(&proposals.get())}</p>
                         <Show when=move || !proposals_note.get().is_empty()>
                             <p class="hint" role="status" data-cz-proposals-note="true">{move || proposals_note.get()}</p>
