@@ -6,7 +6,7 @@ use leptos::task::spawn_local;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::api::{get_json, js_encode, post_json_value};
+use crate::api::{get_json, js_encode, patch_json, post_json_value};
 
 pub const SECRET_KEEP: &str = "••••";
 
@@ -107,6 +107,15 @@ fn focus_is_field() -> bool {
         return false;
     };
     matches!(el.tag_name().to_ascii_lowercase().as_str(), "input" | "textarea" | "select")
+}
+
+/// The slice of `GET /v1/bootstrap` Customize reads (#1386): skill and
+/// agent load diagnostics, rescanned by the daemon on every request so a
+/// fixed file drops out on the next catalog load.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct BootWarnings {
+    load_warnings: Vec<crate::model::LoadWarning>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -484,6 +493,11 @@ pub fn CustomizePane(
 ) -> impl IntoView {
     let section = RwSignal::new("skills".to_string());
     let catalog = RwSignal::new(Catalog::default());
+    // #1611: repeated-workflow skill proposals for this workspace.
+    let proposals = RwSignal::new(crate::skill_proposals::State::default());
+    let proposals_note = RwSignal::new(String::new());
+    let proposals_busy = RwSignal::new(false);
+    let load_warnings = RwSignal::new(Vec::<crate::model::LoadWarning>::new());
     // #1442: per-skill run counts. None until a report loads; rows then show
     // no usage line instead of claiming "Never used".
     let usage = RwSignal::new(None::<crate::skill_usage::Report>);
@@ -541,6 +555,14 @@ pub fn CustomizePane(
                     err.set(String::new());
                 }
                 Err(e) => err.set(e),
+            }
+            if let Ok(st) = get_json::<crate::skill_proposals::State>(&b, &t, "/v1/skill-proposals").await {
+                proposals.set(st);
+            }
+            // A failed bootstrap read keeps the last list rather than
+            // claiming the files are fine.
+            if let Ok(boot) = get_json::<BootWarnings>(&b, &t, "/v1/bootstrap").await {
+                load_warnings.set(boot.load_warnings);
             }
             match get_json::<crate::skill_usage::Report>(&b, &t, "/v1/customize/skill-usage").await {
                 Ok(report) => usage.set(Some(report)),
@@ -664,6 +686,53 @@ pub fn CustomizePane(
         description.set(String::new());
         body.set(String::new());
         form_on.set(true);
+    };
+
+    // #1611 actions. Each reply is the daemon's full proposal state, so the
+    // cards always show what the daemon holds.
+    let proposals_call = move |method: &'static str, path: &'static str, body: Value, after_accept: bool| {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        proposals_busy.set(true);
+        proposals_note.set(String::new());
+        spawn_local(async move {
+            let result = if method == "PATCH" {
+                match patch_json(&b, &t, path, body).await {
+                    Ok(()) => get_json::<crate::skill_proposals::State>(&b, &t, "/v1/skill-proposals")
+                        .await
+                        .map(Some),
+                    Err(e) => Err(e),
+                }
+            } else {
+                post_json_value(&b, &t, path, body).await.map(|v| {
+                    if after_accept {
+                        None
+                    } else {
+                        serde_json::from_value::<crate::skill_proposals::State>(v).ok()
+                    }
+                })
+            };
+            proposals_busy.set(false);
+            match result {
+                Ok(Some(st)) => {
+                    if path.ends_with("/scan") && st.pending.is_empty() {
+                        proposals_note.set("No repeated workflows found.".into());
+                    }
+                    proposals.set(st);
+                }
+                Ok(None) => {
+                    proposals_note.set("Skill installed for this workspace.".into());
+                    tick.update(|n| *n = n.wrapping_add(1));
+                }
+                Err(e) => proposals_note.set(crate::skill_proposals::error_text(&e)),
+            }
+        });
+    };
+    let edit_proposal = move |p: crate::skill_proposals::Proposal| {
+        start_new();
+        name.set(p.name);
+        description.set(p.description);
+        body.set(p.body);
+        scope.set("workspace".into());
     };
 
     let build_change = move |confirm: bool| -> Result<Value, String> {
@@ -907,8 +976,104 @@ pub fn CustomizePane(
                     </Show>
                 </header>
                 <p class="hint">{move || section_blurb(&section.get())}</p>
+                {move || {
+                    // #1386: files the loaders flagged for this section,
+                    // with the reason and how to fix it.
+                    let sec = section.get();
+                    let all = load_warnings.get();
+                    let rows: Vec<crate::model::LoadWarning> =
+                        crate::load_warnings::for_section(&all, &sec).into_iter().cloned().collect();
+                    if rows.is_empty() {
+                        return ().into_any();
+                    }
+                    let heading = crate::load_warnings::section_heading(&sec, rows.len());
+                    view! {
+                        <div class="cz-load-warn" role="status" data-cz-load-warnings=sec>
+                            <h3 class="cz-load-warn-head">{heading}</h3>
+                            <ul>
+                                {rows.into_iter().map(|w| {
+                                    let hint = crate::load_warnings::fix_hint(&w);
+                                    let label = crate::load_warnings::code_label(&w.code);
+                                    let file = if w.file.is_empty() { w.path.clone() } else { w.file.clone() };
+                                    let fatal = w.fatal;
+                                    view! {
+                                        <li data-cz-load-warning=w.code.clone() data-fatal=fatal.to_string()>
+                                            <span class="cz-row-title">{file}</span>
+                                            <span class="badge">{label}</span>
+                                            <Show when=move || fatal>
+                                                <span class="badge cz-load-fatal">"Failed the whole load"</span>
+                                            </Show>
+                                            <p class="cz-load-warn-msg">{w.message.clone()}</p>
+                                            <p class="hint">{hint}</p>
+                                            <p class="hint cz-path">{w.path.clone()}</p>
+                                        </li>
+                                    }
+                                }).collect_view()}
+                            </ul>
+                        </div>
+                    }.into_any()
+                }}
                 <Show when=move || !catalog.get().work_dir.is_empty()>
                     <p class="hint cz-dir">{move || format!("Directory {}", catalog.get().work_dir)}</p>
+                </Show>
+                <Show when=move || section.get() == "skills">
+                    <div class="cz-proposals" data-cz-proposals="true">
+                        <div class="cz-proposals-head">
+                            <h3>"Proposed skills"</h3>
+                            <button type="button" class="secondary" data-cz-proposals-toggle=move || proposals.get().enabled.to_string()
+                                disabled=move || proposals_busy.get()
+                                on:click=move |_| {
+                                    let on = !proposals.get_untracked().enabled;
+                                    proposals_call("PATCH", "/v1/skill-proposals", json!({"enabled": on}), false);
+                                }
+                            >{move || if proposals.get().enabled { "Look for repeated workflows: On" } else { "Look for repeated workflows: Off" }}</button>
+                            <button type="button" class="secondary" data-cz-proposals-scan="true"
+                                disabled=move || proposals_busy.get() || !proposals.get().enabled
+                                on:click=move |_| proposals_call("POST", "/v1/skill-proposals/scan", json!({}), false)
+                            >"Look now"</button>
+                        </div>
+                        <p class="hint">{move || crate::skill_proposals::rule_text(&proposals.get())}</p>
+                        <p class="hint" data-cz-proposals-status="true">{move || crate::skill_proposals::status_text(&proposals.get())}</p>
+                        <Show when=move || !proposals_note.get().is_empty()>
+                            <p class="hint" role="status" data-cz-proposals-note="true">{move || proposals_note.get()}</p>
+                        </Show>
+                        {move || proposals.get().pending.into_iter().map(|p| {
+                            let id = p.id.clone();
+                            let id_accept = p.id.clone();
+                            let id_dismiss = p.id.clone();
+                            let edit = p.clone();
+                            let evidence = crate::skill_proposals::evidence_text(&p);
+                            let rows: Vec<String> = p.sessions.iter().map(crate::skill_proposals::evidence_row).collect();
+                            view! {
+                                <article class="cz-proposal" data-cz-proposal=id>
+                                    <header>
+                                        <span class="cz-row-title">{p.name.clone()}</span>
+                                        <span class="badge">"Draft"</span>
+                                    </header>
+                                    <p class="cz-row-meta">{p.description.clone()}</p>
+                                    <p class="hint">{evidence}</p>
+                                    <details>
+                                        <summary>"Evidence sessions and draft"</summary>
+                                        <ul class="cz-proposal-evidence">
+                                            {rows.into_iter().map(|r| view! { <li>{r}</li> }).collect_view()}
+                                        </ul>
+                                        <pre class="cz-diff">{p.body.clone()}</pre>
+                                    </details>
+                                    <div class="cz-actions">
+                                        <button type="button" class="primary" data-cz-proposal-accept="true" disabled=move || proposals_busy.get()
+                                            on:click=move |_| proposals_call("POST", "/v1/skill-proposals/accept", json!({"id": id_accept.clone()}), true)
+                                        >"Accept"</button>
+                                        <button type="button" class="secondary" data-cz-proposal-edit="true"
+                                            on:click=move |_| edit_proposal(edit.clone())
+                                        >"Edit"</button>
+                                        <button type="button" class="secondary" data-cz-proposal-dismiss="true" disabled=move || proposals_busy.get()
+                                            on:click=move |_| proposals_call("POST", "/v1/skill-proposals/dismiss", json!({"id": id_dismiss.clone()}), false)
+                                        >"Dismiss"</button>
+                                    </div>
+                                </article>
+                            }
+                        }).collect_view()}
+                    </div>
                 </Show>
                 <div class="cz-rows">
                     {move || {
