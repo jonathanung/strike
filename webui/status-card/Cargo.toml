@@ -1,0 +1,8 @@
+[package]
+name = "status-card"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Record-derived zero-turn status card: buckets, provenance and idle recap (#1397)."
+
+[dependencies]
