@@ -27,6 +27,7 @@ type fakeContainerEngine struct {
 	mu        sync.Mutex
 	binaries  []string
 	inspected bool
+	targets   []string
 }
 
 func (f *fakeContainerEngine) runtime(binary string) *container.CLI {
@@ -53,6 +54,7 @@ func (f *fakeContainerEngine) runtime(binary string) *container.CLI {
 		case "inspect":
 			f.mu.Lock()
 			f.inspected = true
+			f.targets = append(f.targets, args[len(args)-1])
 			f.mu.Unlock()
 			if f.inspect == "" {
 				return "", "Error: No such object: x", 1, nil
@@ -318,5 +320,34 @@ func TestContainerStatusCapabilityAndRoots(t *testing.T) {
 	}
 	if code, _, raw := containerRequest(t, multi, "/v1/container/status?root=r1"); code != http.StatusOK {
 		t.Fatalf("root r1 = %d %s", code, raw)
+	}
+}
+
+// The container id cache is inside the repo: an untrusted workspace must not
+// redirect the panel to another container through it.
+func TestContainerStatusUntrustedIgnoresRepoContainerCache(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(protocol.IsolationEnvKey, "")
+	work := t.TempDir()
+	cacheDir := filepath.Join(work, filepath.FromSlash(container.CacheDirName))
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "container_id"), []byte("victim-container\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eng := &fakeContainerEngine{found: true}
+	srv := newContainerServer(t, work, eng, "off")
+	if code, _, raw := containerRequest(t, srv, "/v1/container/status"); code != http.StatusOK {
+		t.Fatalf("GET = %d %s", code, raw)
+	}
+	want := container.ContainerName(work)
+	if len(eng.targets) == 0 {
+		t.Fatal("no inspect issued")
+	}
+	for _, target := range eng.targets {
+		if target != want {
+			t.Fatalf("inspected %q, want only %q", target, want)
+		}
 	}
 }

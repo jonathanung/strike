@@ -233,7 +233,16 @@ func (s *Server) handleContainerStatus(w http.ResponseWriter, r *http.Request) {
 			out.Errors = append(out.Errors, "container: "+err.Error())
 		} else {
 			mgr.Stderr = nil
-			st, err := mgr.Status(ctx)
+			// The container id cache lives inside the repo
+			// (.strike/container), so an untrusted workspace could point it
+			// at another container. Untrusted: inspect only the
+			// deterministic per-repo name.
+			var st *container.InspectState
+			if out.ConfigScope == "project" {
+				st, err = mgr.Status(ctx)
+			} else {
+				st, err = cli.InspectContainer(ctx, container.ContainerName(workDir))
+			}
 			switch {
 			case errors.Is(err, container.ErrNoContainer):
 				// absent
