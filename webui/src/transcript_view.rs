@@ -1128,6 +1128,10 @@ fn message_view(
         format!("sx-msg sx-{role}{}", if on { " sx-on" } else { "" })
     };
     let copy_btn = copy_text.clone();
+    // Lessons capture (#1376): "Remember this" on the user's own messages,
+    // shown only while the page's capture gate (memory mode) allows it.
+    let lesson_gate = use_context::<crate::lessons::CaptureGate>();
+    let lesson_text = (msg.role == Role::You && !copy_text.trim().is_empty()).then(|| copy_text.clone());
     // Per-button copy feedback (#1582): the label only reads "Copied"
     // once the awaited clipboard write resolves; a rejection reads
     // "Copy failed" instead of silence. Reverts after 2s.
@@ -1169,6 +1173,16 @@ fn message_view(
                             crate::clipboard::after_ms(2_000, move || copy_state.set(None));
                         });
                     }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
+                    {lesson_text.zip(lesson_gate).map(|(text, gate)| view! {
+                        <Show when=move || gate.0.get()>
+                            <button type="button" class="sx-quiet" data-action="lesson-remember"
+                                title="Save this message as a lesson future sessions load"
+                                on:click={
+                                    let text = text.clone();
+                                    move |_| { let _ = crate::shell::dispatch("lesson-remember", &text); }
+                                }>"Remember this"</button>
+                        </Show>
+                    })}
                 </span>
             </header>
             {if find_body {

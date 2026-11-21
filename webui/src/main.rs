@@ -19,6 +19,7 @@ mod composer_triggers;
 mod diag;
 mod draft_size;
 mod editor;
+mod lessons;
 mod load_epoch;
 mod localfiles;
 mod customize;
@@ -1283,6 +1284,13 @@ fn App() -> impl IntoView {
     let memory_mode_known = RwSignal::new(false);
     let memory_menu = RwSignal::new(false);
     let storage_rev = RwSignal::new(0u32);
+    // Lessons capture (#1376): rows show "Remember this" only while the
+    // confirmed memory mode allows storing; the draft is page-owned.
+    let lesson_gate = Signal::derive(move || {
+        lessons::capture_allowed(memory_mode_known.get(), &memory_mode.get())
+    });
+    provide_context(lessons::CaptureGate(lesson_gate));
+    let lesson_draft = RwSignal::new(None::<lessons::Draft>);
     // Find in transcript (#1342): bar visibility, query, current match,
     // and the transcript scroll offset saved when the bar opened so
     // Escape / Close can restore it.
@@ -3666,6 +3674,16 @@ fn App() -> impl IntoView {
         }),
     );
     shell::bind(
+        "lesson-remember",
+        Rc::new(move |text: &str| {
+            if !lesson_gate.get_untracked() {
+                return Err("This session's memory mode does not store lessons.".into());
+            }
+            lesson_draft.set(Some(lessons::draft_from_message(text)));
+            Ok(())
+        }),
+    );
+    shell::bind(
         "panel-terminal",
         Rc::new(move |_args: &str| {
             side_tab.set("terminal".into());
@@ -5934,6 +5952,13 @@ fn App() -> impl IntoView {
             refresh=refresh_meta
         />
         <PhoneNav pane=phone_pane side_tab=side_tab mode=mode />
+        <lessons::LessonDraftDialog
+            draft=lesson_draft
+            base=base
+            token=token
+            status=status
+            storage_rev=storage_rev
+        />
     }
 }
 
