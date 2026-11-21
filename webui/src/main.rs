@@ -45,6 +45,7 @@ mod provider_signin;
 mod providers;
 mod review_queue;
 mod push;
+mod reasoning;
 mod rule_author;
 mod sandbox_explain;
 mod schedule;

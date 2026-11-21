@@ -465,6 +465,9 @@ try {
     envLine("text.delta", "2026-10-26T06:04:00Z", { text: "slow answer" }) +
     envLine("turn.completed", "2026-10-26T06:04:12Z", { stopReason: "end_turn" }) +
     envLine("user.message", "2026-10-26T06:10:00Z", { text: "quick follow up" }) +
+    // Reasoning visibility (#1372): one reasoning delta before the answer;
+    // hidden until the per-session toggle is switched on.
+    envLine("reasoning.delta", "2026-10-26T06:10:05Z", { text: "weighing the quick reply" }) +
     envLine("text.delta", "2026-10-26T06:10:10Z", { text: "fast answer" }) +
     envLine("turn.completed", "2026-10-26T06:10:20Z", { stopReason: "end_turn" }) +
     // Compaction visibility (#1359): markers between turns (outside any
@@ -5207,6 +5210,66 @@ try {
           v.after,
         ...v,
       };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Reasoning visibility (#1372): off by default the reasoning leaves no
+  // trace in the DOM, only the toggle; switched on, a labelled block sits
+  // directly above the answer it preceded and stays out of the answer's
+  // own text; switched off again, it is gone.
+  const reasoningProbe = `(() => {
+    const toggle = document.querySelector("[data-reasoning-toggle]");
+    const blocks = [...document.querySelectorAll(".sx-reasoning")];
+    const answer = [...document.querySelectorAll("article.sx-msg")].find((a) =>
+      (a.innerText || "").includes("fast answer"),
+    );
+    return {
+      toggle: !!toggle,
+      pressed: toggle ? toggle.getAttribute("aria-pressed") : "",
+      label: toggle ? toggle.textContent.trim() : "",
+      blocks: blocks.length,
+      text: blocks[0] ? blocks[0].innerText : "",
+      aboveAnswer: !!blocks[0] && !!answer && blocks[0].nextElementSibling === answer,
+      inAnswer: answer ? (answer.innerText || "").includes("weighing the quick reply") : true,
+      leaked: !blocks.length && document.body.innerText.includes("weighing the quick reply"),
+    };
+  })()`;
+  await waitFor(
+    "reasoning hidden by default behind its toggle",
+    async () => {
+      const v = await evaluate(reasoningProbe);
+      return {
+        ok: v.toggle && v.pressed === "false" && v.label === "Show reasoning" && v.blocks === 0 && !v.leaked,
+        ...v,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => { document.querySelector("[data-reasoning-toggle]").click(); return true; })()`);
+  await waitFor(
+    "reasoning block above the answer once toggled on",
+    async () => {
+      const v = await evaluate(reasoningProbe);
+      return {
+        ok:
+          v.pressed === "true" &&
+          v.label === "Hide reasoning" &&
+          v.blocks === 1 &&
+          v.text.includes("weighing the quick reply") &&
+          v.text.includes("not part of the answer") &&
+          v.aboveAnswer &&
+          !v.inAnswer,
+        ...v,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => { document.querySelector("[data-reasoning-toggle]").click(); return true; })()`);
+  await waitFor(
+    "reasoning gone again once toggled off",
+    async () => {
+      const v = await evaluate(reasoningProbe);
+      return { ok: v.pressed === "false" && v.blocks === 0 && !v.leaked, ...v };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
