@@ -20,7 +20,7 @@
 use std::sync::{Arc, OnceLock};
 
 use leptos::prelude::*;
-use link_patterns::{validate, validate_all, LinkRules, Piece, Rule, MAX_NAME_LEN, MAX_RULES};
+use ::link_patterns::{validate, validate_all, LinkRules, Piece, Rule, MAX_NAME_LEN, MAX_RULES};
 use serde::{Deserialize, Serialize};
 
 const STORAGE_KEY: &str = "strike.linkPatterns";

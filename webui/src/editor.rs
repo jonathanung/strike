@@ -1678,8 +1678,8 @@ fn Inlines(text: String) -> impl IntoView {
             // code spans only.
             Inline::Text(t) => view! { <span>{crate::link_patterns::linked_text(t)}</span> }.into_any(),
             Inline::Code(t) => crate::link_patterns::linked_code(t, None).into_any(),
-            Inline::Strong(t) => view! { <strong>{t}</strong> }.into_any(),
-            Inline::Em(t) => view! { <em>{t}</em> }.into_any(),
+            Inline::Strong(t) => view! { <strong>{crate::link_patterns::linked_text(t)}</strong> }.into_any(),
+            Inline::Em(t) => view! { <em>{crate::link_patterns::linked_text(t)}</em> }.into_any(),
             Inline::Link { text, href } => {
                 view! { <a href=href target="_blank" rel="noopener noreferrer">{text}</a> }.into_any()
             }
