@@ -21,6 +21,7 @@ mod draft_size;
 mod editor;
 mod load_epoch;
 mod localfiles;
+mod md_table;
 mod customize;
 mod gateway;
 mod gateway_qr;

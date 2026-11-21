@@ -1062,7 +1062,7 @@ pub fn has_markdown_table(src: &str) -> bool {
         .any(|b| matches!(b, MdBlock::Table { .. }))
 }
 
-fn align_class(align: MdAlign) -> &'static str {
+pub(crate) fn align_class(align: MdAlign) -> &'static str {
     match align {
         MdAlign::Left => "md-left",
         MdAlign::Center => "md-center",
@@ -1669,8 +1669,20 @@ pub fn LinkedBody(
     }
 }
 
+/// Plain text of an inline-Markdown string: code, emphasis and link
+/// markup stripped to the text they show (#1505 CSV/TSV table copies).
+pub(crate) fn inline_plain_text(src: &str) -> String {
+    inline_parse(src)
+        .into_iter()
+        .map(|part| match part {
+            Inline::Text(t) | Inline::Code(t) | Inline::Strong(t) | Inline::Em(t) => t,
+            Inline::Link { text, .. } => text,
+        })
+        .collect()
+}
+
 #[component]
-fn Inlines(text: String) -> impl IntoView {
+pub(crate) fn Inlines(text: String) -> impl IntoView {
     inline_parse(&text)
         .into_iter()
         .map(|part| match part {
@@ -1755,31 +1767,9 @@ pub fn MarkdownView(text: String, #[prop(optional)] outline: bool) -> impl IntoV
                 }.into_any(),
                 MdBlock::Rule => view! { <hr /> }.into_any(),
                 MdBlock::Table { header, aligns, rows } => {
-                    let head_aligns = aligns.clone();
-                    view! {
-                        <div class="md-table-wrap">
-                            <table class="md-table">
-                                <thead>
-                                    <tr>
-                                        {header.into_iter().enumerate().map(|(idx, cell)| {
-                                            let cls = align_class(head_aligns.get(idx).copied().unwrap_or(MdAlign::None));
-                                            view! { <th scope="col" class=cls><Inlines text=cell /></th> }
-                                        }).collect_view()}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {rows.into_iter().map(|row| view! {
-                                        <tr>
-                                            {row.into_iter().enumerate().map(|(idx, cell)| {
-                                                let cls = align_class(aligns.get(idx).copied().unwrap_or(MdAlign::None));
-                                                view! { <td class=cls><Inlines text=cell /></td> }
-                                            }).collect_view()}
-                                        </tr>
-                                    }).collect_view()}
-                                </tbody>
-                            </table>
-                        </div>
-                    }.into_any()
+                    // Table block + its copy/widen actions (#1505), shared
+                    // by the transcript and the document viewer.
+                    view! { <crate::md_table::MdTable header=header aligns=aligns rows=rows /> }.into_any()
                 }
             })
         .collect_view();

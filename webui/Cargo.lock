@@ -1348,6 +1348,7 @@ dependencies = [
  "send_wrapper",
  "serde",
  "serde_json",
+ "table-export",
  "transcript-window",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -1386,6 +1387,10 @@ dependencies = [
  "quote",
  "syn 3.0.9",
 ]
+
+[[package]]
+name = "table-export"
+version = "0.1.0"
 
 [[package]]
 name = "tachys"
