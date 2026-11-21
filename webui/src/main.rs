@@ -25,6 +25,7 @@ mod load_epoch;
 mod local_issues;
 mod localfiles;
 mod customize;
+mod dashboards;
 mod gateway;
 mod gateway_qr;
 mod git;
@@ -4852,6 +4853,9 @@ fn App() -> impl IntoView {
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
+        </Show>
+        <Show when=move || mode.get() == "dashboards" fallback=move || ()>
+            <dashboards::DashboardsPane base=base token=token active_root=active_root />
         </Show>
         <Show when=move || mode.get() == "tasks" fallback=move || ()>
             <task_runner::TaskRunner

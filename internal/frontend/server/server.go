@@ -449,6 +449,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sessions/{id}/rewind_points", s.handleSessionRewindPoints)
 	// Daemon-generated session report artifact (#1444).
 	s.mux.HandleFunc("POST /v1/sessions/{id}/report", s.handleSessionReport)
+	s.mux.HandleFunc("GET /v1/dashboards", s.handleDashboardsList)
+	s.mux.HandleFunc("POST /v1/dashboards", s.handleDashboardCreate)
+	s.mux.HandleFunc("GET /v1/dashboards/{id}", s.handleDashboardGet)
 	s.mux.HandleFunc("PATCH /v1/sessions/{id}", s.handleSessionRename)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.handleSessionDelete)
 	// Session-scoped /loop jobs (#1588): ephemeral, die with the session.
