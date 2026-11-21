@@ -55,6 +55,7 @@ mod session_restore;
 mod shell;
 mod side_chat;
 mod status;
+mod status_card_view;
 mod term;
 mod terminal;
 mod transcript;
@@ -103,6 +104,7 @@ use crate::approvals_ui::{
     apply_perm_notes, commit_autonomy, commit_session_mode, ApprovalCards, ApprovalHost,
     ApprovalMenu, AutonomyMenu,
 };
+use crate::status_card_view::{ChildStatusCard, SessionStatusCard};
 use crate::transcript::Transcript;
 use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
 use crate::workspaces::WorkspacePicker;
@@ -979,13 +981,6 @@ fn rows_from_team(prev: &[ActivityRow], team: &TeamSnapshot, now: f64) -> Vec<Ac
             continue;
         }
         let state = display_state(member);
-        let mut output = member.terminal_summary.clone();
-        if !member.block_reason.is_empty() {
-            if !output.is_empty() {
-                output.push_str("\n\n");
-            }
-            output.push_str(&member.block_reason);
-        }
         let started_ms = prev
             .iter()
             .find(|p| p.session_id == session_id)
@@ -1013,10 +1008,12 @@ fn rows_from_team(prev: &[ActivityRow], team: &TeamSnapshot, now: f64) -> Vec<Ac
             agent: member.agent.clone(),
             task: member.objective.clone(),
             state,
-            output,
             elapsed_s,
             started_ms,
             expanded,
+            summary: member.terminal_summary.clone(),
+            block_reason: member.block_reason.clone(),
+            budget: model::card_budget(member),
         });
     }
     rows.sort_by(|a, b| a.name.cmp(&b.name).then(a.session_id.cmp(&b.session_id)));
@@ -5640,6 +5637,7 @@ fn App() -> impl IntoView {
                         <StatCard label="Blocked".into()>{move || blocked_count().to_string()}</StatCard>
                         <StatCard label="Tasks".into()>{move || activity.get().len().to_string()}</StatCard>
                     </div>
+                    <SessionStatusCard activity=activity roots=roots active_root=active_root children=children tick=tick />
                     <Show when=move || !team_note.get().is_empty()>
                         <p class="hint" data-team-note="true">{move || team_note.get()}</p>
                     </Show>
@@ -5685,7 +5683,7 @@ fn App() -> impl IntoView {
                                 let task_retry = row.task.clone();
                                 let headline = task_headline(&row.task);
                                 let show_task = !headline.is_empty();
-                                let output = row.output.clone();
+                                let row_card = row.clone();
                                 let expanded = row.expanded;
                                 let running = is_running(&state);
                                 let retry = can_retry(&state);
@@ -5759,7 +5757,7 @@ fn App() -> impl IntoView {
                                             </Show>
                                         </div>
                                         <Show when=move || expanded>
-                                            <pre class="output">{if output.is_empty() { "No output yet.".to_string() } else { output.clone() }}</pre>
+                                            <ChildStatusCard row=row_card.clone() />
                                         </Show>
                                     </li>
                                 }
