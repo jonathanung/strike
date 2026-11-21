@@ -21,6 +21,8 @@
 //!
 //! No web dependencies, so the rules run as host unit tests in CI.
 
+use std::collections::HashMap;
+
 /// Stored excerpt length, in characters. Must match the daemon's clip
 /// (`messagePinExcerptMax`) so a stored excerpt compares equal.
 pub const EXCERPT_MAX: usize = 160;
@@ -62,28 +64,43 @@ pub fn pinnable(role: &str, keep: i32) -> bool {
     (role == "you" || role == "strike") && keep >= 0
 }
 
-/// Anchor of every pinnable row, in transcript order.
-pub fn anchors(rows: &[Row<'_>]) -> Vec<(u32, Anchor)> {
-    let mut out: Vec<(u32, Anchor)> = Vec::new();
-    for row in rows {
+/// Anchor of every pinnable row, in transcript order, with the row's
+/// index. One pass: a turn's messages share one `keep` and are
+/// contiguous, so the per-role counters reset when `keep` changes.
+fn anchors_at(rows: &[Row<'_>]) -> Vec<(usize, Anchor)> {
+    let mut out = Vec::new();
+    let mut turn: Option<i32> = None;
+    let (mut you, mut strike) = (0u32, 0u32);
+    for (idx, row) in rows.iter().enumerate() {
+        if turn != Some(row.keep) {
+            turn = Some(row.keep);
+            you = 0;
+            strike = 0;
+        }
         if !pinnable(row.role, row.keep) {
             continue;
         }
-        let keep = i64::from(row.keep);
-        let seq = out
-            .iter()
-            .filter(|(_, a)| a.keep == keep && a.role == row.role)
-            .count() as u32;
+        let counter = if row.role == "you" { &mut you } else { &mut strike };
+        let seq = *counter;
+        *counter += 1;
         out.push((
-            row.id,
+            idx,
             Anchor {
-                keep,
+                keep: i64::from(row.keep),
                 role: row.role.to_string(),
                 seq,
             },
         ));
     }
     out
+}
+
+/// Anchor of every pinnable row, in transcript order.
+pub fn anchors(rows: &[Row<'_>]) -> Vec<(u32, Anchor)> {
+    anchors_at(rows)
+        .into_iter()
+        .map(|(idx, a)| (rows[idx].id, a))
+        .collect()
 }
 
 /// Anchor of the message with `role`/`keep`, given the messages before
@@ -124,15 +141,19 @@ pub fn excerpt(text: &str) -> String {
     flat.chars().take(EXCERPT_MAX).collect()
 }
 
+fn resolve_in(pin: &Pin, rows: &[Row<'_>], index: &HashMap<Anchor, usize>) -> Option<u32> {
+    let row = rows.get(*index.get(&pin.anchor)?)?;
+    (excerpt(row.text) == pin.excerpt).then_some(row.id)
+}
+
+fn anchor_index(rows: &[Row<'_>]) -> HashMap<Anchor, usize> {
+    anchors_at(rows).into_iter().map(|(idx, a)| (a, idx)).collect()
+}
+
 /// The row a pin points at, or `None` when its anchor no longer lands
 /// on the same text.
 pub fn resolve(pin: &Pin, rows: &[Row<'_>]) -> Option<u32> {
-    let id = anchors(rows)
-        .into_iter()
-        .find(|(_, a)| *a == pin.anchor)
-        .map(|(id, _)| id)?;
-    let row = rows.iter().find(|r| r.id == id)?;
-    (excerpt(row.text) == pin.excerpt).then_some(id)
+    resolve_in(pin, rows, &anchor_index(rows))
 }
 
 /// Is `anchor` pinned?
@@ -169,11 +190,17 @@ pub fn label(pin: &Pin) -> String {
 /// Rail rows for `pins` against the loaded transcript, in pin order.
 /// Empty pins → empty rail (the rail renders nothing at all).
 pub fn rail(pins: &[Pin], rows: &[Row<'_>]) -> Vec<RailItem> {
+    if pins.is_empty() {
+        return Vec::new();
+    }
+    // One anchor pass for every pin: the rail re-renders on each
+    // transcript change, including streaming deltas.
+    let index = anchor_index(rows);
     pins.iter()
         .map(|p| RailItem {
             anchor: p.anchor.clone(),
             label: label(p),
-            target: resolve(p, rows),
+            target: resolve_in(p, rows, &index),
         })
         .collect()
 }
