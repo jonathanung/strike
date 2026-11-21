@@ -21,10 +21,12 @@ mod child_signals;
 mod clipboard;
 mod compaction_marks;
 mod confirm;
+mod container_panel;
 mod context_doctor;
 mod composer_triggers;
 mod config_sources;
 mod diag;
+mod diagnostics;
 mod draft_size;
 mod drafts;
 mod editor;
@@ -35,6 +37,7 @@ mod load_epoch;
 mod load_warnings;
 mod markdown_review;
 mod local_issues;
+mod mermaid;
 mod localfiles;
 mod customize;
 mod deploy_watch;
@@ -65,6 +68,7 @@ mod prompt_sharpen;
 mod onboarding;
 mod outbox;
 mod park;
+mod preview;
 mod permissions_explain;
 mod plugin_flow;
 mod plugin_lifecycle;
@@ -91,6 +95,7 @@ mod session_delete;
 mod session_restore;
 mod share;
 mod shell;
+mod skill_proposals;
 mod skill_usage;
 mod side_chat;
 mod side_chat_promote;
@@ -106,6 +111,7 @@ mod tts;
 mod update_check;
 mod triggers;
 mod turn_elapsed;
+mod turn_files;
 mod turn_failure;
 mod turn_usage;
 mod turn_verify;
@@ -1194,6 +1200,8 @@ fn App() -> impl IntoView {
     let token = RwSignal::new(gateway::initial_token());
     provide_context(transcript_attachments::AttachmentAuth { base, token });
     let status = RwSignal::new("connecting…".to_string());
+    // Bootstrap capability `container` (#1584): gates Settings → Isolation.
+    let container_capable = RwSignal::new(false);
     // Bootstrap capability `workspaceTrust` (#1781): gates the untrusted
     // workspace badge and trust card.
     let workspace_trust_capable = RwSignal::new(false);
@@ -1506,6 +1514,12 @@ fn App() -> impl IntoView {
     let doc_path = RwSignal::new(String::new());
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
+    // LSP diagnostics (#1404): last /v1/diagnostics result, a refresh
+    // counter, and a generation so a slow older fetch cannot overwrite a
+    // newer one.
+    let diag_state = RwSignal::new(diagnostics::DiagState::Idle);
+    let diag_rev = RwSignal::new(0u32);
+    let diag_gen = RwSignal::new(0u32);
     // Search in files (#1406): the Files-pane box's query and a run
     // counter the palette command bumps to start a search.
     let sif_query = RwSignal::new(String::new());
@@ -1967,6 +1981,7 @@ fn App() -> impl IntoView {
                                         }
                                     });
                                 }
+                                container_capable.set(boot.capabilities.container);
                                 workspace_trust_capable.set(boot.capabilities.workspace_trust);
                                 diag_capable.set(boot.capabilities.diag);
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
@@ -3653,6 +3668,31 @@ fn App() -> impl IntoView {
         });
     };
 
+    // Diagnostics (#1404) load while the pane is shown or a document is
+    // open (for the editor badge), and again on every Refresh / palette
+    // open (diag_rev). The previous result stays visible while reloading.
+    Effect::new(move |_| {
+        let _ = diag_rev.get();
+        let shown = side_tab.get() == "diagnostics";
+        let doc_open = !doc_path.get().is_empty();
+        if !shown && !doc_open {
+            return;
+        }
+        let gen = diag_gen.get_untracked().wrapping_add(1);
+        diag_gen.set(gen);
+        if !matches!(diag_state.get_untracked(), diagnostics::DiagState::Ready(_)) {
+            diag_state.set(diagnostics::DiagState::Loading);
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let res = api::get_text(&b, &t, diagnostics::PATH).await;
+            if diag_gen.get_untracked() != gen {
+                return;
+            }
+            diag_state.set(diagnostics::state_from(res));
+        });
+    });
+
     Effect::new(move |_| {
         let tab = side_tab.get();
         let _ = files_path.get();
@@ -5127,6 +5167,15 @@ fn App() -> impl IntoView {
         }),
     );
     shell::bind(
+        "lsp-diagnostics.open",
+        Rc::new(move |_| {
+            side_tab.set("diagnostics".into());
+            mode.set("chat".into());
+            diag_rev.update(|n| *n = n.wrapping_add(1));
+            Ok(())
+        }),
+    );
+    shell::bind(
         "search-in-files.run",
         Rc::new(move |args: &str| {
             let q = args.trim();
@@ -5484,6 +5533,7 @@ fn App() -> impl IntoView {
                 status=status
                 diag_capable=diag_capable
                 project_init_capable=project_init_capable
+                container_capable=container_capable
                 config_files_capable=config_files_capable
                 root=active_root
                 theme=theme_id
@@ -5786,6 +5836,14 @@ fn App() -> impl IntoView {
                     // #1785: a deploy watch session shows its verdict card.
                     <deploy_watch::DeployWatchCard base=base token=token active=active_root tick=tick />
                     <Show when=move || !doc_path.get().is_empty()>
+                        <diagnostics::DocBadge
+                            state=diag_state
+                            doc_path=doc_path
+                            on_click=Callback::new(move |_| {
+                                side_tab.set("diagnostics".into());
+                                diag_rev.update(|n| *n = n.wrapping_add(1));
+                            })
+                        />
                         <DocumentPane
                             base=base
                             token=token
@@ -6599,6 +6657,7 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "git" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("git".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("git")></span>"Git"</button>
                         <button class=move || if side_tab.get() == "review" { "chip on" } else { "chip" } data-side-tab="review" on:click=move |_| side_tab.set("review".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Review"</button>
                         <button class=move || if side_tab.get() == "terminal" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("terminal".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("terminal")></span>"Terminal"</button>
+                        <button class=move || if side_tab.get() == "preview" { "chip on" } else { "chip" } data-side-tab="preview" on:click=move |_| side_tab.set("preview".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("preview")></span>"Preview"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
                     <div class="activity">
@@ -6914,6 +6973,17 @@ fn App() -> impl IntoView {
                             storage_rev=storage_rev
                         />
                     </Show>
+                    <Show when=move || side_tab.get() == "diagnostics">
+                        <diagnostics::DiagnosticsPane
+                            state=diag_state
+                            on_refresh=Callback::new(move |_| diag_rev.update(|n| *n = n.wrapping_add(1)))
+                            on_open=Callback::new(move |(path, line): (String, u32)| {
+                                doc_diff.set(false);
+                                doc_line.set(line);
+                                doc_path.set(path);
+                            })
+                        />
+                    </Show>
                     <Show when=move || side_tab.get() == "issues" && issues_capable.get()>
                         <local_issues::LocalIssuesPanel
                             base=base
@@ -6929,6 +6999,9 @@ fn App() -> impl IntoView {
                             workspace_id=active_workspace
                             session_id=active_root
                         />
+                    </Show>
+                    <Show when=move || side_tab.get() == "preview">
+                        <preview::PreviewPanel base=base token=token />
                     </Show>
                 </aside>
             </div>

@@ -30,6 +30,9 @@ pub fn icon(name: &str) -> &'static str {
         "terminal" => {
             r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5l3.5 3.5L3 11.5M8 11.5h5"/></svg>"#
         }
+        "preview" => {
+            r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M2 6h12"/></svg>"#
+        }
         "artifacts" => {
             r#"<svg class="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5.5 8 2.5l5.5 3L8 8.5z"/><path d="M2.5 5.5V10.5L8 13.5l5.5-3V5.5"/></svg>"#
         }

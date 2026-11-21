@@ -85,6 +85,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/persist/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
 | `internal/persist/issue` | Project-scoped durable issues (JSON under `~/.strike/issues/`) | stdlib |
 | `internal/product/goal` | Loop harness: goals, JSONL iterations/events, guards, critic, hooks | stdlib |
+| `internal/product/skillpropose` | Repeated-workflow skill proposals (#1611): local, model-free mining of a workspace's root session logs into redacted SKILL drafts; opt-in, pending and dismissed state in `~/.strike/skill-proposals.json` | `persist/session` (meta), `pkg/protocol`, `pkg/redact`, stdlib |
 | `internal/persist/plan` | Project-scoped root-session-owned structured plans (sections, lifecycle, CAS versions, section→child delegate correlation; JSON under `~/.strike/plans/`) | stdlib |
 | `internal/persist/artifact` | Shared typed multi-agent artifacts (findings/patch/test_report/contract/plan-blob; daemon-only `session_report`) with CAS versions, owner|team access, project|session scope; JSON under `~/.strike/artifacts/`. Not memory (untyped KV), issues (tickets), or structured plans (use `internal/persist/plan`) | stdlib |
 | `internal/persist/attachment` | Content-addressed typed attachments (image/pdf/diagram/log/archive/build) under `~/.strike/attachments/`; protocol refs `att:sha256:`; capability select, region redaction, visual compare, retention. Not timeline blob spill or artifact work products | stdlib, `pkg/redact` |
