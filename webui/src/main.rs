@@ -1955,11 +1955,11 @@ fn App() -> impl IntoView {
                                                 .to_string(),
                                         );
                                     }
-                                        &st.phase,
-                                        &st.workflow,
-                                    ));
                                     crate::verbosity::seed(&st.verbosity, &st.verbosity_delivery);
                                     wf_run.set(workflow_run::WorkflowRun::from_status(
+                                        &st.workflow,
+                                        &st.phase,
+                                    ));
                                     session_cwd.set(st.cwd);
                                     live_busy.set(st.busy);
                                     live_busy_root.set(root);
@@ -6579,17 +6579,17 @@ fn App() -> impl IntoView {
                                     model_menu.set(false);
                                     autonomy_menu.update(|v| *v = !*v);
                                 }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
-                                            model_note.set(e);
-                                        if let Err(e) = request_workflow_stop() {
-                                        }
-                                    <button type="button" class="composer-glance workflow-stop" data-workflow-stop="true" title="Stop the active workflow (asks first)" aria-label=move || format!("Stop workflow {}", wf_run.with(|w| w.workflow.clone())) on:click=move |_| {
-                                    <span class="composer-glance workflow-glance" data-workflow-status="true" title="Active workflow and phase, as reported by the daemon. Start another from the palette: Start workflow…">{move || wf_run.with(|w| w.label())}</span>
-                                    }>"Stop"</button>
+                                <crate::verbosity::VerbosityChip base=base token=token active_root=active_root status=status busy=Signal::derive(move || session_busy_now.get()) />
                                 // #1574: the live workflow run, only while the
                                 // daemon reports one. Stop asks first.
-                                </Show>
                                 <Show when=move || wf_run.with(|w| w.is_active())>
-                                <crate::verbosity::VerbosityChip base=base token=token active_root=active_root status=status busy=Signal::derive(move || session_busy_now.get()) />
+                                    <span class="composer-glance workflow-glance" data-workflow-status="true" title="Active workflow and phase, as reported by the daemon. Start another from the palette: Start workflow…">{move || wf_run.with(|w| w.label())}</span>
+                                    <button type="button" class="composer-glance workflow-stop" data-workflow-stop="true" title="Stop the active workflow (asks first)" aria-label=move || format!("Stop workflow {}", wf_run.with(|w| w.workflow.clone())) on:click=move |_| {
+                                        if let Err(e) = request_workflow_stop() {
+                                            model_note.set(e);
+                                        }
+                                    }>"Stop"</button>
+                                </Show>
                                 <Show when=move || fast_on.get()>
                                     <span class="composer-glance" data-fast-status="true" title="Fast (priority service tier) is on for this session, as confirmed by the daemon. The current provider may not support priority tier.">"Fast · on"</span>
                                 </Show>
