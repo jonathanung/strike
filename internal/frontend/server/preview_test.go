@@ -64,6 +64,7 @@ func TestPreviewProxiesOnlyTheSelectedLoopbackPort(t *testing.T) {
 		seenAuth, seenCookie, seenHost, seenPath = r.Header.Get("Authorization"), r.Header.Get("Cookie"), r.Host, r.URL.RequestURI()
 		mu.Unlock()
 		w.Header().Set("Set-Cookie", "app=1")
+		w.Header().Set("Referrer-Policy", "unsafe-url")
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write([]byte("<h1>fixture app</h1>"))
 	}))
@@ -107,6 +108,9 @@ func TestPreviewProxiesOnlyTheSelectedLoopbackPort(t *testing.T) {
 	}
 	if rec.Header().Get("Set-Cookie") != "" {
 		t.Fatal("app Set-Cookie reached the gateway origin")
+	}
+	if rp := rec.Header().Values("Referrer-Policy"); len(rp) != 1 || rp[0] != "no-referrer" {
+		t.Fatalf("Referrer-Policy = %q, want only the gateway's no-referrer", rp)
 	}
 	csp := strings.Join(rec.Header().Values("Content-Security-Policy"), " | ")
 	if !strings.Contains(csp, "sandbox") || strings.Contains(csp, "allow-same-origin") || strings.Contains(csp, "frame-ancestors 'none'") {

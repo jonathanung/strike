@@ -354,6 +354,9 @@ func (s *Server) handlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			resp.Header.Del("Set-Cookie")
+			// The gateway's no-referrer must win: an app policy appended
+			// after it could leak the preview key to third-party hosts.
+			resp.Header.Del("Referrer-Policy")
 			resp.Header.Add("Content-Security-Policy", previewCSP)
 			if loc := resp.Header.Get("Location"); loc != "" {
 				resp.Header.Set("Location", rewritePreviewLocation(loc, prefix, port))
