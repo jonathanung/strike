@@ -477,6 +477,36 @@ type Service struct {
 	// chain is content-free multi-step correlation within a turn (#891).
 	// Never nil after New.
 	chain *Correlator
+
+	// userDenied latches action signatures (permission + patterns) the user
+	// rejected, until the engine reports the user's next message via
+	// ClearDenyLatch (#1387). A latched ask is refused without a card.
+	userDenied map[string]struct{}
+}
+
+// LayerUserDenied labels PermissionDecided for an ask refused by the deny
+// latch: the user rejected the same action and has not spoken since.
+const LayerUserDenied = "user-denied"
+
+// userDeniedReason is the model-facing refusal for a latched ask.
+const userDeniedReason = "the user denied this exact action; it will not be asked again until the user's next message"
+
+// denySignature keys the deny latch the way the chain tracker keys steps:
+// permission name plus the ask's patterns, in order.
+func denySignature(permission string, patterns []string) string {
+	return permission + "\x00" + strings.Join(patterns, "\x00")
+}
+
+// ClearDenyLatch forgets every latched user denial. The engine calls it
+// when a turn starts from a user message, so "no" holds until the user
+// speaks again (#1387).
+func (s *Service) ClearDenyLatch() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.userDenied = nil
+	s.mu.Unlock()
 }
 
 // New creates a Service. emit publishes events toward the frontend; base
@@ -868,6 +898,23 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 		s.emitDecided(corr, req, action, "", "", det, chainHit)
 		return &DeniedError{Reason: reason}
 	}
+	if _, latched := s.userDenied[denySignature(req.Permission, req.Patterns)]; latched {
+		// The user already said no to this exact action and has not sent a
+		// message since: refuse without a card. Not recorded in the chain
+		// tracker — this narrows asks, it does not tune retry-storm rules.
+		s.mu.Unlock()
+		det.Action = Deny
+		det.Matched = &Match{
+			Layer:      LayerUserDenied,
+			LayerIndex: -1,
+			RuleIndex:  -1,
+			Permission: req.Permission,
+			Pattern:    strings.Join(req.Patterns, ", "),
+			Action:     Deny,
+		}
+		s.emitDecided(corr, req, Deny, "", "", det, chainHit)
+		return &DeniedError{Reason: userDeniedReason}
+	}
 	s.nextID++
 	// Session-scope IDs so concurrent parent/child engines never collide when
 	// replies fan out across services.
@@ -929,8 +976,21 @@ func (s *Service) ask(ctx context.Context, req tool.AskRequest, corr protocol.Co
 	select {
 	case <-ctx.Done():
 		s.mu.Lock()
+		_, open := s.pending[id]
 		delete(s.pending, id)
 		s.mu.Unlock()
+		if open {
+			// The ask died with no reply (turn stopped, session closed,
+			// client gone). Close it with the same terminal pair a reply
+			// emits so every surface can name what expired (#1387). When a
+			// reply won the race it already emitted its own resolution.
+			s.emit(protocol.PermissionResolved{
+				Correlation: corr,
+				RequestID:   id,
+				Decision:    protocol.DecisionExpired,
+			})
+			s.emitDecided(corr, req, Ask, id, protocol.DecisionExpired, det, chainHit)
+		}
 		return ctx.Err()
 	case reply := <-p.ch:
 		if reply.Decision == protocol.DecisionReject {
@@ -1063,6 +1123,12 @@ func (s *Service) Reply(r protocol.PermissionReply) {
 		}
 		resolvedReply = protocol.PermissionReply{Decision: protocol.DecisionOnce}
 	case protocol.DecisionReject:
+		// Latch only the action the user answered; siblings resolved by the
+		// cascade below were never shown a decision of their own.
+		if s.userDenied == nil {
+			s.userDenied = make(map[string]struct{})
+		}
+		s.userDenied[denySignature(p.permission, p.patterns)] = struct{}{}
 		for id, other := range s.pending {
 			delete(s.pending, id)
 			resolved = append(resolved, cascaded{id: id, p: other})

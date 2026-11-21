@@ -36,6 +36,8 @@ type ManagedInfo struct {
 	PermissionMode   bool `json:"-"`
 	Sandbox          bool `json:"-"`
 	PermissionPreset bool `json:"-"`
+	// SandboxRuntime is true when managed set sandboxRuntime (CLI flag ignored).
+	SandboxRuntime bool `json:"-"`
 	// ContentGuard is true when managed set contentGuard.mode (lock dial).
 	ContentGuard bool `json:"-"`
 	// ContentGuardForcedDeny is true when managed contentGuard.mode is deny
@@ -185,6 +187,9 @@ func stampManagedLocks(info *ManagedInfo, layer Config) {
 	}
 	if strings.TrimSpace(layer.Sandbox) != "" {
 		info.Sandbox = true
+	}
+	if strings.TrimSpace(layer.SandboxRuntime) != "" {
+		info.SandboxRuntime = true
 	}
 	if strings.TrimSpace(layer.PermissionPreset) != "" {
 		info.PermissionPreset = true
