@@ -362,17 +362,6 @@ func reviewPathFromGitLine(line string) string {
 	return rest
 }
 
-func atoiDefault(s string, def int) int {
-	if s == "" {
-		return def
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	return n
-}
-
 func reviewGitDiff(ctx context.Context, cwd, rel string) ([]reviewFileDiff, bool, error) {
 	// quotePath=false keeps UTF-8 names readable; git still quotes names
 	// with control characters, which parseReviewDiff lists without hunks.
