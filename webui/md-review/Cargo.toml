@@ -1,0 +1,8 @@
+[package]
+name = "md-review"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Quoted-text anchors and the review turn for Markdown Review comments on rendered documents."
+
+[dependencies]
