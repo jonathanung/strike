@@ -212,6 +212,9 @@ type Server struct {
 	// terms is the side-panel PTY manager.
 	terms *terminal.Manager
 
+	// preview is the selected live-preview target (#1341).
+	preview previewState
+
 	seenOnce sync.Once
 	seen     *SeenStore
 
@@ -753,6 +756,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/terminals/{id}/ticket", s.handleTerminalTicket)
 	s.mux.HandleFunc("GET /v1/terminals/{id}/stream", s.handleTerminalStream)
 	s.mux.HandleFunc("DELETE /v1/terminals/{id}", s.handleTerminalDelete)
+	// Live preview (#1341): user-selected loopback port, proxied under an
+	// unguessable per-port path. See preview.go for the boundary rules.
+	s.mux.HandleFunc("GET /v1/preview/ports", s.handlePreviewPorts)
+	s.mux.HandleFunc("GET /v1/preview", s.handlePreviewGet)
+	s.mux.HandleFunc("PUT /v1/preview", s.handlePreviewPut)
+	s.mux.HandleFunc("DELETE /v1/preview", s.handlePreviewDelete)
+	s.mux.HandleFunc(previewPathPrefix, s.handlePreviewProxy)
 	// Unknown API routes (#1452): these method-less patterns are less
 	// specific than every registered /v1 route, so they only answer paths
 	// no handler claimed (the handler itself synthesises a JSON 405 for a
@@ -784,7 +794,11 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if stateChanging(r.Method) {
+		// /preview/<key>/ is the user's own app behind an unguessable key
+		// (#1341). Its sandboxed frame posts with Origin: null, and the
+		// gateway cookie is never honoured there, so the CSRF origin check
+		// for gateway routes does not apply to it.
+		if stateChanging(r.Method) && !strings.HasPrefix(r.URL.Path, previewPathPrefix) {
 			if origin := r.Header.Get("Origin"); origin != "" && !requestOriginAllowed(r) {
 				http.Error(w, "origin not allowed", http.StatusForbidden)
 				return

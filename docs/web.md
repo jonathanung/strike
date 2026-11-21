@@ -1158,6 +1158,11 @@ Permission asks appear as `permission.asked` events; resolve with
 | `GET` | `/v1/memory/export` | mode | Download portable `strike-memory.json` (TUI format) |
 | `GET` | `/v1/backup/export` | mode | Download `strike-backup.json`: whole-gateway archive (sessions, memory, schedules, non-secret settings) with manifest, sha256 per section, and named exclusions (#1339) |
 | `POST` | `/v1/backup/restore` | live (dry run: mode) | Body is the archive. `?dryRun=1` reports create/skip/copy per record without writing; otherwise restores through each store. Never overwrites: identical records skip, differing ones restore as copies |
+| `GET` | `/v1/preview/ports` | mode | Live preview (#1341): listening loopback TCP ports on the gateway host (`detection: proc` on Linux, `unsupported` elsewhere). The gateway's own port is omitted and reported as `self`. |
+| `GET` | `/v1/preview` | mode | The selected preview target `{selected, port, origin, path}`. `?probe=1` adds reachability and framing (`ok`/`refused`). |
+| `PUT` | `/v1/preview` | mode | Select a port (`{port}`; there is no host field). Returns the target plus probe. The proxy serves only this port. |
+| `DELETE` | `/v1/preview` | mode | Stop proxying. |
+| any | `/preview/<key>/…` | key | Proxies to `127.0.0.1:<selected port>`. The per-port random key is the capability (the cookie is SameSite=Strict and the frame is sandboxed). Gateway `Authorization`/`Cookie` are stripped, app `Set-Cookie` is dropped, and the response gets a `CSP sandbox` (no `allow-same-origin`) with `frame-ancestors 'self'`. Unselected ports and wrong keys get 404. |
 | `POST` | `/v1/memory/import` | **yes** | Import (`{path}` or `{data}`, `replace?`); blocked in attach-only |
 | `POST` | `/v1/issues` | **yes** | Create issue (`{title,body?}`); blocked in attach-only |
 | `POST` | `/v1/issues/{id}/close` | **yes** | Close issue; blocked in attach-only |
