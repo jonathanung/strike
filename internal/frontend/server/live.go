@@ -504,6 +504,9 @@ type StatusSnapshot struct {
 	// (allowed | denied | expired), so a row does not keep a stale
 	// "Permission required" after the ask ends (#1387).
 	AskOutcome string `json:"askOutcome,omitempty"`
+	// ElicitationPending is set while an MCP tool is paused on an
+	// elicitation request (#1353); the root reads as waiting on the user.
+	ElicitationPending bool `json:"elicitationPending,omitempty"`
 	// StopReason is the last TurnCompleted reason. Empty after a new turn starts.
 	StopReason string `json:"stopReason,omitempty"`
 	// TurnSince is unix milliseconds when the current turn state began.
@@ -816,7 +819,7 @@ func (l *Live) Status() StatusSnapshot {
 	out.TurnState = protocol.ClassifyLive(protocol.LiveStatusInput{
 		Busy:               out.Busy,
 		PermissionPending:  out.PermissionPending,
-		QuestionPending:    out.QuestionPending,
+		QuestionPending:    out.QuestionPending || out.ElicitationPending,
 		StopReason:         out.StopReason,
 		ChildRunning:       running,
 		ChildWaiting:       waiting,
@@ -1062,6 +1065,14 @@ func (l *Live) applyStatus(ev protocol.Event) {
 		l.noteActivityLocked()
 	case protocol.QuestionResolved:
 		l.status.QuestionPending = false
+		l.status.TurnSince = time.Now().UnixMilli()
+		l.noteActivityLocked()
+	case protocol.ElicitationRequested:
+		l.status.ElicitationPending = true
+		l.status.TurnSince = time.Now().UnixMilli()
+		l.noteActivityLocked()
+	case protocol.ElicitationResolved:
+		l.status.ElicitationPending = false
 		l.status.TurnSince = time.Now().UnixMilli()
 		l.noteActivityLocked()
 	case protocol.UsageReported:

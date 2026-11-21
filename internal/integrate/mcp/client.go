@@ -43,6 +43,10 @@ type Client struct {
 	caps     ServerCaps
 	notifyMu sync.Mutex
 	onNotify func(method string, params json.RawMessage)
+
+	// elicit routes server elicitation/create requests to the in-flight
+	// tools/call that registered a handler (#1353).
+	elicit elicitors
 }
 
 // startStdio launches the server subprocess and completes the MCP initialize handshake.
@@ -141,7 +145,7 @@ func (c *Client) initialize(ctx context.Context) error {
 	var result initializeResult
 	if err := c.call(ctx, "initialize", initializeParams{
 		ProtocolVersion: ProtocolVersion,
-		Capabilities:    clientCapabilities(),
+		Capabilities:    clientCapabilities(true),
 		ClientInfo:      implementationInfo{Name: "strike", Version: "1"},
 	}, &result); err != nil {
 		return fmt.Errorf("mcp %s: initialize: %w", c.cfg.Name, err)
@@ -200,6 +204,17 @@ func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage
 		return callToolResult{}, fmt.Errorf("mcp %s: tools/call %s: %w", c.cfg.Name, name, err)
 	}
 	return result, nil
+}
+
+// CallToolElicit is CallTool with fn answering any elicitation/create the
+// server sends while this call is in flight. A nil fn behaves like CallTool
+// (elicitations are cancelled).
+func (c *Client) CallToolElicit(ctx context.Context, name string, args json.RawMessage, fn ElicitHandler) (callToolResult, error) {
+	if fn != nil {
+		remove := c.elicit.push(fn)
+		defer remove()
+	}
+	return c.CallTool(ctx, name, args)
 }
 
 // ListPrompts returns prompts when the server advertises prompts capability.
@@ -344,6 +359,13 @@ func (c *Client) readLoop() {
 		if len(line) == 0 {
 			continue
 		}
+		// Server→client request (method + id, numeric or string id): answer
+		// off the read loop so a pending elicitation never blocks responses.
+		var probe rpcProbe
+		if err := json.Unmarshal(line, &probe); err == nil && probe.isRequest() {
+			go c.answerServerRequest(probe)
+			continue
+		}
 		var resp rpcResponse
 		if err := json.Unmarshal(line, &resp); err != nil {
 			continue
@@ -370,6 +392,10 @@ func (c *Client) readLoop() {
 		}
 	}
 	c.failPending(fmt.Errorf("mcp server %q stdout closed", c.cfg.Name))
+}
+
+func (c *Client) answerServerRequest(probe rpcProbe) {
+	_ = c.writeJSON(serverRequestResponse(context.Background(), &c.elicit, probe))
 }
 
 func (c *Client) dispatchNotify(method string, params json.RawMessage) {
