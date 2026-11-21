@@ -713,7 +713,7 @@ pub fn TranscriptPane(
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
                                     {above.map(|text| reasoning_block(text, false))}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, edit_last, last_you, r.hits, r.current, r.elapsed, r.usage, r.verify, r.steer, r.tail, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, edit_last, last_you, r.hits, r.current, r.elapsed, r.usage, r.verify, r.files, r.steer, r.tail, fold_open, folds)}
                                     {after.map(|text| reasoning_block(text, false))}
                                 }
                             })
@@ -871,6 +871,7 @@ struct RowData {
     usage: Option<(String, String)>,
     reasoning: Option<String>,
     verify: Option<crate::turn_verify::TurnVerify>,
+    files: Option<crate::turn_files::TurnFiles>,
     steer: Option<crate::steer_ack::AckState>,
     tail: Option<crate::tool_tail::ToolTail>,
 }
@@ -902,6 +903,7 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
         reasoning: t.reasoning.for_message(msg.id).map(str::to_owned),
         verify: t.verify_for(msg.id).cloned(),
+        files: t.files_for(msg.id).cloned(),
         steer: t.steer_acks.get(msg.id),
         tail: t.tail_for(msg.id).cloned(),
     })
@@ -1131,6 +1133,7 @@ fn message_view(
     turn_elapsed: Option<String>,
     turn_usage: Option<(String, String)>,
     turn_verify: Option<crate::turn_verify::TurnVerify>,
+    turn_files: Option<crate::turn_files::TurnFiles>,
     steer: Option<crate::steer_ack::AckState>,
     tail: Option<crate::tool_tail::ToolTail>,
     fold_open: bool,
@@ -1329,6 +1332,7 @@ fn message_view(
             {(!sent_attachments.is_empty()).then(|| view! {
                 <crate::transcript_attachments::SentAttachments items=sent_attachments.clone() />
             })}
+            {turn_files.map(|f| turn_files_view(f, open_file))}
             {tail.map(crate::tool_tail::tail_view)}
             {auth_notice.then(|| {
                 let target = reconnect.clone();
@@ -1420,6 +1424,60 @@ fn message_view(
                 view! { <span></span> }.into_any()
             }}
         </article>
+    }
+}
+
+/// Per-turn file-change summary (#1365): a collapsed chip on the turn's
+/// final line, expanding in place to the paths grouped by kind. Updated
+/// and created paths open in the document pane exactly like file chips;
+/// deleted paths are plain text (there is nothing left to open).
+fn turn_files_view(
+    files: crate::turn_files::TurnFiles,
+    open_file: Callback<(String, u32)>,
+) -> impl IntoView {
+    let label = files.label();
+    let total = files.total();
+    let groups: Vec<(&'static str, Vec<String>)> = files
+        .groups()
+        .into_iter()
+        .map(|(head, paths)| (head, paths.to_vec()))
+        .collect();
+    view! {
+        <details class="turn-files" data-turn-files=total.to_string()>
+            <summary>{label}</summary>
+            {groups.into_iter().map(|(head, paths)| {
+                let deleted = head == "Deleted";
+                view! {
+                    <div class="turn-files-group" data-turn-files-kind=head.to_lowercase()>
+                        <span class="turn-files-head">{head}</span>
+                        <ul>
+                            {paths.into_iter().map(|path| {
+                                if deleted {
+                                    view! { <li><span class="turn-files-path">{path}</span></li> }.into_any()
+                                } else {
+                                    let open = path.clone();
+                                    let attr = path.clone();
+                                    view! {
+                                        <li>
+                                            <a
+                                                class="turn-files-path"
+                                                href="#file"
+                                                data-path=attr
+                                                on:click=move |ev: web_sys::MouseEvent| {
+                                                    ev.prevent_default();
+                                                    dispatch_open_file(&open, 0);
+                                                    open_file.run((open.clone(), 0));
+                                                }
+                                            >{path}</a>
+                                        </li>
+                                    }.into_any()
+                                }
+                            }).collect_view()}
+                        </ul>
+                    </div>
+                }
+            }).collect_view()}
+        </details>
     }
 }
 
