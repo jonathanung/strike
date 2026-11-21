@@ -90,6 +90,9 @@ pub struct RootSummary {
     pub permission_pending: bool,
     #[serde(default, rename = "questionPending")]
     pub question_pending: bool,
+    /// Last approval outcome this turn (allowed | denied | expired), #1387.
+    #[serde(default, rename = "askOutcome")]
+    pub ask_outcome: String,
     /// `None` when the field is absent (older daemon). Present `false` is read.
     #[serde(default)]
     pub unread: Option<bool>,
@@ -151,11 +154,22 @@ pub struct LiveStatus {
     pub cwd: String,
     #[serde(default)]
     pub effort: String,
+    /// The running agent (#1563), from the daemon's last `agent.selected`.
+    /// Empty when not reported; the chip then says unknown, never a guess.
+    #[serde(default)]
+    pub agent: String,
     /// Session exit-gate policy the daemon reports on every status
     /// (#1572). Empty until the daemon reports one; the UI normalizes
     /// empty to the `supervised` default rather than inventing a mode.
     #[serde(default)]
     pub autonomy: String,
+    /// Active workflow and phase the daemon reports on every status
+    /// (#1574; `StatusSnapshot.Workflow` / `.Phase`). Both empty when no
+    /// workflow is active. Later changes arrive as `phase.changed`.
+    #[serde(default)]
+    pub workflow: String,
+    #[serde(default)]
+    pub phase: String,
     #[serde(default)]
     pub busy: bool,
     #[serde(default, rename = "contextUsed")]
@@ -209,6 +223,32 @@ pub struct StatusBoard {
     pub sessions: Vec<BoardSession>,
 }
 
+/// One skill or agent file the daemon's loaders flagged (#1386), from
+/// bootstrap `loadWarnings`. Carries the path and the loader's redacted
+/// reason only, never file contents. `fingerprint` changes when the file
+/// changes, so the cockpit can warn once per unchanged file.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct LoadWarning {
+    pub kind: String,
+    pub severity: String,
+    pub code: String,
+    pub path: String,
+    pub file: String,
+    pub message: String,
+    pub fatal: bool,
+    pub fingerprint: String,
+}
+
+/// One selectable agent from bootstrap `agents` (#1563). The daemon's
+/// `AgentInfo`; `description` is omitted when empty.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+pub struct AgentInfo {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct SkillInfo {
     pub name: String,
@@ -237,6 +277,14 @@ pub struct FileSearchResponse {
 /// ignored; a missing object parses as every capability off.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct BootstrapCapabilities {
+    /// True when `GET /v1/container/status` reports the isolation posture
+    /// ladder and container status (#1584). Read-only.
+    #[serde(default)]
+    pub container: bool,
+    /// True when `GET /v1/workspace/trust` reports the workspace trust
+    /// state and the repo config it gates (#1781).
+    #[serde(default, rename = "workspaceTrust")]
+    pub workspace_trust: bool,
     /// True when a live engine can build a diagnostic bundle (#1489):
     /// the daemon sets it from the same live gate as `GET /v1/diag`.
     #[serde(default)]
@@ -253,10 +301,89 @@ pub struct BootstrapCapabilities {
     /// present, live engine, and not `--read-only`.
     #[serde(default, rename = "projectInit")]
     pub project_init: bool,
+    /// True when the daemon wires plugin lifecycle (`/v1/plugins*`, #1570).
+    #[serde(default)]
+    pub plugins: bool,
+    /// True when the daemon serves the typed config-source list
+    /// (`GET /v1/config-sources`, #1493).
+    #[serde(default, rename = "configFiles")]
+    pub config_files: bool,
+    /// True when `GET /v1/update` can run the release probe (#1583).
+    #[serde(default, rename = "updateCheck")]
+    pub update_check: bool,
     /// True when `/v1/sessions/{id}/loops` can start and stop session
     /// loops (#1588): live engine and not `--read-only`.
     #[serde(default)]
     pub loops: bool,
+}
+
+/// One `GET /v1/config-sources` row (#1493). The daemon withholds absolute
+/// host paths; `display` is the only location the cockpit may show.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Hash)]
+pub struct ConfigSource {
+    /// Primary slot id: config | mcp | providers | keybinds. Empty for extras.
+    #[serde(default)]
+    pub slot: String,
+    /// Extra-file group: agents | skills | themes | workflows. Empty for primary.
+    #[serde(default)]
+    pub kind: String,
+    /// global | project.
+    #[serde(default)]
+    pub scope: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub display: String,
+    #[serde(default)]
+    pub exists: bool,
+    #[serde(default, rename = "canCreate")]
+    pub can_create: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ConfigSourcesReply {
+    #[serde(default)]
+    pub sources: Vec<ConfigSource>,
+}
+
+impl ConfigSource {
+    /// "Global" / "Project", or the daemon's word for any other scope.
+    pub fn scope_label(&self) -> String {
+        match self.scope.as_str() {
+            "global" => "Global".into(),
+            "project" => "Project".into(),
+            "" => "Unknown scope".into(),
+            other => other.to_string(),
+        }
+    }
+
+    /// What the row is: the primary slot, or the extra-file group.
+    pub fn kind_label(&self) -> String {
+        match (self.slot.as_str(), self.kind.as_str()) {
+            ("", "") => "file".into(),
+            ("", kind) => format!("{kind} file"),
+            (slot, _) => format!("{slot} slot"),
+        }
+    }
+
+    /// Present / not present, with the create fact stated as text only:
+    /// slice 1 never creates files.
+    pub fn state_label(&self) -> &'static str {
+        match (self.exists, self.can_create) {
+            (true, _) => "Present",
+            (false, true) => "Not present (the daemon can create it; not from here)",
+            (false, false) => "Not present",
+        }
+    }
+
+    /// The row's name. Falls back to `display` so a row is never blank.
+    pub fn title(&self) -> &str {
+        if self.label.trim().is_empty() {
+            &self.display
+        } else {
+            &self.label
+        }
+    }
 }
 
 /// One `/v1/init` reply (#1581). `exists` with a non-empty `error` is the
@@ -289,16 +416,391 @@ pub fn project_init_outcome(status: u16, body: &str) -> Result<ProjectInitReply,
     Err(diag_error_message(status, body))
 }
 
+/// One repo-supplied process or endpoint in the trust enumeration. Env,
+/// headers and keys are never sent by the daemon.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct TrustExecutable {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub url: String,
+}
+
+impl TrustExecutable {
+    /// `name: command args…`, or `name: url` for an endpoint-only entry.
+    pub fn line(&self) -> String {
+        let target = if self.command.is_empty() && !self.url.is_empty() {
+            self.url.clone()
+        } else {
+            let mut parts = vec![self.command.clone()];
+            parts.extend(self.args.iter().cloned());
+            parts.join(" ").trim().to_string()
+        };
+        if target.is_empty() {
+            self.name.clone()
+        } else {
+            format!("{}: {}", self.name, target)
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct TrustHook {
+    #[serde(default)]
+    pub event: String,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub action: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct TrustFile {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub path: String,
+}
+
+/// `config.ProjectSurfaces` as the daemon serializes it: what the repo
+/// would load once trusted, enumerated without loading any of it.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct TrustSurfaces {
+    #[serde(default, rename = "configFiles")]
+    pub config_files: Vec<String>,
+    #[serde(default, rename = "configKeys")]
+    pub config_keys: Vec<String>,
+    #[serde(default, rename = "permissionRules")]
+    pub permission_rules: u32,
+    #[serde(default)]
+    pub mcp: Vec<TrustExecutable>,
+    #[serde(default)]
+    pub lsp: Vec<TrustExecutable>,
+    #[serde(default)]
+    pub harnesses: Vec<TrustExecutable>,
+    #[serde(default)]
+    pub providers: Vec<TrustExecutable>,
+    #[serde(default)]
+    pub hooks: Vec<TrustHook>,
+    #[serde(default)]
+    pub agents: Vec<TrustFile>,
+    #[serde(default)]
+    pub skills: Vec<TrustFile>,
+    #[serde(default)]
+    pub workflows: Vec<TrustFile>,
+    #[serde(default)]
+    pub plugins: Vec<String>,
+    #[serde(default)]
+    pub steering: Vec<String>,
+    #[serde(default)]
+    pub errors: Vec<String>,
+}
+
+/// One titled group of lines on the trust card.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrustSection {
+    pub title: &'static str,
+    pub lines: Vec<String>,
+}
+
+impl TrustSurfaces {
+    /// The card's groups in the same order and wording as
+    /// `strike trust status`; empty groups are dropped.
+    pub fn sections(&self) -> Vec<TrustSection> {
+        let execs = |items: &[TrustExecutable]| items.iter().map(|e| e.line()).collect::<Vec<_>>();
+        let files = |items: &[TrustFile]| {
+            items
+                .iter()
+                .map(|f| format!("{} ({})", f.name, f.path))
+                .collect::<Vec<_>>()
+        };
+        let mut config = Vec::new();
+        if !self.config_keys.is_empty() {
+            config.push(format!("overrides: {}", self.config_keys.join(", ")));
+        }
+        if self.permission_rules > 0 {
+            config.push(format!("permission rules: {}", self.permission_rules));
+        }
+        config.extend(self.config_files.iter().cloned());
+        let hooks = self
+            .hooks
+            .iter()
+            .map(|h| {
+                if h.command.is_empty() {
+                    format!("{}: {} (rule)", h.event, h.action)
+                } else {
+                    format!("{}: {}", h.event, h.command)
+                }
+            })
+            .collect::<Vec<_>>();
+        let groups = vec![
+            TrustSection { title: "Config", lines: config },
+            TrustSection { title: "MCP servers", lines: execs(&self.mcp[..]) },
+            TrustSection { title: "LSP servers", lines: execs(&self.lsp[..]) },
+            TrustSection { title: "Harnesses", lines: execs(&self.harnesses[..]) },
+            TrustSection { title: "Providers", lines: execs(&self.providers[..]) },
+            TrustSection { title: "Hooks", lines: hooks },
+            TrustSection { title: "Agents", lines: files(&self.agents[..]) },
+            TrustSection { title: "Skills", lines: files(&self.skills[..]) },
+            TrustSection { title: "Workflows", lines: files(&self.workflows[..]) },
+            TrustSection { title: "Plugins", lines: self.plugins.clone() },
+            TrustSection { title: "Steering", lines: self.steering.clone() },
+            TrustSection { title: "Unreadable", lines: self.errors.clone() },
+        ];
+        groups.into_iter().filter(|g| !g.lines.is_empty()).collect()
+    }
+}
+
+/// One `GET/POST /v1/workspace/trust` reply (#1781).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct WorkspaceTrustReply {
+    #[serde(default)]
+    pub root: String,
+    #[serde(default)]
+    pub trusted: bool,
+    #[serde(default, rename = "trustedAt")]
+    pub trusted_at: String,
+    #[serde(default)]
+    pub untrustable: bool,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub surfaces: TrustSurfaces,
+    #[serde(default)]
+    pub mutable: bool,
+    #[serde(default, rename = "restartRequired")]
+    pub restart_required: bool,
+    #[serde(default)]
+    pub error: String,
+}
+
+impl WorkspaceTrustReply {
+    /// The persistent "Untrusted workspace" badge shows only when the repo
+    /// actually ships config that trust would enable.
+    pub fn badge_visible(&self) -> bool {
+        !self.trusted && !self.surfaces.sections().is_empty()
+    }
+}
+
+/// Reads a `/v1/workspace/trust` response. 2xx and the 422 untrustable
+/// refusal (which still carries the status body) are states to render;
+/// anything else is the daemon's error sentence.
+pub fn workspace_trust_outcome(status: u16, body: &str) -> Result<WorkspaceTrustReply, String> {
+    if (200..300).contains(&status) || status == 422 {
+        let mut reply: WorkspaceTrustReply =
+            serde_json::from_str(body).map_err(|e| e.to_string())?;
+        if status == 422 && reply.error.trim().is_empty() {
+            reply.error = "workspace root cannot be trusted".to_string();
+        }
+        return Ok(reply);
+    }
+    Err(diag_error_message(status, body))
+}
+
+/// One rung of the E12.7 isolation ladder from `/v1/container/status`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ContainerRung {
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub describe: String,
+    #[serde(default)]
+    pub active: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ContainerRuntime {
+    #[serde(default)]
+    pub engine: String,
+    #[serde(default)]
+    pub found: bool,
+    #[serde(default)]
+    pub available: bool,
+    #[serde(default)]
+    pub error: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ContainerInfo {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub running: bool,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub image: String,
+    #[serde(default)]
+    pub compatible: Option<bool>,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default, rename = "sessionModel")]
+    pub session_model: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ContainerDrift {
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub have: String,
+    #[serde(default)]
+    pub want: String,
+    #[serde(default)]
+    pub error: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ContainerDetect {
+    #[serde(default)]
+    pub markers: Vec<String>,
+}
+
+/// `GET /v1/container/status` (#1584): read-only isolation posture.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ContainerStatusReply {
+    #[serde(default)]
+    pub posture: String,
+    #[serde(default, rename = "postureSource")]
+    pub posture_source: String,
+    #[serde(default)]
+    pub describe: String,
+    #[serde(default)]
+    pub ladder: Vec<ContainerRung>,
+    #[serde(default, rename = "permissionMode")]
+    pub permission_mode: String,
+    #[serde(default, rename = "sandboxMode")]
+    pub sandbox_mode: String,
+    #[serde(default)]
+    pub workspace: String,
+    #[serde(default, rename = "configScope")]
+    pub config_scope: String,
+    #[serde(default)]
+    pub runtime: ContainerRuntime,
+    #[serde(default)]
+    pub container: ContainerInfo,
+    #[serde(default)]
+    pub drift: ContainerDrift,
+    #[serde(default)]
+    pub detect: ContainerDetect,
+    #[serde(default)]
+    pub errors: Vec<String>,
+}
+
+fn short_hash(h: &str) -> &str {
+    if h.len() > 12 {
+        &h[..12]
+    } else {
+        h
+    }
+}
+
+impl ContainerStatusReply {
+    /// Where the posture came from, in words. Host rungs are a supported
+    /// mode (#1290), so nothing here reads as a warning.
+    pub fn posture_note(&self) -> String {
+        if self.posture_source == "env" {
+            "Set at launch (STRIKE_ISOLATION).".to_string()
+        } else {
+            let perm = if self.permission_mode.is_empty() {
+                "default"
+            } else {
+                self.permission_mode.as_str()
+            };
+            let sandbox = if self.sandbox_mode.is_empty() {
+                "workspace-write"
+            } else {
+                self.sandbox_mode.as_str()
+            };
+            format!("From the host dials: permission mode {perm}, sandbox {sandbox}.")
+        }
+    }
+
+    /// The engine probe: honest about a missing runtime, which is normal
+    /// for host mode.
+    pub fn runtime_line(&self) -> String {
+        let r = &self.runtime;
+        if r.available {
+            format!("{} is running.", r.engine)
+        } else if r.found {
+            format!("{} is installed but not answering: {}", r.engine, r.error)
+        } else {
+            "No container runtime found (docker or podman). Host mode is the active, supported posture.".to_string()
+        }
+    }
+
+    /// The workspace container from `strike container status`.
+    pub fn container_line(&self) -> String {
+        let c = &self.container;
+        if !self.runtime.available {
+            return format!("{}: not checked (runtime unavailable).", c.name);
+        }
+        match c.status.as_str() {
+            "absent" | "" => format!("{}: no container for this workspace.", c.name),
+            status => {
+                let mut line = format!("{}: {}", c.name, status);
+                match c.compatible {
+                    Some(true) => line.push_str(", matches current config"),
+                    Some(false) if !c.reason.is_empty() => {
+                        line.push_str(&format!(", out of date ({})", c.reason))
+                    }
+                    Some(false) => line.push_str(", out of date"),
+                    None => {}
+                }
+                line
+            }
+        }
+    }
+
+    /// The ejected Dockerfile drift state from `strike container drift`.
+    pub fn drift_line(&self) -> String {
+        let d = &self.drift;
+        match d.state.as_str() {
+            "matches" => format!("{} matches the current config ({}).", d.path, short_hash(&d.want)),
+            "drifted" => format!(
+                "{} drifted: has {}, config wants {}.",
+                d.path,
+                if d.have.is_empty() { "no hash" } else { short_hash(&d.have) },
+                short_hash(&d.want)
+            ),
+            "not-ejected" => format!("Not ejected ({} not present).", d.path),
+            _ => format!("Could not check {}: {}", d.path, d.error),
+        }
+    }
+}
+
+/// Reads a `/v1/container/status` response; non-2xx is the daemon's error.
+pub fn container_status_outcome(status: u16, body: &str) -> Result<ContainerStatusReply, String> {
+    if (200..300).contains(&status) {
+        return serde_json::from_str(body).map_err(|e| e.to_string());
+    }
+    Err(diag_error_message(status, body))
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct Bootstrap {
     #[serde(default)]
     pub status: Option<LiveStatus>,
     #[serde(default)]
     pub skills: Vec<SkillInfo>,
+    /// Selectable agents for the live session (#1563), default first.
+    #[serde(default)]
+    pub agents: Vec<AgentInfo>,
     #[serde(default, rename = "composerCommands")]
     pub composer_commands: Vec<ComposerCommand>,
     #[serde(default)]
     pub capabilities: BootstrapCapabilities,
+    /// Skill/agent load diagnostics for the live root's workspace (#1386).
+    #[serde(default, rename = "loadWarnings")]
+    pub load_warnings: Vec<LoadWarning>,
 }
 
 /// The filename a `/v1/diag` download is saved under: the server's
@@ -438,6 +940,8 @@ pub struct SessionRow {
     pub permission_pending: bool,
     /// Live root is waiting on an answer to an agent question (#1451).
     pub question_pending: bool,
+    /// Last approval outcome this turn (allowed | denied | expired), #1387.
+    pub ask_outcome: String,
     /// Unix milliseconds when `status` began.
     pub status_since: i64,
     /// Unix milliseconds of the last user-visible activity. 0 when unknown.
@@ -482,6 +986,46 @@ pub struct TeamMember {
     pub budget: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(default)]
     pub terminal: bool,
+    /// Latest `child.escalated` the daemon recorded for this member (#1375).
+    #[serde(default)]
+    pub escalation: Option<TeamEscalation>,
+}
+
+/// One child budget/stall/loop trip, as the daemon's team snapshot keeps it.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct TeamEscalation {
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub action: String,
+    #[serde(default, rename = "terminalStatus")]
+    #[allow(dead_code)]
+    pub terminal_status: String,
+}
+
+/// One inter-agent message from the daemon's bounded team snapshot
+/// (`TeamSnapshot.messages`, already redacted daemon-side).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct TeamMessage {
+    #[serde(default, rename = "messageId")]
+    pub message_id: String,
+    #[serde(default)]
+    pub from: String,
+    #[serde(default)]
+    pub to: String,
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub urgency: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default, rename = "taskId")]
+    #[allow(dead_code)]
+    pub task_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -494,6 +1038,18 @@ pub struct TeamSnapshot {
     pub lead_id: String,
     #[serde(default)]
     pub members: HashMap<String, TeamMember>,
+    /// Recent inter-agent mail, oldest first (#1375). The daemon sends
+    /// `null` for an empty list, which reads as empty here.
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub messages: Vec<TeamMessage>,
+}
+
+fn null_as_empty<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
 }
 
 #[derive(Clone, Debug)]
@@ -523,10 +1079,15 @@ pub struct ActivityRow {
     pub agent: String,
     pub task: String,
     pub state: String,
-    pub output: String,
     pub elapsed_s: i64,
     pub started_ms: f64,
     pub expanded: bool,
+    /// Agent-written terminal summary, kept apart for the status card (#1397).
+    pub summary: String,
+    /// Agent-written block reason, kept apart for the status card (#1397).
+    pub block_reason: String,
+    /// Engine budget counters; `None` when the daemon sent no budget.
+    pub budget: Option<status_card::Budget>,
 }
 
 pub fn display_state(m: &TeamMember) -> String {
@@ -550,6 +1111,24 @@ fn budget_flag(m: &TeamMember, key: &str) -> bool {
         .and_then(|b| b.get(key))
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
+}
+
+fn budget_i64(b: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<i64> {
+    let v = b.get(key)?;
+    v.as_i64().or_else(|| v.as_f64().filter(|f| f.is_finite()).map(|f| f as i64))
+}
+
+/// Engine counters for the status card (#1397). Keys match the daemon's
+/// `TeamMemberSnapshot.Budget` map (`internal/frontend/server/live.go`).
+/// A missing key stays `None` so the card shows a dash, never `0`.
+pub fn card_budget(m: &TeamMember) -> Option<status_card::Budget> {
+    let b = m.budget.as_ref()?;
+    Some(status_card::Budget {
+        elapsed_s: budget_i64(b, "elapsedS"),
+        tokens: budget_i64(b, "tokensUsed"),
+        tool_calls: budget_i64(b, "toolCalls"),
+        cost_usd: b.get("costUsdUsed").and_then(|v| v.as_f64()),
+    })
 }
 
 pub fn budget_elapsed(m: &TeamMember) -> i64 {
@@ -699,6 +1278,7 @@ fn blank_row(id: &str, title: &str, mtime: i64, pinned: bool) -> SessionRow {
         status: String::new(),
         permission_pending: false,
         question_pending: false,
+        ask_outcome: String::new(),
         status_since: 0,
         last_activity_at: 0,
     }
@@ -753,6 +1333,7 @@ pub fn merge_sessions(
         }
         entry.permission_pending = r.permission_pending;
         entry.question_pending = r.question_pending;
+        entry.ask_outcome = r.ask_outcome.clone();
         if r.status_since > 0 {
             entry.status_since = r.status_since;
         }
@@ -1251,10 +1832,12 @@ pub fn activity_panel(
             agent: String::new(),
             task: card.map(|line| line.body.clone()).unwrap_or_default(),
             state: card.map(|line| line.badge.clone()).unwrap_or_default(),
-            output: card.map(|line| line.detail.clone()).unwrap_or_default(),
             elapsed_s: 0,
             started_ms: 0.0,
             expanded: false,
+            summary: card.map(|line| line.detail.clone()).unwrap_or_default(),
+            block_reason: String::new(),
+            budget: None,
         });
     }
     rows
@@ -1296,6 +1879,68 @@ mod tests {
     use super::*;
 
     #[test]
+    fn bootstrap_plugins_capability() {
+        let on: Bootstrap = serde_json::from_str(r#"{"capabilities":{"plugins":true,"panes":true}}"#).unwrap();
+        assert!(on.capabilities.plugins);
+        let off: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
+        assert!(!off.capabilities.plugins);
+    }
+
+    #[test]
+    fn config_sources_decode_in_daemon_order() {
+        let reply: ConfigSourcesReply = serde_json::from_str(
+            r#"{"sources":[
+                {"slot":"config","kind":"","scope":"global","label":"Main config","display":"~/.strike/config","exists":true,"canCreate":true},
+                {"slot":"mcp","kind":"","scope":"project","label":"MCP servers","display":"./.strike/mcp.json","exists":false,"canCreate":true},
+                {"slot":"","kind":"agents","scope":"project","label":"agents/review.md","display":"./.strike/agents/review.md","exists":true,"canCreate":false},
+                {"display":"./odd","exists":false,"futureField":1}
+            ]}"#,
+        )
+        .unwrap();
+        let titles: Vec<&str> = reply.sources.iter().map(ConfigSource::title).collect();
+        assert_eq!(titles, ["Main config", "MCP servers", "agents/review.md", "./odd"]);
+        let cases = [
+            (0, "Global", "config slot", "Present"),
+            (1, "Project", "mcp slot", "Not present (the daemon can create it; not from here)"),
+            (2, "Project", "agents file", "Present"),
+            (3, "Unknown scope", "file", "Not present"),
+        ];
+        for (i, scope, kind, state) in cases {
+            let row = &reply.sources[i];
+            assert_eq!(row.scope_label(), scope, "row {i}");
+            assert_eq!(row.kind_label(), kind, "row {i}");
+            assert_eq!(row.state_label(), state, "row {i}");
+        }
+        let empty: ConfigSourcesReply = serde_json::from_str("{}").unwrap();
+        assert!(empty.sources.is_empty());
+    }
+
+    #[test]
+    fn bootstrap_config_files_capability() {
+        let on: Bootstrap = serde_json::from_str(r#"{"capabilities":{"configFiles":true}}"#).unwrap();
+        assert!(on.capabilities.config_files);
+        let off: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
+        assert!(!off.capabilities.config_files);
+        let old: Bootstrap = serde_json::from_str("{}").unwrap();
+        assert!(!old.capabilities.config_files);
+    }
+
+    #[test]
+    fn card_budget_keeps_missing_counters_unmeasured() {
+        let mk = |v: serde_json::Value| -> TeamMember { serde_json::from_value(v).unwrap() };
+        assert_eq!(card_budget(&mk(serde_json::json!({"sessionId": "a"}))), None);
+        let b = card_budget(&mk(serde_json::json!({
+            "sessionId": "a",
+            "budget": {"elapsedS": 90, "tokensUsed": 1200.0, "costUsdUsed": 0.0}
+        })))
+        .expect("budget sent");
+        assert_eq!(b.elapsed_s, Some(90));
+        assert_eq!(b.tokens, Some(1200));
+        assert_eq!(b.tool_calls, None, "key not sent stays unmeasured");
+        assert_eq!(b.cost_usd, Some(0.0));
+    }
+
+    #[test]
     fn root_reported_idle_needs_a_daemon_status() {
         let mk = |id: &str, busy: bool, status: &str| -> RootSummary {
             serde_json::from_value(serde_json::json!({"id": id, "busy": busy, "status": status}))
@@ -1322,6 +1967,7 @@ mod tests {
             status: String::new(),
             permission_pending: false,
             question_pending: false,
+            ask_outcome: String::new(),
             status_since: 0,
             last_activity_at: 0,
         }
@@ -1339,6 +1985,7 @@ mod tests {
             last_activity_at: 0,
             permission_pending: false,
             question_pending: false,
+            ask_outcome: String::new(),
             unread: None,
         }];
         let sessions = vec![SessionItem {
@@ -1378,6 +2025,7 @@ mod tests {
             last_activity_at: 9_000,
             permission_pending: true,
             question_pending: false,
+            ask_outcome: String::new(),
             unread: Some(true),
         }];
         let mut seen = HashMap::new();
@@ -1547,6 +2195,8 @@ mod tests {
         assert_eq!(rows[0].name, "scribe");
         assert_eq!(rows[0].state, "blocked");
         assert_eq!(rows[0].task, "schema: handoff missing");
+        assert_eq!(rows[0].summary, "handoff json", "transcript detail feeds the card as agent text");
+        assert!(rows[0].budget.is_none(), "saved children carry no engine counters");
 
         let siblings = vec![
             ChildSession {
@@ -1622,6 +2272,151 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_reads_the_workspace_trust_capability() {
+        let boot: Bootstrap = serde_json::from_str(
+            r#"{"capabilities":{"workspaceTrust":true},"skills":[],"composerCommands":[]}"#,
+        )
+        .unwrap();
+        assert!(boot.capabilities.workspace_trust);
+        let off: Bootstrap = serde_json::from_str(r#"{"skills":[]}"#).unwrap();
+        assert!(!off.capabilities.workspace_trust);
+    }
+
+    #[test]
+    fn workspace_trust_sections_match_cli_wording() {
+        let reply = workspace_trust_outcome(
+            200,
+            r#"{"root":"/r","trusted":false,"summary":"1 MCP server","mutable":true,
+               "surfaces":{"root":"/r","configFiles":["/r/.strike/config"],"configKeys":["model"],
+               "permissionRules":2,"mcp":[{"name":"evil","command":"npx","args":["-y","evil"]},
+               {"name":"remote","url":"https://mcp.example"}],
+               "providers":[{"name":"openai","url":""}],
+               "hooks":[{"event":"pre_tool_use","command":"echo hi"},{"event":"stop","action":"log"}],
+               "agents":[{"name":"a","path":"/r/.strike/agents/a.md"}],"steering":["/r/AGENTS.md"]}}"#,
+        )
+        .unwrap();
+        assert!(reply.badge_visible());
+        assert!(reply.mutable);
+        let sections = reply.surfaces.sections();
+        let titles: Vec<&str> = sections.iter().map(|s| s.title).collect();
+        assert_eq!(
+            titles,
+            vec!["Config", "MCP servers", "Providers", "Hooks", "Agents", "Steering"]
+        );
+        assert_eq!(
+            sections[0].lines,
+            vec!["overrides: model", "permission rules: 2", "/r/.strike/config"]
+        );
+        assert_eq!(
+            sections[1].lines,
+            vec!["evil: npx -y evil", "remote: https://mcp.example"]
+        );
+        assert_eq!(sections[2].lines, vec!["openai"], "blank URL row shows the name only");
+        assert_eq!(sections[3].lines, vec!["pre_tool_use: echo hi", "stop: log (rule)"]);
+        assert_eq!(sections[4].lines, vec!["a (/r/.strike/agents/a.md)"]);
+    }
+
+    #[test]
+    fn workspace_trust_badge_hides_when_trusted_or_empty() {
+        let trusted = workspace_trust_outcome(
+            200,
+            r#"{"root":"/r","trusted":true,"surfaces":{"steering":["/r/AGENTS.md"]}}"#,
+        )
+        .unwrap();
+        assert!(!trusted.badge_visible());
+        let empty = workspace_trust_outcome(200, r#"{"root":"/r","surfaces":{}}"#).unwrap();
+        assert!(!empty.badge_visible());
+    }
+
+    #[test]
+    fn workspace_trust_outcome_reads_refusals() {
+        let home = workspace_trust_outcome(
+            422,
+            r#"{"root":"/home/u","untrustable":true,"error":"workspace root cannot be trusted: /home/u"}"#,
+        )
+        .unwrap();
+        assert!(home.untrustable);
+        assert!(home.error.contains("cannot be trusted"));
+        assert_eq!(
+            workspace_trust_outcome(403, r#"{"error":"daemon is --read-only"}"#).unwrap_err(),
+            "daemon is --read-only"
+        );
+        assert_eq!(workspace_trust_outcome(500, "").unwrap_err(), "HTTP 500");
+    }
+
+    #[test]
+    fn bootstrap_reads_the_container_capability() {
+        let boot: Bootstrap =
+            serde_json::from_str(r#"{"capabilities":{"container":true},"skills":[]}"#).unwrap();
+        assert!(boot.capabilities.container);
+        let off: Bootstrap = serde_json::from_str(r#"{"skills":[]}"#).unwrap();
+        assert!(!off.capabilities.container);
+    }
+
+    #[test]
+    fn container_status_host_mode_without_runtime_is_not_an_error() {
+        let r = container_status_outcome(
+            200,
+            r#"{"posture":"host+sandbox","postureSource":"dials","sandboxMode":"workspace-write",
+               "ladder":[{"label":"host+yolo"},{"label":"host+default"},{"label":"host+sandbox","active":true},
+               {"label":"container"},{"label":"container+no-network"}],
+               "runtime":{"engine":"docker","found":false,"error":"engine not found"},
+               "container":{"name":"strike-repo-abc","status":"absent"},
+               "drift":{"state":"not-ejected","path":"Dockerfile.devcontainer"}}"#,
+        )
+        .unwrap();
+        assert_eq!(r.ladder.iter().filter(|g| g.active).count(), 1);
+        assert!(r.runtime_line().contains("Host mode is the active, supported posture"));
+        assert_eq!(r.container_line(), "strike-repo-abc: not checked (runtime unavailable).");
+        assert_eq!(r.drift_line(), "Not ejected (Dockerfile.devcontainer not present).");
+        assert_eq!(
+            r.posture_note(),
+            "From the host dials: permission mode default, sandbox workspace-write."
+        );
+    }
+
+    #[test]
+    fn container_status_lines_for_a_running_container() {
+        let r = container_status_outcome(
+            200,
+            r#"{"posture":"container","postureSource":"env",
+               "runtime":{"engine":"/usr/bin/docker","found":true,"available":true},
+               "container":{"name":"strike-repo","status":"running","running":true,"compatible":false,"reason":"config hash a != b"},
+               "drift":{"state":"drifted","path":"Dockerfile.devcontainer","have":"0123456789abcdef","want":"fedcba9876543210"}}"#,
+        )
+        .unwrap();
+        assert_eq!(r.posture_note(), "Set at launch (STRIKE_ISOLATION).");
+        assert_eq!(r.runtime_line(), "/usr/bin/docker is running.");
+        assert_eq!(
+            r.container_line(),
+            "strike-repo: running, out of date (config hash a != b)"
+        );
+        assert_eq!(
+            r.drift_line(),
+            "Dockerfile.devcontainer drifted: has 0123456789ab, config wants fedcba987654."
+        );
+        let down = container_status_outcome(
+            200,
+            r#"{"runtime":{"engine":"/usr/bin/podman","found":true,"error":"daemon down"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            down.runtime_line(),
+            "/usr/bin/podman is installed but not answering: daemon down"
+        );
+    }
+
+    #[test]
+    fn container_status_outcome_surfaces_route_errors() {
+        assert_eq!(
+            container_status_outcome(409, r#"{"error":"workspace directory is not available"}"#)
+                .unwrap_err(),
+            "workspace directory is not available"
+        );
+        assert_eq!(container_status_outcome(500, "").unwrap_err(), "HTTP 500");
+    }
+
+    #[test]
     fn bootstrap_reads_the_project_init_capability() {
         let boot: Bootstrap = serde_json::from_str(
             r#"{"capabilities":{"projectInit":true},"skills":[],"composerCommands":[]}"#,
@@ -1630,6 +2425,65 @@ mod tests {
         assert!(boot.capabilities.project_init);
         let boot: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
         assert!(!boot.capabilities.project_init);
+    }
+
+    #[test]
+    fn bootstrap_reads_load_warnings() {
+        let boot: Bootstrap = serde_json::from_str(
+            r#"{"loadWarnings":[{"kind":"skill","severity":"error","code":"invalid","path":"/w/.strike/skills/bad.md","file":"bad.md","message":"unknown effort \"warp\"","fatal":true,"fingerprint":"abc"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(boot.load_warnings.len(), 1);
+        let w = &boot.load_warnings[0];
+        assert_eq!(w.kind, "skill");
+        assert_eq!(w.code, "invalid");
+        assert_eq!(w.file, "bad.md");
+        assert!(w.fatal);
+        assert_eq!(w.fingerprint, "abc");
+        let boot: Bootstrap = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(boot.load_warnings.is_empty());
+    }
+
+    #[test]
+    fn bootstrap_reads_agents_and_the_current_agent() {
+        let boot: Bootstrap = serde_json::from_str(
+            r#"{"status":{"agent":"build"},"agents":[{"name":"build"},{"name":"plan","description":"Read-only"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(boot.status.map(|s| s.agent), Some("build".to_string()));
+        assert_eq!(
+            boot.agents,
+            vec![
+                AgentInfo { name: "build".into(), description: String::new() },
+                AgentInfo { name: "plan".into(), description: "Read-only".into() },
+            ]
+        );
+        // Older daemons: no agents and no status agent read as empty.
+        let boot: Bootstrap = serde_json::from_str(r#"{"status":{}}"#).unwrap();
+        assert!(boot.agents.is_empty());
+        assert_eq!(boot.status.map(|s| s.agent), Some(String::new()));
+    }
+
+    #[test]
+    fn team_snapshot_reads_messages_and_escalation() {
+        let snap: TeamSnapshot = serde_json::from_str(
+            r#"{"available":true,"leadId":"lead","members":{"c1":{"sessionId":"c1","name":"scout","state":"running","escalation":{"kind":"stall","reason":"no progress","action":"finalizing","terminalStatus":"blocked"}}},"messages":[{"messageId":"m1","from":"c1","to":"lead","body":"stuck on schema","summary":"blocked","urgency":"high","kind":"request"}]}"#,
+        )
+        .unwrap();
+        let esc = snap.members["c1"].escalation.clone().unwrap();
+        assert_eq!((esc.kind.as_str(), esc.action.as_str()), ("stall", "finalizing"));
+        assert_eq!(snap.messages.len(), 1);
+        assert_eq!(snap.messages[0].summary, "blocked");
+        assert_eq!(snap.messages[0].urgency, "high");
+
+        // Go marshals an empty slice as null; older daemons omit it.
+        for raw in [
+            r#"{"available":true,"members":{},"messages":null}"#,
+            r#"{"available":true,"members":{}}"#,
+        ] {
+            let snap: TeamSnapshot = serde_json::from_str(raw).unwrap();
+            assert!(snap.messages.is_empty(), "{raw}");
+        }
     }
 
     #[test]

@@ -1,0 +1,8 @@
+[package]
+name = "mermaid-lite"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Native subset Mermaid renderer for the cockpit: flowchart and sequenceDiagram parsed and laid out into a renderer-agnostic scene."
+
+[dependencies]

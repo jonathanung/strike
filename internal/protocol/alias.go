@@ -86,6 +86,16 @@ const (
 	DecisionProject = pub.DecisionProject
 	DecisionFolder  = pub.DecisionFolder
 	DecisionReject  = pub.DecisionReject
+	DecisionExpired = pub.DecisionExpired
+)
+
+// MCP elicitation modes and actions (#1353).
+const (
+	ElicitationModeForm = pub.ElicitationModeForm
+	ElicitationModeURL  = pub.ElicitationModeURL
+	ElicitationAccept   = pub.ElicitationAccept
+	ElicitationDecline  = pub.ElicitationDecline
+	ElicitationCancel   = pub.ElicitationCancel
 )
 
 const (
@@ -140,6 +150,7 @@ type (
 	UserInput               = pub.UserInput
 	PermissionReply         = pub.PermissionReply
 	QuestionReply           = pub.QuestionReply
+	ElicitationReply        = pub.ElicitationReply
 	Interrupt               = pub.Interrupt
 	Steer                   = pub.Steer
 	InputQueueEdit          = pub.InputQueueEdit
@@ -192,6 +203,8 @@ type (
 	AdmissionDecided        = pub.AdmissionDecided
 	QuestionAsked           = pub.QuestionAsked
 	QuestionResolved        = pub.QuestionResolved
+	ElicitationRequested    = pub.ElicitationRequested
+	ElicitationResolved     = pub.ElicitationResolved
 	TurnSteered             = pub.TurnSteered
 	InputQueueItem          = pub.InputQueueItem
 	InputQueued             = pub.InputQueued
