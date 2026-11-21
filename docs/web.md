@@ -126,6 +126,7 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
 | `GET` | `/v1/sessions/{id}/children` | **yes** | Child/subagent sessions under a root |
 | `POST` | `/v1/sessions/{id}/fork` | **yes** | Fork durable session → new id |
+| `GET` | `/v1/sessions/{id}/rewind_preview` | **yes** | Rewind preview (#1336): `?keep=` a turn's fork keep-count → `{turn, turns, totalTurns, prompt, files[{path,kind}], checkpointSkipped, uncovered[], beyondCheckpoints, disabled?}` summing what rewinding that turn and every later one would undo, from the record's `turn.completed` facts. Read-only; the cockpit applies the rewind with one `rewind` op per undone turn. `disabled` states why on `--read-only` cockpits and delegated child sessions. **400** bad `keep`; **409** turn no longer in history; **404** unknown session |
 | `POST` | `/v1/sessions/{id}/report` | **yes** | Generate a `session_report` artifact from the session record (#1444) → **201** artifact. Facts only (turns, asks, tool counts, files, approvals, children, tokens, errors); tool args/output never copied; redacted. **404** unknown session; **501** without sessions or artifact store |
 | `PATCH` | `/v1/sessions/{id}` | **yes** | Rename (`{ "title" }`) |
 | `DELETE` | `/v1/sessions/{id}` | **yes** | Delete durable session (`?force=true` optional) |

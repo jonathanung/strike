@@ -98,6 +98,7 @@ mod file_history;
 mod quick_open;
 mod transcript_find;
 mod usage_audit;
+mod rewind;
 mod session_delete;
 mod session_restore;
 mod share;
@@ -1565,6 +1566,8 @@ fn App() -> impl IntoView {
     // for. `None` means no deletion is pending; setting it never issues
     // a request by itself.
     let delete_target = RwSignal::new(None::<session_delete::DeleteTarget>);
+    // Session rewind (#1336): the preview dialog's open request.
+    let rewind_target = RwSignal::new(None::<rewind::RewindTarget>);
     let pending_files = RwSignal::new(Vec::<chat_mode::PendingAttachment>::new());
     // Visual annotate (#1545): marks per pending image id, and the image
     // open in the overlay. Marks live and die with the composer session.
@@ -3607,6 +3610,25 @@ fn App() -> impl IntoView {
     // is filed separately; this PR only composes the two existing
     // endpoints, in delete-then-close order, after the user's force
     // confirmation when one was required.
+    // Rewind applied (#1336): after a conversation restore the picked
+    // turn's prompt returns to the composer for edit-and-resend; it is
+    // never sent automatically.
+    let rewind_busy = Signal::derive(move || {
+        let active = active_root.get();
+        roots.with(|list| list.iter().any(|r| r.id == active && r.busy))
+    });
+    let on_rewound = Callback::new(move |(prompt, mode, turns): (String, rewind::Mode, u32)| {
+        let what = if mode.restores_files() { "conversation and code" } else { "conversation" };
+        // The ops were accepted; the engine reports each undone turn (or a
+        // refusal) in the transcript, so this note does not claim more.
+        ux_note.set(format!(
+            "Requested a rewind of {turns} turn(s) ({what}); the transcript shows each undone turn. The prompt is back in the composer."
+        ));
+        if !prompt.trim().is_empty() {
+            draft.set(prompt);
+            sync_composer_height_soon();
+        }
+    });
     // Global search pick (#1355): open the session through the shared
     // live/resume path and queue the find-in-transcript handoff.
     let on_gs_pick = Callback::new(move |(id, q): (String, String)| {
@@ -5112,6 +5134,15 @@ fn App() -> impl IntoView {
             });
         })
         .into(),
+        rewind: (move |keep: i32| {
+            let root = active_root.get_untracked();
+            if root.is_empty() || keep <= 0 {
+                ux_note.set("No completed turn to rewind to.".into());
+                return;
+            }
+            rewind_target.set(Some(rewind::RewindTarget { session: root, keep }));
+        })
+        .into(),
         open_file: (move |path: String, line: u32| {
             // The editor stream (#1269) is wired now: a file chip opens the
             // document pane at the line, beside the transcript.
@@ -5595,6 +5626,13 @@ fn App() -> impl IntoView {
             base=base
             token=token
             on_deleted=on_deleted
+        />
+        <rewind::RewindDialog
+            target=rewind_target
+            base=base
+            token=token
+            busy_turn=rewind_busy
+            on_done=on_rewound
         />
         <global_search::GlobalSearch
             open=gs_open

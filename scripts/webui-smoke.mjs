@@ -676,6 +676,24 @@ try {
     join(sessionsDir, "tail-session.meta.json"),
     JSON.stringify({ title: "Tool tail replay" }) + "\n",
   );
+  // Session rewind (#1336) fixture: two completed turns; the second ran an
+  // uncovered (bash) mutation, so a code restore must be acknowledged.
+  await writeFile(
+    join(sessionsDir, "rewind-session.jsonl"),
+    envLine("user.message", "2026-10-26T07:00:00Z", { text: "add login" }) +
+      envLine("turn.started", "2026-10-26T07:00:01Z", {}) +
+      envLine("text.delta", "2026-10-26T07:00:02Z", { text: "added" }) +
+      envLine("turn.completed", "2026-10-26T07:00:03Z", { stopReason: "end_turn", files: [{ path: "auth/login.go", kind: "create" }] }) +
+      envLine("user.message", "2026-10-26T07:01:00Z", { text: "run the migration script" }) +
+      envLine("turn.started", "2026-10-26T07:01:01Z", {}) +
+      envLine("text.delta", "2026-10-26T07:01:02Z", { text: "migrated" }) +
+      envLine("turn.completed", "2026-10-26T07:01:03Z", {
+        stopReason: "end_turn",
+        files: [{ path: "db/schema.sql", kind: "update" }],
+        uncovered: ["bash"],
+      }),
+  );
+  await writeFile(join(sessionsDir, "rewind-session.meta.json"), JSON.stringify({ title: "Rewind fixture" }) + "\n");
   // Verification badge (#1373) fixture: one turn per state plus a turn
   // with no verification payload, which must render no badge.
   const verifyTurn = (n, text, verification) =>
@@ -5383,6 +5401,96 @@ try {
     },
     { timeout: STEP_MS, interval: 250 },
   );
+  // Session rewind (#1336): the prompt's Rewind… action opens a preview
+  // fed by the daemon; the bash warning blocks a code restore until it is
+  // acknowledged; Cancel changes nothing; a conversation-only rewind
+  // drops the turn on the daemon and puts the prompt back in the composer
+  // without sending it.
+  {
+    const rewindPoints = async () => {
+      const res = await fetch(`http://127.0.0.1:${port}/v1/sessions/rewind-session/rewind_points`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return ((await res.json()).points || []).length;
+    };
+    if ((await rewindPoints()) !== 2) throw new Error("rewind fixture should start with 2 turns");
+    const rowRW = `[data-session-id="rewind-session"]`;
+    await waitFor(
+      "rewind fixture row",
+      async () => ({ ok: (await evaluate(`!!document.querySelector(${JSON.stringify(rowRW)})`)) === true }),
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await evaluate(`document.querySelector(${JSON.stringify(rowRW)}).querySelector(".ss-main").click()`);
+    const rewindBtn = `[data-rewind-keep="8"]`;
+    await waitFor(
+      "Rewind… action on the second prompt",
+      async () => ({ ok: (await evaluate(`!!document.querySelector(${JSON.stringify(rewindBtn)})`)) === true }),
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    const rwDialog = async () =>
+      JSON.parse(
+        (await evaluate(`(() => {
+          const d = document.querySelector("[data-rewind='dialog']");
+          const c = document.querySelector("[data-rewind='confirm']");
+          return JSON.stringify({
+            open: !!d,
+            text: d ? d.innerText : "",
+            confirmDisabled: c ? c.disabled : null,
+            blocked: document.querySelector("[data-rewind='blocked']")?.innerText || "",
+          });
+        })()`)) || "{}",
+      );
+    await evaluate(`document.querySelector(${JSON.stringify(rewindBtn)}).click()`);
+    const shown = await waitFor(
+      "rewind preview with the uncovered bash warning",
+      async () => {
+        const d = await rwDialog();
+        return { ok: d.open && d.text.includes("Rewind to before turn 2?") && d.text.includes("bash"), ...d };
+      },
+      { timeout: WAIT_MS, interval: 200 },
+    );
+    if (!shown.text.includes("db/schema.sql") || !shown.text.includes("Restore code only")) {
+      throw new Error(`rewind preview incomplete: ${shown.text.slice(0, 400)}`);
+    }
+    if (shown.confirmDisabled !== true || !shown.blocked.includes("Acknowledge")) {
+      throw new Error(`uncovered warning did not block the code restore: ${JSON.stringify(shown).slice(0, 400)}`);
+    }
+    await evaluate(`document.querySelector("[data-rewind='cancel']").click()`);
+    await waitFor("rewind dialog closes on cancel", async () => ({ ok: !(await rwDialog()).open }), {
+      timeout: STEP_MS,
+      interval: 200,
+    });
+    if ((await rewindPoints()) !== 2) throw new Error("cancelled rewind changed the session");
+    await evaluate(`document.querySelector(${JSON.stringify(rewindBtn)}).click()`);
+    await waitFor(
+      "rewind preview reopens",
+      async () => ({ ok: (await rwDialog()).text.includes("Rewind to before turn 2?") }),
+      { timeout: WAIT_MS, interval: 200 },
+    );
+    await evaluate(`document.querySelector("[data-rewind-mode='conversation'] input").click()`);
+    await waitFor(
+      "conversation-only rewind is not blocked",
+      async () => ({ ok: (await rwDialog()).confirmDisabled === false }),
+      { timeout: STEP_MS, interval: 200 },
+    );
+    await evaluate(`document.querySelector("[data-rewind='confirm']").click()`);
+    await waitFor(
+      "rewind drops the turn and returns the prompt to the composer",
+      async () => {
+        const points = await rewindPoints();
+        const composer = (await evaluate(`document.querySelector("#composer-input")?.value || ""`)) || "";
+        return { ok: points === 1 && composer.includes("run the migration script"), points, composer };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await evaluate(`(() => {
+      const el = document.querySelector("#composer-input");
+      const proto = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+      proto.set.call(el, "");
+      el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    })()`);
+  }
+
   // Global transcript search (#1355): the palette opens the overlay; a
   // query with no matches says so; a content match in a session shows a
   // highlighted snippet; picking it opens that session and hands the
