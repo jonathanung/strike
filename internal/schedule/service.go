@@ -29,6 +29,10 @@ type Hooks struct {
 	// Audit receives one record per script run outcome (started, finished,
 	// failed, denied, skipped, missed, error). Nil writes none.
 	Audit func(ScriptAudit)
+	// Notify receives one notice per finished or failed script run (none
+	// for skipped, missed, denied, or error). It carries no command or
+	// output, so a banner built from it cannot show them.
+	Notify func(ScriptNotice)
 }
 
 // Service is the clock. Open reconciles runs that were in flight when the
