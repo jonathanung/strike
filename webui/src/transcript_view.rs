@@ -1313,6 +1313,18 @@ fn message_view(
                             crate::clipboard::after_ms(2_000, move || copy_state.set(None));
                         });
                     }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
+                    {is_you.then(|| {
+                        // Prompt library (#1357): keep a sent message as a
+                        // reusable prompt; opens the save dialog prefilled.
+                        // Not on a read-only share transcript (no library).
+                        let text = copy_text.clone();
+                        view! {
+                            <button type="button" class="sx-quiet" data-save-prompt="true" on:click=move |_| {
+                                let _ = crate::shell::dispatch(crate::prompt_library::SAVE_ID, &text);
+                            }>"Save as prompt"</button>
+                        }
+                    })}
+||||||| base
                     {can_rewind.then(|| view! {
                         <button
                             type="button"

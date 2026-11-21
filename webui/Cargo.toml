@@ -17,6 +17,7 @@ md-review = { path = "md-review" }
 status-card = { path = "status-card" }
 mermaid-lite = { path = "mermaid-lite" }
 composer-drafts = { path = "composer-drafts" }
+prompt-library = { path = "prompt-library" }
 signin-flow = { path = "signin-flow" }
 transcript-window = { path = "transcript-window" }
 edit-resend = { path = "edit-resend" }

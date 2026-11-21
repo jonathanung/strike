@@ -7553,6 +7553,158 @@ try {
     { timeout: STEP_MS, interval: 200 },
   );
 
+  // Prompt library (#1357): save the draft as a named prompt (browser-
+  // local, strike.prompts), reject a malformed placeholder at save time,
+  // insert through the searchable picker with a {{variable}} fill-in
+  // form (a repeated placeholder is asked once), never auto-send, and
+  // delete behind the shared confirm.
+  const libField = async (sel, value) => {
+    const ok = await evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(sel)});
+      if (!el) return false;
+      el.focus();
+      const proto = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value");
+      proto.set.call(el, ${JSON.stringify(value)});
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
+      return el.value === ${JSON.stringify(value)};
+    })()`);
+    if (ok !== true) throw new Error(`prompt library: ${sel} did not accept ${JSON.stringify(value)}`);
+  };
+  const libClick = async (sel) => {
+    const ok = await evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (el) el.click(); return !!el; })()`);
+    if (ok !== true) throw new Error(`prompt library: ${sel} missing`);
+  };
+  const libKey = async (sel, key) =>
+    evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(sel)});
+      if (!el) return false;
+      el.focus();
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, code: ${JSON.stringify(key)}, bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+  const libPlus = async (sel) => {
+    await waitFor(
+      `composer + menu row ${sel}`,
+      async () => {
+        const has = await evaluate(`!!document.querySelector(${JSON.stringify(sel)})`);
+        if (!has) await evaluate(`document.querySelector('[data-composer-triggers="plus-button"]')?.click()`);
+        return { ok: has === true };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await libClick(sel);
+  };
+  const libStored = async () => JSON.parse((await evaluate(`localStorage.getItem("strike.prompts") || "[]"`)) || "[]");
+  const libBody = "Review {{file}} for {{concern}}, then re-read {{file}}.";
+  await setDraft(libBody);
+  await libPlus("[data-prompts-save-menu]");
+  await waitFor(
+    "save-as-prompt editor prefilled from the draft",
+    async () => {
+      const body = await evaluate(`document.querySelector("[data-prompt-body]")?.value ?? null`);
+      return { ok: body === libBody, body };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libField("[data-prompt-name]", "Smoke review");
+  await libClick("[data-prompt-save]");
+  await waitFor(
+    "prompt saved browser-locally and editor closed",
+    async () => {
+      const list = await libStored();
+      const open = await evaluate(`!!document.querySelector("[data-prompt-library]")`);
+      return { ok: !open && list.length === 1 && list[0].name === "Smoke review" && list[0].body === libBody, list, open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  // Malformed placeholder: rejected at save time, nothing stored.
+  await setDraft("fix {{file");
+  await libPlus("[data-prompts-save-menu]");
+  await waitFor(
+    "malformed-placeholder editor open",
+    async () => ({ ok: (await evaluate(`document.querySelector("[data-prompt-body]")?.value ?? null`)) === "fix {{file" }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libField("[data-prompt-name]", "Broken");
+  await libClick("[data-prompt-save]");
+  await waitFor(
+    "unclosed placeholder rejected at save time",
+    async () => {
+      const err = (await evaluate(`document.querySelector("[data-prompt-error]")?.innerText || ""`)) || "";
+      const list = await libStored();
+      return { ok: /unclosed/i.test(err) && list.length === 1, err, count: list.length };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libKey("[data-prompt-name]", "Escape");
+  await setDraft("");
+  // Picker: search, Enter, fill-in form, insert into the composer.
+  await libPlus("[data-prompts-open-menu]");
+  await waitFor(
+    "prompt library picker open",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-prompt-search]")`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libField("[data-prompt-search]", "smoke");
+  await waitFor(
+    "search filters to the saved prompt",
+    async () => {
+      const rows = await evaluate(`document.querySelectorAll("[data-prompt-row]").length`);
+      return { ok: rows === 1, rows };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libKey("[data-prompt-search]", "Enter");
+  await waitFor(
+    "fill-in form asks each placeholder once",
+    async () => {
+      const vars = JSON.parse((await evaluate(`JSON.stringify([...document.querySelectorAll("[data-prompt-var]")].map((el) => el.getAttribute("data-prompt-var")))`)) || "[]");
+      return { ok: vars.join(",") === "file,concern", vars };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libField('[data-prompt-var="file"]', "a.go");
+  await libField('[data-prompt-var="concern"]', "races");
+  await libClick("[data-prompt-fill-insert]");
+  await waitFor(
+    "filled prompt lands in the composer, not sent",
+    async () => {
+      const value = await evaluate(`document.querySelector("#composer-input")?.value ?? null`);
+      const open = await evaluate(`!!document.querySelector("[data-prompt-library]")`);
+      return { ok: !open && value === "Review a.go for races, then re-read a.go.", value, open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  // Delete with confirm.
+  await setDraft("");
+  await libPlus("[data-prompts-open-menu]");
+  await waitFor(
+    "library lists the prompt for delete",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-prompt-delete]")`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libClick("[data-prompt-delete]");
+  await waitFor(
+    "delete asks the shared confirm first",
+    async () => {
+      const open = await evaluate(`!!document.querySelector("[data-confirm='dialog']")`);
+      return { ok: open && (await libStored()).length === 1, open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libClick("[data-confirm='accept']");
+  await waitFor(
+    "prompt deleted after confirm",
+    async () => ({ ok: (await libStored()).length === 0 }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libKey("[data-prompt-search]", "Escape");
+  await waitFor(
+    "prompt library closed",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-prompt-library]")`)) === false }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+
   // Prompt sharpen (#1385): Alt+P sends the draft to the daemon's
   // one-shot rewrite (echo stands in for the model), shows the
   // original-vs-sharpened preview, and changes nothing until Accept.

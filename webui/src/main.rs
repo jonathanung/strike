@@ -74,6 +74,7 @@ mod model;
 mod notify;
 mod outcome;
 mod project_init;
+mod prompt_library;
 mod prompt_sharpen;
 mod onboarding;
 mod outbox;
@@ -5639,6 +5640,7 @@ fn App() -> impl IntoView {
         />
         <shell::Chrome />
         {gateway_qr::phone_view()}
+        <prompt_library::PromptLibrary draft=draft />
         <session_delete::SessionDeleteDialog
             target=delete_target
             base=base
@@ -6223,6 +6225,20 @@ fn App() -> impl IntoView {
                                 <button type="button" class="palette-row" on:click=move |_| open_composer_catalog("skills", &ui)>
                                     <span class="name">"Use a skill"</span>
                                     <span class="path">"Skills loaded for this daemon"</span>
+                                </button>
+                                <button type="button" class="palette-row" data-prompts-open-menu="true" on:click=move |_| {
+                                    plus_open.set(false);
+                                    let _ = crate::shell::dispatch(prompt_library::INSERT_ID, "");
+                                }>
+                                    <span class="name">"Insert saved prompt"</span>
+                                    <span class="path">"Search your prompt library"</span>
+                                </button>
+                                <button type="button" class="palette-row" data-prompts-save-menu="true" on:click=move |_| {
+                                    plus_open.set(false);
+                                    let _ = crate::shell::dispatch(prompt_library::SAVE_ID, "");
+                                }>
+                                    <span class="name">"Save draft as prompt"</span>
+                                    <span class="path">"Keep this draft in the prompt library"</span>
                                 </button>
                                 <button type="button" class="palette-row" data-sharpen-menu="true" on:click=move |_| {
                                     plus_open.set(false);
