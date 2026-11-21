@@ -2,7 +2,9 @@
 // end of the Customize pass. It seeds three recorded root sessions in this
 // workspace that open with the same request and run the same tools. Then it
 // turns the opt-in on in Customize → Skills, clicks "Look now", expects one
-// proposal card, accepts it, and expects the skill in the catalog. The
+// proposal card, accepts it, and expects the skill in the catalog. #1913:
+// each evidence session row is a link that opens the session, and the
+// draft is mirrored into the Ideas inbox and settled when accepted. The
 // dismiss path and near-miss handling are covered by Go tests.
 import { rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -57,7 +59,13 @@ async function waitFor(send, expression, label, tries = 80) {
 }
 
 // Customize must be mounted; this opens the Skills section itself.
-export async function skillProposalsCheck({ send, repoDir }) {
+async function proposalIdea({ port, token }) {
+  const res = await fetch(`http://127.0.0.1:${port}/v1/suggestions`, { headers: { Authorization: `Bearer ${token}` } });
+  const body = await res.json();
+  return (body.suggestions || []).find((s) => s.source === "skill-proposals" && String(s.title || "").includes(PROPOSED_SKILL));
+}
+
+export async function skillProposalsCheck({ send, repoDir, port, token }) {
   await evalValue(send, `document.querySelector('[data-cz-section="skills"]')?.click()`);
   await waitFor(
     send,
@@ -85,6 +93,22 @@ export async function skillProposalsCheck({ send, repoDir }) {
     })()`,
     "scan proposes the seeded workflow",
   );
+  await waitFor(
+    send,
+    `(() => {
+      const links = [...document.querySelectorAll('[data-cz-proposal] [data-cz-proposal-session]')];
+      return links.length === 3 && links.every((b) => b.tagName === "BUTTON" && b.getAttribute("data-cz-proposal-session"))
+        ? "ok"
+        : "evidence links " + links.length;
+    })()`,
+    "evidence sessions are links",
+  );
+  if (port && token) {
+    const mirrored = await proposalIdea({ port, token });
+    if (!mirrored || mirrored.state !== "open" || (mirrored.evidence || []).length !== 3) {
+      throw new Error(`skill proposals: Ideas inbox mirror = ${JSON.stringify(mirrored || null).slice(0, 400)}`);
+    }
+  }
   await evalValue(send, `document.querySelector('[data-cz-proposal-accept]').click()`);
   try {
     await waitFor(
@@ -96,6 +120,12 @@ export async function skillProposalsCheck({ send, repoDir }) {
       })()`,
       "accepted skill is listed and the card is gone",
     );
+    if (port && token) {
+      const settled = await proposalIdea({ port, token });
+      if (!settled || settled.state !== "accepted") {
+        throw new Error(`skill proposals: Ideas row after accept = ${JSON.stringify(settled || null).slice(0, 400)}`);
+      }
+    }
   } finally {
     await rm(join(repoDir, ".strike", "skills", `${PROPOSED_SKILL}.md`), { force: true });
     await rm(join(repoDir, ".strike", "skills", PROPOSED_SKILL), { recursive: true, force: true });

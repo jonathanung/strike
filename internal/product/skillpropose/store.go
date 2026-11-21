@@ -19,6 +19,10 @@ type Workspace struct {
 	LastScan  time.Time  `json:"lastScan,omitempty"`
 	Pending   []Proposal `json:"pending,omitempty"`
 	Dismissed []string   `json:"dismissed,omitempty"`
+	// Dir is the workspace directory last seen from the cockpit. The
+	// weekly cadence (#1913) needs it to read installed skills with no
+	// request in hand; a workspace with no Dir is never scanned on cadence.
+	Dir string `json:"dir,omitempty"`
 }
 
 // EffectiveThreshold is Threshold, or the default when unset.
