@@ -577,6 +577,9 @@ impl Transcript {
         // schema is dropped. Parsing below still reads the raw object.
         match protocol_schema::decode_event(raw) {
             Ok(protocol_schema::Event::Unknown { .. }) => return,
+            // #1944: stream-only, never in the session log. Counting it would
+            // shift event_count (rewind / keep_events) off the persisted log.
+            Ok(protocol_schema::Event::LoopsChanged(_)) => return,
             Err(_) => {
                 // #1359: a compaction/budget payload the schema rejects
                 // still leaves a title-only marker where it happened.
@@ -2687,6 +2690,14 @@ pub fn provider_auth_headline(provider: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loops_changed_is_not_a_transcript_event() {
+        let mut t = Transcript::new();
+        t.apply_envelope(r#"{"type":"loops.changed","time":"2026-11-21T10:00:00Z","data":{"sessionId":"s1","reason":"stop","loops":[]}}"#);
+        assert_eq!(t.event_count, 0, "stream-only events must not shift log-aligned counts");
+        assert!(t.messages.is_empty());
+    }
 
     #[test]
     fn loop_firing_user_line_carries_loop_badge() {
