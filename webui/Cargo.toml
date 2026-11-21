@@ -11,6 +11,7 @@ serde_json = "1"
 protocol-schema = { path = "protocol-schema" }
 load-guard = { path = "load-guard" }
 composer-drafts = { path = "composer-drafts" }
+prompt-library = { path = "prompt-library" }
 transcript-window = { path = "transcript-window" }
 js-sys = "0.3"
 send_wrapper = "0.6"
