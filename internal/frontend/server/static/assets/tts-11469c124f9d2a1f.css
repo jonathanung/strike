@@ -1,0 +1,8 @@
+/* feature:tts-playback begin */
+.sx-tts { display: inline-flex; gap: 4px; align-items: center; }
+.sx-tts[data-tts-playing="true"] [data-action="read-aloud"] { color: var(--acid); }
+.sx-msg:has(.sx-tts[data-tts-playing="true"]) { box-shadow: inset 2px 0 0 var(--acid); }
+.sx-tts-note { font-size: 0.85em; color: var(--muted); }
+.tts-settings { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tts-settings .hint { flex-basis: 100%; }
+/* feature:tts-playback end */
