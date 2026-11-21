@@ -196,6 +196,11 @@
               "omitEmpty": true
             }
           ]
+        },
+        {
+          "name": "loopId",
+          "type": "string",
+          "omitEmpty": true
         }
       ]
     },
