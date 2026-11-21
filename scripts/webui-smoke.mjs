@@ -4022,7 +4022,7 @@ try {
   await rm(invalidatedPath, { force: true });
   try {
     const filesTab = await evaluate(`(() => {
-      const btn = [...document.querySelectorAll(".side-tabs button")].find((b) => (b.textContent || "").trim() === "Files");
+      const btn = [...document.querySelectorAll(".side-tabs button")].find((b) => (b.textContent || "").includes("Files"));
       if (!btn) return "missing";
       btn.click();
       return "clicked";
