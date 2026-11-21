@@ -115,7 +115,7 @@ type PackConnector struct {
 	locks     map[string]*sync.Mutex // server -> serializes attach/detach
 	refs      map[string]int         // server -> sessions holding it
 	owned     map[string]bool        // server -> attached by us
-	attaching map[string]bool        // server -> attach in flight
+	attaching map[string]bool        // server -> attach or detach in flight
 }
 
 // NewPackConnector builds a connector. resolve maps a pack server name to
@@ -140,7 +140,7 @@ func newPackConnector(resolve func(string) (ServerConfig, bool), attach func(con
 }
 
 // ScopedTool reports whether the registry tool name belongs to a server
-// Powers attached (or is attaching), and which one. Those tools are session
+// Powers attached (or is attaching or detaching), and which one. Those tools are session
 // scoped (#1943); a server configured outside Powers is shared and never
 // reported. When the manager has not recorded the tool yet it falls back to
 // the mcp_<server>_ name prefix, so a tool that appears mid-attach is
@@ -242,9 +242,17 @@ func (c *PackConnector) Disconnect(_ string, server string) {
 	if last {
 		delete(c.refs, server)
 		delete(c.owned, server)
+		if owned {
+			// Still scoped until detach unregisters its tools, so they
+			// never become visible to every session on the way out.
+			c.attaching[server] = true
+		}
 	}
 	c.mu.Unlock()
 	if last && owned {
 		c.detach(server)
+		c.mu.Lock()
+		delete(c.attaching, server)
+		c.mu.Unlock()
 	}
 }

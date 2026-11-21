@@ -12,6 +12,7 @@ func TestPackConnectorScopedTool(t *testing.T) {
 	recorded := map[string]string{"mcp_docs_search": "docs", "mcp_global_read": "global"}
 	var c *PackConnector
 	var midAttach map[string]bool
+	var midDetach bool
 	c = newPackConnector(
 		func(s string) (ServerConfig, bool) { return ServerConfig{Name: s}, true },
 		func(_ context.Context, cfg ServerConfig) (bool, error) {
@@ -21,7 +22,12 @@ func TestPackConnectorScopedTool(t *testing.T) {
 			}
 			return cfg.Name != "global", nil
 		},
-		func(string) {},
+		func(name string) {
+			if name == "docs" {
+				// Tools are still registered while detach runs.
+				_, midDetach = c.ScopedTool("mcp_docs_search")
+			}
+		},
 	)
 	c.toolServer = func(tool string) (string, bool) {
 		srv, ok := recorded[tool]
@@ -59,6 +65,9 @@ func TestPackConnectorScopedTool(t *testing.T) {
 	}
 
 	c.Disconnect("s1", "docs")
+	if !midDetach {
+		t.Error("tool of a server mid-detach was not scoped (would leak to every session)")
+	}
 	if _, ok := c.ScopedTool("mcp_docs_search"); ok {
 		t.Error("tool still scoped after the last session released its server")
 	}
