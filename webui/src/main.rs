@@ -27,6 +27,7 @@ mod customize;
 mod gateway;
 mod gateway_qr;
 mod git;
+mod global_search;
 mod goals;
 mod mobile;
 mod providers;
@@ -1312,6 +1313,12 @@ fn App() -> impl IntoView {
     let tf_match_case = RwSignal::new(false);
     let tf_whole_word = RwSignal::new(false);
     let tf_idx = RwSignal::new(0usize);
+    // Global transcript search (#1355): overlay state and the pending
+    // jump (session id, query) handed to find-in-transcript once that
+    // session's lines have loaded.
+    let gs_open = RwSignal::new(false);
+    let gs_query = RwSignal::new(String::new());
+    let gs_jump = RwSignal::new(None::<(String, String)>);
     let tf_saved_scroll = RwSignal::new(0.0f64);
     let doc_path = RwSignal::new(String::new());
     let doc_line = RwSignal::new(0u32);
@@ -2994,6 +3001,12 @@ fn App() -> impl IntoView {
     // is filed separately; this PR only composes the two existing
     // endpoints, in delete-then-close order, after the user's force
     // confirmation when one was required.
+    // Global search pick (#1355): open the session through the shared
+    // live/resume path and queue the find-in-transcript handoff.
+    let on_gs_pick = Callback::new(move |(id, q): (String, String)| {
+        gs_jump.set(Some((id.clone(), q)));
+        open_session_page(id);
+    });
     let on_deleted = Callback::new(move |id: String| {
         let was_live = roots.get_untracked().iter().any(|row| row.id == id);
         // Drop the deleted session's draft (#1367) before the fallback
@@ -4090,6 +4103,43 @@ fn App() -> impl IntoView {
         }
     });
 
+    // Global search handoff (#1355): once the picked session is open and
+    // its lines contain the query, open the find bar on it; the scroll
+    // effect above then brings the first match into view. A session whose
+    // loaded lines do not contain the query (e.g. the match is only in an
+    // older page) leaves the jump pending until the next pick.
+    Effect::new(move |_| {
+        let list = lines.get();
+        let active = active_root.get();
+        let Some((id, q)) = gs_jump.get() else {
+            return;
+        };
+        if active != id || list.is_empty() {
+            return;
+        }
+        let hits = transcript_matches(&list, &q, crate::editor::FindOptions::new(false, false));
+        if hits.is_empty() {
+            return;
+        }
+        gs_jump.set(None);
+        if !tf_open.get_untracked() {
+            tf_saved_scroll.set(transcript_find::transcript_scroll());
+        }
+        tf_match_case.set(false);
+        tf_whole_word.set(false);
+        tf_query.set(q);
+        tf_idx.set(0);
+        tf_open.set(true);
+    });
+    shell::bind(
+        "search.global",
+        Rc::new(move |args: &str| {
+            gs_query.set(args.trim().to_string());
+            gs_open.set(true);
+            Ok(())
+        }),
+    );
+
     // Find-in-transcript view state for the readable pane (#1310 union):
     // the matches over the ChatLine mirror — which is transcript.chat_lines(),
     // index-aligned with Transcript::messages — plus the current match,
@@ -4718,6 +4768,14 @@ fn App() -> impl IntoView {
             base=base
             token=token
             on_deleted=on_deleted
+        />
+        <global_search::GlobalSearch
+            open=gs_open
+            query=gs_query
+            base=base
+            token=token
+            workspaces=workspaces
+            on_pick=on_gs_pick
         />
         <Show when=move || mode.get() == "providers" fallback=move || ()>
             <providers::ProvidersPage base=base token=token />
