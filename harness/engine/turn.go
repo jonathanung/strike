@@ -43,6 +43,8 @@ type pendingUserInput struct {
 	text    string
 	display string
 	images  []protocol.ImageAttachment
+	// loopID is UserInput.LoopID: the /loop that fired this prompt (#1827).
+	loopID string
 }
 
 // pendingSteer is one active-turn redirect awaiting a safe request boundary.
@@ -360,6 +362,11 @@ func (e *Engine) applyPendingSteer(turnID, mode string) {
 		Mode:         mode,
 		TargetTurnID: ps.targetTurnID,
 	})
+	target := ps.targetTurnID
+	if target == "" {
+		target = turnID
+	}
+	e.recordAppliedSteer(target)
 }
 
 // fallbackSteerToQueue converts an unapplied steer into a next-turn UserInput
@@ -428,6 +435,7 @@ func (e *Engine) enqueuePrepared(op protocol.UserInput, display string) {
 		text:    op.Text,
 		display: display,
 		images:  append([]protocol.ImageAttachment(nil), op.Images...),
+		loopID:  op.LoopID,
 	})
 	e.emitInputQueued()
 }
@@ -591,7 +599,7 @@ func (e *Engine) handleInputQueueSendNow(ctx context.Context, op protocol.InputQ
 		e.pendingUserInputs = nil
 	}
 	e.emitInputQueued()
-	e.startUserTurn(ctx, item.text, item.display, item.images)
+	e.startUserTurn(ctx, item.text, item.display, item.loopID, item.images)
 }
 
 // drainIdleFollowups starts at most one follow-up turn when idle: preferred
@@ -638,16 +646,16 @@ func (e *Engine) startNextPendingUserInput(ctx context.Context) bool {
 		e.pendingUserInputs = nil
 	}
 	e.emitInputQueued()
-	e.startUserTurn(ctx, item.text, item.display, item.images)
+	e.startUserTurn(ctx, item.text, item.display, item.loopID, item.images)
 	return true
 }
 
 // startUserTurn starts a turn from a user message. The user speaking again
 // lifts the permission deny latch (#1387); child notices, mailbox turns and
 // other engine-started turns keep it.
-func (e *Engine) startUserTurn(ctx context.Context, text, display string, images []protocol.ImageAttachment) {
+func (e *Engine) startUserTurn(ctx context.Context, text, display, loopID string, images []protocol.ImageAttachment) {
 	e.clearDenyLatches()
-	e.startTurnShown(ctx, text, display, images)
+	e.startTurnShown(ctx, text, display, loopID, images)
 }
 
 // clearDenyLatches lifts the deny latch on this engine and every live child
@@ -669,10 +677,12 @@ func (e *Engine) clearDenyLatches() {
 }
 
 func (e *Engine) startTurn(ctx context.Context, text string, images []protocol.ImageAttachment) {
-	e.startTurnShown(ctx, text, "", images)
+	e.startTurnShown(ctx, text, "", "", images)
 }
 
-func (e *Engine) startTurnShown(ctx context.Context, text, display string, images []protocol.ImageAttachment) {
+// startTurnShown starts a turn. display, when set, is the transcript text in
+// place of text; loopID marks a /loop firing on the UserMessage (#1827).
+func (e *Engine) startTurnShown(ctx context.Context, text, display, loopID string, images []protocol.ImageAttachment) {
 	// Mint turn ID only after input acceptance (provider present, no active turn).
 	turnID := rand.Text()
 	var turnCtx context.Context
@@ -691,7 +701,7 @@ func (e *Engine) startTurnShown(ctx context.Context, text, display string, image
 	go func() {
 		defer close(done)
 		defer cancel()
-		e.runTurn(turnCtx, text, display, images, turnID, finishing)
+		e.runTurn(turnCtx, text, display, loopID, images, turnID, finishing)
 	}()
 }
 
@@ -755,7 +765,7 @@ func sessionTitleFromText(text string) string {
 // provider-request ID and attempt number (retries included). finishing is
 // closed exactly once immediately before the terminal TurnCompleted emission
 // so Run can join the worker before the next op.
-func (e *Engine) runTurn(ctx context.Context, text, display string, images []protocol.ImageAttachment, turnID string, finishing chan struct{}) {
+func (e *Engine) runTurn(ctx context.Context, text, display, loopID string, images []protocol.ImageAttachment, turnID string, finishing chan struct{}) {
 	turnCorr := e.baseCorr()
 	turnCorr.TurnID = turnID
 	e.checkpoints.BeginTurn(turnID)
@@ -782,7 +792,7 @@ func (e *Engine) runTurn(ctx context.Context, text, display string, images []pro
 	if strings.TrimSpace(display) != "" {
 		shown = display
 	}
-	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: shown, Images: persisted})
+	e.emit(protocol.UserMessage{Correlation: turnCorr, Text: shown, Images: persisted, LoopID: loopID})
 	e.maybeTitleSession(shown)
 	e.emit(protocol.TurnStarted{Correlation: turnCorr})
 	e.fireLifecycle(turnCorr, permission.HookEventTurnStart, "", "", "start", "")
@@ -1554,6 +1564,9 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			StopWorkflow:   func() error { e.stopWorkflow(); return nil },
 			AdvancePhase:   e.advancePhase,
 			HandoffPlan:    e.handoffPlan,
+			AckSteer: func(ack tool.SteerAck) error {
+				return e.ackSteer(corr, ack)
+			},
 			ReportOutput: func(data string) {
 				if data == "" {
 					return
@@ -2024,6 +2037,9 @@ func (e *Engine) completeTurn(ctx context.Context, finishing chan struct{}, corr
 	if stopReason == "end_turn" && len(e.opts.Verify) > 0 {
 		verification = e.runSoloVerification(ctx, corr)
 	}
+	// A steer the agent never acknowledged stays at plain "acknowledged";
+	// a later turn must not answer it (#1860).
+	e.clearUnackedSteers()
 	e.emit(protocol.TurnCompleted{
 		Correlation:       corr,
 		StopReason:        stopReason,

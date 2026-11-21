@@ -12,7 +12,11 @@ const (
 	activationFamilyChild = "child"
 	activationFamilyTeam  = "team"
 	activationFamilyTask  = "task-advanced"
+	activationFamilySteer = "steer"
 )
+
+// steerAckTool is the agent's steer acknowledgement tool (internal/tools).
+const steerAckTool = "steer_ack"
 
 // planFamilyTools are deferred tools needed during plan mode / active plan work.
 var planFamilyTools = []string{
@@ -64,6 +68,14 @@ func (e *Engine) applyWorkflowToolActivation() []string {
 	if live >= 2 {
 		reg.Discover(teamFamilyTools...)
 		families = append(families, activationFamilyTeam)
+	}
+
+	// A steer just landed: surface steer_ack so the agent can say what
+	// changed (or that the steer conflicts with its plan) without a
+	// toolsearch round trip (#1860).
+	if e.hasUnackedSteer() {
+		reg.Discover(steerAckTool)
+		families = append(families, activationFamilySteer)
 	}
 
 	return uniqueStrings(families)

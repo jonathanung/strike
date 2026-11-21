@@ -404,6 +404,10 @@ type ImageAttachment struct {
 type UserInput struct {
 	Text   string            `json:"text"`
 	Images []ImageAttachment `json:"images,omitempty"`
+	// LoopID names the session /loop (e.g. "l1") whose firing produced
+	// this input (#1827). Set only by the daemon's loop registry; the HTTP
+	// server clears it on client-submitted ops. Empty for ordinary sends.
+	LoopID string `json:"loopId,omitempty"`
 }
 
 // PermissionReply resolves a pending PermissionAsked event.
@@ -1294,6 +1298,9 @@ type UserMessage struct {
 	Correlation
 	Text   string            `json:"text"`
 	Images []ImageAttachment `json:"images,omitempty"`
+	// LoopID carries UserInput.LoopID into the transcript and the session
+	// log so live and replayed views can mark /loop firings (#1827).
+	LoopID string `json:"loopId,omitempty"`
 }
 
 // SessionTitled records the human-readable session title. Emitted once when
@@ -1555,6 +1562,19 @@ type TurnSteered struct {
 	// TargetTurnID is the turn that was steered (empty when queued_fallback
 	// after the turn already ended).
 	TargetTurnID string `json:"targetTurnId,omitempty"`
+}
+
+// TurnSteerAck is the agent's own acknowledgement of a steer it just received: a one-line summary of what changed and, when the steer contradicts the in-flight plan, Conflict with a Reason. Emitted by the steer_ack tool at most once per applied steer; it never blocks the turn.
+type TurnSteerAck struct {
+	Correlation
+	// TargetTurnID is the steered turn (same as the TurnSteered it answers).
+	TargetTurnID string `json:"targetTurnId,omitempty"`
+	// Summary is the agent's one-line direction change ("now doing X").
+	Summary string `json:"summary,omitempty"`
+	// Conflict is true when the steer contradicts the in-flight plan.
+	Conflict bool `json:"conflict,omitempty"`
+	// Reason explains the conflict (empty when Conflict is false).
+	Reason string `json:"reason,omitempty"`
 }
 
 // InputQueueItem is one user.input waiting for the active turn to finish.
@@ -2321,6 +2341,7 @@ func (ElicitationRequested) isEvent()    {}
 func (ElicitationResolved) isEvent()     {}
 func (QuestionResolved) isEvent()        {}
 func (TurnSteered) isEvent()             {}
+func (TurnSteerAck) isEvent()            {}
 func (InputQueued) isEvent()             {}
 func (TurnCompleted) isEvent()           {}
 func (VerificationStarted) isEvent()     {}

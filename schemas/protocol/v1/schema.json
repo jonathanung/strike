@@ -3504,6 +3504,30 @@
           "additionalProperties": true,
           "properties": {
             "data": {
+              "$ref": "#/$defs/TurnSteerAck"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "turn.steer_ack"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
               "$ref": "#/$defs/TurnSteered"
             },
             "time": {
@@ -6924,6 +6948,43 @@
       },
       "type": "object"
     },
+    "TurnSteerAck": {
+      "additionalProperties": true,
+      "description": "TurnSteerAck is the agent's own acknowledgement of a steer it just received: a one-line summary of what changed and, when the steer contradicts the in-flight plan, Conflict with a Reason. Emitted by the steer_ack tool at most once per applied steer; it never blocks the turn.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "conflict": {
+          "type": "boolean"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "targetTurnId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "TurnSteered": {
       "additionalProperties": true,
       "description": "TurnSteered records that active-turn steering was accepted and how it was applied. Emitted into the session log so resume/replay can observe decisions.",
@@ -7021,6 +7082,9 @@
           },
           "type": "array"
         },
+        "loopId": {
+          "type": "string"
+        },
         "text": {
           "type": "string"
         }
@@ -7045,6 +7109,9 @@
             "$ref": "#/$defs/ImageAttachment"
           },
           "type": "array"
+        },
+        "loopId": {
+          "type": "string"
         },
         "parentSessionId": {
           "type": "string"
@@ -7474,7 +7541,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Forward-compatible Op/Event wire schema generated from pkg/protocol. The root schema is one event envelope: unknown type strings and unknown fields are valid. $defs/KnownEvent lists types this version writes. $defs/KnownOp is fail-closed: unknown op type strings are not valid. required is the writer contract; readers treat missing fields as zero values. See schemas/protocol/v1/COMPAT.md.",
   "title": "Strike event envelope",
-  "x-strike-event-count": 68,
+  "x-strike-event-count": 69,
   "x-strike-legacy-version": "1.0.0",
   "x-strike-op-count": 34,
   "x-strike-protocol-version": "1.26.0",
