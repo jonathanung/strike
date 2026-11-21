@@ -1,0 +1,39 @@
+/* feature:turn-file-summary begin (#1365) */
+/* Per-turn file-change summary on a completed turn's final line:
+   collapsed chip, expands in place to paths grouped by kind. */
+.sx-msg .turn-files {
+  margin-top: var(--space-2);
+  font-size: var(--type-sm);
+}
+.sx-msg .turn-files > summary {
+  display: inline-block;
+  cursor: pointer;
+  padding: 0 var(--space-2);
+  color: var(--muted);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+}
+.sx-msg .turn-files > summary:focus-visible {
+  outline: var(--border-width) solid var(--border-focus);
+}
+.sx-msg .turn-files-group {
+  margin-top: var(--space-1);
+}
+.sx-msg .turn-files-head {
+  color: var(--muted);
+  font-weight: 600;
+}
+.sx-msg .turn-files-group ul {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+.sx-msg .turn-files-path {
+  font-family: var(--font-display);
+  overflow-wrap: anywhere;
+}
+.sx-msg [data-turn-files-kind="deleted"] .turn-files-path {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+/* feature:turn-file-summary end */

@@ -20,8 +20,9 @@ import (
 )
 
 // Git routes back the Git and Worktree panels. Every invocation is
-// exec.Command with an argument vector — never a shell. There is no push
-// route, so the daemon cannot force-push. Hard reset, discard, branch
+// exec.Command with an argument vector — never a shell. The only push is
+// Ship to PR's confirmed, non-force push of the current feature branch
+// (git_pr.go, #1340); there is no general push route and no force-push. Hard reset, discard, branch
 // delete, worktree remove, and stale prune refuse to run unless the body
 // carries the exact confirm token.
 //
