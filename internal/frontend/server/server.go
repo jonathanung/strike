@@ -252,6 +252,10 @@ type Server struct {
 	clientMsgOnce  sync.Once
 	clientMsgStore *clientMsgDedupe
 
+	// briefingOnce lazily opens the away-briefing watermark (#1488).
+	briefingOnce  sync.Once
+	briefingStore *briefingStore
+
 	// suggestOnce lazily opens the Ideas inbox store (#1323).
 	suggestOnce  sync.Once
 	suggestStore *suggestion.Store
@@ -500,6 +504,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}/loops/{loopID}", s.handleSessionLoopStop)
 	// Session list organisation (pins, archive, folders, search). Not filesystem dirs.
 	s.mux.HandleFunc("GET /v1/session-list/search", s.handleSessionListSearch)
+	// Global transcript search across all root sessions (#1355).
+	s.mux.HandleFunc("GET /v1/search", s.handleGlobalSearch)
 	s.mux.HandleFunc("POST /v1/session-list/bulk", s.handleSessionListBulk)
 	s.mux.HandleFunc("POST /v1/session-list/folders", s.handleSessionListFolderCreate)
 	s.mux.HandleFunc("PATCH /v1/session-list/folders/{id}", s.handleSessionListFolderRename)
@@ -743,6 +749,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/notifications/push-subscriptions", s.handlePushSubscribe)
 	s.mux.HandleFunc("DELETE /v1/notifications/push-subscriptions", s.handlePushUnsubscribe)
 	s.mux.HandleFunc("POST /v1/notifications/seen", s.handleNotificationSeen)
+	s.mux.HandleFunc("GET /v1/briefing/seen", s.handleBriefingSeen)
+	s.mux.HandleFunc("POST /v1/briefing/seen", s.handleBriefingSeenSet)
 	s.mux.HandleFunc("GET /v1/suggestions", s.handleSuggestionsList)
 	s.mux.HandleFunc("POST /v1/suggestions", s.handleSuggestionCreate)
 	s.mux.HandleFunc("PUT /v1/suggestions/prefs", s.handleSuggestionPrefs)
