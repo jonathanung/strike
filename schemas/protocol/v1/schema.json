@@ -6793,6 +6793,9 @@
           },
           "type": "array"
         },
+        "loopId": {
+          "type": "string"
+        },
         "text": {
           "type": "string"
         }
@@ -6817,6 +6820,9 @@
             "$ref": "#/$defs/ImageAttachment"
           },
           "type": "array"
+        },
+        "loopId": {
+          "type": "string"
         },
         "parentSessionId": {
           "type": "string"
@@ -7204,7 +7210,7 @@
   "x-strike-event-count": 65,
   "x-strike-legacy-version": "1.0.0",
   "x-strike-op-count": 32,
-  "x-strike-protocol-version": "1.25.0",
+  "x-strike-protocol-version": "1.26.0",
   "x-strike-unknown-event": "valid",
   "x-strike-unknown-field": "ignore",
   "x-strike-unknown-op": "reject"

@@ -1252,6 +1252,14 @@ fn message_view(
                 <Show when=move || show_badge>
                     {match StatusKind::parse_known(&badge) {
                         Some(kind) => view! { <StatusMark kind=kind place=StatusSlot::Badge /> }.into_any(),
+                        // #1827: a /loop firing names its loop; one stable
+                        // class token, the id on its own attribute.
+                        None if crate::transcript::loop_badge_id(&badge).is_some() => {
+                            let loop_id = crate::transcript::loop_badge_id(&badge).unwrap_or_default().to_string();
+                            view! {
+                                <span class="sx-status sx-status-loop" data-status="loop" data-loop-id=loop_id.clone() title=format!("Fired by /loop {loop_id}")>{badge.clone()}</span>
+                            }.into_any()
+                        }
                         None => {
                             // Badge text keeps its space ("no result"); the
                             // class token cannot, so it is dashed (#1506).

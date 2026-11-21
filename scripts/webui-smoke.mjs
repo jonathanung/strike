@@ -529,7 +529,9 @@ try {
     // still work) but rejected by the cockpit's generated schema, so it
     // exercises the minimal-marker degradation path.
     envLine("compaction.completed", "2026-10-26T06:15:04Z", { reason: "manual", removed: null }) +
-    envLine("user.message", "2026-10-26T06:20:00Z", { text: "old log turn" }) +
+    // #1827: this replayed turn is a /loop firing; its user line must
+    // carry the loop badge while the other replayed sends carry none.
+    envLine("user.message", "2026-10-26T06:20:00Z", { text: "old log turn", loopId: "l1" }) +
     envLine("tool.begin", null, { callId: "c9", name: "bash", args: { command: "sleep 240" } }) +
     envLine("tool.end", "2026-10-26T06:24:00Z", { callId: "c9", name: "bash", output: "done" }) +
     envLine("text.delta", "2026-10-26T06:24:30Z", { text: "old answer" }) +
@@ -5942,6 +5944,29 @@ try {
           v.engineError,
         ...v,
       };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Loop firing badge (#1827): only the replayed /loop firing's user line
+  // is badged, with its loop id; ordinary replayed sends have no badge.
+  await waitFor(
+    "loop badge on the replayed /loop firing only",
+    async () => {
+      const v = await evaluate(`(() => {
+        const marks = [...document.querySelectorAll("article.sx-msg [data-loop-id]")];
+        const art = marks[0] ? marks[0].closest("article") : null;
+        const plain = [...document.querySelectorAll("article.sx-msg")].find((a) =>
+          (a.innerText || "").includes("failing replay turn"),
+        );
+        return {
+          n: marks.length,
+          id: marks[0] ? marks[0].getAttribute("data-loop-id") : "",
+          text: marks[0] ? marks[0].textContent.trim() : "",
+          onFiring: art ? (art.innerText || "").includes("old log turn") : false,
+          plainBadged: plain ? !!plain.querySelector("[data-loop-id]") : true,
+        };
+      })()`);
+      return { ok: v.n === 1 && v.id === "l1" && v.text === "loop l1" && v.onFiring && !v.plainBadged, ...v };
     },
     { timeout: WAIT_MS, interval: 250 },
   );

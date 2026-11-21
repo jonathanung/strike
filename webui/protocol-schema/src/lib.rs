@@ -4,7 +4,7 @@
 // Unknown event type strings become Event::Unknown.
 // Unknown JSON fields are ignored. Missing fields are defaults.
 // Unknown op type strings return Err.
-// protocol.Version 1.25.0
+// protocol.Version 1.26.0
 
 use std::collections::HashMap;
 
@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "1.25.0";
+pub const PROTOCOL_VERSION: &str = "1.26.0";
 pub const LEGACY_VERSION: &str = "1.0.0";
 
 /// Open string. Known writer values live in the JSON Schema.
@@ -2634,6 +2634,8 @@ pub struct UserInput {
     pub text: String,
     #[serde(default, rename = "images", deserialize_with = "null_as_default")]
     pub images: Vec<ImageAttachment>,
+    #[serde(default, rename = "loopId")]
+    pub loop_id: String,
 }
 
 /// UserMessage echoes accepted user input into the event stream so the transcript is fully reconstructable from events alone.
@@ -2655,6 +2657,8 @@ pub struct UserMessage {
     pub text: String,
     #[serde(default, rename = "images", deserialize_with = "null_as_default")]
     pub images: Vec<ImageAttachment>,
+    #[serde(default, rename = "loopId")]
+    pub loop_id: String,
 }
 
 /// VerificationAttempt is one focused rerun in a gate's triage history.

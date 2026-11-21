@@ -30,7 +30,7 @@ type harness struct {
 func newHarness(t *testing.T) (*Registry, *harness) {
 	t.Helper()
 	h := &harness{now: time.Date(2026, 11, 14, 8, 0, 0, 0, time.UTC)}
-	r := New(func(_ context.Context, job string) error {
+	r := New(func(_ context.Context, _, job string) error {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		if h.err != nil {
@@ -266,7 +266,7 @@ func TestStopDuringSubmitDoesNotRearm(t *testing.T) {
 	t.Parallel()
 	release := make(chan struct{})
 	entered := make(chan struct{})
-	r := New(func(context.Context, string) error {
+	r := New(func(context.Context, string, string) error {
 		close(entered)
 		<-release
 		return nil
@@ -308,7 +308,7 @@ func TestStopDuringSubmitDoesNotRearm(t *testing.T) {
 func TestRealTimerFires(t *testing.T) {
 	t.Parallel()
 	got := make(chan string, 1)
-	r := New(func(_ context.Context, job string) error {
+	r := New(func(_ context.Context, _, job string) error {
 		select {
 		case got <- job:
 		default:
@@ -327,5 +327,44 @@ func TestRealTimerFires(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("real timer never fired")
+	}
+}
+
+// TestFireSubmitsLoopID covers #1827: each firing hands the session its own
+// loop id so the transcript can badge it.
+func TestFireSubmitsLoopID(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var got []string
+	var timers []*fakeTimer
+	r := New(func(_ context.Context, id, job string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		got = append(got, id+":"+job)
+		return nil
+	})
+	r.after = func(d time.Duration, f func()) timer {
+		mu.Lock()
+		defer mu.Unlock()
+		ft := &fakeTimer{d: d, f: f}
+		timers = append(timers, ft)
+		return ft
+	}
+	for _, job := range []string{"first job", "second job"} {
+		if _, err := r.Start("1m", job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mu.Lock()
+	fire := []func(){timers[1].f, timers[0].f}
+	mu.Unlock()
+	for _, f := range fire {
+		f()
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"l2:second job", "l1:first job"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("submitted = %v, want %v", got, want)
 	}
 }
