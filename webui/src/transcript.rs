@@ -820,7 +820,6 @@ impl Transcript {
                     copy_text: body,
                     reconnect: String::new(),
                     at_ms,
-                    attachments: Vec::new(),
                     turn_id: field_str(&data, "turnId"),
                     attachments: Vec::new(),
                 });
@@ -968,7 +967,6 @@ impl Transcript {
                     copy_text: permission,
                     reconnect: String::new(),
                     at_ms,
-                    attachments: Vec::new(),
                     turn_id: String::new(),
                     attachments: Vec::new(),
                 });
