@@ -14,6 +14,12 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
+import {
+  BROKEN_SKILL,
+  BROKEN_SKILL_BODY,
+  loadWarningCustomizeCheck,
+  loadWarningNoticeCheck,
+} from "./webui-load-warnings-check.mjs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -4981,6 +4987,7 @@ try {
     join(home, ".strike", "skills", "smoke-note.md"),
     "---\nname: smoke-note\ndescription: seeded note\n---\nSay hello from smoke.\n",
   );
+  await writeFile(join(home, ".strike", "skills", `${BROKEN_SKILL}.md`), BROKEN_SKILL_BODY);
   await writeFile(
     join(home, ".strike", "mcp.json"),
     JSON.stringify({
@@ -4995,7 +5002,10 @@ try {
     }
     return ev.result?.result?.value;
   };
-  await evalJson(`localStorage.setItem("strike.token", ${JSON.stringify(token)})`);
+  // The page polls bootstrap every 2s and may already have announced the
+  // seeded broken skill; forget announced fingerprints so the reload's
+  // session-start notice is deterministic (#1386).
+  await evalJson(`(() => { localStorage.setItem("strike.token", ${JSON.stringify(token)}); localStorage.removeItem("strike.loadWarningsSeen"); return true; })()`);
   await send("Page.reload", { ignoreCache: true });
   for (let i = 0; i < 40; i++) {
     const body = await evalJson(`document.body ? document.body.innerText : ""`);
@@ -5006,6 +5016,7 @@ try {
     if (i === 39) throw new Error(`reload did not show the cockpit: ${String(body).slice(0, 300)}`);
     await delay(250);
   }
+  await loadWarningNoticeCheck({ send });
 
   let customizeText = "";
   for (let i = 0; i < 40; i++) {
@@ -5020,6 +5031,7 @@ try {
   if (!customizeText.includes("smoke-note")) {
     throw new Error(`customize catalog missing smoke-note: ${customizeText.slice(0, 500)}`);
   }
+  await loadWarningCustomizeCheck({ send });
 
   await evalJson(`(() => {
     const tabs = document.querySelector('[aria-label="Customize sections"]');

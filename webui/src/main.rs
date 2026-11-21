@@ -20,6 +20,7 @@ mod diag;
 mod draft_size;
 mod editor;
 mod load_epoch;
+mod load_warnings;
 mod localfiles;
 mod customize;
 mod gateway;
@@ -1135,6 +1136,9 @@ fn App() -> impl IntoView {
     let meta_base = RwSignal::new(load("strike.base"));
     let tick = RwSignal::new(0u32);
     let stream_note = RwSignal::new(String::new());
+    // #1386: one notice per session start for skill/agent load diagnostics
+    // this browser has not announced yet. Cleared only by the user.
+    let load_notice = RwSignal::new(String::new());
     let load_error = RwSignal::new(String::new());
     let gateway = RwSignal::new("checking".to_string());
     let gateway_kind = RwSignal::new(StatusKind::Idle);
@@ -1696,6 +1700,17 @@ fn App() -> impl IntoView {
                                 ledger_capable.set(boot.capabilities.ledger);
                                 project_init_capable.set(boot.capabilities.project_init);
                                 skills.set(boot.skills);
+                                {
+                                    let seen = crate::load_warnings::parse_seen(&load(crate::load_warnings::SEEN_KEY));
+                                    let fresh = crate::load_warnings::unseen(&boot.load_warnings, &seen);
+                                    if !fresh.is_empty() {
+                                        load_notice.set(crate::load_warnings::notice_text(&fresh));
+                                        let kept = crate::load_warnings::remember(&seen, &fresh);
+                                        if let Ok(raw) = serde_json::to_string(&kept) {
+                                            save(crate::load_warnings::SEEN_KEY, &raw);
+                                        }
+                                    }
+                                }
                                 commands.set(boot.composer_commands);
                                 if !catalog_once.get_untracked() {
                                     catalog_once.set(true);
@@ -4987,6 +5002,18 @@ fn App() -> impl IntoView {
                     </Show>
                     <Show when=move || !stream_note.get().is_empty()>
                         <p class="hint banner">{move || stream_note.get()}</p>
+                    </Show>
+                    <Show when=move || !load_notice.get().is_empty()>
+                        <div class="notice" role="status" data-load-warning-notice="true">
+                            <span>{move || load_notice.get()}</span>
+                            <span class="load-warning-actions">
+                                <button class="secondary" data-load-warning-open="true" on:click=move |_| {
+                                    load_notice.set(String::new());
+                                    let _ = shell::set_view("customize");
+                                }>"Open Customize"</button>
+                                <button class="secondary" data-load-warning-dismiss="true" on:click=move |_| load_notice.set(String::new())>"Dismiss"</button>
+                            </span>
+                        </div>
                     </Show>
                     <Show when=move || !doc_path.get().is_empty()>
                         <DocumentPane

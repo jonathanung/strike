@@ -205,6 +205,23 @@ pub struct StatusBoard {
     pub sessions: Vec<BoardSession>,
 }
 
+/// One skill or agent file the daemon's loaders flagged (#1386), from
+/// bootstrap `loadWarnings`. Carries the path and the loader's redacted
+/// reason only, never file contents. `fingerprint` changes when the file
+/// changes, so the cockpit can warn once per unchanged file.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct LoadWarning {
+    pub kind: String,
+    pub severity: String,
+    pub code: String,
+    pub path: String,
+    pub file: String,
+    pub message: String,
+    pub fatal: bool,
+    pub fingerprint: String,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct SkillInfo {
     pub name: String,
@@ -287,6 +304,9 @@ pub struct Bootstrap {
     pub composer_commands: Vec<ComposerCommand>,
     #[serde(default)]
     pub capabilities: BootstrapCapabilities,
+    /// Skill/agent load diagnostics for the live root's workspace (#1386).
+    #[serde(default, rename = "loadWarnings")]
+    pub load_warnings: Vec<LoadWarning>,
 }
 
 /// The filename a `/v1/diag` download is saved under: the server's
@@ -1617,6 +1637,23 @@ mod tests {
         assert!(boot.capabilities.project_init);
         let boot: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
         assert!(!boot.capabilities.project_init);
+    }
+
+    #[test]
+    fn bootstrap_reads_load_warnings() {
+        let boot: Bootstrap = serde_json::from_str(
+            r#"{"loadWarnings":[{"kind":"skill","severity":"error","code":"invalid","path":"/w/.strike/skills/bad.md","file":"bad.md","message":"unknown effort \"warp\"","fatal":true,"fingerprint":"abc"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(boot.load_warnings.len(), 1);
+        let w = &boot.load_warnings[0];
+        assert_eq!(w.kind, "skill");
+        assert_eq!(w.code, "invalid");
+        assert_eq!(w.file, "bad.md");
+        assert!(w.fatal);
+        assert_eq!(w.fingerprint, "abc");
+        let boot: Bootstrap = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(boot.load_warnings.is_empty());
     }
 
     #[test]

@@ -109,3 +109,20 @@ body[data-phone="1"] .cz-actions button {
   font-size: 16px;
 }
 /* feature:customize end */
+/* feature:skill-load-warnings begin */
+.cz-load-warn {
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  border: var(--border-width) solid var(--warning);
+  box-shadow: var(--shadow);
+}
+.cz-load-warn-head { margin: 0 0 var(--space-2); font-size: 1em; color: var(--ink); }
+.cz-load-warn ul { margin: 0; padding: 0; list-style: none; }
+.cz-load-warn li { padding: var(--space-2) 0; border-top: var(--border-width) solid var(--rule); }
+.cz-load-warn li:first-child { border-top: 0; padding-top: 0; }
+.cz-load-warn li .badge { margin-left: var(--space-2); }
+.cz-load-warn .cz-load-fatal { border-color: var(--danger); color: var(--danger); }
+.cz-load-warn-msg { margin: var(--space-1) 0 0; color: var(--ink); overflow-wrap: anywhere; }
+.cz-load-warn .cz-path { overflow-wrap: anywhere; }
+/* feature:skill-load-warnings end */
