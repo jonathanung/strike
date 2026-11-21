@@ -1065,6 +1065,15 @@ an ordinary `user.input`: while a turn is busy it waits on the same input
 queue as a queued send, and it counts as a normal turn for usage, budgets,
 and guardrails. `GET /v1/status` carries `loops`, the active count.
 
+**Cockpit.** The composer takes the same grammar: `/loop <interval> <job>`,
+`/loop` or `/loop list`, `/loop stop [id]` (no id stops all). The line is
+handled against these routes and is never sent as a prompt; the daemon's
+error sentence shows under the composer. Active loops show as rows in the
+queue pane (id, interval, job, run count, next fire, Stop). The rows poll
+the list route every 5 s, since loop state is not on the event stream yet.
+Firings appear in the transcript as plain user prompts: `user.input` carries
+no loop id, so there is no per-firing loop badge.
+
 ### Schedules
 
 `~/.strike/schedules.json` (mode `0600`) is the clock. The daemon ticks

@@ -248,6 +248,10 @@ pub struct BootstrapCapabilities {
     /// True when `GET /v1/update` can run the release probe (#1583).
     #[serde(default, rename = "updateCheck")]
     pub update_check: bool,
+    /// True when `/v1/sessions/{id}/loops` can start and stop session
+    /// loops (#1588): live engine and not `--read-only`.
+    #[serde(default)]
+    pub loops: bool,
 }
 
 /// One `/v1/init` reply (#1581). `exists` with a non-empty `error` is the
