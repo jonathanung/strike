@@ -312,6 +312,9 @@ pub(crate) fn SessionPanel(
     let reload_epoch = RwSignal::new(LoadEpoch::new());
     // Regenerate title (#1370): per-row pending / refusal / failure state.
     let regen = RwSignal::new(HashMap::<String, crate::regenerate_title::RowState>::new());
+    // Saved gateways other than this one (#1539): when there are any,
+    // this list is labelled as the Local group above the peek groups.
+    let peer_count = RwSignal::new(0usize);
 
     let reload = move || {
         // Reloads commit in start order, not arrival order (#1641, via the
@@ -1203,6 +1206,9 @@ pub(crate) fn SessionPanel(
                     .into_any()
                 }
             }}
+            <Show when=move || { peer_count.get() != 0 }>
+                <p class="ss-peek-local">"Local"</p>
+            </Show>
             {move || render_rows(
                 layout.get(),
                 cursor.get(),
@@ -1293,6 +1299,7 @@ pub(crate) fn SessionPanel(
                     </div>
                 }
             }}
+            <crate::gateway_peek::GatewayPeek base=base peer_count=peer_count />
         </div>
     }
 }
@@ -1361,6 +1368,7 @@ fn build_layout(
                 status: row.status.clone(),
                 permission_pending: row.permission_pending,
                 question_pending: row.question_pending,
+                ask_outcome: row.ask_outcome.clone(),
                 workspace: workspaces
                     .iter()
                     .find(|w| w.id == row.workspace_id)

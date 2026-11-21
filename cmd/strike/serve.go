@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -30,8 +31,8 @@ import (
 	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/product/update"
 	"github.com/jonathanung/strike/internal/protocol"
-	"github.com/jonathanung/strike/internal/trust/audit"
 	"github.com/jonathanung/strike/internal/trust/usageaudit"
+	"github.com/jonathanung/strike/internal/trust/workspacetrust"
 )
 
 const serveUsage = `Web agent workspace (live engine + durable session attach).
@@ -66,10 +67,12 @@ Endpoints:
   GET  /v1/sidechat                 list read-only side-chat turns
   POST /v1/sidechat/ask             ask about the session (no tools, no user.input)
   POST /v1/sidechat/ops             refused; cannot approve tools or post user.input
+  POST /v1/prompt/sharpen           rewrite a composer draft (one-shot, no transcript writes)
   GET  /v1/live/events              SSE of live engine events
   GET  /v1/status                   live status chrome
   GET  /v1/agents                   selectable agents
   GET  /v1/sessions                 session list (+ liveId)
+  GET  /v1/sessions/{id}/reference size of an @session:<id> reference (summary + last turns)
   GET  /v1/sessions/{id}/events     SSE tail of a session JSONL log
   GET  /v1/sessions/{id}/loops      session /loop jobs (POST start, DELETE stop)
   GET  /v1/triggers                 trigger registry
@@ -329,12 +332,18 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var sandboxSnap *server.SandboxSnapshot
 	var sideChat server.SideChatModel
 	var keepAwake *keepawake.Service
+	// trustAssembly is the workspace + trust decision this daemon was
+	// assembled with (#1781); nil in attach-only mode.
+	var trustAssembly *server.WorkspaceTrustAssembly
 	var taskRuns *taskrun.Store
 	var terminalSandbox sandbox.Policy
 	var terminalSandboxFor func(sessionID, workDir string) (sandbox.Policy, bool)
 	terminalSandboxLoaded := false
 	var cleanup func() error
 	var sharedAttachments *attachment.Store
+	// served is the assembled root config (nil attach-only); script
+	// schedules and the retention-bounded audit sink read it.
+	var served *assembled
 	sessionDir := opts.sessionDir
 	assembled := false
 
@@ -374,6 +383,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			fmt.Fprintln(stderr, n)
 		}
 		sharedAttachments = a.attachments
+		served = a
 		// Opt-in host sleep inhibition (#1496): default off; the persisted
 		// dial is applied at start and flipped live by PATCH /v1/settings.
 		keepAwake = keepawake.New(keepawake.Options{})
@@ -591,6 +601,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		taskRuns = a.taskRuns
 		terminalSandbox = a.sandboxPolicy
 		terminalSandboxLoaded = true
+		trustAssembly = &server.WorkspaceTrustAssembly{Dir: a.trustDir, Root: a.trustRoot, Trusted: a.trustedAtStart}
 		terminalSandboxFor = func(sessionID, workDir string) (sandbox.Policy, bool) {
 			id := strings.TrimSpace(sessionID)
 			if id == "" && liveHub != nil {
@@ -709,7 +720,10 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		writePermissionsModeWarning(stderr, opts.auto, opts.dangerouslySkipPermissions)
 	}
 
-	auditSink, err := audit.Open(audit.Options{})
+	// Retention-bounded like every engine's sink: the clock writes one
+	// script_run record per tick outcome, so an unbounded sink would grow
+	// forever behind an every-minute schedule (#1774).
+	auditSink, err := openAuditSink(serveAuditConfig(served))
 	if err != nil {
 		return fmt.Errorf("open audit sink: %w", err)
 	}
@@ -727,12 +741,30 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	if err != nil {
 		cwd = ""
 	}
-	schedules, err := openScheduleService(workspace.DefaultDir(), liveHub, services, wsStore, cwd)
+	// The server is built after the clock; script-run notices reach its
+	// notification centre once it exists (a run finishing earlier posts none).
+	var notifySrv atomic.Pointer[server.Server]
+	schedules, err := openScheduleService(workspace.DefaultDir(), liveHub, services, wsStore, cwd, scheduleScripts{
+		runner: newScriptRunner(served, auditSink, opts.tokenFile, serveCwd()),
+		sink:   auditSink,
+		notify: func(scheduleID, runID, name string, exitCode *int, failed bool) {
+			if srv := notifySrv.Load(); srv != nil {
+				srv.NotifyScriptRun(scheduleID, runID, name, exitCode, failed)
+			}
+		},
+	})
 	if err != nil {
 		return err
 	}
+	// Script runs detach into schedCtx. Cancel it and wait for their
+	// outcomes before the audit sink closes (defers run in reverse).
+	schedCtx, schedCancel := context.WithCancel(ctx)
+	defer func() {
+		schedCancel()
+		schedules.Shutdown()
+	}()
 	if liveHub != nil && !opts.readOnly {
-		go schedules.Run(ctx)
+		go schedules.Run(schedCtx)
 	}
 	trigStore, err := trigger.Open("")
 	if err != nil {
@@ -741,12 +773,28 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	// Triggers use their authored launcher (internal/daemon/rootstart,
 	// server.NewRootLauncher); the landed scheduler uses internal/rootstart.
 	// Do not spawn a third way.
-	trigSvc := trigger.New(trigStore, server.NewRootLauncher(liveHub))
+	rootLauncher := server.NewRootLauncher(liveHub)
+	trigSvc := trigger.New(trigStore, rootLauncher)
 	dwStore, err := deploywatch.Open("")
 	if err != nil {
 		return err
 	}
-	deployWatches := deploywatch.New(dwStore, deploywatch.Config{})
+	// Deploy watch (#1783): shell checks run under the same sandbox dial as
+	// agent bash; plan and verdict post through the shared root launcher.
+	var dwShell *deploywatch.Shell
+	if terminalSandboxLoaded {
+		dwShell = &deploywatch.Shell{Sandbox: terminalSandbox, WorkDir: cwd}
+	}
+	dwGitHub := &deploywatch.GitHub{}
+	deployWatches := deploywatch.New(dwStore, deploywatch.Config{
+		GitHub: dwGitHub,
+		Shell:  dwShell,
+		Notify: deploywatch.Poster{GitHub: dwGitHub, Launcher: rootLauncher},
+		// Confirmed regression handoffs (#1784).
+		Launcher: rootLauncher,
+		Revert:   &deploywatch.Reverter{RepoDir: cwd, GitHub: dwGitHub},
+	})
+	trigSvc.SetDeployWatches(deployWatches)
 	if !opts.readOnly {
 		go deployWatches.Run(ctx, deploywatch.DefaultTick)
 	}
@@ -788,10 +836,14 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		KeepAwake:             keepAwake,
 		// Check-only release probe for GET /v1/update (#1583); never installs.
 		UpdateProbe: server.NewUpdateProbe(update.ProbeOptions{}),
+		// Cockpit workspace trust card (#1781).
+		WorkspaceTrustPath:      workspacetrust.DefaultPath(config.GlobalRoot()),
+		WorkspaceTrustAssembled: trustAssembly,
 	})
 	if err != nil {
 		return err
 	}
+	notifySrv.Store(srv)
 
 	ln, err := net.Listen("tcp", opts.addr)
 	if err != nil {

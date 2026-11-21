@@ -29,6 +29,16 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
   const long = join(repoDir, "editor-long.txt");
   const outlineMd = join(repoDir, "editor-outline.md");
   const md = join(repoDir, "editor-md.md");
+  // Workspace image/binary viewer (#1393): a real 1x1 PNG and a
+  // non-image binary in the fixture workspace.
+  const imagePng = join(repoDir, "editor-image.png");
+  const blobBin = join(repoDir, "editor-blob.bin");
+  const pngBytes = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  await writeFile(imagePng, pngBytes);
+  await writeFile(blobBin, Buffer.from([0, 1, 2, 3, 0, 255]));
   // Quick-open (#1396) target: several directories deep.
   const qoDir = join(repoDir, "qo-deep");
   const qoRel = "qo-deep/inner/most/quickopen-target.txt";
@@ -1285,6 +1295,63 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "blame off restores the viewer",
     );
+    // Open-file history (#1395): open A (smoke, already open), open B
+    // (other), Back returns to A, Forward to B, Recent lists both and
+    // reopens A; Back is disabled at the start of the stack.
+    const viewerPath = (want, label) =>
+      waitFor(
+        send,
+        `(() => {
+          const root = document.querySelector("[data-ev-root]");
+          const p = root ? root.getAttribute("data-ev-path") : "";
+          return p === ${JSON.stringify(want)} ? "ok" : "path = " + p;
+        })()`,
+        label,
+      );
+    await viewerPath("editor-smoke.txt", "history: A open");
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector('[data-ev-open="editor-other.txt"]'); if (!b) return "no other row"; b.click(); return "ok"; })()`,
+    );
+    await viewerPath("editor-other.txt", "history: B open");
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-hist-back]"); if (!b || b.disabled) return "back disabled"; b.click(); return "ok"; })()`,
+    );
+    await viewerPath("editor-smoke.txt", "history: Back returns to A");
+    await waitFor(
+      send,
+      `(() => { const f = document.querySelector("[data-ev-hist-forward]"); return f && !f.disabled ? "ok" : "forward disabled after Back"; })()`,
+      "history: Forward enabled after Back",
+    );
+    // Keyboard path: Alt+] steps forward from inside the pane.
+    await evalValue(
+      send,
+      `(() => {
+        const pane = document.querySelector(".ev-doc");
+        pane.dispatchEvent(new KeyboardEvent("keydown", { key: "]", code: "BracketRight", altKey: true, bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await viewerPath("editor-other.txt", "history: Alt+] returns to B");
+    await waitFor(
+      send,
+      `(() => {
+        const r = document.querySelector("[data-ev-recent]");
+        if (!r) return "no Recent section";
+        const a = r.querySelector('[data-ev-recent-open="editor-smoke.txt"]');
+        const b = r.querySelector('[data-ev-recent-open="editor-other.txt"]');
+        if (!a || !b) return "Recent = " + r.innerText.slice(0, 160);
+        const rows = [...r.querySelectorAll("[data-ev-recent-open]")].map((el) => el.getAttribute("data-ev-recent-open"));
+        return rows[0] === "editor-other.txt" ? "ok" : "order = " + rows.join(",");
+      })()`,
+      "history: Recent lists both, most recent first",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-recent-open="editor-smoke.txt"]').click(); return "ok"; })()`,
+    );
+    await viewerPath("editor-smoke.txt", "history: Recent reopens A");
     // Quick-open (#1396): Ctrl+P opens the palette on Open file…; a
     // query with no match shows the empty state, a partial name lists
     // the nested file, and Enter (keyboard only) opens it in the viewer.
@@ -1344,9 +1411,88 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "quick-open opens the file in the viewer",
     );
+    // Workspace image/binary viewer (#1393). The raw route serves the
+    // PNG with its MIME under normal auth and refuses traversal.
+    const raw = await fetch(`http://127.0.0.1:${port}/v1/file/raw?path=editor-image.png`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const rawBytes = Buffer.from(await raw.arrayBuffer());
+    if (raw.status !== 200 || raw.headers.get("content-type") !== "image/png" || !rawBytes.equals(pngBytes)) {
+      throw new Error(`raw png: ${raw.status} ${raw.headers.get("content-type")} ${rawBytes.length} bytes`);
+    }
+    if (!(raw.headers.get("content-security-policy") || "").includes("sandbox")) {
+      throw new Error(`raw png CSP: ${raw.headers.get("content-security-policy")}`);
+    }
+    const rawTrav = await fetch(
+      `http://127.0.0.1:${port}/v1/file/raw?path=${encodeURIComponent("../secret.png")}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (rawTrav.status === 200) {
+      throw new Error("raw traversal returned 200");
+    }
+    const rawAnon = await fetch(`http://127.0.0.1:${port}/v1/file/raw?path=editor-image.png`);
+    if (rawAnon.status !== 401) {
+      throw new Error(`raw without auth: ${rawAnon.status}`);
+    }
+    // The viewer renders the PNG instead of the old binary hint.
+    await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Refresh" && el.closest(".files")); if (b) b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector('[data-ev-open="editor-image.png"]') ? "ok" : "no image row")()`,
+      "open button for editor-image.png",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-open="editor-image.png"]').click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const img = document.querySelector("[data-ev-image]");
+        if (!img) {
+          const note = document.querySelector("[data-ev-image-note]");
+          return note ? "note: " + note.textContent : "no image";
+        }
+        if (document.body.innerText.includes("Nothing to show")) return "old binary hint still shown";
+        return img.complete && img.naturalWidth === 1 ? "ok" : "image not decoded (" + img.naturalWidth + ")";
+      })()`,
+      "workspace PNG renders in the viewer",
+    );
+    // Keyboard/click toggle: fit ↔ full size.
+    await evalValue(
+      send,
+      `(() => { document.querySelector("[data-ev-image-toggle]").click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-image-toggle]"); return b && b.getAttribute("aria-pressed") === "true" ? "ok" : "not full size"; })()`,
+      "image full-size toggle",
+    );
+    // A non-image binary keeps a hint plus name/size/sha and a download.
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector('[data-ev-open="editor-blob.bin"]'); if (!b) return "no blob row"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const meta = document.querySelector("[data-ev-binary-meta]");
+        const dl = document.querySelector("[data-ev-binary-download]");
+        if (!meta || !dl) return "no binary meta/download";
+        if (document.querySelector("[data-ev-image]")) return "image shown for a .bin";
+        const t = meta.textContent;
+        return t.includes("editor-blob.bin") && t.includes("6 B") && t.includes("sha256 ") ? "ok" : "meta = " + t;
+      })()`,
+      "non-image binary shows meta and download",
+    );
     console.log("webui-editor-check ok");
   } finally {
     await rm(qoDir, { recursive: true, force: true });
+    await rm(imagePng, { force: true });
+    await rm(blobBin, { force: true });
     await rm(sample, { force: true });
     await rm(other, { force: true });
     await rm(long, { force: true });

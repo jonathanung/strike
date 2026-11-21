@@ -66,6 +66,11 @@ type SideChatCompletion struct {
 	Text     string
 	Provider string
 	Model    string
+	// Usage the provider reported for this call; zero when it reported
+	// none. UsageEstimated marks a synthetic estimate (echo).
+	InputTokens    int
+	OutputTokens   int
+	UsageEstimated bool
 }
 
 // SideChatModel answers one question. Implementations must not execute tools
@@ -95,6 +100,8 @@ func sideChatRefusal(opType string) string {
 		return "side chat cannot steer the running turn"
 	case "question.reply":
 		return "side chat cannot answer a pending question for the session"
+	case "elicitation.reply":
+		return "side chat cannot answer a tool's request for input"
 	case "interrupt":
 		return "side chat cannot interrupt the session"
 	case "":

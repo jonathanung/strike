@@ -124,7 +124,12 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     Artifacts.
     Clicking or dragging a file inserts `@path`. The daemon expands
     `@file`, `$skill`, `/command`, and `!shell` on `user.input` and `steer`
-    before a turn starts. `!` asks through the bash permission model and
+    before a turn starts. `@session:<id>` (#1550) attaches another
+    same-gateway session's compacted summary and last 10 turns as a quoted,
+    attributed block (`--- session: <id> ---`), never the raw log; a
+    self-reference or a missing/pruned session attaches nothing and posts a
+    notice. `GET /v1/sessions/{id}/reference` reports that block's size
+    (chars, ~tokens) for display before send. `!` asks through the bash permission model and
     does not start a model turn. The composer `+` menu and the suggestion
     popup only list those real actions (`composerCommands` and `skills` on
     bootstrap, files from `/v1/files/search`). A shell ask shows Allow once /
@@ -162,6 +167,12 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     with a separate model call and no tools. `POST /v1/sidechat/ops` refuses
     `permission.reply` and `user.input`. Turns are not written to the session
     JSONL.
+  - Prompt sharpen (Alt+P in the composer, or the palette's "Sharpen
+    prompt") sends only the draft and the workspace path to
+    `POST /v1/prompt/sharpen`, a one-shot with the session's selected model
+    and no tools. The rewrite is shown as an original-vs-sharpened preview;
+    Accept replaces the draft (Undo restores it until send), Reject keeps it.
+    Nothing is written to the session JSONL and no run starts.
   - Schedule and a multi-gateway hub are
     documented in [webui-planned.md](webui-planned.md), not drawn as empty
     panels. Memory, knowledge, and artifacts are drawn from the live routes.
@@ -230,11 +241,37 @@ static files. To rebuild main's bundle by hand, run
 
 `GET /v1/customize` is the catalog the agent already loads (skills, agents,
 MCP, plugins, hooks, rules, roster). `GET /v1/customize/doc` opens one item.
+`GET /v1/customize/skill-usage` counts how often each catalog skill ran
+(#1442), as `{ "skills": { "<name>": { "count", "lastUsed" } }, "sessions" }`.
+It reads the recorded session logs, all-time, and nothing leaves the gateway.
+A run is a `user.message` that starts with `/name` or `$name`, or a `skill`
+tool call (resource-only loads excluded). Child-agent runs count once.
+Runs typed in the TUI count too, because the TUI writes the same logs.
+Sessions deleted from the sessions directory no longer count.
 `POST /v1/customize/preview` returns a redacted diff and does not write.
 `POST /v1/customize/apply` writes only when `confirm` is true and `diffHash`
 matches that preview. Env, header, and URL secrets are masked; sending `••••`
 keeps the stored value. Plugin enable and disable use the existing
 `/v1/plugins/enable` and `/v1/plugins/disable` routes.
+
+### Skill proposals (#1611)
+
+Customize → Skills can propose skills from workflows you repeat. It is off
+for each workspace until you turn it on, and it only scans when you click
+**Look now**.
+
+- **Routes**:
+  - `GET /v1/skill-proposals` returns `{workspace, enabled, threshold, windowDays, lastScan, pending}` (`workspace` is the project key the scan reads).
+  - `PATCH /v1/skill-proposals` takes `{enabled?, threshold?}`. The threshold must be 2–20; the default is 3.
+  - `POST /v1/skill-proposals/scan` returns 409 while off.
+  - `POST /v1/skill-proposals/dismiss` and `POST /v1/skill-proposals/accept` each take `{id}`.
+- **What the scan reads**: only this workspace's own root session logs from the last 28 days. Child sessions and other workspaces are excluded. For each session it takes the opening request and the tools of the first turn.
+- **What counts as repeated**: sessions whose openings share most of their words and whose tool sequences mostly match. The threshold number of such sessions makes a proposal.
+- **Drafts**: matching is local and makes no model call. Drafts are redacted with `pkg/redact`. Drafts stay pending in `~/.strike/skill-proposals.json` (0600) and are not visible to any session.
+- **Accept**: installs the draft as a workspace skill through the same preview + apply path the editor uses.
+- **Edit**: opens the draft in the skill editor. Once a skill with that name exists, the draft drops out of the proposals.
+- **Dismiss**: removes the draft and suppresses its pattern on later scans.
+- **Read-only attach**: refuses every mutation, including turning the scan on or off.
 
 ## Several workspaces, one daemon
 

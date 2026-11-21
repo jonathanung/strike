@@ -1,56 +1,9 @@
-//! Browser appearance. Theme ids match the bundled TUI themes painted in
-//! webui/style.css. Strike is the stock palette and the default.
+//! Browser appearance. The theme picker lists the daemon catalog
+//! (`GET /v1/themes`, #1529); the bundled themes painted in webui/style.css
+//! are the fallback when the catalog is unavailable. Strike is the default.
 
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
-
-pub struct ThemeChoice {
-    pub id: &'static str,
-    pub label: &'static str,
-    pub detail: &'static str,
-}
-
-pub const THEMES: &[ThemeChoice] = &[
-    ThemeChoice {
-        id: "strike",
-        label: "Strike",
-        detail: "Original palette. Royal purple, cyan while work is in flight.",
-    },
-    ThemeChoice {
-        id: "nord",
-        label: "Nord",
-        detail: "Bundled theme. Surfaces it omits stay on the Strike ladder.",
-    },
-    ThemeChoice {
-        id: "dracula",
-        label: "Dracula",
-        detail: "Bundled theme. Surfaces it omits stay on the Strike ladder.",
-    },
-    ThemeChoice {
-        id: "gruvbox",
-        label: "Gruvbox",
-        detail: "Bundled theme. Surfaces it omits stay on the Strike ladder.",
-    },
-    ThemeChoice {
-        id: "monokai",
-        label: "Monokai",
-        detail: "Bundled theme. Surfaces it omits stay on the Strike ladder.",
-    },
-    ThemeChoice {
-        id: "tokyo-night",
-        label: "Tokyo Night",
-        detail: "Bundled theme. Surfaces it omits stay on the Strike ladder.",
-    },
-    ThemeChoice {
-        id: "catppuccin",
-        label: "Catppuccin",
-        detail: "Bundled theme. Surfaces it omits stay on the Strike ladder.",
-    },
-];
-
-pub fn known_theme(id: &str) -> bool {
-    THEMES.iter().any(|t| t.id == id)
-}
 
 pub fn normalize_font(v: &str) -> String {
     if v == "sm" || v == "lg" {
@@ -171,34 +124,52 @@ pub fn download(filename: &str, body: &str) {
 pub fn ThemeChoices(
     group: &'static str,
     current: RwSignal<String>,
+    catalog: RwSignal<theme_catalog::CatalogState>,
     on_pick: impl Fn(String) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
+    let picker = Memo::new(move |_| catalog.with(theme_catalog::picker));
     view! {
+        <Show when=move || !picker.with(|p| p.note.is_empty())>
+            <p class="hint theme-catalog-note" data-theme-catalog-note="" role="status">
+                {move || picker.with(|p| p.note.clone())}
+            </p>
+        </Show>
         <div class="theme-grid" role="radiogroup" aria-label="Theme">
-            {THEMES.iter().map(|theme| {
-                let id = theme.id.to_string();
-                let id_for = id.clone();
-                let label = theme.label.to_string();
-                let detail = theme.detail.to_string();
-                let badge = if theme.id == "strike" { "Default" } else { "" };
-                let on_pick = on_pick;
-                view! {
-                    <label class="theme-choice">
-                        <input
-                            type="radio"
-                            name=group
-                            data-theme-choice=id.clone()
-                            prop:checked=move || current.get() == id
-                            on:change=move |_| on_pick(id_for.clone())
-                        />
-                        <span class="swatch" data-theme-id=theme.id></span>
-                        <span class="theme-copy">
-                            <span class="name">{label} " " <span class="pill-tag">{badge}</span></span>
-                            <span class="path">{detail}</span>
-                        </span>
-                    </label>
+            <For
+                each=move || picker.get().rows
+                key=|row| row.clone()
+                children=move |row| {
+                    let id = row.id.clone();
+                    let id_for = id.clone();
+                    let disabled = row.disabled.is_some();
+                    let unavailable = row.disabled.clone().map(|reason| {
+                        view! { <span class="path" data-theme-disabled="">{format!("Unavailable: {reason}")}</span> }
+                    });
+                    let swatch_style = row
+                        .swatch
+                        .as_ref()
+                        .map(|c| format!("background: {c}"))
+                        .unwrap_or_default();
+                    view! {
+                        <label class="theme-choice" class:disabled=move || disabled>
+                            <input
+                                type="radio"
+                                name=group
+                                data-theme-choice=id.clone()
+                                disabled=disabled
+                                prop:checked=move || current.get() == id
+                                on:change=move |_| on_pick(id_for.clone())
+                            />
+                            <span class="swatch" data-theme-id=row.id.clone() style=swatch_style></span>
+                            <span class="theme-copy">
+                                <span class="name">{row.label.clone()} " " <span class="pill-tag">{row.badge}</span></span>
+                                <span class="path">{row.detail.clone()}</span>
+                                {unavailable}
+                            </span>
+                        </label>
+                    }
                 }
-            }).collect_view()}
+            />
         </div>
     }
 }
