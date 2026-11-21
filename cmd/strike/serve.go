@@ -746,7 +746,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	schedCtx, schedCancel := context.WithCancel(ctx)
 	defer func() {
 		schedCancel()
-		schedules.WaitScripts()
+		schedules.Shutdown()
 	}()
 	if liveHub != nil && !opts.readOnly {
 		go schedules.Run(schedCtx)

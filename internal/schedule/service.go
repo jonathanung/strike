@@ -46,7 +46,12 @@ type Service struct {
 	// written. It is what makes a script schedule busy (overlap skip).
 	running   map[string]bool
 	daemonCtx context.Context
-	scripts   sync.WaitGroup
+	// base outlives any request: script runs fired before Run (or with no
+	// daemon loop) detach into it, and Shutdown cancels it.
+	base       context.Context
+	cancelBase context.CancelFunc
+	closed     bool
+	scripts    sync.WaitGroup
 }
 
 // Open loads the registry in dir. defaultDir is the fingerprint root when
@@ -59,7 +64,12 @@ func Open(dir string, hooks Hooks, defaultDir string) (*Service, error) {
 	if hooks.Fingerprint == nil {
 		hooks.Fingerprint = Fingerprint
 	}
-	return &Service{store: st, hooks: hooks, defaultDir: defaultDir, firing: map[string]bool{}, running: map[string]bool{}}, nil
+	base, cancel := context.WithCancel(context.Background())
+	return &Service{
+		store: st, hooks: hooks, defaultDir: defaultDir,
+		firing: map[string]bool{}, running: map[string]bool{},
+		base: base, cancelBase: cancel,
+	}, nil
 }
 
 func (s *Service) now() time.Time {
@@ -212,7 +222,7 @@ func (s *Service) RunNow(ctx context.Context, id string) (Run, error) {
 		return Run{}, ErrNotFound
 	}
 	if sch.Source == SourceScript {
-		return s.runScriptNow(ctx, sch)
+		return s.runScriptNow(sch)
 	}
 	if s.hooks.Starter == nil {
 		return Run{}, ErrUnavailable
@@ -268,7 +278,7 @@ func (s *Service) RunNow(ctx context.Context, id string) (Run, error) {
 	return saved.Runs[0], nil
 }
 
-func (s *Service) runScriptNow(ctx context.Context, sch Schedule) (Run, error) {
+func (s *Service) runScriptNow(sch Schedule) (Run, error) {
 	if s.hooks.Script == nil {
 		return Run{}, ErrUnavailable
 	}
@@ -284,7 +294,7 @@ func (s *Service) runScriptNow(ctx context.Context, sch Schedule) (Run, error) {
 		}
 		return run, fmt.Errorf("%w: %s", ErrInvalid, res.LastError)
 	}
-	return s.startScript(s.scriptContext(ctx), sch, res, in.Now)
+	return s.startScript(s.scriptContext(), sch, res, in.Now)
 }
 
 // Tick evaluates every schedule once. startup applies the missed-run policy

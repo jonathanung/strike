@@ -91,39 +91,59 @@ func (s *Service) scriptRunning(id string) bool {
 	return s.running[id]
 }
 
-// claimScript adds id to the in-flight set; false when it is already there.
-func (s *Service) claimScript(id string) bool {
+// claimScript adds id to the in-flight set and counts the run on the wait
+// group under one lock, so Shutdown never races a new run. ErrBusy when id
+// is already in flight, ErrUnavailable once Shutdown has begun.
+func (s *Service) claimScript(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closed {
+		return ErrUnavailable
+	}
 	if s.running[id] {
-		return false
+		return ErrBusy
 	}
 	s.running[id] = true
-	return true
+	s.scripts.Add(1)
+	return nil
 }
 
+// releaseScript ends a claimed run.
 func (s *Service) releaseScript(id string) {
 	s.mu.Lock()
 	delete(s.running, id)
 	s.mu.Unlock()
+	s.scripts.Done()
 }
 
-// scriptContext is the context a detached script run lives in: the daemon
-// loop's context once Run has started, else req with its cancellation cut
-// so an HTTP handler returning does not kill the process.
-func (s *Service) scriptContext(req context.Context) context.Context {
+// scriptContext is the context a detached RunNow script lives in: the
+// daemon loop's context once Run has started, else the service's own base
+// context. Never the HTTP request's, which ends when the handler returns.
+func (s *Service) scriptContext() context.Context {
 	s.mu.Lock()
-	daemon := s.daemonCtx
-	s.mu.Unlock()
-	if daemon != nil {
-		return daemon
+	defer s.mu.Unlock()
+	if s.daemonCtx != nil {
+		return s.daemonCtx
 	}
-	return context.WithoutCancel(req)
+	return s.base
 }
 
 // WaitScripts blocks until every detached script run has recorded its
-// outcome. Shutdown and tests use it.
+// outcome. Tests use it; the daemon uses Shutdown.
 func (s *Service) WaitScripts() {
+	s.scripts.Wait()
+}
+
+// Shutdown refuses new script runs, cancels the ones not already tied to
+// a cancelled daemon context, and waits for every outcome to be written.
+func (s *Service) Shutdown() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.cancelBase()
 	s.scripts.Wait()
 }
 
@@ -151,8 +171,8 @@ func (s *Service) startScript(ctx context.Context, sch Schedule, res tickResult,
 		}
 		return run, fmt.Errorf("%w: %s", ErrInvalid, err.Error())
 	}
-	if !s.claimScript(sch.ID) {
-		return Run{}, ErrBusy
+	if err := s.claimScript(sch.ID); err != nil {
+		return Run{}, err
 	}
 	req.RunID = newID("run_")
 	res.Run.ID = req.RunID
@@ -164,9 +184,7 @@ func (s *Service) startScript(ctx context.Context, sch Schedule, res tickResult,
 		s.releaseScript(sch.ID)
 		return Run{}, err
 	}
-	s.scripts.Add(1)
 	go func() {
-		defer s.scripts.Done()
 		defer s.releaseScript(sch.ID)
 		s.runScript(ctx, saved, req)
 	}()

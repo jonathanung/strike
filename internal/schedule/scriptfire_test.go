@@ -311,6 +311,49 @@ func TestScriptRunNowOutlivesRequestContext(t *testing.T) {
 	}
 }
 
+func TestScriptShutdownCancelsAndRefuses(t *testing.T) {
+	t0 := time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	entered := make(chan struct{})
+	runner := func(ctx context.Context, req ScriptRequest, started func(ScriptStart)) ScriptResult {
+		started(ScriptStart{StartedAt: t0})
+		close(entered)
+		<-ctx.Done()
+		code := -1
+		return ScriptResult{Status: StatusFailed, StartedAt: t0, ExitCode: &code, Error: "canceled: daemon shutting down"}
+	}
+	log := &auditLog{}
+	svc, err := Open(dir, Hooks{Now: func() time.Time { return t0 }, Script: runner, Audit: log.add}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sch, err := svc.Create(armedSpec("forever", t0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RunNow(context.Background(), sch.ID); err != nil {
+		t.Fatal(err)
+	}
+	<-entered
+	done := make(chan struct{})
+	go func() { svc.Shutdown(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Shutdown did not cancel the in-flight script")
+	}
+	got, _ := svc.Get(sch.ID)
+	if got.LastStatus != StatusFailed || got.Runs[0].Status != StatusFailed {
+		t.Fatalf("after shutdown: %s / %s", got.LastStatus, got.Runs[0].Status)
+	}
+	if st := log.statuses(); strings.Join(st, ",") != "started,failed" {
+		t.Fatalf("audit statuses %v", st)
+	}
+	if _, err := svc.RunNow(context.Background(), sch.ID); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("RunNow after Shutdown = %v, want ErrUnavailable", err)
+	}
+}
+
 func TestScriptArmingGuardRefusesFire(t *testing.T) {
 	t0 := time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
 	cases := []struct {
