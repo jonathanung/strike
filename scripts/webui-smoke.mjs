@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
 import { createServer } from "node:http";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
+import { sessionRefCheck } from "./webui-session-ref-check.mjs";
 import { seedRepeatedWorkflow, skillProposalsCheck } from "./webui-skill-proposals-check.mjs";
 import {
   BROKEN_SKILL,
@@ -2195,6 +2196,7 @@ try {
     repoDir: process.cwd(),
   });
   await agentPickerCheck({ send });
+  await sessionRefCheck({ send });
   await mdReviewBrowserCheck({
     send,
     port,

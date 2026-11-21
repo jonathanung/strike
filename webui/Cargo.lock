@@ -1318,6 +1318,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "session-ref"
+version = "0.1.0"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1381,6 +1385,7 @@ dependencies = [
  "send_wrapper",
  "serde",
  "serde_json",
+ "session-ref",
  "signin-flow",
  "status-card",
  "theme-catalog",

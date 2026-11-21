@@ -109,6 +109,7 @@ jobs:
           cargo test --manifest-path webui/mermaid-lite/Cargo.toml --locked
           cargo test --manifest-path webui/composer-drafts/Cargo.toml --locked
           cargo test --manifest-path webui/theme-catalog/Cargo.toml --locked
+          cargo test --manifest-path webui/session-ref/Cargo.toml --locked
           cargo test --manifest-path webui/signin-flow/Cargo.toml --locked
 
       # E3.2 prompt regression: verbose report of tool/turn/token deltas.
