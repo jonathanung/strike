@@ -236,9 +236,20 @@ fn parse_time_ms(rfc3339: &str) -> f64 {
     }
 }
 
-/// Fetches the list into `loops`. Not-live clears it quietly.
-pub async fn refresh(base: String, token: String, root: String, loops: RwSignal<Vec<SessionLoop>>) {
-    match api::get_json::<LoopsResponse>(&base, &token, &loops_path(&root)).await {
+/// Fetches the list into `loops`. Not-live clears it quietly. A reply for
+/// a session that is no longer `active` is dropped.
+pub async fn refresh(
+    base: String,
+    token: String,
+    root: String,
+    active: RwSignal<String>,
+    loops: RwSignal<Vec<SessionLoop>>,
+) {
+    let got = api::get_json::<LoopsResponse>(&base, &token, &loops_path(&root)).await;
+    if active.get_untracked() != root {
+        return;
+    }
+    match got {
         Ok(resp) => loops.set(resp.loops),
         Err(e) if not_live(&e) => loops.set(Vec::new()),
         Err(_) => {} // keep the last list through a transient failure
@@ -246,29 +257,40 @@ pub async fn refresh(base: String, token: String, root: String, loops: RwSignal<
 }
 
 /// Runs one parsed composer command against the daemon and reports the
-/// outcome in `note`.
+/// outcome in `note`, unless the user has switched sessions meanwhile.
 pub async fn run(
     base: String,
     token: String,
     root: String,
     cmd: LoopCmd,
+    active: RwSignal<String>,
     loops: RwSignal<Vec<SessionLoop>>,
     note: RwSignal<String>,
 ) {
+    let note_for = root.clone();
+    let note = move |msg: String| {
+        if active.get_untracked() == note_for {
+            note.set(msg);
+        }
+    };
     match cmd {
-        LoopCmd::Invalid(msg) => note.set(msg),
-        LoopCmd::Help => note.set(USAGE.into()),
+        LoopCmd::Invalid(msg) => note(msg),
+        LoopCmd::Help => note(USAGE.into()),
         LoopCmd::List => {
             match api::get_json::<LoopsResponse>(&base, &token, &loops_path(&root)).await {
                 Ok(resp) => {
-                    note.set(list_summary(&resp.loops));
-                    loops.set(resp.loops);
+                    note(list_summary(&resp.loops));
+                    if active.get_untracked() == root {
+                        loops.set(resp.loops);
+                    }
                 }
                 Err(e) if not_live(&e) => {
-                    loops.set(Vec::new());
-                    note.set("loop: this session is not live here, so it has no loops.".into());
+                    if active.get_untracked() == root {
+                        loops.set(Vec::new());
+                    }
+                    note("loop: this session is not live here, so it has no loops.".into());
                 }
-                Err(e) => note.set(format!("loop: {}", daemon_error(&e))),
+                Err(e) => note(format!("loop: {}", daemon_error(&e))),
             }
         }
         LoopCmd::Start { interval, job } => {
@@ -276,10 +298,10 @@ pub async fn run(
             match api::post_json_value(&base, &token, &loops_path(&root), body).await {
                 Ok(v) => {
                     let started = serde_json::from_value::<StartResponse>(v).unwrap_or_default();
-                    note.set(started_note(&started.r#loop));
-                    refresh(base, token, root, loops).await;
+                    note(started_note(&started.r#loop));
+                    refresh(base, token, root, active, loops).await;
                 }
-                Err(e) => note.set(format!("loop: {}", daemon_error(&e))),
+                Err(e) => note(format!("loop: {}", daemon_error(&e))),
             }
         }
         LoopCmd::Stop(id) => {
@@ -290,10 +312,10 @@ pub async fn run(
             match delete_value(&base, &token, &path).await {
                 Ok(v) => {
                     let stopped = serde_json::from_value::<StopResponse>(v).unwrap_or_default();
-                    note.set(stopped_note(id.as_deref(), stopped.stopped));
-                    refresh(base, token, root, loops).await;
+                    note(stopped_note(id.as_deref(), stopped.stopped));
+                    refresh(base, token, root, active, loops).await;
                 }
-                Err(e) => note.set(format!("loop: {}", daemon_error(&e))),
+                Err(e) => note(format!("loop: {}", daemon_error(&e))),
             }
         }
     }
@@ -330,15 +352,24 @@ pub fn LoopRows(
     note: RwSignal<String>,
 ) -> impl IntoView {
     let now = RwSignal::new(api::now_ms());
-    // Re-fetch when the session or capability changes.
-    Effect::new(move |_| {
-        let r = root.get();
-        let ok = capable.get();
-        loops.set(Vec::new());
-        note.set(String::new());
-        if ok && !r.is_empty() {
-            spawn_local(refresh(base.get_untracked(), token.get_untracked(), r, loops));
+    // Reset and re-fetch only when the session or capability actually
+    // changes: bootstrap re-sets the capability on every refresh.
+    Effect::new(move |prev: Option<(String, bool)>| {
+        let key = (root.get(), capable.get());
+        if prev.as_ref() != Some(&key) {
+            loops.set(Vec::new());
+            note.set(String::new());
+            if key.1 && !key.0.is_empty() {
+                spawn_local(refresh(
+                    base.get_untracked(),
+                    token.get_untracked(),
+                    key.0.clone(),
+                    root,
+                    loops,
+                ));
+            }
         }
+        key
     });
     let handle = StoredValue::new(None::<i32>);
     if let Some(window) = web_sys::window() {
@@ -351,7 +382,7 @@ pub fn LoopRows(
             }
             let r = root.get_untracked();
             if capable.get_untracked() && !r.is_empty() {
-                spawn_local(refresh(base.get_untracked(), token.get_untracked(), r, loops));
+                spawn_local(refresh(base.get_untracked(), token.get_untracked(), r, root, loops));
             }
         });
         if let Ok(id) = window
@@ -369,7 +400,7 @@ pub fn LoopRows(
 
     let stop_one = move |id: String| {
         let (b, t, r) = (base.get_untracked(), token.get_untracked(), root.get_untracked());
-        spawn_local(run(b, t, r, LoopCmd::Stop(Some(id)), loops, note));
+        spawn_local(run(b, t, r, LoopCmd::Stop(Some(id)), root, loops, note));
     };
 
     view! {

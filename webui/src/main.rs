@@ -2341,6 +2341,31 @@ fn App() -> impl IntoView {
     };
 
     let send = move |which: steer_queue::SendWhich| {
+        // Session /loop (#1588): handled against the loops routes, never
+        // sent as a prompt, and ahead of the context hold so a full window
+        // never blocks /loop stop. Without the capability the draft is kept.
+        let loop_text = draft.get_untracked().trim().to_string();
+        if let Some(cmd) = session_loops::parse(&loop_text) {
+            ac_open.set(false);
+            let root = active_root.get_untracked();
+            if root.is_empty() {
+                status.set("no live session yet".into());
+                return;
+            }
+            if !loops_capable.get_untracked() {
+                loop_note.set("loop: this gateway cannot run loops for this session (attach-only or read-only).".into());
+                return;
+            }
+            if pending_files.get_untracked().iter().any(|f| f.error.is_empty()) {
+                loop_note.set("loop: a loop job is text only. Remove the attachments first.".into());
+                return;
+            }
+            prompt_history.update(|h| h.push(&loop_text));
+            draft.set(String::new());
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(session_loops::run(b, t, root, cmd, active_root, loop_rows, loop_note));
+            return;
+        }
         // Context-hold gate (mirrors send_text): when the context fit is
         // critical/full, do not dispatch and do not clear the draft or
         // pending files, so a held submit never loses typed text. This
@@ -2383,23 +2408,6 @@ fn App() -> impl IntoView {
         let root = active_root.get_untracked();
         if root.is_empty() {
             status.set("no live session yet".into());
-            return;
-        }
-        // Session /loop (#1588): handled against the loops routes, never
-        // sent as a prompt. Without the capability the draft is kept.
-        if let Some(cmd) = session_loops::parse(&text) {
-            if !loops_capable.get_untracked() {
-                loop_note.set("loop: this gateway cannot run loops for this session (attach-only or read-only).".into());
-                return;
-            }
-            if ready {
-                loop_note.set("loop: a loop job is text only. Remove the attachments first.".into());
-                return;
-            }
-            prompt_history.update(|h| h.push(&text));
-            draft.set(String::new());
-            let (b, t) = (base.get_untracked(), token.get_untracked());
-            spawn_local(session_loops::run(b, t, root, cmd, loop_rows, loop_note));
             return;
         }
         // Draft-size gate (#1542): when the draft itself projects the
