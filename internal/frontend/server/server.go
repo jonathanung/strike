@@ -219,6 +219,10 @@ type Server struct {
 	notifyOnce sync.Once
 	notifyLog  *notifyLog
 
+	// briefingOnce lazily opens the away-briefing watermark (#1488).
+	briefingOnce  sync.Once
+	briefingStore *briefingStore
+
 	// tokenHash is the sha256 of the daemon token file last observed.
 	// A change appends a token-rotation audit entry. The token is not stored.
 	tokenMu   sync.Mutex
@@ -655,6 +659,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/notifications/stream", s.handleNotificationStream)
 	s.mux.HandleFunc("PUT /v1/notifications/prefs", s.handleNotificationPrefs)
 	s.mux.HandleFunc("POST /v1/notifications/seen", s.handleNotificationSeen)
+	s.mux.HandleFunc("GET /v1/briefing/seen", s.handleBriefingSeen)
+	s.mux.HandleFunc("POST /v1/briefing/seen", s.handleBriefingSeenSet)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
 	s.mux.HandleFunc("GET /v1/terminals", s.handleTerminalsList)
 	s.mux.HandleFunc("POST /v1/terminals", s.handleTerminalCreate)

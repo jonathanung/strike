@@ -238,6 +238,44 @@ try {
       throw new Error(`second client read state = ${JSON.stringify(other.seen)} latest=${latest}`);
     }
   }
+  // #1488: the away-briefing watermark is daemon-side (shared by every
+  // device), authed, forward-only, and clamped to the daemon clock. It is
+  // left at daemon now so the cockpit below opens with no briefing.
+  {
+    const briefUrl = `http://127.0.0.1:${port}/v1/briefing/seen`;
+    const auth = { Authorization: `Bearer ${token}` };
+    const json = { ...auth, "Content-Type": "application/json" };
+    const briefNoAuth = await fetch(briefUrl);
+    if (briefNoAuth.status !== 401) {
+      throw new Error(`briefing/seen without token = ${briefNoAuth.status}`);
+    }
+    const fresh = await (await fetch(briefUrl, { headers: auth })).json();
+    if (fresh.seenAt !== 0 || !(fresh.now > 0)) {
+      throw new Error(`fresh briefing watermark = ${JSON.stringify(fresh)}`);
+    }
+    const mark = fresh.now - 60 * 60 * 1000;
+    const post = async (seenAt) => {
+      const res = await fetch(briefUrl, { method: "POST", headers: json, body: JSON.stringify({ seenAt }) });
+      if (res.status !== 200) {
+        throw new Error(`briefing/seen POST ${seenAt} = ${res.status} ${await res.text()}`);
+      }
+      return res.json();
+    };
+    const first = await post(mark);
+    const back = await post(mark - 1000);
+    const peer = await (await fetch(briefUrl, { headers: auth })).json();
+    if (first.seenAt !== mark || back.seenAt !== mark || peer.seenAt !== mark) {
+      throw new Error(`briefing watermark first=${first.seenAt} back=${back.seenAt} peer=${peer.seenAt} want=${mark}`);
+    }
+    const ahead = await post(Date.now() + 24 * 60 * 60 * 1000);
+    if (!(ahead.seenAt > mark) || ahead.seenAt > ahead.now) {
+      throw new Error(`briefing watermark not clamped to daemon now: ${JSON.stringify(ahead)}`);
+    }
+    const bad = await fetch(briefUrl, { method: "POST", headers: json, body: '{"seenAt":0}' });
+    if (bad.status !== 400) {
+      throw new Error(`briefing/seen zero = ${bad.status}`);
+    }
+  }
   const healthBody = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
   if (!healthBody.ok || !(healthBody.now > 0)) {
     throw new Error(`health missing now: ${JSON.stringify(healthBody)}`);
@@ -779,6 +817,14 @@ try {
     throw new Error(
       `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} version=${version} text=${text.slice(0, 400)}\n${await diagnostics()}`,
     );
+  }
+  // #1488: the watermark was just set to daemon now, so the away gap is
+  // under the threshold: no catch-up panel (empty delta = cockpit as today).
+  {
+    const panel = await evaluate(`!!document.querySelector("[data-briefing]")`);
+    if (panel) {
+      throw new Error(`away briefing shown with no away gap\n${await diagnostics()}`);
+    }
   }
   // Approvals (#1266): mode menu, Yolo confirm + Escape, and the
   // permission-rules API confirm gates. Runs while the boot session is
