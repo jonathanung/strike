@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/jonathanung/strike/harness/elicit"
 	"github.com/jonathanung/strike/harness/permission"
 	"github.com/jonathanung/strike/harness/provider"
 	"github.com/jonathanung/strike/harness/question"
@@ -551,7 +552,7 @@ func (e *Engine) handleInputQueueSendNow(ctx context.Context, op protocol.InputQ
 		e.pendingUserInputs = nil
 	}
 	e.emitInputQueued()
-	e.startTurnShown(ctx, item.text, item.display, item.images)
+	e.startUserTurn(ctx, item.text, item.display, item.images)
 }
 
 // drainIdleFollowups starts at most one follow-up turn when idle: preferred
@@ -598,8 +599,34 @@ func (e *Engine) startNextPendingUserInput(ctx context.Context) bool {
 		e.pendingUserInputs = nil
 	}
 	e.emitInputQueued()
-	e.startTurnShown(ctx, item.text, item.display, item.images)
+	e.startUserTurn(ctx, item.text, item.display, item.images)
 	return true
+}
+
+// startUserTurn starts a turn from a user message. The user speaking again
+// lifts the permission deny latch (#1387); child notices, mailbox turns and
+// other engine-started turns keep it.
+func (e *Engine) startUserTurn(ctx context.Context, text, display string, images []protocol.ImageAttachment) {
+	e.clearDenyLatches()
+	e.startTurnShown(ctx, text, display, images)
+}
+
+// clearDenyLatches lifts the deny latch on this engine and every live child
+// engine: a user's message speaks to the whole session tree, and a delegated
+// child that was denied must not stay latched after the user writes again.
+func (e *Engine) clearDenyLatches() {
+	e.perms.ClearDenyLatch()
+	e.childMu.Lock()
+	kids := make([]*Engine, 0, len(e.children))
+	for _, h := range e.children {
+		if h != nil && h.eng != nil {
+			kids = append(kids, h.eng)
+		}
+	}
+	e.childMu.Unlock()
+	for _, k := range kids {
+		k.clearDenyLatches()
+	}
 }
 
 func (e *Engine) startTurn(ctx context.Context, text string, images []protocol.ImageAttachment) {
@@ -1472,6 +1499,16 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 				}
 				return tool.QuestionResponse{Answers: answers}, nil
 			},
+			Elicit: func(ctx context.Context, req tool.ElicitRequest) tool.ElicitResponse {
+				res := e.elicits.Ask(ctx, corr, elicit.Request{
+					Server:          req.Server,
+					Message:         req.Message,
+					Mode:            req.Mode,
+					RequestedSchema: req.RequestedSchema,
+					URL:             req.URL,
+				})
+				return tool.ElicitResponse{Action: res.Action, Content: res.Content}
+			},
 			SwitchAgent:    e.queueSwitchAgent,
 			EnterPlanPhase: e.enterPlanPhase,
 			StartWorkflow:  e.startWorkflow,
@@ -2190,5 +2227,6 @@ func (e *Engine) BashSandboxPolicy(workDir string) sandbox.Policy {
 	}
 	p.NetworkAllow = sandbox.CloneNetworkAllow(e.opts.NetworkAllow)
 	p.AllowDegrade = e.opts.SandboxAllowDegrade
+	p.Runtime = sandbox.ResolveRuntime(e.opts.SandboxRuntime)
 	return p
 }

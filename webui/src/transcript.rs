@@ -103,6 +103,8 @@ pub struct Message {
     /// the envelope carried one. Empty for legacy log lines. Used by the
     /// orphan sweep (#1506) to scope a `turn.completed` to its own turn.
     pub turn_id: String,
+    /// Attachments sent with a `user.message` (#1389). Empty elsewhere.
+    pub attachments: Vec<crate::transcript_attachments::SentAttachment>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -310,6 +312,19 @@ pub struct Transcript {
     /// `sessionId` of the turn in progress (from `turn.started`), so a
     /// child session's streams are not counted on the parent's turn.
     turn_session: String,
+    /// Opt-in reasoning (#1372), kept out of `messages` entirely; the
+    /// pane renders it only while its per-session toggle is on.
+    pub reasoning: crate::reasoning::ReasoningLog,
+    /// Per-turn verification badges (#1373), keyed like `turn_elapsed` by
+    /// the turn's final message id. Only turns whose `turn.completed`
+    /// carried a verification report get an entry.
+    pub turn_verify: HashMap<u32, crate::turn_verify::TurnVerify>,
+    /// Per-turn file-change summaries (#1365), keyed like `turn_elapsed`
+    /// by the turn's final message id. Only turns whose `turn.completed`
+    /// listed changed files get an entry.
+    pub turn_files: HashMap<u32, crate::turn_files::TurnFiles>,
+    /// Steer acknowledgement markers (#1343), keyed by message id.
+    pub steer_acks: crate::steer_ack::SteerAcks,
     /// Live `tool.output` tails (#1374), keyed by the tool card's message
     /// id. Removed when the call's `tool.end` arrives; a call that never
     /// ends keeps its last tail as the only record of what it printed.
@@ -340,8 +355,24 @@ impl Transcript {
             turn_usage: HashMap::new(),
             usage_acc: crate::turn_usage::TurnUsage::default(),
             turn_session: String::new(),
+            reasoning: crate::reasoning::ReasoningLog::default(),
+            turn_verify: HashMap::new(),
+            turn_files: HashMap::new(),
+            steer_acks: crate::steer_ack::SteerAcks::default(),
             tool_tails: HashMap::new(),
         }
+    }
+
+    /// The verification badge stamped on this message, if it is the final
+    /// line of a completed turn whose payload carried a report (#1373).
+    pub fn verify_for(&self, id: u32) -> Option<&crate::turn_verify::TurnVerify> {
+        self.turn_verify.get(&id)
+    }
+
+    /// The file-change summary stamped on this message, if it is the final
+    /// line of a completed turn that changed files (#1365).
+    pub fn files_for(&self, id: u32) -> Option<&crate::turn_files::TurnFiles> {
+        self.turn_files.get(&id)
     }
 
     /// The live output tail of tool card `id`, while it has one (#1374).
@@ -476,7 +507,13 @@ impl Transcript {
         // are skipped, and a known event whose payload does not match the
         // schema is dropped. Parsing below still reads the raw object.
         match protocol_schema::decode_event(raw) {
-            Ok(protocol_schema::Event::Unknown { .. }) | Err(_) => return,
+            Ok(protocol_schema::Event::Unknown { .. }) => return,
+            Err(_) => {
+                // #1359: a compaction/budget payload the schema rejects
+                // still leaves a title-only marker where it happened.
+                self.apply_malformed_mark(raw);
+                return;
+            }
             Ok(_) => {}
         }
         let v: Value = match serde_json::from_str(raw) {
@@ -500,14 +537,19 @@ impl Transcript {
             "user.message" => {
                 self.assistant_open = false;
                 self.trigger_note.clear();
+                self.attach_reasoning_to_last();
                 let text = field_str(&data, "text");
                 let shown = display_user_text(&strip_echo_progress(&text));
+                // #1324: a review-queue turn is labelled as a review, not
+                // shown as if the operator had typed it.
+                let review = crate::review_queue::is_review_turn(&text);
+                let (ack_text, ack_shown) = (text.clone(), shown.clone());
                 let id = self.push(Message {
                     id: 0,
                     role: Role::You,
-                    title: "You".into(),
+                    title: if review { "Review".into() } else { "You".into() },
                     body: shown.clone(),
-                    badge: String::new(),
+                    badge: if review { "review".into() } else { String::new() },
                     detail: String::new(),
                     key: String::new(),
                     call_id: String::new(),
@@ -519,11 +561,30 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: field_str(&data, "turnId"),
+                    attachments: crate::transcript_attachments::parse_images(&data),
                 });
+                self.steer_acks.on_user_message(id, &ack_text, &ack_shown);
                 self.turn_start = Some(id);
                 self.absorb();
             }
+            "turn.steered" => {
+                let text = field_str(&data, "text");
+                let mode = field_str(&data, "mode");
+                self.steer_acks.on_steered(&self.messages, &text, &mode);
+            }
             "session.titled" => self.note_titled(&field_str(&data, "title")),
+            "session.rewound" => {
+                // #1361: the engine dropped the last root user turn
+                // (`rewind` op, TUI /rewind, or edit & resend). The
+                // transcript drops the same rows so live and replayed
+                // views read as if that turn was never sent. Child
+                // lineage rewinds do not touch the root transcript.
+                let child = !field_str(&data, "parentSessionId").is_empty()
+                    || data.get("depth").and_then(|d| d.as_i64()).unwrap_or(0) > 0;
+                if !child {
+                    self.drop_last_user_turn();
+                }
+            }
             "turn.started" => {
                 self.assistant_open = false;
                 // A new turn starting means every earlier turn has ended:
@@ -536,7 +597,15 @@ impl Transcript {
                 self.turn_session = field_str(&data, "sessionId");
             }
             "usage.reported" => self.usage_acc.absorb(&data, &self.turn_session),
-            "reasoning.delta" => {}
+            "reasoning.delta" => {
+                // #1372: recorded off-transcript; another session's
+                // stream (a child's) is not this turn's reasoning.
+                let session = field_str(&data, "sessionId");
+                if !self.turn_session.is_empty() && !session.is_empty() && session != self.turn_session {
+                    return;
+                }
+                self.reasoning.push_delta(&field_str(&data, "text"));
+            }
             "text.delta" => {
                 let chunk = field_str(&data, "text");
                 if chunk.is_empty() {
@@ -549,6 +618,8 @@ impl Transcript {
                             last.body = strip_echo_progress(&last.body);
                             last.copy_text = last.body.clone();
                             last.chips = chips_in(&last.body);
+                            let id = last.id;
+                            self.reasoning.attach_live(id);
                             return;
                         }
                     }
@@ -573,14 +644,55 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "turn.completed" => {
                 self.assistant_open = false;
+                self.attach_reasoning_to_last();
                 self.sweep_orphaned_at_turn_end(&field_str(&data, "turnId"));
                 self.absorb();
                 let usage = std::mem::take(&mut self.usage_acc);
-                self.stamp_turn(at_ms, usage);
+                let verify = crate::turn_verify::turn_verify(&data);
+                let files = crate::turn_files::turn_files(&data);
+                self.stamp_turn(at_ms, usage, verify, files);
+                // #1371: an abnormal stop gets its own end-of-turn line,
+                // pushed after the turn is stamped so the elapsed/usage
+                // labels and fork keep-counts stay on the turn's real
+                // last line. Another session's stop on this stream (a
+                // child's) is the child card's job.
+                if !self.foreign_session(&data) {
+                    let stop = field_str(&data, "stopReason");
+                    if let Some(m) = crate::turn_failure::stop_marker(&stop) {
+                        self.push_failure_line(
+                            m.title,
+                            m.body.to_string(),
+                            crate::turn_failure::STOP_BADGE,
+                            format!("{}{}", crate::turn_failure::STOP_KEY_PREFIX, m.reason),
+                            at_ms,
+                            field_str(&data, "turnId"),
+                        );
+                    }
+                }
+            }
+            "tool.loop_detected" => {
+                if self.foreign_session(&data) {
+                    return;
+                }
+                let count = data.get("count").and_then(|c| c.as_i64()).unwrap_or(0);
+                let body = crate::turn_failure::loop_body(
+                    &field_str(&data, "message"),
+                    &field_str(&data, "toolName"),
+                    count,
+                );
+                self.push_failure_line(
+                    crate::turn_failure::LOOP_TITLE,
+                    body,
+                    crate::turn_failure::LOOP_BADGE,
+                    String::new(),
+                    at_ms,
+                    field_str(&data, "turnId"),
+                );
             }
             "tool.begin" => {
                 self.assistant_open = false;
@@ -614,6 +726,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: field_str(&data, "turnId"),
+                    attachments: Vec::new(),
                 });
             }
             "tool.output" => {
@@ -695,6 +808,7 @@ impl Transcript {
                         reconnect: String::new(),
                         at_ms,
                         turn_id: field_str(&data, "turnId"),
+                        attachments: Vec::new(),
                     });
                 }
             }
@@ -722,7 +836,56 @@ impl Transcript {
                 card.at_ms = at_ms;
                 self.upsert_child(card);
             }
+            "child.escalated" => {
+                // #1375: a child tripped a budget/stall/loop. One persistent
+                // line names the child, the trip and the action taken; the
+                // later child.completed card still carries the outcome.
+                let session = field_str(&data, "sessionId");
+                let mut name = field_str(&data, "name");
+                if name.is_empty() {
+                    name = session.chars().take(8).collect();
+                }
+                if name.is_empty() {
+                    name = "A child".into();
+                }
+                let body = crate::child_signals::escalation_sentence(
+                    &field_str(&data, "kind"),
+                    &field_str(&data, "reason"),
+                    &field_str(&data, "action"),
+                );
+                self.push(Message {
+                    id: 0,
+                    role: Role::Notice,
+                    title: format!("{name} escalated"),
+                    body: body.clone(),
+                    badge: "escalated".into(),
+                    detail: String::new(),
+                    key: String::new(),
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: body,
+                    reconnect: String::new(),
+                    at_ms,
+                    attachments: Vec::new(),
+                    turn_id: field_str(&data, "turnId"),
+                });
+            }
             "artifact.updated" => self.artifact_updates = self.artifact_updates.wrapping_add(1),
+            "compaction.started"
+            | "compaction.completed"
+            | "context.fit_warning"
+            | "session.budget_warning" => {
+                if self.foreign_session(&data) {
+                    return;
+                }
+                if let Some(mark) = crate::compaction_marks::mark(typ, &data) {
+                    self.assistant_open = false;
+                    self.push_mark(mark, at_ms, field_str(&data, "turnId"));
+                }
+            }
             "engine.error" => {
                 let message = field_str(&data, "message");
                 if message.is_empty() {
@@ -756,6 +919,7 @@ impl Transcript {
                         reconnect: provider,
                         at_ms,
                         turn_id: String::new(),
+                        attachments: Vec::new(),
                     });
                     return;
                 }
@@ -776,6 +940,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "permission.asked" => {
@@ -814,6 +979,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "permission.resolved" => {
@@ -826,12 +992,45 @@ impl Transcript {
                     .rev()
                     .find(|m| m.key == request_id && m.role == Role::Permission)
                 {
+                    // Name how the ask ended (#1387): Allowed, Denied, or
+                    // Expired when it died with no answer.
+                    msg.title = crate::approval_outcome::resolved_title(&decision).into();
                     msg.badge = if decision.is_empty() {
                         "done".into()
                     } else {
                         decision
                     };
                 }
+            }
+            "permission.decided" if crate::approval_outcome::is_latched_denial(&data) => {
+                // A repeat of an action the user already denied: no card,
+                // one line saying why (#1387).
+                let permission = field_str(&data, "permission");
+                let patterns = pattern_list(&data);
+                let body = if patterns.is_empty() {
+                    permission.clone()
+                } else {
+                    format!("{permission} · {patterns}")
+                };
+                self.push(Message {
+                    id: 0,
+                    role: Role::Permission,
+                    title: "Denied".into(),
+                    body,
+                    badge: "denied".into(),
+                    detail: crate::approval_outcome::LATCHED_DETAIL.into(),
+                    key: String::new(),
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: permission,
+                    reconnect: String::new(),
+                    at_ms,
+                    attachments: Vec::new(),
+                    turn_id: String::new(),
+                });
             }
             _ => {}
         }
@@ -848,6 +1047,97 @@ impl Transcript {
         self.auto_title = title.to_string();
     }
 
+    /// Whether an event belongs to a different session than the turn in
+    /// progress (a child's stream), by the same rule `TurnUsage::absorb`
+    /// uses: only a known, differing `sessionId` is foreign. A child
+    /// session opened on its own has its own `turn.started` id, so its
+    /// events are not foreign there.
+    fn foreign_session(&self, data: &Value) -> bool {
+        let session = field_str(data, "sessionId");
+        !self.turn_session.is_empty() && !session.is_empty() && session != self.turn_session
+    }
+
+    /// One turn-failure notice line (#1371): end-of-turn marker or
+    /// loop-guard line. Body is plain text; nothing is retried or forked
+    /// from it.
+    fn push_failure_line(
+        &mut self,
+        title: &str,
+        body: String,
+        badge: &str,
+        key: String,
+        at_ms: f64,
+        turn_id: String,
+    ) {
+        self.push(Message {
+            id: 0,
+            role: Role::Notice,
+            title: title.into(),
+            body: body.clone(),
+            badge: badge.into(),
+            detail: String::new(),
+            key,
+            call_id: String::new(),
+            diff: None,
+            chips: Vec::new(),
+            keep_events: -1,
+            retry_text: String::new(),
+            copy_text: body,
+            reconnect: String::new(),
+            at_ms,
+            turn_id,
+            attachments: Vec::new(),
+        });
+    }
+
+    /// Minimal marker for a compaction/budget envelope whose payload the
+    /// generated schema rejected (#1359). Anything else stays dropped.
+    fn apply_malformed_mark(&mut self, raw: &str) {
+        let Ok(v) = serde_json::from_str::<Value>(raw) else {
+            return;
+        };
+        let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let Some(mark) = crate::compaction_marks::minimal(typ) else {
+            return;
+        };
+        let at_ms = v
+            .get("time")
+            .and_then(|t| t.as_str())
+            .map(crate::model::rfc3339_to_ms)
+            .unwrap_or(0.0);
+        self.assistant_open = false;
+        self.push_mark(mark, at_ms, String::new());
+    }
+
+    /// One compaction/budget marker line (#1359): a notice whose summary
+    /// and residue sit in the collapsed detail fold.
+    fn push_mark(&mut self, mark: crate::compaction_marks::Mark, at_ms: f64, turn_id: String) {
+        let copy = if mark.body.is_empty() {
+            mark.title.clone()
+        } else {
+            format!("{}\n{}", mark.title, mark.body)
+        };
+        self.push(Message {
+            id: 0,
+            role: Role::Notice,
+            title: mark.title,
+            body: mark.body,
+            badge: mark.badge,
+            detail: mark.detail,
+            key: mark.key,
+            call_id: String::new(),
+            diff: None,
+            chips: Vec::new(),
+            keep_events: -1,
+            retry_text: String::new(),
+            copy_text: copy,
+            reconnect: String::new(),
+            at_ms,
+            turn_id,
+            attachments: Vec::new(),
+        });
+    }
+
     fn current_retry(&self) -> String {
         self.messages
             .iter()
@@ -857,12 +1147,76 @@ impl Transcript {
             .unwrap_or_default()
     }
 
+    /// Rows reduced to what edit & resend (#1361) needs.
+    pub fn edit_rows(&self) -> Vec<edit_resend::Row> {
+        self.messages
+            .iter()
+            .map(|m| edit_resend::Row {
+                id: m.id,
+                role: match m.role {
+                    Role::You => edit_resend::Role::You,
+                    Role::Strike => edit_resend::Role::Strike,
+                    Role::Tool => edit_resend::Role::Tool,
+                    _ => edit_resend::Role::Other,
+                },
+                file_change: m.role == Role::Tool && edit_resend::is_file_tool(&m.key),
+            })
+            .collect()
+    }
+
+    /// Id of the newest user message (the one edit & resend can edit).
+    pub fn last_user_id(&self) -> Option<u32> {
+        self.messages
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::You)
+            .map(|m| m.id)
+    }
+
+    /// Exact text of message `id` as the user sent it.
+    pub fn sent_text(&self, id: u32) -> Option<String> {
+        self.messages
+            .iter()
+            .find(|m| m.id == id && m.role == Role::You)
+            .map(|m| m.retry_text.clone())
+    }
+
+    /// Apply `session.rewound`: drop the newest user message and every
+    /// row after it. Message ids are never reused, so a cursor or fold
+    /// keyed on a dropped id simply stops matching.
+    fn drop_last_user_turn(&mut self) {
+        let Some(cut) = edit_resend::rewind_cut(&self.edit_rows()) else {
+            return;
+        };
+        for m in &self.messages[cut..] {
+            self.turn_elapsed.remove(&m.id);
+            self.turn_usage.remove(&m.id);
+        }
+        self.messages.truncate(cut);
+        self.assistant_open = false;
+        self.turn_start = None;
+        self.usage_acc = crate::turn_usage::TurnUsage::default();
+    }
+
     fn push(&mut self, mut message: Message) -> u32 {
         self.next_id += 1;
         message.id = self.next_id;
         let id = message.id;
+        // #1372: reasoning streamed before this line belongs above it.
+        // A user line opens the next turn, so it never takes reasoning.
+        if message.role != Role::You {
+            self.reasoning.attach_live(id);
+        }
         self.messages.push(message);
         id
+    }
+
+    /// Settle reasoning still streaming at a turn boundary onto the
+    /// turn's last line (#1372).
+    fn attach_reasoning_to_last(&mut self) {
+        if let Some(id) = self.messages.last().map(|m| m.id) {
+            self.reasoning.attach_live(id);
+        }
     }
 
     fn find_tool(&self, call_id: &str, name: &str) -> Option<usize> {
@@ -985,7 +1339,13 @@ impl Transcript {
         }
     }
 
-    fn stamp_turn(&mut self, completed_ms: f64, usage: crate::turn_usage::TurnUsage) {
+    fn stamp_turn(
+        &mut self,
+        completed_ms: f64,
+        usage: crate::turn_usage::TurnUsage,
+        verify: Option<crate::turn_verify::TurnVerify>,
+        files: Option<crate::turn_files::TurnFiles>,
+    ) {
         let Some(id) = self.turn_start else {
             return;
         };
@@ -1020,6 +1380,16 @@ impl Transcript {
             // reported a known input or output count.
             if usage.label().is_some() {
                 self.turn_usage.insert(last_id, usage);
+            }
+            // Verification badge (#1373): same final line, from the
+            // payload only; no report, no badge.
+            if let Some(v) = verify {
+                self.turn_verify.insert(last_id, v);
+            }
+            // File-change summary (#1365): same final line; a turn with
+            // no file changes gets no entry and renders nothing.
+            if let Some(f) = files {
+                self.turn_files.insert(last_id, f);
             }
         }
         self.turn_start = None;
@@ -1123,6 +1493,7 @@ impl Transcript {
             reconnect: String::new(),
             at_ms,
             turn_id: String::new(),
+            attachments: Vec::new(),
         });
     }
 }
@@ -2076,6 +2447,324 @@ pub fn provider_auth_headline(provider: &str) -> String {
 mod tests {
     use super::*;
 
+    fn notices(t: &Transcript) -> Vec<(String, String)> {
+        t.messages
+            .iter()
+            .filter(|m| m.role == Role::Notice)
+            .map(|m| (m.title.clone(), m.key.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn compaction_and_budget_markers_render_inline_in_order() {
+        // Real envelope shapes, as the engine emits them mid-session.
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "long task"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"turnId": "t1", "sessionId": "s1"})));
+        t.apply_envelope(&env(
+            "context.fit_warning",
+            serde_json::json!({"sessionId": "s1", "turnId": "t1", "estimatedTokens": 180000,
+                "contextLimit": 200000, "level": "warn", "message": "context is getting full"}),
+        ));
+        t.apply_envelope(&env(
+            "compaction.started",
+            serde_json::json!({"sessionId": "s1", "turnId": "t1", "reason": "threshold", "strategy": "summarize"}),
+        ));
+        t.apply_envelope(&env(
+            "compaction.completed",
+            serde_json::json!({"sessionId": "s1", "turnId": "t1", "reason": "threshold",
+                "strategy": "summarize", "removed": 6, "kept": 2, "summary": "Earlier work summarised.",
+                "residue": {"schemaVersion": "1", "facts": [{"id": "f1", "text": "tests pass"}]}}),
+        ));
+        t.apply_envelope(&env(
+            "session.budget_warning",
+            serde_json::json!({"sessionId": "s1", "level": "80", "kind": "cost_usd",
+                "costUsd": 4.0, "maxCostUsd": 5.0, "ratio": 0.8, "message": "80% of session budget"}),
+        ));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "done"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({"turnId": "t1", "stopReason": "end_turn"})));
+        let roles: Vec<Role> = t.messages.iter().map(|m| m.role).collect();
+        assert_eq!(
+            roles,
+            [Role::You, Role::Notice, Role::Notice, Role::Notice, Role::Notice, Role::Strike]
+        );
+        assert_eq!(
+            notices(&t),
+            [
+                ("Context near limit".to_string(), "compaction:fit".to_string()),
+                ("Compacting context".to_string(), "compaction:started".to_string()),
+                ("Context compacted".to_string(), "compaction:completed".to_string()),
+                ("Budget warning".to_string(), "compaction:budget".to_string()),
+            ]
+        );
+        let done = &t.messages[3];
+        assert!(done.body.starts_with("Removed 6 messages, kept 2 messages"), "{}", done.body);
+        assert!(done.detail.contains("Summary\nEarlier work summarised."));
+        assert!(done.detail.contains("Facts kept\n- tests pass"));
+        assert!(!protocol_leak(&visible(&t)), "{}", visible(&t));
+    }
+
+    #[test]
+    fn malformed_compaction_payload_degrades_to_minimal_marker() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "go"})));
+        // `removed` as a string fails the generated schema.
+        t.apply_envelope(&env("compaction.completed", serde_json::json!({"removed": "lots"})));
+        t.apply_envelope(&env("session.budget_warning", serde_json::json!("not an object")));
+        // `null` counts pass the daemon's Go decoder but not the schema.
+        t.apply_envelope(&env(
+            "compaction.completed",
+            serde_json::json!({"reason": "manual", "removed": null}),
+        ));
+        // Legacy payload: no counts, no strategy — still a marker.
+        t.apply_envelope(&env("compaction.completed", serde_json::json!({"reason": "manual"})));
+        // A malformed event this module does not own stays dropped.
+        t.apply_envelope(&env("tool.end", serde_json::json!({"isError": "nope"})));
+        t.apply_envelope(r#"{"type":"compaction.started","data":"#);
+        let got = notices(&t);
+        assert_eq!(
+            got,
+            [
+                ("Context compacted".to_string(), "compaction:completed".to_string()),
+                ("Budget warning".to_string(), "compaction:budget".to_string()),
+                ("Context compacted".to_string(), "compaction:completed".to_string()),
+                ("Context compacted".to_string(), "compaction:completed".to_string()),
+            ]
+        );
+        assert_eq!(t.messages[1].body, "");
+        assert_eq!(t.messages[3].body, "");
+        assert_eq!(t.messages[4].body, "Requested manually");
+        assert_eq!(t.messages.len(), 5);
+    }
+
+    #[test]
+    fn foreign_session_compaction_adds_no_marker() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("turn.started", serde_json::json!({"sessionId": "root"})));
+        t.apply_envelope(&env(
+            "compaction.completed",
+            serde_json::json!({"sessionId": "child", "removed": 1, "kept": 1}),
+        ));
+        assert!(notices(&t).is_empty());
+        t.apply_envelope(&env(
+            "compaction.completed",
+            serde_json::json!({"sessionId": "root", "removed": 1, "kept": 1}),
+        ));
+        assert_eq!(notices(&t).len(), 1);
+    }
+
+    #[test]
+    fn markers_replay_identically() {
+        let lines = [
+            env_at("user.message", serde_json::json!({"text": "a"}), "2026-10-26T06:00:00Z"),
+            env_at("compaction.started", serde_json::json!({"reason": "manual", "strategy": "trim"}), "2026-10-26T06:00:01Z"),
+            env_at("compaction.completed", serde_json::json!({"reason": "manual", "strategy": "trim", "removed": 4, "kept": 3}), "2026-10-26T06:00:02Z"),
+            env_at("context.fit_warning", serde_json::json!({"level": "critical", "estimatedTokens": 9, "contextLimit": 8}), "2026-10-26T06:00:03Z"),
+        ];
+        let build = || {
+            let mut t = Transcript::new();
+            for l in &lines {
+                t.apply_envelope(l);
+            }
+            t
+        };
+        let (a, b) = (build(), build());
+        assert_eq!(a.messages, b.messages);
+        let stamps: Vec<f64> = a.messages.iter().map(|m| m.at_ms).collect();
+        assert!(stamps.windows(2).all(|w| w[0] < w[1]), "{stamps:?}");
+        assert_eq!(a.messages[3].title, "Context over limit");
+    }
+
+    /// #1371: one turn ending with `stopReason`, after a short answer.
+    fn turn_ending(stop: Value) -> Transcript {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "go"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"turnId": "t1"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "partial"})));
+        t.apply_envelope(&env("turn.completed", stop));
+        t
+    }
+
+    #[test]
+    fn clean_turn_end_adds_no_failure_line() {
+        for stop in [
+            serde_json::json!({"stopReason": "end_turn"}),
+            serde_json::json!({"stopReason": "interrupted"}),
+            serde_json::json!({}),
+        ] {
+            let t = turn_ending(stop.clone());
+            assert_eq!(t.messages.len(), 2, "{stop}");
+            assert!(t.messages.iter().all(|m| m.role != Role::Notice), "{stop}");
+        }
+    }
+
+    #[test]
+    fn abnormal_stop_reasons_end_with_a_marker() {
+        let cases = [
+            ("error", "Turn failed"),
+            ("loop_detected", "Turn stopped by loop guard"),
+            ("timeout", "Turn timed out"),
+            ("budget_exhausted", "Budget exhausted"),
+        ];
+        for (reason, title) in cases {
+            let t = turn_ending(serde_json::json!({"turnId": "t1", "stopReason": reason}));
+            let last = t.messages.last().unwrap();
+            assert_eq!(last.role, Role::Notice, "{reason}");
+            assert_eq!(last.title, title, "{reason}");
+            assert_eq!(last.badge, crate::turn_failure::STOP_BADGE, "{reason}");
+            assert_eq!(crate::turn_failure::stop_reason_of(&last.key), Some(reason));
+            assert_eq!(last.turn_id, "t1");
+            // Stamped after the turn: fork keep-counts stay on real lines.
+            assert_eq!(last.keep_events, -1, "{reason}");
+            assert!(t.messages[1].keep_events > 0, "{reason}");
+            assert!(!protocol_leak(&visible(&t)), "{reason}");
+        }
+    }
+
+    #[test]
+    fn foreign_session_stop_adds_no_marker() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "go"})));
+        t.apply_envelope(&env(
+            "turn.started",
+            serde_json::json!({"turnId": "t1", "sessionId": "root"}),
+        ));
+        t.apply_envelope(&env(
+            "tool.loop_detected",
+            serde_json::json!({"sessionId": "child", "message": "x"}),
+        ));
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"sessionId": "child", "stopReason": "error"}),
+        ));
+        assert!(t.messages.iter().all(|m| m.role != Role::Notice));
+        // A child session viewed on its own: its events carry the
+        // parent link but match its own turn, so the marker shows.
+        let mut c = Transcript::new();
+        c.apply_envelope(&env("user.message", serde_json::json!({"text": "task"})));
+        c.apply_envelope(&env(
+            "turn.started",
+            serde_json::json!({"sessionId": "child", "parentSessionId": "root"}),
+        ));
+        c.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"sessionId": "child", "parentSessionId": "root", "stopReason": "timeout"}),
+        ));
+        assert_eq!(c.messages.last().unwrap().title, "Turn timed out");
+    }
+
+    #[test]
+    fn engine_failure_then_marker_replays_in_order() {
+        // The engine's real loop-guard sequence (harness/engine failTurn):
+        // tool.loop_detected, engine.error, turn.completed loop_detected.
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "go"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"turnId": "t1"})));
+        t.apply_envelope(&env(
+            "tool.loop_detected",
+            serde_json::json!({
+                "turnId": "t1",
+                "reason": "identical_calls",
+                "toolName": "bash",
+                "count": 3,
+                "message": "repeated identical failing tool calls"
+            }),
+        ));
+        t.apply_envelope(&env(
+            "engine.error",
+            serde_json::json!({"message": "tool loop detected: identical_calls", "code": "blocked"}),
+        ));
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"turnId": "t1", "stopReason": "loop_detected"}),
+        ));
+        let titles: Vec<&str> = t.messages.iter().map(|m| m.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["You", "Loop guard", "Notice", "Turn stopped by loop guard"]
+        );
+        let guard = &t.messages[1];
+        assert_eq!(guard.badge, "blocked");
+        assert_eq!(guard.body, "Repeated identical failing tool calls · bash, 3 times");
+        assert_eq!(crate::turn_failure::stop_reason_of(&guard.key), None);
+    }
+
+    #[test]
+    fn loop_detected_with_sparse_payload_degrades() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("tool.loop_detected", serde_json::json!({})));
+        assert_eq!(t.messages.len(), 1);
+        assert_eq!(t.messages[0].body, "Repeated failing tool calls");
+    }
+
+    #[test]
+    fn failure_marker_does_not_steal_turn_labels() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env_at(
+            "user.message",
+            serde_json::json!({"text": "slow"}),
+            "2026-10-26T06:00:00Z",
+        ));
+        t.apply_envelope(&env_at(
+            "text.delta",
+            serde_json::json!({"text": "partial"}),
+            "2026-10-26T06:01:00Z",
+        ));
+        t.apply_envelope(&env_at(
+            "turn.completed",
+            serde_json::json!({"stopReason": "timeout"}),
+            "2026-10-26T06:04:12Z",
+        ));
+        let answer = t.messages.iter().find(|m| m.role == Role::Strike).unwrap();
+        let marker = t.messages.last().unwrap();
+        assert_eq!(marker.title, "Turn timed out");
+        assert_eq!(t.elapsed_for(answer.id), Some("took 4:12"));
+        assert_eq!(t.elapsed_for(marker.id), None);
+    }
+
+    #[test]
+    fn reasoning_attaches_around_tools_and_turn_end() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "fix it"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"sessionId": "s1"})));
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"sessionId": "s1", "text": "check the file"})));
+        assert_eq!(t.reasoning.live(), "check the file");
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "c1", "name": "read", "args": {"path": "a.rs"}}),
+        ));
+        let tool_id = t.messages.last().unwrap().id;
+        assert_eq!(t.reasoning.for_message(tool_id), Some("check the file"));
+        t.apply_envelope(&env("tool.end", serde_json::json!({"callId": "c1", "name": "read", "output": "x"})));
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"text": "now answer"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "Fixed."})));
+        let answer = t.messages.last().unwrap().clone();
+        assert_eq!(answer.role, Role::Strike);
+        assert_eq!(t.reasoning.for_message(answer.id), Some("now answer"));
+        // Mid-answer reasoning appends to the answer's own entry.
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"text": " double-check"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": " Done."})));
+        assert_eq!(t.reasoning.for_message(answer.id), Some("now answer double-check"));
+        // Trailing reasoning settles on the turn's last line at turn end.
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"text": " wrap"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        assert_eq!(t.reasoning.live(), "");
+        assert_eq!(t.reasoning.for_message(answer.id), Some("now answer double-check wrap"));
+        // A child's reasoning on this stream is not this turn's.
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"sessionId": "child", "text": "nope"})));
+        assert_eq!(t.reasoning.live(), "");
+        assert!(t.messages.iter().all(|m| !m.body.contains("check the file")));
+    }
+
+    #[test]
+    fn no_reasoning_leaves_log_empty() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "hi"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "hello"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        assert!(t.reasoning.is_empty());
+    }
+
     #[test]
     fn provider_auth_error_renders_actionable_notice() {
         let mut t = Transcript::new();
@@ -2467,6 +3156,42 @@ mod tests {
     }
 
     #[test]
+    fn child_escalated_renders_a_line() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "child.escalated",
+            serde_json::json!({
+                "sessionId": "abcd1234ef",
+                "name": "scout",
+                "kind": "stall",
+                "reason": "no progress for 300s",
+                "action": "finalizing",
+                "terminalStatus": "blocked"
+            }),
+        ));
+        let line = t
+            .messages
+            .iter()
+            .find(|m| m.badge == "escalated")
+            .expect("escalation line");
+        assert_eq!(line.role, Role::Notice);
+        assert_eq!(line.title, "scout escalated");
+        assert_eq!(
+            line.body,
+            "Stalled: no progress for 300s. Action: finishing with a handoff."
+        );
+
+        // No name: fall back to the short session id.
+        t.apply_envelope(&env(
+            "child.escalated",
+            serde_json::json!({"sessionId": "abcd1234ef", "kind": "tokens", "reason": "", "action": "interrupted"}),
+        ));
+        let last = t.messages.last().unwrap();
+        assert_eq!(last.title, "abcd1234 escalated");
+        assert_eq!(last.body, "Token budget. Action: stopped.");
+    }
+
+    #[test]
     fn orphan_child_row_swept_at_turn_end() {
         let mut t = Transcript::new();
         t.apply_envelope(&env(
@@ -2683,8 +3408,14 @@ mod tests {
             serde_json::json!({"text": " to exercise the bash tool and the permission prompt."}),
         ));
         t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        // #1372: reasoning is opt-in and quarantined — never in a
+        // message body, copy text or the markdown export; it sits in the
+        // side log, attached to the answer it preceded.
         assert!(t.messages.iter().all(|m| !m.body.contains("secret chain")));
+        assert!(t.messages.iter().all(|m| !m.copy_text.contains("secret chain")));
+        assert!(!t.to_markdown().contains("secret chain"));
         let strike = t.messages.iter().find(|m| m.role == Role::Strike).unwrap();
+        assert_eq!(t.reasoning.for_message(strike.id), Some("secret chain"));
         assert!(!strike.body.contains("Tip:"));
         assert!(strike.body.contains("You said: hello"));
         assert_eq!(strike.keep_events, 5);
@@ -3074,6 +3805,81 @@ mod tests {
         assert!(matches!(blocks[0], Block::Paragraph(_)));
     }
 
+    #[test]
+    fn session_rewound_drops_the_last_user_turn() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "first"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "one"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "secnod typo"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "two"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        let last = t.last_user_id().expect("last user");
+        assert_eq!(t.sent_text(last).as_deref(), Some("secnod typo"));
+        // A child-lineage rewind leaves the root transcript alone.
+        t.apply_envelope(&env(
+            "session.rewound",
+            serde_json::json!({"parentSessionId": "root", "depth": 1}),
+        ));
+        assert_eq!(t.messages.len(), 4);
+        t.apply_envelope(&env("session.rewound", serde_json::json!({"removed": 2})));
+        let bodies: Vec<&str> = t.messages.iter().map(|m| m.body.as_str()).collect();
+        assert_eq!(bodies, vec!["first", "one"]);
+        assert_ne!(t.last_user_id(), Some(last));
+        // The resend lands as a fresh turn after the kept history.
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "second fixed"})));
+        assert_eq!(t.messages.last().map(|m| m.body.as_str()), Some("second fixed"));
+    }
+
+    #[test]
+    fn session_rewound_on_empty_transcript_is_a_no_op() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("session.rewound", serde_json::json!({})));
+        assert!(t.messages.is_empty());
+        assert_eq!(t.last_user_id(), None);
+    }
+
+    // #1373: per-turn verification badge.
+    fn verify_turn(t: &mut Transcript, prompt: &str, done: Value) -> u32 {
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": prompt})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "answer"})));
+        let last = t.messages.last().unwrap().id;
+        t.apply_envelope(&env("turn.completed", done));
+        last
+    }
+
+    #[test]
+    fn verification_badge_stamps_final_line_from_payload_only() {
+        use crate::turn_verify::VerifyState;
+        let mut t = Transcript::new();
+        let a = verify_turn(
+            &mut t,
+            "one",
+            serde_json::json!({"verification": {"passed": true, "claimed": true, "verified": true}}),
+        );
+        let b = verify_turn(
+            &mut t,
+            "two",
+            serde_json::json!({"verification": {"passed": false, "claimed": true, "verified": false}}),
+        );
+        let c = verify_turn(
+            &mut t,
+            "three",
+            serde_json::json!({"verification": {"passed": false, "claimed": false, "verified": true}}),
+        );
+        let d = verify_turn(&mut t, "four", serde_json::json!({"stopReason": "end_turn"}));
+        assert_eq!(t.verify_for(a).unwrap().state, VerifyState::Verified);
+        assert_eq!(t.verify_for(b).unwrap().state, VerifyState::Claimed);
+        assert_eq!(t.verify_for(c).unwrap().state, VerifyState::Unverified);
+        assert!(t.verify_for(d).is_none(), "no payload, no badge");
+        assert_eq!(t.turn_verify.len(), 3);
+        // Only the final line of each turn carries it.
+        for m in &t.messages {
+            if ![a, b, c].contains(&m.id) {
+                assert!(t.verify_for(m.id).is_none(), "{}", m.id);
+            }
+        }
+    }
     // #1374: live tool.output tail.
     fn begin(t: &mut Transcript, call: &str) -> u32 {
         t.apply_envelope(&env(
@@ -3141,5 +3947,42 @@ mod tests {
         t.settle_orphaned_tools();
         assert_eq!(t.messages[0].badge, NO_RESULT_BADGE);
         assert_eq!(t.tail_for(a).unwrap().text, "last words\n");
+    }
+
+    // #1365: per-turn file-change summary.
+    fn files_turn(t: &mut Transcript, prompt: &str, done: Value) -> u32 {
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": prompt})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "answer"})));
+        let last = t.messages.last().unwrap().id;
+        t.apply_envelope(&env("turn.completed", done));
+        last
+    }
+
+    #[test]
+    fn file_summary_attaches_to_its_own_turn() {
+        let mut t = Transcript::new();
+        let a = files_turn(
+            &mut t,
+            "one",
+            serde_json::json!({"files": [
+                {"path": "a.go", "kind": "update"},
+                {"path": "b.go", "kind": "create"}
+            ]}),
+        );
+        let b = files_turn(&mut t, "two", serde_json::json!({"files": []}));
+        let c = files_turn(
+            &mut t,
+            "three",
+            serde_json::json!({"files": [{"path": "old.go", "kind": "delete"}]}),
+        );
+        assert_eq!(t.files_for(a).unwrap().label(), "2 files changed · 1 updated, 1 created");
+        assert!(t.files_for(b).is_none(), "empty files renders nothing");
+        assert_eq!(t.files_for(c).unwrap().deleted, vec!["old.go"]);
+        assert_eq!(t.turn_files.len(), 2);
+        for m in &t.messages {
+            if m.id != a && m.id != c {
+                assert!(t.files_for(m.id).is_none(), "{}", m.id);
+            }
+        }
     }
 }

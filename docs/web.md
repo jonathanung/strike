@@ -120,6 +120,8 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/sessions` | **yes** | Durable session list (roots only) + `liveId` |
 | `GET`/`POST` | `/v1/diag` | **yes** | Redacted prompt/config diagnostic bundle (JSON download; live only; `?root=` when multi-root). Bootstrap capability `diag`. **503** when unsupported (attach-only / no live). |
 | `GET`/`POST` | `/v1/init` | **yes** | Project init (#1581): `GET` previews `{path, exists}` for AGENTS.md in the root's working directory (`?root=` when multi-root); `POST` writes it via host `ProjectInit`. **409** when AGENTS.md already exists (never overwrites; TUI `/init` confirms replace). **403** attach-only / `--read-only`; **501** without the host service; **404** unknown `?root=`. Bootstrap capability `projectInit`. |
+| `GET` | `/v1/container/status` | no | Container posture (#1584, read-only): `{posture, postureSource (env\|dials), describe, ladder[{label, describe, active}], permissionMode, sandboxMode, workspace, configScope (project\|global), runtime{engine, found, available, error}, container{name, id, running, status, image, compatible, reason, haveHash, wantHash, sessionModel}, drift{state (matches\|drifted\|not-ejected\|error), path, have, want, error}, detect, errors}` for the live root's directory (`?root=`), else the daemon workdir. Same calls as `strike container status\|drift\|detect`. The workspace's own container config (which names the engine binary) is read only when the workspace is trusted (#1352). No runtime is a normal host-mode answer, not an error. **501** with no workspace; **404** unknown `?root=`. Bootstrap capability `container`; cockpit Settings → Isolation. |
+| `GET`/`POST` | `/v1/workspace/trust` | **yes** | Workspace trust (#1781, on top of #1352): `GET` returns `{root, trusted, trustedAt, untrustable, summary, surfaces, mutable, restartRequired}` for the live root's workspace (`?root=` when multi-root); `surfaces` is `config.EnumerateProjectSurfaces` (names + command lines, never env/headers). `POST {"action":"grant"\|"revoke"}` updates `~/.strike/workspace-trust.json`; the workspace always comes from the live root, never the body. Trust takes effect on the next `strike serve` start (`restartRequired`). **422** home / filesystem root; **403** attach-only / `--read-only`; **501** without a store path; **404** unknown `?root=`. Bootstrap capability `workspaceTrust`. The cockpit shows an "Untrusted workspace" badge and a trust card (Grant / Keep untrusted). |
 | `GET` | `/v1/sessions` | **yes** | Session list + `liveId` |
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
 | `GET` | `/v1/sessions/{id}/children` | **yes** | Child/subagent sessions under a root |
@@ -993,6 +995,13 @@ Response: `{ mode, state, current?, latest?, available, message?, error?, checke
 `current` (only after a successful check), `failed` (offline, rate limit, API
 error — never reported as up to date), or `unknown`. Missing capability returns
 501.
+
+The cockpit calls the route once per gateway after bootstrap reports
+`capabilities.updateCheck`, and again from **Settings → Updates** (dial change
+or *Check now*). The Updates section edits the `autoupdate` dial and states the
+result (`off`, available, up to date, or the failure reason). An `available`
+result adds one notification-centre row keyed by the release; dismissing it
+holds until a newer release. The web never installs.
 The cockpit Settings dialog loads `GET`, edits sections, and saves via `PATCH`.
 Browser color scheme (auto/dark/light) is local-only (`data-appearance` +
 `localStorage`), not a host config key.
@@ -1057,6 +1066,15 @@ A loop object carries `id`, `interval`, `intervalMs`, `job`, `runs`,
 an ordinary `user.input`: while a turn is busy it waits on the same input
 queue as a queued send, and it counts as a normal turn for usage, budgets,
 and guardrails. `GET /v1/status` carries `loops`, the active count.
+
+**Cockpit.** The composer takes the same grammar: `/loop <interval> <job>`,
+`/loop` or `/loop list`, `/loop stop [id]` (no id stops all). The line is
+handled against these routes and is never sent as a prompt; the daemon's
+error sentence shows under the composer. Active loops show as rows in the
+queue pane (id, interval, job, run count, next fire, Stop). The rows poll
+the list route every 5 s, since loop state is not on the event stream yet.
+Firings appear in the transcript as plain user prompts: `user.input` carries
+no loop id, so there is no per-firing loop badge.
 
 ### Schedules
 
@@ -1138,6 +1156,13 @@ Permission asks appear as `permission.asked` events; resolve with
 | `PUT` | `/v1/knowledge` | **yes** | Pin (`{path,note?,author?,scope?}`). Notes are scrubbed. Blocked in attach-only. |
 | `DELETE` | `/v1/knowledge` | **yes** | Unpin (`{path,scope?}`). Blocked in attach-only. |
 | `GET` | `/v1/memory/export` | mode | Download portable `strike-memory.json` (TUI format) |
+| `GET` | `/v1/backup/export` | mode | Download `strike-backup.json`: whole-gateway archive (sessions, memory, schedules, non-secret settings) with manifest, sha256 per section, and named exclusions (#1339) |
+| `POST` | `/v1/backup/restore` | live (dry run: mode) | Body is the archive. `?dryRun=1` reports create/skip/copy per record without writing; otherwise restores through each store. Never overwrites: identical records skip, differing ones restore as copies |
+| `GET` | `/v1/preview/ports` | mode | Live preview (#1341): listening loopback TCP ports on the gateway host (`detection: proc` on Linux, `unsupported` elsewhere). The gateway's own port is omitted and reported as `self`. |
+| `GET` | `/v1/preview` | mode | The selected preview target `{selected, port, origin, path}`. `?probe=1` adds reachability and framing (`ok`/`refused`). |
+| `PUT` | `/v1/preview` | mode | Select a port (`{port}`; there is no host field). Returns the target plus probe. The proxy serves only this port. |
+| `DELETE` | `/v1/preview` | mode | Stop proxying. |
+| any | `/preview/<key>/…` | key | Proxies to `127.0.0.1:<selected port>`. The per-port random key is the capability (the cookie is SameSite=Strict and the frame is sandboxed). Gateway `Authorization`/`Cookie` are stripped, app `Set-Cookie` is dropped, and the response gets a `CSP sandbox` (no `allow-same-origin`) with `frame-ancestors 'self'`. Unselected ports and wrong keys get 404. |
 | `POST` | `/v1/memory/import` | **yes** | Import (`{path}` or `{data}`, `replace?`); blocked in attach-only |
 | `POST` | `/v1/issues` | **yes** | Create issue (`{title,body?}`); blocked in attach-only |
 | `POST` | `/v1/issues/{id}/close` | **yes** | Close issue; blocked in attach-only |
@@ -1170,8 +1195,11 @@ writes remain coherent via the underlying stores; browser reads are race-safe.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/v1/files/search` | mode | Workspace file search (`q`, `limit`≤50) for `@file` completion; root-scoped via `host.Files.SearchFiles` |
+| `GET` | `/v1/files/grep` | mode | Search in files (#1406): plain-text, case-insensitive substring search (`q`, `limit` default 200, ≤500). JSON: `matches` (`path`, 1-based `line`, trimmed `snippet`), `capped`, `filesScanned`. Same index and root scoping as `/v1/files/search` (`.gitignore` honored, `.git` and noise dirs skipped) plus the allowed-root ceiling; symlinks and binary files (NUL in the first 8000 bytes) skipped. Walk caps: 5000 files, 1 MiB per file, 64 MiB per search, 20 matches per file, 5 s; any cap hit sets `capped: true`. 501 when the host has no content search. |
 | `GET` | `/v1/search` | **yes** | Global transcript search (#1355): `q` (2–200 chars) matched case-insensitively against every root session's user and assistant message text (tool I/O, reasoning and child streams excluded; text redacted via `pkg/redact` first). On-demand scan, newest session first, one hit per session `{id, title, workspaceId, updatedAt, role, snippet, matchStart, matchEnd, matches}`; at most 50 hits (`capped`), 4 s scan budget (`partial`), `skipped` counts malformed lines. **400** bad `q`; **501** without a session dir |
+| `GET` | `/v1/sessions/{id}/reference` | mode | Size of an `@session:<id>` reference (#1550): `chars` of the exact quoted block the daemon attaches (summary + last 10 turns), `tokens` (~4 chars/token, `estimated`), `turns`, `omitted`, `hasSummary`, `self`. 404 for a missing/pruned session. Display only. |
 | `GET` | `/v1/file/view` | mode | Document read (`path`). JSON: content, sha256, mtimeUnixNano, binary, truncated, writable, writeBlock. Work-root confined; symlinks rejected. An explicit allowed-root ceiling (workspace `AllowedRoots`, when the registry grows one) also rejects paths outside that list. |
+| `GET` | `/v1/file/raw` | mode | One workspace file's bytes (`path`) for the document viewer's image/binary view (#1393). Same confinement as `/v1/file/view` (work root, symlinks rejected, allowed-root ceiling). Allowlisted images (png, jpeg, gif, webp, avif, bmp, ico, svg) are served `inline` with their MIME; everything else as `application/octet-stream` `attachment`. Capped at 1 MiB (the document-view cap): **413** `too_large` past it. Responses carry `Content-Security-Policy: default-src 'none'; …; sandbox` and `nosniff`. Normal `/v1` auth (bearer or the HttpOnly cookie); query tokens are refused. |
 | `PUT` | `/v1/file` | **yes** | Save one existing text file (`path`, `content`, `sha256`, `mtimeUnixNano`). 409 `conflict` when the hash or mtime moved; the body has the new revision, not the file text. Plan mode and edit/write deny rules return 403. Does not create files. Attach-only and read-only reject. |
 | `POST` | `/v1/history` | **yes** | Enqueue one prompt (`{prompt}`) into project history; blocked in attach-only. Web client calls once per accepted `user.input` (not on replay). |
 
