@@ -667,7 +667,7 @@ pub fn TranscriptPane(
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, r.tail, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, r.verify, r.tail, fold_open, folds)}
                                 }
                             })
                         }
@@ -813,6 +813,7 @@ struct RowData {
     current: Option<crate::transcript_find::TMatch>,
     elapsed: Option<String>,
     usage: Option<(String, String)>,
+    verify: Option<crate::turn_verify::TurnVerify>,
     tail: Option<crate::tool_tail::ToolTail>,
 }
 
@@ -841,6 +842,7 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
         usage: t
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
+        verify: t.verify_for(msg.id).cloned(),
         tail: t.tail_for(msg.id).cloned(),
     })
 }
@@ -1052,6 +1054,7 @@ fn message_view(
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
     turn_usage: Option<(String, String)>,
+    turn_verify: Option<crate::turn_verify::TurnVerify>,
     tail: Option<crate::tool_tail::ToolTail>,
     fold_open: bool,
     folds: FoldState,
@@ -1162,6 +1165,9 @@ fn message_view(
                 {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
                 {turn_elapsed.clone().map(|label| view! { <span class="turn-elapsed" title="Turn elapsed time">{label}</span> })}
                 {turn_usage.clone().map(|(label, detail)| view! { <span class="turn-usage" title=detail>{label}</span> })}
+                {turn_verify.clone().map(|v| view! {
+                    <span class="turn-verify" data-verify=v.state.label() title=v.detail.clone() aria-label=v.detail>{v.state.label()}</span>
+                })}
                 {diff.clone().map(|d| view! {
                     <span class="sx-diff" aria-label=format!("+{} -{}", d.added, d.deleted)>
                         <span class="sx-add">{format!("+{}", d.added)}</span>

@@ -455,6 +455,33 @@ try {
     join(sessionsDir, "tail-session.meta.json"),
     JSON.stringify({ title: "Tool tail replay" }) + "\n",
   );
+  // Verification badge (#1373) fixture: one turn per state plus a turn
+  // with no verification payload, which must render no badge.
+  const verifyTurn = (n, text, verification) =>
+    envLine("user.message", `2026-10-28T06:0${n}:00Z`, { text: `verify prompt ${n}` }) +
+    envLine("text.delta", `2026-10-28T06:0${n}:05Z`, { text }) +
+    envLine(
+      "turn.completed",
+      `2026-10-28T06:0${n}:10Z`,
+      verification ? { stopReason: "end_turn", verification } : { stopReason: "end_turn" },
+    );
+  const verifySession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-28T06:00:00Z" }) +
+    "\n" +
+    verifyTurn(1, "answer gated", { passed: true, claimed: true, verified: true, summary: "go test passed" }) +
+    verifyTurn(2, "answer claimed", { passed: false, claimed: true, verified: false }) +
+    verifyTurn(3, "answer failed", {
+      passed: false,
+      claimed: false,
+      verified: true,
+      checks: [{ kind: "cmd", value: "go test ./...", passed: false }],
+    }) +
+    verifyTurn(4, "answer ungated", null);
+  await writeFile(join(sessionsDir, "verify-session.jsonl"), verifySession);
+  await writeFile(
+    join(sessionsDir, "verify-session.meta.json"),
+    JSON.stringify({ title: "Verification replay" }) + "\n",
+  );
   const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
     throw new Error(`content search ${found.status} ${found.text.slice(0, 300)}`);
@@ -1759,6 +1786,51 @@ try {
     "font and density",
   );
 
+  // #1583: Settings → Updates shows the effective autoupdate dial, `off`
+  // persists and the route answers "off" (no probe), and the row never
+  // claims "up to date" without a successful check.
+  await waitUntil(
+    `(() => {
+      const sec = document.querySelector('[data-section="updates"]');
+      const notify = sec?.querySelector('input[data-autoupdate="notify"]');
+      return !!notify && notify.checked && !notify.disabled && !!sec.querySelector(".update-status")?.textContent;
+    })()`,
+    "updates section shows the effective notify dial",
+  );
+  const updateRoute = async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/update`, { headers: { Authorization: `Bearer ${token}` } });
+    return { status: res.status, body: res.status === 200 ? await res.json() : null };
+  };
+  const updateCap = (await updateRoute()).status === 200;
+  await evaluate(`document.querySelector('input[data-autoupdate="off"]').click()`);
+  await waitUntil(
+    `(() => {
+      const off = document.querySelector('input[data-autoupdate="off"]');
+      const line = document.querySelector('[data-section="updates"] .update-status')?.textContent || "";
+      return off.checked && !off.disabled && (${updateCap} ? line.includes("Checks are off") : true);
+    })()`,
+    "autoupdate off saved",
+  );
+  {
+    const settings = await (await fetch(`http://127.0.0.1:${port}/v1/settings`, { headers: { Authorization: `Bearer ${token}` } })).json();
+    if (settings.autoupdateEffective !== "off") {
+      throw new Error(`autoupdate off did not persist: ${JSON.stringify(settings.autoupdateEffective)}`);
+    }
+    if (updateCap) {
+      const r = await updateRoute();
+      if (r.body?.state !== "off") throw new Error(`update route with dial off: ${JSON.stringify(r)}`);
+    }
+  }
+  await evaluate(`document.querySelector('input[data-autoupdate="notify"]').click()`);
+  await waitUntil(
+    `(() => {
+      const n = document.querySelector('input[data-autoupdate="notify"]');
+      const line = document.querySelector('[data-section="updates"] .update-status')?.textContent || "";
+      return n.checked && !n.disabled && !line.includes("Checks are off");
+    })()`,
+    "autoupdate back to notify",
+  );
+
   await waitUntil(`(() => {
     if (document.querySelector(".gw-pop")) return true;
     if (!document.querySelector('[data-nav="palette-dialog"]')) {
@@ -3060,16 +3132,25 @@ try {
     throw new Error(`side chat shell did not boot ${JSON.stringify(booted)}`);
   }
 
-  const seeded = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+  // The seed carries an outbox client message id (#1325); the retry below
+  // must be acknowledged as a duplicate and never start a second turn.
+  const seedInit = {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      "X-Strike-Client-Message-Id": "smoke-seed-1325",
     },
     body: JSON.stringify({ type: "user.input", data: { text: "read the makefile" } }),
-  });
+  };
+  const seeded = await fetch(`http://127.0.0.1:${port}/v1/ops`, seedInit);
   if (!seeded.ok) {
     throw new Error(`seed user.input ${seeded.status} ${await seeded.text()}`);
+  }
+  const seedRetry = await fetch(`http://127.0.0.1:${port}/v1/ops`, seedInit);
+  const seedRetryBody = await seedRetry.text();
+  if (seedRetry.status !== 200 || !seedRetryBody.includes('"duplicate":true')) {
+    throw new Error(`outbox retry was not deduped: ${seedRetry.status} ${seedRetryBody}`);
   }
 
   await evaluate(`document.querySelector(".side-chat-open-activity").click()`);
@@ -4549,6 +4630,59 @@ try {
           v.quick,
         ...v,
       };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // Verification badge (#1373): resume the seeded session; each gated
+  // turn's final line carries the TUI label for its state, and the turn
+  // without a payload carries none.
+  let verifyClicked = "missing";
+  try {
+    await waitFor(
+      "verification badge resume row",
+      async () => {
+        verifyClicked = await evaluate(`(() => {
+          const row = document.querySelector('[data-session-id="verify-session"]');
+          const btn = row && row.querySelector(".ss-main");
+          if (!btn) return "missing";
+          btn.click();
+          return "clicked";
+        })()`);
+        return { ok: verifyClicked === "clicked", clicked: verifyClicked };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  } catch {
+    // reported below with the last observed state
+  }
+  if (verifyClicked !== "clicked") {
+    throw new Error(`verification badge resume click -> ${verifyClicked}`);
+  }
+  await waitFor(
+    "verification badges per turn state",
+    async () => {
+      const v = await evaluate(`(() => {
+        const badges = [...document.querySelectorAll(".turn-verify")].map((b) => ({
+          state: b.getAttribute("data-verify"),
+          text: b.textContent.trim(),
+          on: (b.closest("article")?.innerText || "").split("\\n").find((l) => l.startsWith("answer")) || "",
+        }));
+        const ungated = [...document.querySelectorAll("article")].find((a) =>
+          (a.innerText || "").includes("answer ungated"),
+        );
+        return {
+          badges: JSON.stringify(badges),
+          ungatedFound: Boolean(ungated),
+          ungatedBadge: Boolean(ungated && ungated.querySelector(".turn-verify")),
+        };
+      })()`);
+      const want = JSON.stringify([
+        { state: "verified", text: "verified", on: "answer gated" },
+        { state: "claimed", text: "claimed", on: "answer claimed" },
+        { state: "unverified", text: "unverified", on: "answer failed" },
+      ]);
+      return { ok: v.badges === want && v.ungatedFound && !v.ungatedBadge, ...v };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
