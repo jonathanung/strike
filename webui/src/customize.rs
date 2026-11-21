@@ -931,7 +931,10 @@ pub fn CustomizePane(
                                     <span class="cz-row-title">{title}</span>
                                     <span class="badge">{origin_label(&origin)}</span>
                                     <span class="cz-row-meta">{meta}</span>
-                                    {used.map(|text| view! { <span class="cz-row-meta cz-row-usage" data-cz-usage=text.clone()>{text}</span> })}
+                                    {used.map(|text| {
+                                        let attr = text.clone();
+                                        view! { <span class="cz-row-meta cz-row-usage" data-cz-usage=attr>{text}</span> }
+                                    })}
                                 </button>
                             }
                         }).collect_view().into_any()
