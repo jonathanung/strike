@@ -62,3 +62,26 @@
 }
 .review-summary { flex: 1 1 16em; }
 /* feature:pre-push-review end */
+
+/* feature:security-review begin */
+/* Security mode (#1620): mode toggle, verification groups, dismissals. */
+.review-branch-mode { display: flex; gap: var(--space-2); font-size: var(--type-sm); color: var(--ink); }
+.review-branch-mode label { display: inline-flex; gap: var(--space-1); align-items: center; }
+.review-fix,
+.review-verify-reason { flex-basis: 100%; color: var(--muted); font-size: var(--type-sm); }
+.review-not-verified summary,
+.review-suppressed summary { color: var(--muted); font-size: var(--type-sm); cursor: pointer; }
+.review-dismiss { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
+.review-dismiss-form { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
+.review-dismiss-form input[type="text"] {
+  min-width: 14em;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-1);
+  font: inherit;
+}
+.review-dismiss-form input[type="text"]:focus-visible { outline: 1px solid var(--border-focus); outline-offset: 1px; }
+.review-suppressions { display: flex; flex-direction: column; gap: var(--space-1); }
+/* feature:security-review end */
