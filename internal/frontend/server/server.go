@@ -218,6 +218,9 @@ type Server struct {
 	// notifyOnce lazily opens the redacted notification log under SessionDir.
 	notifyOnce sync.Once
 	notifyLog  *notifyLog
+	// pushOnce lazily opens the Web Push subscription store (#1564).
+	pushOnce  sync.Once
+	pushStore *pushStore
 
 	// tokenHash is the sha256 of the daemon token file last observed.
 	// A change appends a token-rotation audit entry. The token is not stored.
@@ -315,6 +318,7 @@ func (s *Server) Handler() http.Handler { return s.http.Handler }
 // ListenAndServe binds and serves until the server is closed.
 func (s *Server) ListenAndServe() error {
 	go s.warmStaticGzip()
+	go s.runPush()
 	return s.http.ListenAndServe()
 }
 
@@ -322,6 +326,7 @@ func (s *Server) ListenAndServe() error {
 func (s *Server) Serve(ln net.Listener) error {
 	s.http.Addr = ln.Addr().String()
 	go s.warmStaticGzip()
+	go s.runPush()
 	return s.http.Serve(ln)
 }
 
@@ -654,6 +659,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/notifications", s.handleNotifications)
 	s.mux.HandleFunc("GET /v1/notifications/stream", s.handleNotificationStream)
 	s.mux.HandleFunc("PUT /v1/notifications/prefs", s.handleNotificationPrefs)
+	// Web Push (#1564): VAPID public key and browser push subscriptions.
+	s.mux.HandleFunc("GET /v1/notifications/push-key", s.handlePushKey)
+	s.mux.HandleFunc("POST /v1/notifications/push-subscriptions", s.handlePushSubscribe)
+	s.mux.HandleFunc("DELETE /v1/notifications/push-subscriptions", s.handlePushUnsubscribe)
 	s.mux.HandleFunc("POST /v1/notifications/seen", s.handleNotificationSeen)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
 	s.mux.HandleFunc("GET /v1/terminals", s.handleTerminalsList)

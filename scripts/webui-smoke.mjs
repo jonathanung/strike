@@ -238,6 +238,30 @@ try {
       throw new Error(`second client read state = ${JSON.stringify(other.seen)} latest=${latest}`);
     }
   }
+  // #1564: Web Push registry. No real push service is contacted: the https
+  // endpoint below is never reachable and is removed straight away.
+  {
+    const authed = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const base = `http://127.0.0.1:${port}/v1/notifications`;
+    const keyRes = await fetch(`${base}/push-key`, { headers: authed });
+    const key = keyRes.status === 200 ? (await keyRes.json()).publicKey : "";
+    if (!/^[A-Za-z0-9_-]{86,88}$/.test(key || "")) throw new Error(`push-key ${keyRes.status} ${key}`);
+    const noAuth = await fetch(`${base}/push-key`);
+    if (noAuth.status !== 401) throw new Error(`push-key without token = ${noAuth.status}`);
+    // A real browser key pair is not needed for registry checks; reuse the
+    // daemon's own public key as a valid P-256 point.
+    const sub = (endpoint) => JSON.stringify({ endpoint, expirationTime: null, keys: { p256dh: key, auth: "BTBZMqHH6r4Tts7J_aSIgg" } });
+    const plain = await fetch(`${base}/push-subscriptions`, { method: "POST", headers: authed, body: sub("http://push.invalid/x") });
+    if (plain.status !== 400) throw new Error(`plain-http push endpoint accepted: ${plain.status}`);
+    const added = await fetch(`${base}/push-subscriptions`, { method: "POST", headers: authed, body: sub("https://push.invalid/smoke") });
+    if (added.status !== 201) throw new Error(`push subscribe ${added.status} ${await added.text()}`);
+    const status = await (await fetch(base, { headers: authed })).json();
+    if (!status.push || status.push.subscriptions !== 1 || JSON.stringify(status).includes("push.invalid")) {
+      throw new Error(`push status ${JSON.stringify(status.push)}`);
+    }
+    const removed = await fetch(`${base}/push-subscriptions`, { method: "DELETE", headers: authed, body: JSON.stringify({ endpoint: "https://push.invalid/smoke" }) });
+    if (removed.status !== 204) throw new Error(`push unsubscribe ${removed.status}`);
+  }
   const healthBody = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
   if (!healthBody.ok || !(healthBody.now > 0)) {
     throw new Error(`health missing now: ${JSON.stringify(healthBody)}`);

@@ -401,9 +401,21 @@ pruned to the 200-row window. Each browser keeps its own copy in
 load. Dismissing a row ("Clear read") stays per-browser. Not built yet:
 collapsing consecutive same-kind, same-session rows into one counted row.
 
-Not built: a third-party web-push service, and an operating-system banner
-while the browser process is quit. Nothing can wake a quit browser without
-that push service. The next open replays the daemon log into the centre.
+Web Push (#1564): Notification settings has a "Turn on push" toggle that
+asks the browser for permission, subscribes through `PushManager` (helper in
+`register.js`), and registers the subscription with
+`POST /v1/notifications/push-subscriptions` (`DELETE` removes it;
+`GET /v1/notifications/push-key` is the VAPID public key). When a new centre
+row would banner (same enabled / quiet hours / mute policy) and needs you —
+an approval or a blocked run — the daemon encrypts `{type, kind, href, tag}`
+(RFC 8291 aes128gcm, VAPID RFC 8292, standard library only) and posts it to
+each subscription. `sw.js` shows fixed text by kind; names, summaries, prompts
+and tool text are never sent. 404/410 from the push service prunes the
+subscription; `GET /v1/notifications` reports `push.lastResult` so the
+toggle can say a push failed. The VAPID key is `push/vapid.json` beside the
+session dir (0600). Unsupported browsers, blocked permission, and iOS
+without Home Screen install are named in the toggle. Not built yet:
+opt-in push for finished or failed runs.
 A gateway drop is detected by the page (the daemon cannot deliver "I am
 gone"); it is not a JSONL record.
 

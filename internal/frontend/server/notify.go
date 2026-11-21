@@ -77,6 +77,8 @@ type notificationsResponse struct {
 	Latest        int64          `json:"latest"`
 	// Seen is the daemon-side read state shared by every browser (#1392).
 	Seen NotifySeen `json:"seen"`
+	// Push is the Web Push delivery state for the prefs UI (#1564).
+	Push PushStatus `json:"push"`
 }
 
 type notifyState struct {
@@ -188,11 +190,16 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, prefs, latest := log.snapshot(since)
+	var push PushStatus
+	if p := s.pushes(); p != nil {
+		push = p.status()
+	}
 	writeJSON(w, http.StatusOK, notificationsResponse{
 		Notifications: items,
 		Prefs:         prefs,
 		Latest:        latest,
 		Seen:          log.seenState(),
+		Push:          push,
 	})
 }
 
