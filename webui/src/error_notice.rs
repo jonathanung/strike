@@ -33,10 +33,10 @@ pub fn ErrorNotice(
         let raw = message.get();
         copy_note.set(String::new());
         if info.get_untracked().internal {
-            leptos::logging::warn!("cockpit error: {raw}");
+            web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&format!("cockpit error: {raw}")));
         }
     });
-    let copy_details = move |_| {
+    let copy_details = move |_: web_sys::MouseEvent| {
         let raw = message.get_untracked();
         spawn_local(async move {
             let note = match crate::clipboard::copy_text(&raw).await {
