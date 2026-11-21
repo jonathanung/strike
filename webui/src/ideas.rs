@@ -1,15 +1,16 @@
 //! Ideas inbox page (#1323).
 //!
 //! Lists `GET /v1/suggestions` (proactive suggestions producers deposited)
-//! with Accept, Snooze and Dismiss, plus the inbox controls: muted sources
-//! and "never suggest this kind". Accept records the decision
+//! with Accept, Snooze and Dismiss, plus the inbox controls: muted sources,
+//! "never suggest this kind" and quiet hours (#1926). The open-count badge
+//! is a header slot (`header_badge`), beside the bell. Accept records the decision
 //! (`POST /v1/suggestions/{id}/accept`), opens a new session through the
 //! normal session-start path, and drafts the proposed prompt with its
 //! evidence in that session's composer. Nothing is sent or approved for
 //! the user: they read the draft and send it under the session's
 //! permission mode. View rules live in the `webui/ideas-inbox` crate.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -64,12 +65,44 @@ struct IdeaDto {
     evidence: Vec<EvidenceDto>,
 }
 
+/// Badge refresh period. The header mounts once per layout, so one slow
+/// poll keeps the count honest on every page without stacking timers.
+const BADGE_POLL_MS: i32 = 60_000;
+
+/// Producer quiet hours (#1926), daemon-local HH:MM. Same shape as the
+/// notification centre's.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct QuietHours {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_quiet_start")]
+    pub start: String,
+    #[serde(default = "default_quiet_end")]
+    pub end: String,
+}
+
+fn default_quiet_start() -> String {
+    "22:00".into()
+}
+
+fn default_quiet_end() -> String {
+    "07:00".into()
+}
+
+impl Default for QuietHours {
+    fn default() -> Self {
+        Self { enabled: false, start: default_quiet_start(), end: default_quiet_end() }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct IdeaPrefs {
     #[serde(default, rename = "mutedSources")]
     pub muted_sources: Vec<String>,
     #[serde(default, rename = "mutedKinds")]
     pub muted_kinds: Vec<String>,
+    #[serde(default, rename = "quietHours")]
+    pub quiet_hours: QuietHours,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -134,9 +167,24 @@ fn later(ms: i32, f: impl FnOnce() + 'static) {
     cb.forget();
 }
 
-// Open count for the rail badge. The page and the badge share it.
+// Open count for the header badge. The page and the badge share it.
 thread_local! {
     static OPEN_COUNT: Cell<Option<RwSignal<usize>>> = const { Cell::new(None) };
+    static HOST: RefCell<Option<(RwSignal<String>, RwSignal<String>)>> = const { RefCell::new(None) };
+}
+
+/// App installs the daemon base and token before the shell boots, so the
+/// header slot can fetch the count.
+pub fn set_host(base: RwSignal<String>, token: RwSignal<String>) {
+    HOST.with(|slot| *slot.borrow_mut() = Some((base, token)));
+}
+
+/// The header slot's render (registered in `shell/contrib/ideas.rs`).
+pub fn header_badge() -> AnyView {
+    match HOST.with(|slot| *slot.borrow()) {
+        Some((base, token)) => view! { <IdeasBadge base=base token=token /> }.into_any(),
+        None => view! { <span></span> }.into_any(),
+    }
 }
 
 fn set_open_count(n: usize) {
@@ -148,18 +196,19 @@ fn set_open_count(n: usize) {
     });
 }
 
-/// Rail badge: the open count, hidden at zero. It loads when the chat view
-/// mounts (so returning from any page refreshes it) and when the Ideas page
-/// reloads its list. No timer: a remounting component must not stack polls.
+/// Header badge: the open count, hidden at zero. It loads on mount, when
+/// the Ideas page reloads its list, and on a slow poll whose timer is
+/// cleared when the slot unmounts (desktop/phone switch), so polls never
+/// stack.
 #[component]
-pub fn IdeasBadge(base: RwSignal<String>, token: RwSignal<String>, mode: RwSignal<String>) -> impl IntoView {
+pub fn IdeasBadge(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoView {
     let open = RwSignal::new(0usize);
     OPEN_COUNT.with(|slot| slot.set(Some(open)));
     let refresh = move || {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             if let Ok(list) = get_json::<ListDto>(&b, &t, "/v1/suggestions").await {
-                open.set(list.open);
+                let _ = open.try_set(list.open);
             }
         });
     };
@@ -167,12 +216,27 @@ pub fn IdeasBadge(base: RwSignal<String>, token: RwSignal<String>, mode: RwSigna
         let _ = (base.get(), token.get());
         refresh();
     });
+    if let Some(win) = web_sys::window() {
+        let cb = Closure::<dyn FnMut()>::new(refresh);
+        let registered = win.set_interval_with_callback_and_timeout_and_arguments_0(
+            cb.as_ref().unchecked_ref(),
+            BADGE_POLL_MS,
+        );
+        cb.forget();
+        if let Ok(id) = registered {
+            on_cleanup(move || {
+                if let Some(win) = web_sys::window() {
+                    win.clear_interval_with_handle(id);
+                }
+            });
+        }
+    }
     move || match ideas_inbox::badge(open.get()) {
         None => view! { <span></span> }.into_any(),
         Some(text) => {
             let label = format!("{} open ideas", open.get());
             view! {
-                <button type="button" class="ideas-badge" data-ideas-badge="true" title=label.clone() aria-label=label on:click=move |_| mode.set("ideas".into())>
+                <button type="button" class="ideas-badge" data-ideas-badge="true" title=label.clone() aria-label=label on:click=move |_| { let _ = crate::shell::host::set_view("ideas"); }>
                     <span class="ideas-badge-label">"Ideas"</span>
                     <span class="badge">{text}</span>
                 </button>
@@ -286,7 +350,15 @@ pub fn IdeasPage(
     let save_prefs = move |next: IdeaPrefs| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
-            let body = json!({ "mutedSources": next.muted_sources, "mutedKinds": next.muted_kinds });
+            let body = json!({
+                "mutedSources": next.muted_sources,
+                "mutedKinds": next.muted_kinds,
+                "quietHours": {
+                    "enabled": next.quiet_hours.enabled,
+                    "start": next.quiet_hours.start,
+                    "end": next.quiet_hours.end,
+                },
+            });
             match put_json_value(&b, &t, "/v1/suggestions/prefs", body).await {
                 Ok(_) => note.set("Inbox controls saved.".into()),
                 Err(e) => error.set(format!("Saving inbox controls failed: {e}")),
@@ -432,6 +504,7 @@ pub fn IdeasPage(
             <details class="fold ideas-controls">
                 <summary>"Inbox controls"</summary>
                 <p class="hint">"Muted sources and kinds cannot deposit ideas."</p>
+                <QuietHoursForm prefs=prefs on_save=Callback::new(move |next: IdeaPrefs| save_prefs(next)) />
                 {move || {
                     let p = prefs.get();
                     if p.muted_sources.is_empty() && p.muted_kinds.is_empty() {
@@ -472,5 +545,43 @@ pub fn IdeasPage(
                 }}
             </details>
         </div>
+    }
+}
+
+/// Quiet hours for producers (#1926): while on, no new idea is deposited.
+/// Times are the daemon host's local clock.
+#[component]
+fn QuietHoursForm(prefs: RwSignal<IdeaPrefs>, on_save: Callback<IdeaPrefs>) -> impl IntoView {
+    let enabled = RwSignal::new(false);
+    let start = RwSignal::new(String::new());
+    let end = RwSignal::new(String::new());
+    Effect::new(move |_| {
+        let q = prefs.get().quiet_hours;
+        enabled.set(q.enabled);
+        start.set(q.start);
+        end.set(q.end);
+    });
+    let save = move |ev: web_sys::SubmitEvent| {
+        ev.prevent_default();
+        let mut next = prefs.get_untracked();
+        next.quiet_hours = QuietHours {
+            enabled: enabled.get_untracked(),
+            start: start.get_untracked(),
+            end: end.get_untracked(),
+        };
+        on_save.run(next);
+    };
+    view! {
+        <form class="ideas-quiet" data-ideas-quiet="true" on:submit=save>
+            <label class="ideas-quiet-toggle">
+                <input type="checkbox" prop:checked=move || enabled.get() on:change=move |ev| enabled.set(event_target_checked(&ev)) />
+                " Quiet hours: no new ideas between"
+            </label>
+            <input type="time" aria-label="Quiet hours start" required prop:value=move || start.get() on:input=move |ev| start.set(event_target_value(&ev)) />
+            <span>"and"</span>
+            <input type="time" aria-label="Quiet hours end" required prop:value=move || end.get() on:input=move |ev| end.set(event_target_value(&ev)) />
+            <button type="submit" class="secondary">"Save"</button>
+            <p class="hint">"Daemon host time. Ideas already in the inbox stay."</p>
+        </form>
     }
 }

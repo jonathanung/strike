@@ -838,6 +838,10 @@ func (s *Server) NotifyScriptRun(scheduleID, runID, name string, exitCode *int, 
 	if s == nil {
 		return
 	}
+	if failed {
+		// The scheduler producer (#1926): one Ideas row per failing schedule.
+		s.SuggestScriptRunFailure(scheduleID, runID, name, exitCode)
+	}
 	log := s.notifications()
 	note, ok := ScriptRunNote(scheduleID, runID, name, exitCode, failed, log.clock())
 	if !ok {
