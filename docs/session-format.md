@@ -556,6 +556,23 @@ Go `TurnSteered`.
 | `mode` | string |  |
 | `targetTurnId` | string | yes |
 
+#### `turn.steer_ack`
+
+Go `TurnSteerAck`.
+
+| Field | Type | omitempty |
+|---|---|---|
+| `sessionId` | string | yes |
+| `turnId` | string | yes |
+| `providerRequestId` | string | yes |
+| `attempt` | number | yes |
+| `parentSessionId` | string | yes |
+| `depth` | number | yes |
+| `targetTurnId` | string | yes |
+| `summary` | string | yes |
+| `conflict` | bool | yes |
+| `reason` | string | yes |
+
 #### `input.queued`
 
 Go `InputQueued`.

@@ -572,6 +572,14 @@ impl Transcript {
                 let mode = field_str(&data, "mode");
                 self.steer_acks.on_steered(&self.messages, &text, &mode);
             }
+            "turn.steer_ack" => {
+                let conflict = data.get("conflict").and_then(|c| c.as_bool()).unwrap_or(false);
+                self.steer_acks.on_steer_ack(
+                    &field_str(&data, "summary"),
+                    conflict,
+                    &field_str(&data, "reason"),
+                );
+            }
             "session.titled" => self.note_titled(&field_str(&data, "title")),
             "session.rewound" => {
                 // #1361: the engine dropped the last root user turn
@@ -649,6 +657,7 @@ impl Transcript {
             }
             "turn.completed" => {
                 self.assistant_open = false;
+                self.steer_acks.on_turn_completed();
                 self.attach_reasoning_to_last();
                 self.sweep_orphaned_at_turn_end(&field_str(&data, "turnId"));
                 self.absorb();

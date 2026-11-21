@@ -486,6 +486,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tools.NewEnterPlanMode(),
 		tools.NewExitPlanMode(),
 		tools.NewPhaseDone(),
+		tools.NewSteerAck(),
 	)
 	registry.Register(tool.NewToolSearch(registry))
 	frameStore := &tool.TUIFrameStore{}

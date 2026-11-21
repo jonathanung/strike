@@ -26,6 +26,7 @@ func eventPrototypes() []Event {
 		ElicitationRequested{},
 		ElicitationResolved{},
 		TurnSteered{},
+		TurnSteerAck{},
 		InputQueued{},
 		TurnCompleted{},
 		VerificationStarted{},

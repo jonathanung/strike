@@ -3415,6 +3415,30 @@
           "additionalProperties": true,
           "properties": {
             "data": {
+              "$ref": "#/$defs/TurnSteerAck"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "turn.steer_ack"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
               "$ref": "#/$defs/TurnSteered"
             },
             "time": {
@@ -6688,6 +6712,43 @@
           "type": "string"
         },
         "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "TurnSteerAck": {
+      "additionalProperties": true,
+      "description": "TurnSteerAck is the agent's own acknowledgement of a steer it just received: a one-line summary of what changed and, when the steer contradicts the in-flight plan, Conflict with a Reason. Emitted by the steer_ack tool at most once per applied steer; it never blocks the turn.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "conflict": {
+          "type": "boolean"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "targetTurnId": {
           "type": "string"
         },
         "turnId": {

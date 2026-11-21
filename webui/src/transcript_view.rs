@@ -872,7 +872,7 @@ struct RowData {
     reasoning: Option<String>,
     verify: Option<crate::turn_verify::TurnVerify>,
     files: Option<crate::turn_files::TurnFiles>,
-    steer: Option<crate::steer_ack::AckState>,
+    steer: Option<crate::steer_ack::SteerMark>,
     tail: Option<crate::tool_tail::ToolTail>,
 }
 
@@ -904,7 +904,7 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
         reasoning: t.reasoning.for_message(msg.id).map(str::to_owned),
         verify: t.verify_for(msg.id).cloned(),
         files: t.files_for(msg.id).cloned(),
-        steer: t.steer_acks.get(msg.id),
+        steer: t.steer_acks.mark(msg.id),
         tail: t.tail_for(msg.id).cloned(),
     })
 }
@@ -1134,7 +1134,7 @@ fn message_view(
     turn_usage: Option<(String, String)>,
     turn_verify: Option<crate::turn_verify::TurnVerify>,
     turn_files: Option<crate::turn_files::TurnFiles>,
-    steer: Option<crate::steer_ack::AckState>,
+    steer: Option<crate::steer_ack::SteerMark>,
     tail: Option<crate::tool_tail::ToolTail>,
     fold_open: bool,
     folds: FoldState,
@@ -1317,8 +1317,8 @@ fn message_view(
             } else {
                 view! { <p class="sx-body">{body.clone()}</p> }.into_any()
             }}
-            {steer.map(|ack| view! {
-                <p class="steer-ack" data-steer-state=ack.key() role="note">{ack.text()}</p>
+            {steer.map(|mark| view! {
+                <p class="steer-ack" data-steer-state=mark.key() role="note">{mark.text()}</p>
             })}
             {if !prose && !chips.is_empty() {
                 view! {

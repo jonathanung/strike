@@ -664,7 +664,8 @@ plan mode / plan agent / active workflow / active plan handoff → plan tools
 (`plan_write`/`plan_read`/`plan_delegate`, `enter_plan_mode`/`exit_plan_mode`/
 `phase_done`); any live or historical child → roster/messaging/ownership plus
 advanced `task`; two or more live children → team tools (`agent_broadcast`,
-`team_task`, `patch_collab`). Hard-denied tools stay omitted. Guidance source
+`team_task`, `patch_collab`); a steer applied this turn and not yet
+acknowledged → `steer_ack`. Hard-denied tools stay omitted. Guidance source
 tags include `+activate:<families>`.
 
 **Rollback / permanent default:** progressive disclosure (`deferTools` on) is

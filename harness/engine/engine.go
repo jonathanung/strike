@@ -600,6 +600,10 @@ type Engine struct {
 	// steerQueueFallback is set by the turn worker when a steer must become
 	// the next UserInput; Run drains it into pendingUserInputs.
 	steerQueueFallback *pendingUserInput
+	// unackedSteers is the FIFO of target turn ids of steers applied in the
+	// current turn that the agent has not acknowledged with steer_ack yet.
+	// Guarded by pendingSteerMu; cleared when the turn ends (#1860).
+	unackedSteers []string
 
 	// mailbox holds unread peer/team messages for this session. Delivery is
 	// at tool-round / turn boundaries (injectPendingMailbox /

@@ -206,6 +206,7 @@ type (
 	ElicitationRequested    = pub.ElicitationRequested
 	ElicitationResolved     = pub.ElicitationResolved
 	TurnSteered             = pub.TurnSteered
+	TurnSteerAck            = pub.TurnSteerAck
 	InputQueueItem          = pub.InputQueueItem
 	InputQueued             = pub.InputQueued
 	TurnCompleted           = pub.TurnCompleted

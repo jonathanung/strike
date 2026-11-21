@@ -1488,6 +1488,19 @@ type TurnSteered struct {
 	TargetTurnID string `json:"targetTurnId,omitempty"`
 }
 
+// TurnSteerAck is the agent's own acknowledgement of a steer it just received: a one-line summary of what changed and, when the steer contradicts the in-flight plan, Conflict with a Reason. Emitted by the steer_ack tool at most once per applied steer; it never blocks the turn.
+type TurnSteerAck struct {
+	Correlation
+	// TargetTurnID is the steered turn (same as the TurnSteered it answers).
+	TargetTurnID string `json:"targetTurnId,omitempty"`
+	// Summary is the agent's one-line direction change ("now doing X").
+	Summary string `json:"summary,omitempty"`
+	// Conflict is true when the steer contradicts the in-flight plan.
+	Conflict bool `json:"conflict,omitempty"`
+	// Reason explains the conflict (empty when Conflict is false).
+	Reason string `json:"reason,omitempty"`
+}
+
 // InputQueueItem is one user.input waiting for the active turn to finish.
 type InputQueueItem struct {
 	ID   string `json:"id"`
@@ -2215,6 +2228,7 @@ func (ElicitationRequested) isEvent()    {}
 func (ElicitationResolved) isEvent()     {}
 func (QuestionResolved) isEvent()        {}
 func (TurnSteered) isEvent()             {}
+func (TurnSteerAck) isEvent()            {}
 func (InputQueued) isEvent()             {}
 func (TurnCompleted) isEvent()           {}
 func (VerificationStarted) isEvent()     {}
