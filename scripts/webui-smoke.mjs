@@ -5189,6 +5189,80 @@ try {
     },
     { timeout: STEP_MS, interval: 250 },
   );
+  // Global transcript search (#1355): the palette opens the overlay; a
+  // query with no matches says so; a content match in a session shows a
+  // highlighted snippet; picking it opens that session and hands the
+  // query to find-in-transcript.
+  {
+    const api = await fetch(`http://127.0.0.1:${port}/v1/search?q=coral%20bookmark`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = await api.json();
+    if (!api.ok || !(body.hits || []).some((h) => h.id === "beta-session")) {
+      throw new Error(`global search API ${api.status} ${JSON.stringify(body).slice(0, 300)}`);
+    }
+    await runPalette("Search all sessions");
+    // The command takes an optional query, so the first Enter opens its
+    // argument prompt; a second Enter submits it empty and opens the overlay.
+    await evaluate(`(() => {
+      const input = document.querySelector('[data-nav="palette-dialog"] input');
+      input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+    await waitFor(
+      "global search overlay",
+      async () => ({ ok: (await evaluate(`!!document.querySelector("#gs-input")`)) === true }),
+      { timeout: STEP_MS, interval: 150 },
+    );
+    const gsSearch = async (q) => {
+      await evaluate(`(() => {
+        const input = document.querySelector("#gs-input");
+        const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+        proto.set.call(input, ${JSON.stringify(q)});
+        input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+        document.querySelector("[data-gs-submit]").click();
+        return true;
+      })()`);
+    };
+    await gsSearch("zzqx nothing matches this");
+    await waitFor(
+      "global search no-results state",
+      async () => {
+        const t = (await evaluate(`document.querySelector("[data-gs-status]")?.innerText || ""`)) || "";
+        return { ok: t.startsWith("No matches in"), t };
+      },
+      { timeout: WAIT_MS, interval: 200 },
+    );
+    await gsSearch("coral bookmark");
+    const hitInfo = await waitFor(
+      "global search hit with highlighted snippet",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const hit = document.querySelector('[data-gs-hit="beta-session"]');
+          return JSON.stringify({ found: !!hit, mark: hit?.querySelector("mark")?.textContent || "" });
+        })()`);
+        const v = JSON.parse(raw || "{}");
+        return { ok: v.found && v.mark.toLowerCase() === "coral bookmark", ...v };
+      },
+      { timeout: WAIT_MS, interval: 200 },
+    );
+    if (!hitInfo.found) throw new Error("global search hit missing");
+    await evaluate(`document.querySelector('[data-gs-hit="beta-session"]').click()`);
+    await waitFor(
+      "global search opens the session and hands off to find-in-transcript",
+      async () => {
+        const raw = await evaluate(`(() => JSON.stringify({
+          overlay: !!document.querySelector("#gs-input"),
+          selected: document.querySelector('[data-session-id][aria-selected="true"]')?.getAttribute("data-session-id") || "",
+          find: document.querySelector("#tf-search")?.value || "",
+        }))()`);
+        const v = JSON.parse(raw || "{}");
+        return { ok: !v.overlay && v.selected === "beta-session" && v.find === "coral bookmark", ...v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await evaluate(`document.querySelector("[data-tf-close]")?.click()`);
+  }
   // Search in files (#1406): seed a fixture dir under the daemon's work
   // dir, search from the Files-pane box, and check: matches grouped by
   // file with marked text, the no-results state, the capped state (per-

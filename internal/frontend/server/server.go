@@ -504,6 +504,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}/loops/{loopID}", s.handleSessionLoopStop)
 	// Session list organisation (pins, archive, folders, search). Not filesystem dirs.
 	s.mux.HandleFunc("GET /v1/session-list/search", s.handleSessionListSearch)
+	// Global transcript search across all root sessions (#1355).
+	s.mux.HandleFunc("GET /v1/search", s.handleGlobalSearch)
 	s.mux.HandleFunc("POST /v1/session-list/bulk", s.handleSessionListBulk)
 	s.mux.HandleFunc("POST /v1/session-list/folders", s.handleSessionListFolderCreate)
 	s.mux.HandleFunc("PATCH /v1/session-list/folders/{id}", s.handleSessionListFolderRename)
