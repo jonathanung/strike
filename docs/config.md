@@ -453,6 +453,33 @@ missing OS backend may run bash unsandboxed (with a one-shot warning). When
 `false`, non-off sandbox modes return `sandbox_denied` instead of silent
 degrade (#1030).
 
+**Sandbox runtime (`sandboxRuntime`):** `process` (default) | `microvm`.
+Orthogonal to `sandbox` (the filesystem posture): it picks *what* isolates
+the bash tool and the web terminal panel. `process` is today's `bwrap` /
+`sandbox-exec` launcher, byte-for-byte unchanged. `microvm` runs wrapped
+commands in a KVM microVM ([RFC](rfc/nixos-microvm-sandbox.md)). Only the
+user sets it (config, `--sandbox-runtime <runtime>`, or managed config, which
+the CLI flag cannot override); the model has no tool that writes it.
+
+- **Never falls back to the host.** When `microvm` is selected and not
+  available, bash and the terminal fail with `sandbox_denied`.
+  `sandboxAllowDegrade` does not apply to this runtime. To run on the host,
+  set `sandboxRuntime: process`.
+- `sandbox: off` with `sandboxRuntime: microvm` is a config error.
+- Availability is static and probed once per process, the first time a
+  wrapped command runs (never by `/sandbox explain`): Linux only, `/dev/kvm`
+  openable, `KVM_GET_API_VERSION` = 12, `KVM_CREATE_VM`, a microvm driver
+  installed, then `KVM_CREATE_VCPU`. The vCPU step runs last because some
+  nested hosts pass `KVM_CREATE_VM` and oops the kernel on vCPU creation.
+  `/sandbox explain` shows the runtime and, once probed, the reason it is
+  unavailable.
+- **Current build:** no microvm driver or VM exec bridge ships yet (#1793,
+  #1794), so `microvm` always reports unavailable and fails closed.
+
+```jsonc
+{ "sandbox": "workspace-write", "sandboxRuntime": "process" }
+```
+
 **Bash secrets (`bashSecrets`):** map of env var name → secret ref injected
 into the bash tool process only:
 

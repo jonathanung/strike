@@ -162,6 +162,69 @@ struct NotesResponse {
     notifications: Vec<Note>,
     prefs: Prefs,
     latest: i64,
+    #[serde(default)]
+    seen: SeenState,
+}
+
+/// Daemon-side read state shared by every browser on the gateway (#1392).
+/// A row is read when `seq <= up_to` or its id is in `ids`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+struct SeenState {
+    #[serde(default, rename = "upTo")]
+    up_to: i64,
+    #[serde(default)]
+    ids: Vec<String>,
+}
+
+/// Page-local rows (the gateway drop) never reach the daemon.
+fn is_local_note(n: &Note) -> bool {
+    n.id.starts_with("local-")
+}
+
+/// Ids among `notes` that the daemon reports read.
+fn daemon_read_ids(notes: &[Note], seen: &SeenState) -> Vec<String> {
+    notes
+        .iter()
+        .filter(|n| !is_local_note(n))
+        .filter(|n| (n.seq > 0 && n.seq <= seen.up_to) || seen.ids.iter().any(|id| id == &n.id))
+        .map(|n| n.id.clone())
+        .collect()
+}
+
+/// Rows read in this browser that the daemon does not know about yet
+/// (read while offline, or before #1392 shipped). Pushed on the next load.
+fn unsynced_reads(notes: &[Note], local: &[String], seen: &SeenState) -> Vec<String> {
+    let remote = daemon_read_ids(notes, seen);
+    notes
+        .iter()
+        .filter(|n| !is_local_note(n))
+        .filter(|n| local.iter().any(|id| id == &n.id))
+        .filter(|n| !remote.iter().any(|id| id == &n.id))
+        .map(|n| n.id.clone())
+        .collect()
+}
+
+/// The local cache after a load: everything read here plus everything the
+/// daemon says is read. Reads are monotonic, so a union is the merge.
+fn merge_seen(local: &[String], remote: &[String]) -> Vec<String> {
+    let mut out = local.to_vec();
+    for id in remote {
+        if !out.iter().any(|have| have == id) {
+            out.push(id.clone());
+        }
+    }
+    out
+}
+
+/// "Mark all read" watermark: the newest daemon row this browser showed,
+/// so a row that lands while the click is in flight stays unread.
+fn mark_all_up_to(notes: &[Note]) -> i64 {
+    notes
+        .iter()
+        .filter(|n| !is_local_note(n))
+        .map(|n| n.seq)
+        .max()
+        .unwrap_or(0)
 }
 
 fn default_prefs() -> Prefs {
@@ -516,6 +579,44 @@ fn short_when(at: &str) -> String {
     format!("{} {}", &at[5..10], &at[11..16])
 }
 
+const UPDATE_NOTE_PREFIX: &str = "local-update-";
+
+/// The centre row for a newer release (#1583), or None. The id carries the
+/// release, so a dismissal (stored per gateway) holds for that release and
+/// the next release surfaces once. No OS banner: this is a calm notice.
+fn update_note(check: Option<&crate::update_check::UpdateCheck>) -> Option<Note> {
+    let c = check?;
+    if c.state != "available" || c.latest.trim().is_empty() {
+        return None;
+    }
+    let body = if c.current.is_empty() {
+        "Install it on the host with strike upgrade. This page never installs.".to_string()
+    } else {
+        format!("This gateway runs {}. Install it on the host with strike upgrade. This page never installs.", c.current)
+    };
+    Some(Note {
+        id: format!("{UPDATE_NOTE_PREFIX}{}", c.latest.trim()),
+        seq: 0,
+        kind: "update.available".into(),
+        session_id: String::new(),
+        subject_id: String::new(),
+        title: format!("Strike {} is available", c.latest.trim()),
+        body,
+        href: String::new(),
+        request_id: String::new(),
+        banner: false,
+        at: c.checked_at.clone(),
+    })
+}
+
+/// Replace any update row with `note` (None clears it).
+fn upsert_update_note(list: &mut Vec<Note>, note: Option<Note>) {
+    list.retain(|n| !n.id.starts_with(UPDATE_NOTE_PREFIX));
+    if let Some(note) = note {
+        list.insert(0, note);
+    }
+}
+
 fn kind_label(kind: &str) -> &'static str {
     match kind {
         "approval.needed" => "Approval",
@@ -523,6 +624,7 @@ fn kind_label(kind: &str) -> &'static str {
         "child.blocked" => "Blocked",
         "session.finished" => "Session",
         "gateway.disconnected" => "Gateway",
+        "update.available" => "Update",
         _ => "Notice",
     }
 }
@@ -658,6 +760,39 @@ async fn put_prefs(base: &str, token: &str, prefs: &Prefs) -> Result<(), String>
     } else {
         Err(format!("HTTP {}", resp.status()))
     }
+}
+
+async fn post_seen(base: &str, token: &str, ids: &[String], up_to: i64) -> Result<(), String> {
+    let mut body = serde_json::Map::new();
+    if up_to > 0 {
+        body.insert("upTo".into(), serde_json::Value::from(up_to));
+    }
+    if !ids.is_empty() {
+        body.insert("ids".into(), serde_json::Value::from(ids.to_vec()));
+    }
+    let resp = Request::post(&api(base, "/v1/notifications/seen"))
+        .header("Authorization", &auth_header(token))
+        .json(&serde_json::Value::Object(body))
+        .map_err(|e| e.to_string())?
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if (200..300).contains(&resp.status()) {
+        Ok(())
+    } else {
+        Err(format!("HTTP {}", resp.status()))
+    }
+}
+
+/// Fire-and-forget read sync. A failed POST is retried by the next poll:
+/// the read is still in the local cache, so `unsynced_reads` picks it up.
+fn push_seen(base: String, token: String, ids: Vec<String>, up_to: i64) {
+    if ids.is_empty() && up_to <= 0 {
+        return;
+    }
+    spawn_local(async move {
+        let _ = post_seen(&base, &token, &ids, up_to).await;
+    });
 }
 
 fn event_target(ev: &web_sys::Event) -> Option<web_sys::Element> {
@@ -847,12 +982,18 @@ pub fn NotificationBell(
         if id.is_empty() || seen.get_untracked().iter().any(|s| s == &id) {
             return;
         }
-        seen.update(|list| list.push(id));
+        seen.update(|list| list.push(id.clone()));
         save_seen_for(&base.get_untracked(), &seen.get_untracked());
+        if !id.starts_with("local-") {
+            push_seen(base.get_untracked(), token.get_untracked(), vec![id], 0);
+        }
     };
 
     let activate = UnsyncCallback::new(move |note: Note| {
         mark(note.id.clone());
+        if note.kind == "update.available" {
+            let _ = crate::shell::set_view("settings");
+        }
         if let Some(target) = parse_focus(&note.href) {
             if let Some(window) = web_sys::window() {
                 let hash = note.href.trim_start_matches("/#").trim_start_matches('#');
@@ -900,16 +1041,19 @@ pub fn NotificationBell(
         }
     });
 
+    let seen_inflight = Rc::new(Cell::new(false));
     let refresh = UnsyncCallback::new({
         let save_inflight = save_inflight.clone();
         let stream_on = stream_on.clone();
         let stream = stream.clone();
+        let seen_inflight = seen_inflight.clone();
         move |_: ()| {
             perm.set(notification_permission());
             let (b, t) = (base.get_untracked(), token.get_untracked());
             let save_inflight = save_inflight.clone();
             let stream_on = stream_on.clone();
             let stream = stream.clone();
+            let seen_inflight = seen_inflight.clone();
             let started = b.clone();
             spawn_local(async move {
                 match get_json::<NotesResponse>(&b, &t, "/v1/notifications").await {
@@ -922,8 +1066,26 @@ pub fn NotificationBell(
                         }
                         let merged = merge_notes(&items.get_untracked(), &resp.notifications);
                         consider.run((merged.clone(), resp.latest, started.clone()));
+                        // The daemon read state is authoritative (#1392);
+                        // the local list is an offline cache merged in.
+                        let local = seen.get_untracked();
+                        let pending = unsynced_reads(&merged, &local, &resp.seen);
+                        let next = merge_seen(&local, &daemon_read_ids(&merged, &resp.seen));
+                        if next != local {
+                            seen.set(next.clone());
+                            save_seen_for(&started, &next);
+                        }
                         items.set(merged);
                         load_error.set(String::new());
+                        if !pending.is_empty() && !seen_inflight.get() {
+                            seen_inflight.set(true);
+                            let seen_inflight = seen_inflight.clone();
+                            let (b2, t2) = (b.clone(), t.clone());
+                            spawn_local(async move {
+                                let _ = post_seen(&b2, &t2, &pending, 0).await;
+                                seen_inflight.set(false);
+                            });
+                        }
                         if !stream_on.get() && page_same_origin(&b) {
                             stream_on.set(true);
                             start_stream(resp.latest, items, consider, stream, started);
@@ -1084,6 +1246,13 @@ pub fn NotificationBell(
         if p.enabled && !quiet_active(&p, local_minutes()) {
             show_os(&note.kind, &note.href, &note.id);
         }
+    });
+
+    // #1583: mirror the update check into one local row.
+    let update = crate::update_check::signal();
+    Effect::new(move |_| {
+        let note = update.with(|c| update_note(c.as_ref()));
+        items.update(|list| upsert_update_note(list, note));
     });
 
     let save = UnsyncCallback::new({
@@ -1279,9 +1448,11 @@ pub fn NotificationBell(
                                         <h2>"Notifications"</h2>
                                         <div class="notify-head-actions">
                                             <button class="secondary" on:click=move |_| {
-                                                let ids: Vec<String> = items.get_untracked().iter().map(|n| n.id.clone()).collect();
+                                                let list = items.get_untracked();
+                                                let ids: Vec<String> = list.iter().map(|n| n.id.clone()).collect();
                                                 seen.set(ids.clone());
                                                 save_seen_for(&base.get_untracked(), &ids);
+                                                push_seen(base.get_untracked(), token.get_untracked(), Vec::new(), mark_all_up_to(&list));
                                             }>"Mark all read"</button>
                                             <button class="secondary"
                                                 disabled=move || clear_read_ids(&items.get(), &seen.get(), &dismissed.get()).is_empty()
@@ -1727,6 +1898,45 @@ mod tests {
     }
 
     #[test]
+    fn update_note_only_for_an_available_release() {
+        use crate::update_check::UpdateCheck;
+        let mut c = UpdateCheck {
+            state: "available".into(),
+            current: "v1.2.0".into(),
+            latest: "v1.3.0".into(),
+            ..UpdateCheck::default()
+        };
+        let note = update_note(Some(&c)).expect("note");
+        assert_eq!(note.id, "local-update-v1.3.0");
+        assert_eq!(note.kind, "update.available");
+        assert!(!note.banner);
+        assert!(note.body.contains("never installs"));
+        assert_eq!(kind_label(&note.kind), "Update");
+        for state in ["current", "failed", "off", "unknown"] {
+            c.state = state.into();
+            assert!(update_note(Some(&c)).is_none(), "{state}");
+        }
+        assert!(update_note(None).is_none());
+    }
+
+    #[test]
+    fn update_row_is_replaced_and_survives_poll_merge() {
+        let mut list = vec![plain_note("a", 1)];
+        let c = crate::update_check::UpdateCheck {
+            state: "available".into(),
+            latest: "v2".into(),
+            ..Default::default()
+        };
+        upsert_update_note(&mut list, update_note(Some(&c)));
+        upsert_update_note(&mut list, update_note(Some(&c)));
+        assert_eq!(list.iter().filter(|n| n.id.starts_with("local-update-")).count(), 1);
+        let merged = merge_notes(&list, &[plain_note("b", 2)]);
+        assert_eq!(merged[0].id, "local-update-v2");
+        upsert_update_note(&mut list, None);
+        assert!(list.iter().all(|n| !n.id.starts_with("local-update-")));
+    }
+
+    #[test]
     fn visible_notes_hides_dismissed_and_keeps_order() {
         let notes = vec![
             plain_note("a", 3),
@@ -1764,6 +1974,67 @@ mod tests {
         );
         // Nothing read means Clear read has nothing to do (button disabled).
         assert!(clear_read_ids(&notes, &[], &[]).is_empty());
+    }
+
+    #[test]
+    fn daemon_seen_is_authoritative_and_local_reads_sync_up() {
+        let notes = vec![
+            plain_note("local-gateway", 0),
+            plain_note("n4", 4),
+            plain_note("n3", 3),
+            plain_note("n2", 2),
+            plain_note("n1", 1),
+        ];
+        let remote = SeenState {
+            up_to: 2,
+            ids: vec!["n4".into(), "gone".into()],
+        };
+        // Watermark covers n1/n2, the id list n4; the page-local row and a
+        // pruned id are never read by the daemon state.
+        assert_eq!(
+            daemon_read_ids(&notes, &remote),
+            vec!["n4".to_string(), "n2".to_string(), "n1".to_string()]
+        );
+        // Read on another device: this browser's empty cache picks it up.
+        let merged = merge_seen(&[], &daemon_read_ids(&notes, &remote));
+        assert_eq!(merged.len(), 3);
+        // Read here while offline (n3) is pushed; the local row is not.
+        let local = vec!["n3".to_string(), "local-gateway".to_string(), "n1".to_string()];
+        assert_eq!(unsynced_reads(&notes, &local, &remote), vec!["n3".to_string()]);
+        // Union keeps local order and adds remote reads once.
+        assert_eq!(
+            merge_seen(&local, &["n1".to_string(), "n4".to_string()]),
+            vec![
+                "n3".to_string(),
+                "local-gateway".to_string(),
+                "n1".to_string(),
+                "n4".to_string()
+            ]
+        );
+        // A zero watermark reads nothing by seq, even seq-0 local rows.
+        assert!(daemon_read_ids(&notes, &SeenState::default()).is_empty());
+    }
+
+    #[test]
+    fn mark_all_watermark_ignores_page_local_rows() {
+        assert_eq!(mark_all_up_to(&[]), 0);
+        let notes = vec![plain_note("local-gateway", 99), plain_note("a", 7), plain_note("b", 3)];
+        assert_eq!(mark_all_up_to(&notes), 7);
+    }
+
+    #[test]
+    fn seen_state_is_optional_on_older_daemons() {
+        let old: NotesResponse = serde_json::from_str(
+            r#"{"notifications":[],"prefs":{"enabled":true,"quiet":{"enabled":false,"start":"22:00","end":"07:00"},"mutedSessions":[]},"latest":0}"#,
+        )
+        .unwrap();
+        assert_eq!(old.seen, SeenState::default());
+        let new: NotesResponse = serde_json::from_str(
+            r#"{"notifications":[],"prefs":{"enabled":true,"quiet":{"enabled":false,"start":"22:00","end":"07:00"},"mutedSessions":[]},"latest":5,"seen":{"upTo":5,"ids":["x"]}}"#,
+        )
+        .unwrap();
+        assert_eq!(new.seen.up_to, 5);
+        assert_eq!(new.seen.ids, vec!["x".to_string()]);
     }
 
     #[test]
