@@ -46,6 +46,8 @@ pub struct ShipPreview {
     #[serde(default)]
     pub branch: String,
     #[serde(default)]
+    pub head: String,
+    #[serde(default)]
     pub base: String,
     #[serde(default)]
     pub repo: String,
@@ -105,7 +107,8 @@ pub fn can_create(p: &ShipPreview, title: &str, push_ok: bool, dirty_ok: bool) -
 }
 
 /// POST body. The confirmations are sent only when actually required and
-/// ticked, so the daemon re-checks the same gates.
+/// ticked, so the daemon re-checks the same gates. `head` pins the commit
+/// the user reviewed: the daemon refuses if the branch moved since.
 pub fn create_body(
     p: &ShipPreview,
     title: &str,
@@ -116,6 +119,7 @@ pub fn create_body(
 ) -> serde_json::Value {
     serde_json::json!({
         "base": p.base,
+        "head": p.head,
         "title": title.trim(),
         "body": body,
         "draft": draft,
@@ -408,6 +412,7 @@ mod tests {
             added: 3,
             deleted: 1,
             needs_push: true,
+            head: "abc123".into(),
             title: "Add export".into(),
             ..Default::default()
         }
@@ -460,6 +465,7 @@ mod tests {
         let v = create_body(&p, "  Add export ", "body", true, true, true);
         assert_eq!(v["title"], "Add export");
         assert_eq!(v["base"], "main");
+        assert_eq!(v["head"], "abc123", "the reviewed commit is pinned");
         assert_eq!(v["draft"], true);
         assert_eq!(v["confirmPush"], true);
         assert_eq!(v["allowDirty"], false, "clean tree never sends allowDirty");

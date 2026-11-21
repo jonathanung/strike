@@ -55,6 +55,7 @@ type shipPRPreview struct {
 	Blockers      []string        `json:"blockers"`
 	Warnings      []string        `json:"warnings"`
 	Branch        string          `json:"branch"`
+	Head          string          `json:"head"`
 	Base          string          `json:"base"`
 	DefaultBranch string          `json:"defaultBranch"`
 	Repo          string          `json:"repo,omitempty"`
@@ -80,8 +81,6 @@ type shipPRCreateResult struct {
 }
 
 func (s *Server) handleGitPRPreview(w http.ResponseWriter, r *http.Request) {
-	s.gitMu.Lock()
-	defer s.gitMu.Unlock()
 	cwd, ok := s.gitCWD(w, r)
 	if !ok {
 		return
@@ -93,17 +92,20 @@ func (s *Server) handleGitPRPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), shipPRGHTimeout)
 	defer cancel()
-	p, err := s.shipPRPreview(ctx, cwd, base, s.shipPRSessionID(r))
+	// Local git work runs under gitMu; the gh lookup does not, so a slow
+	// GitHub never freezes the Git panel.
+	s.gitMu.Lock()
+	p, err := shipPRLocal(ctx, cwd, base)
+	s.gitMu.Unlock()
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	s.shipPRFinish(ctx, cwd, &p, s.shipPRSessionID(r))
 	writeJSON(w, http.StatusOK, p)
 }
 
 func (s *Server) handleGitPRCreate(w http.ResponseWriter, r *http.Request) {
-	s.gitMu.Lock()
-	defer s.gitMu.Unlock()
 	if s.opts.ReadOnly {
 		writeJSON(w, http.StatusForbidden, opErrorResponse{Error: "this daemon is read-only; pushing and creating pull requests are disabled", Code: protocol.ErrTeamReadOnly})
 		return
@@ -122,6 +124,9 @@ func (s *Server) handleGitPRCreate(w http.ResponseWriter, r *http.Request) {
 		Draft       *bool  `json:"draft"`
 		ConfirmPush bool   `json:"confirmPush"`
 		AllowDirty  bool   `json:"allowDirty"`
+		// Head is the commit the user saw in the preview; when set, a
+		// different HEAD at push time is refused.
+		Head string `json:"head"`
 	}
 	if err := decodeBody(w, r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
@@ -149,11 +154,14 @@ func (s *Server) handleGitPRCreate(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(r.Context(), shipPRPushTimeout+shipPRGHTimeout)
 	defer cancel()
-	p, err := s.shipPRPreview(ctx, cwd, base, sid)
+	s.gitMu.Lock()
+	p, err := shipPRLocal(ctx, cwd, base)
+	s.gitMu.Unlock()
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	s.shipPRFinish(ctx, cwd, &p, sid)
 	if p.Existing != nil {
 		s.linkSessionPR(sid, p.Existing.URL, p.Existing.Number, p.Existing.State)
 		writeJSON(w, http.StatusOK, shipPRCreateResult{
@@ -174,14 +182,14 @@ func (s *Server) handleGitPRCreate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, opErrorResponse{Error: "pushing " + p.Branch + " to origin was not confirmed", Code: "push-unconfirmed"})
 		return
 	}
+	if want := strings.TrimSpace(body.Head); want != "" && want != p.Head {
+		writeJSON(w, http.StatusConflict, opErrorResponse{Error: "the branch moved since the preview; refresh and review again", Code: "stale-preview"})
+		return
+	}
 	res := shipPRCreateResult{State: session.PRStateOpen, Draft: draft}
 	if p.NeedsPush {
-		pctx, pcancel := context.WithTimeout(ctx, shipPRPushTimeout)
-		ref := "refs/heads/" + p.Branch
-		_, stderr, err := gitRun(pctx, cwd, "push", "--porcelain", "--set-upstream", shipPRRemote, ref+":"+ref)
-		pcancel()
-		if err != nil {
-			writeJSON(w, http.StatusBadGateway, opErrorResponse{Error: scrubRemoteText(gitErr("push", err, stderr))})
+		if msg := s.shipPRPush(ctx, cwd, base, p); msg != "" {
+			writeJSON(w, http.StatusConflict, opErrorResponse{Error: msg})
 			return
 		}
 		res.Pushed = true
@@ -238,7 +246,46 @@ func (s *Server) linkSessionPR(sid, url string, number int, state string) {
 	})
 }
 
-func (s *Server) shipPRPreview(ctx context.Context, cwd, base, sid string) (shipPRPreview, error) {
+// shipPRPush re-checks the local state under gitMu (same branch and HEAD
+// the user confirmed, still no blockers) and pushes the branch. It returns
+// a user-facing error message, or "" on success.
+func (s *Server) shipPRPush(ctx context.Context, cwd, base string, confirmed shipPRPreview) string {
+	s.gitMu.Lock()
+	defer s.gitMu.Unlock()
+	cur, err := shipPRLocal(ctx, cwd, base)
+	if err != nil || cur.Branch != confirmed.Branch || cur.Head != confirmed.Head || len(cur.Blockers) > 0 {
+		return "the branch changed while the pull request was being prepared; refresh and review again"
+	}
+	pctx, cancel := context.WithTimeout(ctx, shipPRPushTimeout)
+	defer cancel()
+	ref := "refs/heads/" + cur.Branch
+	if _, stderr, err := gitRun(pctx, cwd, "push", "--porcelain", "--set-upstream", shipPRRemote, ref+":"+ref); err != nil {
+		return scrubRemoteText(gitErr("push", err, stderr))
+	}
+	return ""
+}
+
+// shipPRFinish adds what needs gh or the session (existing PR, draft text,
+// final state). It runs without gitMu.
+func (s *Server) shipPRFinish(ctx context.Context, cwd string, p *shipPRPreview, sid string) {
+	if p.Repo != "" && p.Branch != "" {
+		existing, err := findBranchPR(ctx, cwd, p.Repo, p.Branch)
+		switch {
+		case err != nil:
+			p.Blockers = append(p.Blockers, shipPRGHMessage(err))
+		case existing != nil:
+			p.Existing = existing
+		}
+	}
+	p.Title, p.Body = shipPRDraft(s.shipPRSessionTitle(sid), *p)
+	p.State = shipPRStateOK
+	if len(p.Blockers) > 0 && p.Existing == nil {
+		p.State = shipPRStateBlocked
+	}
+}
+
+// shipPRLocal is the git-only part of the preview; callers hold gitMu.
+func shipPRLocal(ctx context.Context, cwd, base string) (shipPRPreview, error) {
 	p := shipPRPreview{
 		State: shipPRStateOK, Blockers: []string{}, Warnings: []string{},
 		Commits: []gitCommitJSON{},
@@ -293,26 +340,12 @@ func (s *Server) shipPRPreview(ctx context.Context, cwd, base, sid string) (ship
 	}
 	p.Repo = repo
 
+	p.Head = resolveCommit(ctx, cwd, "HEAD")
 	if p.Branch != "" && bc.State != branchStateDetached {
 		remoteRef := "refs/remotes/" + shipPRRemote + "/" + p.Branch
-		local := resolveCommit(ctx, cwd, "HEAD")
-		p.NeedsPush = local == "" || resolveCommit(ctx, cwd, remoteRef) != local
+		p.NeedsPush = p.Head == "" || resolveCommit(ctx, cwd, remoteRef) != p.Head
 	}
-
-	// Existing-PR lookup only when the branch could have one and gh can
-	// reach a GitHub repo; a gh failure is a blocker with a fixed message.
-	if repo != "" && p.Branch != "" && bc.State != branchStateDetached {
-		existing, err := findBranchPR(ctx, cwd, repo, p.Branch)
-		switch {
-		case err != nil:
-			p.Blockers = append(p.Blockers, shipPRGHMessage(err))
-		case existing != nil:
-			p.Existing = existing
-		}
-	}
-
-	p.Title, p.Body = shipPRDraft(s.shipPRSessionTitle(sid), p)
-	if len(p.Blockers) > 0 && p.Existing == nil {
+	if len(p.Blockers) > 0 {
 		p.State = shipPRStateBlocked
 	}
 	return p, nil
@@ -338,6 +371,12 @@ func originGitHubRepo(ctx context.Context, cwd string) (string, error) {
 	slug, ok := parseGitHubRemote(string(out))
 	if !ok {
 		return "", errors.New("origin is not a GitHub remote. Ship to PR supports GitHub only; push and open the pull request from your forge.")
+	}
+	// git pushes to pushurl when one is set; it must be the same repo.
+	if push, _, err := gitRun(ctx, cwd, "config", "--local", "--get", "remote."+shipPRRemote+".pushurl"); err == nil && strings.TrimSpace(string(push)) != "" {
+		if ps, ok := parseGitHubRemote(string(push)); !ok || !strings.EqualFold(ps, slug) {
+			return "", errors.New("origin's push URL points somewhere other than its GitHub repository. Ship to PR will not push there.")
+		}
 	}
 	return slug, nil
 }

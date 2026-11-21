@@ -413,3 +413,37 @@ func TestShipPRDraftPrefill(t *testing.T) {
 		t.Fatalf("draft title leaked a token: %q", title)
 	}
 }
+
+func TestShipPRRefusesStalePreviewHead(t *testing.T) {
+	e := newShipEnv(t, Options{})
+	p := decodePreview(t, e.call(t, http.MethodGet, "/v1/git/pr", ""))
+	if p.Head == "" || p.Head != e.git(t, e.repo, "rev-parse", "HEAD") {
+		t.Fatalf("preview head = %q", p.Head)
+	}
+	// A new commit lands after the user reviewed the preview.
+	if err := os.WriteFile(filepath.Join(e.repo, "late.txt"), []byte("late\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e.git(t, e.repo, "add", "late.txt")
+	e.git(t, e.repo, "commit", "-m", "late commit")
+	res := e.call(t, http.MethodPost, "/v1/git/pr", `{"title":"t","body":"b","confirmPush":true,"head":"`+p.Head+`"}`)
+	if res.Code != http.StatusConflict || !strings.Contains(res.Body.String(), "stale-preview") {
+		t.Fatalf("stale create = %d: %s", res.Code, res.Body.String())
+	}
+	if e.hasRemoteBranch("feature/ship") || strings.Contains(e.ghCalls(t), "pr create") {
+		t.Fatal("stale preview pushed or created")
+	}
+}
+
+func TestShipPRRefusesForeignPushURL(t *testing.T) {
+	e := newShipEnv(t, Options{})
+	e.git(t, e.repo, "config", "remote.origin.pushurl", "https://gitlab.com/someone/else.git")
+	p := decodePreview(t, e.call(t, http.MethodGet, "/v1/git/pr", ""))
+	if p.State != shipPRStateBlocked || !strings.Contains(strings.Join(p.Blockers, "\n"), "push URL") {
+		t.Fatalf("preview = %+v", p)
+	}
+	e.git(t, e.repo, "config", "remote.origin.pushurl", "git@github.com:acme/widgets.git")
+	if p := decodePreview(t, e.call(t, http.MethodGet, "/v1/git/pr", "")); p.State != shipPRStateOK {
+		t.Fatalf("same-repo pushurl should be allowed: %+v", p)
+	}
+}
