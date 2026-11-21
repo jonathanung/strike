@@ -1,0 +1,87 @@
+/* feature:pre-push-review begin */
+/* Pre-push branch review (#1487): cost notice, verdict, findings. */
+.review-branch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+}
+.review-branch-head { display: flex; gap: var(--space-1); align-items: center; }
+.review-branch-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+}
+.review-branch-notice,
+.review-branch-result { display: flex; flex-direction: column; gap: var(--space-1); }
+.review-branch-meta { margin: 0; color: var(--muted); font-size: var(--type-sm); }
+.review-branch-warn { margin: 0; color: var(--warning); font-size: var(--type-sm); }
+.review-branch-error { margin: 0; color: var(--danger); font-size: var(--type-sm); }
+.review-branch-actions { display: flex; gap: var(--space-1); flex-wrap: wrap; }
+.review-branch-verdict { margin: 0; color: var(--success); font-weight: 600; }
+.review-branch-verdict.review-blocking { color: var(--danger); }
+.review-branch-findings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.review-finding {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: baseline;
+  font-size: var(--type-sm);
+  color: var(--ink);
+}
+.review-sev {
+  min-width: 6em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.review-blocking .review-sev { color: var(--danger); }
+.review-should-fix .review-sev { color: var(--warning); }
+.review-anchor {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--accent-alt);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+.review-anchor:focus-visible {
+  outline: 1px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.review-summary { flex: 1 1 16em; }
+/* feature:pre-push-review end */
+
+/* feature:security-review begin */
+/* Security mode (#1620): mode toggle, verification groups, dismissals. */
+.review-branch-mode { display: flex; gap: var(--space-2); font-size: var(--type-sm); color: var(--ink); }
+.review-branch-mode label { display: inline-flex; gap: var(--space-1); align-items: center; }
+.review-fix,
+.review-verify-reason { flex-basis: 100%; color: var(--muted); font-size: var(--type-sm); }
+.review-not-verified summary,
+.review-suppressed summary { color: var(--muted); font-size: var(--type-sm); cursor: pointer; }
+.review-dismiss { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
+.review-dismiss-form { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
+.review-dismiss-form input[type="text"] {
+  min-width: 14em;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 2px var(--space-1);
+  font: inherit;
+}
+.review-dismiss-form input[type="text"]:focus-visible { outline: 1px solid var(--border-focus); outline-offset: 1px; }
+.review-suppressions { display: flex; flex-direction: column; gap: var(--space-1); }
+/* feature:security-review end */

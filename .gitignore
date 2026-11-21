@@ -8,6 +8,7 @@ coverage.out
 webui/target/
 webui/load-guard/target/
 webui/dashboard-view/target/
+webui/ideas-inbox/target/
 webui/status-card/target/
 webui/composer-drafts/target/
 webui/protocol-schema/target/
