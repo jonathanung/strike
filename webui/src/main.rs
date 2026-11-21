@@ -108,6 +108,7 @@ mod tts;
 mod update_check;
 mod triggers;
 mod turn_elapsed;
+mod turn_files;
 mod turn_failure;
 mod turn_usage;
 mod turn_verify;
