@@ -20,3 +20,14 @@
   font-variant-numeric: tabular-nums;
 }
 /* feature:turn-usage end */
+/* feature:turn-failure begin (#1371) */
+/* End-of-turn failure marker: a notice line whose rule switches from the
+   notice warning tone to the danger tone, so an abnormal stop never reads
+   like a clean end. The badge is the shared `failed` status mark. */
+.sx-msg.sx-notice[data-turn-stop] {
+  border-left-color: var(--danger);
+}
+.sx-msg.sx-notice[data-turn-stop] .sx-who {
+  color: var(--danger);
+}
+/* feature:turn-failure end */

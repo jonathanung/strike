@@ -173,11 +173,9 @@ pub fn Chrome() -> impl IntoView {
             String::new()
         };
         if in_arg {
-            if let Some(load) = cmd.choices.clone() {
-                let rows = registry::filter_choices(&args, &load());
-                if let Some(choice) = rows.get(cursor.get_untracked()) {
-                    args = choice.id.clone();
-                }
+            let rows = choice_rows(&id, &args);
+            if let Some(choice) = rows.get(cursor.get_untracked()) {
+                args = choice.id.clone();
             }
         }
         run_ready(id, args);
@@ -191,6 +189,10 @@ pub fn Chrome() -> impl IntoView {
 
     Effect::new(move |_| {
         let _ = query.get();
+        // Step rows can change under the cursor as the step text changes
+        // (and, for query-driven lists like Open file…, when results
+        // arrive), so the cursor restarts at the top on either.
+        let _ = arg_text.get();
         cursor.set(0);
     });
     Effect::new(move |_| {
@@ -671,13 +673,7 @@ fn alive_slots() -> Vec<super::registry::TopSlot> {
 }
 
 fn choice_rows(id: &str, query: &str) -> Vec<super::registry::Choice> {
-    let Some(cmd) = registry::command(id) else {
-        return Vec::new();
-    };
-    let Some(load) = cmd.choices else {
-        return Vec::new();
-    };
-    registry::filter_choices(query, &load())
+    registry::step_rows(id, query)
 }
 
 fn trap_palette_focus(shift: bool) {
