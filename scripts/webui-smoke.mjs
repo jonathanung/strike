@@ -596,24 +596,6 @@ try {
     join(sessionsDir, "elapsed-session.meta.json"),
     JSON.stringify({ title: "Elapsed replay" }) + "\n",
   );
-  // Stale/large resume (#1502) fixtures: the last usage.reported carries
-  // the recorded context occupancy; the file mtime is the activity time.
-  const staleAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-  for (const [id, used, stale] of [
-    ["stale-large", 950000, true],
-    ["stale-small", 1000, true],
-    ["fresh-large", 950000, false],
-  ]) {
-    const file = join(sessionsDir, `${id}.jsonl`);
-    await writeFile(
-      file,
-      line(`resume fixture ${id}`) +
-        JSON.stringify({ type: "usage.reported", time: "2026-10-26T06:00:02Z", data: { used: { n: used, known: true } } }) +
-        "\n",
-    );
-    await writeFile(join(sessionsDir, `${id}.meta.json`), JSON.stringify({ title: `Resume ${id}` }) + "\n");
-    if (stale) await utimes(file, staleAt, staleAt);
-  }
   // files.invalidated (#1380) fixture: a replayed turn with two
   // back-to-back invalidations (five distinct paths). The cockpit must
   // render ONE muted notice (merged, capped at three names) and refetch
@@ -5616,6 +5598,26 @@ try {
   // whose last recorded context is ~950k tokens shows the inline card;
   // a stale small one and a fresh large one open with no card. Resume
   // anyway dismisses it and remembers the dismissal for that size.
+  // Fixtures are written here, not at boot, so the earlier steps see the
+  // same session set as main; the session list re-polls every 4s.
+  // The last usage.reported carries the recorded context occupancy; the
+  // file mtime is the activity time.
+  const staleAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+  for (const [id, used, stale] of [
+    ["stale-large", 950000, true],
+    ["stale-small", 1000, true],
+    ["fresh-large", 950000, false],
+  ]) {
+    const file = join(sessionsDir, `${id}.jsonl`);
+    await writeFile(
+      file,
+      line(`resume fixture ${id}`) +
+        JSON.stringify({ type: "usage.reported", time: "2026-10-26T06:00:02Z", data: { used: { n: used, known: true } } }) +
+        "\n",
+    );
+    await writeFile(join(sessionsDir, `${id}.meta.json`), JSON.stringify({ title: `Resume ${id}` }) + "\n");
+    if (stale) await utimes(file, staleAt, staleAt);
+  }
   const staleListedTokens = ((await listJSON("/v1/sessions")).sessions || []).find((s) => s.id === "stale-large")?.historyTokens;
   if (staleListedTokens !== 950000) {
     throw new Error(`session list historyTokens for stale-large = ${staleListedTokens}`);
