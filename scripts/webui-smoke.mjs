@@ -3748,6 +3748,84 @@ try {
     }),
     { timeout: STEP_MS, interval: 250 },
   );
+  // Per-session drafts (#1367): a draft typed in session A is absent in
+  // session B, back on return to A, persisted under strike.draft.<A>,
+  // and still there after a reload. Clearing it removes the stored key
+  // so later composer checks start from an empty draft.
+  const openRow = async (id) => {
+    await evaluate(
+      `(() => { const row = document.querySelector(${JSON.stringify(rowSel(id))}); const btn = row && row.querySelector(".ss-main"); if (btn) btn.click(); return !!btn; })()`,
+    );
+    await waitFor(`session ${id} selected`, async () => ({ ok: (await selectedID()) === id }), {
+      timeout: STEP_MS,
+      interval: 200,
+    });
+  };
+  const composerValue = async () =>
+    evaluate(`(() => { const el = document.querySelector("#composer-input"); return el ? el.value : null; })()`);
+  const typeComposer = async (value) => {
+    const ok = await evaluate(`(() => {
+      const el = document.querySelector("#composer-input");
+      if (!el) return false;
+      el.focus();
+      const proto = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+      proto.set.call(el, ${JSON.stringify(value)});
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: ${JSON.stringify(value)} }));
+      return el.value === ${JSON.stringify(value)};
+    })()`);
+    if (ok !== true) throw new Error(`draft check: composer did not accept ${JSON.stringify(value)}`);
+  };
+  const storedDraft = async (id) =>
+    evaluate(`localStorage.getItem(${JSON.stringify("strike.draft." + id)})`);
+  const draftA = "half-written prompt for session A (#1367)";
+  await waitFor(
+    "draft check: session A row",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector(${JSON.stringify(rowSel(restoreFallback))})`)) === true,
+    }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await openRow(restoreFallback);
+  await typeComposer(draftA);
+  await waitFor(
+    "draft check: A's draft persisted",
+    async () => ({ ok: (await storedDraft(restoreFallback)) === draftA, stored: await storedDraft(restoreFallback) }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await openRow(restoreTarget);
+  await waitFor(
+    "draft check: session B composer is empty",
+    async () => {
+      const value = await composerValue();
+      return { ok: value === "", value };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await openRow(restoreFallback);
+  await waitFor(
+    "draft check: A's draft restored on return",
+    async () => {
+      const value = await composerValue();
+      return { ok: value === draftA, value };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await reloadCockpit("cockpit reload for draft persistence");
+  await waitFor(
+    "draft check: A's draft restored after reload",
+    async () => {
+      const selected = await selectedID();
+      const value = await composerValue();
+      return { ok: selected === restoreFallback && value === draftA, selected, value };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await typeComposer("");
+  await waitFor(
+    "draft check: cleared draft removes its stored key",
+    async () => ({ ok: (await storedDraft(restoreFallback)) === null }),
+    { timeout: STEP_MS, interval: 200 },
+  );
   // Open session B (the target) through its row, like a user switch.
   await evaluate(
     `(() => { const row = document.querySelector(${JSON.stringify(rowSel(restoreTarget))}); const btn = row && row.querySelector(".ss-main"); if (btn) btn.click(); return !!btn; })()`,
