@@ -62,6 +62,8 @@ func eventType(ev Event) string {
 		return "elicitation.resolved"
 	case TurnSteered:
 		return "turn.steered"
+	case TurnSteerAck:
+		return "turn.steer_ack"
 	case InputQueued:
 		return "input.queued"
 	case TurnCompleted:
@@ -239,6 +241,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &ElicitationResolved{}
 	case "turn.steered":
 		ev = &TurnSteered{}
+	case "turn.steer_ack":
+		ev = &TurnSteerAck{}
 	case "input.queued":
 		ev = &InputQueued{}
 	case "turn.completed":
@@ -399,6 +403,8 @@ func deref(ev Event) Event {
 	case *ElicitationResolved:
 		return *v
 	case *TurnSteered:
+		return *v
+	case *TurnSteerAck:
 		return *v
 	case *InputQueued:
 		return *v

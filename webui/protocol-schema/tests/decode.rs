@@ -93,3 +93,25 @@ fn unknown_op_fails_and_interrupt_decodes() {
         other => panic!("{other:?}"),
     }
 }
+
+// #1827: a /loop firing carries loopId on user.input and user.message; a
+// line without it (older logs, ordinary sends) decodes to empty.
+#[test]
+fn loop_id_decodes_and_defaults_empty() {
+    let cases = [
+        (r#"{"type":"user.message","v":"1.26.0","data":{"text":"check ci","loopId":"l1"}}"#, "l1"),
+        (r#"{"type":"user.message","v":"1.25.0","data":{"text":"hello"}}"#, ""),
+    ];
+    for (raw, want) in cases {
+        match decode_event(raw).expect("user.message") {
+            Event::UserMessage(msg) => assert_eq!(msg.loop_id, want, "{raw}"),
+            other => panic!("user.message decoded as {other:?}"),
+        }
+    }
+    match decode_op(r#"{"type":"user.input","data":{"text":"check ci","loopId":"l2"}}"#)
+        .expect("user.input")
+    {
+        Op::UserInput(input) => assert_eq!(input.loop_id, "l2"),
+        other => panic!("{other:?}"),
+    }
+}
