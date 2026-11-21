@@ -1,0 +1,24 @@
+/* feature:verification-badge begin (#1373) */
+/* Per-turn verification badge on the turn's final line, beside the
+   elapsed / usage footers. TUI vocabulary and tones: verified = success,
+   claimed = warning (agent said done, harness did not confirm),
+   unverified = signal (gates failed). */
+.sx-msg header .turn-verify {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 0 var(--space-1);
+  border: 1px solid currentColor;
+  border-radius: var(--radius);
+  white-space: nowrap;
+}
+.sx-msg header .turn-verify[data-verify="verified"] {
+  color: var(--success);
+}
+.sx-msg header .turn-verify[data-verify="claimed"] {
+  color: var(--warning);
+}
+.sx-msg header .turn-verify[data-verify="unverified"] {
+  color: var(--signal);
+}
+/* feature:verification-badge end */

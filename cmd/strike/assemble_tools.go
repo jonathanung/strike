@@ -91,6 +91,10 @@ type assembled struct {
 	harnessClose func() error
 	// schedulerClose shuts down the shared in-process admission controller.
 	schedulerClose func()
+	// procScheduler and procSchedPolicy are that controller and its bash
+	// classification; script schedules acquire the same leases.
+	procScheduler   *scheduler.Scheduler
+	procSchedPolicy *scheduler.Effective
 	// spawnRoot creates additional concurrent root engines (interactive multi-root).
 	// resumeID empty = new session; non-empty opens that durable root.
 	spawnRoot rootSpawner
@@ -283,6 +287,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		}
 	}
 	sandboxMode, err := resolveSandboxMode(cfg.Sandbox, opts.sandbox, cfg.Managed.Sandbox)
+	var sandboxRuntime string
+	if err == nil {
+		sandboxRuntime, err = resolveSandboxRuntime(cfg.SandboxRuntime, opts.sandboxRuntime, sandboxMode, cfg.Managed.SandboxRuntime)
+	}
 	if err != nil {
 		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
@@ -964,6 +972,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialPermissionMode: initialPermMode,
 			SandboxMode:           sandboxMode,
 			SandboxAllowDegrade:   cfg.SandboxAllowDegrade,
+			SandboxRuntime:        sandboxRuntime,
 			NetworkAllow:          sessionNetworkAllow(cfg.Network.Allow, opts.skipNetworkAllow() && !unattended),
 			BashSecrets:           cloneBashSecrets(cfg.BashSecrets),
 			ContentGuard: tool.ContentGuardSettings{
@@ -1238,6 +1247,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	)
 	sandboxPolicy.NetworkAllow = sessionNetworkAllow(cfg.Network.Allow, opts.skipNetworkAllow())
 	sandboxPolicy.AllowDegrade = cfg.SandboxAllowDegrade
+	sandboxPolicy.Runtime = sandbox.ResolveRuntime(sandboxRuntime)
 	sandboxExplain := sandbox.Explain(sandboxPolicy)
 	services.Shell = local.NewShell(workDir, sandboxPolicy)
 	// Permission explain/presets for /permission. Live explain binds to the
@@ -1371,6 +1381,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return first
 		},
 		schedulerClose:  sched.Close,
+		procScheduler:   sched,
+		procSchedPolicy: schedEff,
 		spawnRoot:       spawn,
 		spawnUnattended: spawnUnattended,
 		firstSlot:       first,
