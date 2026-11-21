@@ -1278,9 +1278,10 @@ fn message_view(
                             crate::clipboard::after_ms(2_000, move || copy_state.set(None));
                         });
                     }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
-                    {(role == "you").then(|| {
+                    {is_you.then(|| {
                         // Prompt library (#1357): keep a sent message as a
                         // reusable prompt; opens the save dialog prefilled.
+                        // Not on a read-only share transcript (no library).
                         let text = copy_text.clone();
                         view! {
                             <button type="button" class="sx-quiet" data-save-prompt="true" on:click=move |_| {
