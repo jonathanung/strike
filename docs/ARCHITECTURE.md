@@ -85,6 +85,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/persist/memory` | Project-scoped durable key/value memory (JSON under `~/.strike/memory/`) | stdlib |
 | `internal/persist/issue` | Project-scoped durable issues (JSON under `~/.strike/issues/`) | stdlib |
 | `internal/product/goal` | Loop harness: goals, JSONL iterations/events, guards, critic, hooks | stdlib |
+| `internal/product/skillpropose` | Repeated-workflow skill proposals (#1611): local, model-free mining of a workspace's root session logs into redacted SKILL drafts; opt-in, pending and dismissed state in `~/.strike/skill-proposals.json` | `persist/session` (meta), `pkg/protocol`, `pkg/redact`, stdlib |
 | `internal/persist/plan` | Project-scoped root-session-owned structured plans (sections, lifecycle, CAS versions, section→child delegate correlation; JSON under `~/.strike/plans/`) | stdlib |
 | `internal/persist/artifact` | Shared typed multi-agent artifacts (findings/patch/test_report/contract/plan-blob; daemon-only `session_report`) with CAS versions, owner|team access, project|session scope; JSON under `~/.strike/artifacts/`. Not memory (untyped KV), issues (tickets), or structured plans (use `internal/persist/plan`) | stdlib |
 | `internal/persist/attachment` | Content-addressed typed attachments (image/pdf/diagram/log/archive/build) under `~/.strike/attachments/`; protocol refs `att:sha256:`; capability select, region redaction, visual compare, retention. Not timeline blob spill or artifact work products | stdlib, `pkg/redact` |
@@ -102,6 +103,7 @@ TUI rendered from (see `pkg/protocol/codec.go`).
 | `internal/product/auth` | Product credential store (0600 `~/.strike/auth.json`); re-exports flow helpers from `harness/providers/auth` | `harness/providers/auth`, stdlib |
 | `internal/product/config` | Layered JSON config (defaults → global → project → managed/MDM) + agents/skills markdown loading; merges passive plugin contributions; managed deny ceiling provenance on `Config.Managed` | `permission` (Ruleset is a config field), `protocol`, `plugin`, `sandbox` (sandbox dial parse), `scheduler` (limits + presets + command rules), stdlib |
 | `internal/integrate/plugin` | Versioned plugin bundle discovery + manifest validation + path confinement + enablement + trust + catalog install/update; passive contribution file refs (agents/skills/workflows/themes/providers); executable compile when trusted | `version`, `pkg/redact`, stdlib |
+| `internal/integrate/powers` | Powers (#1347): Agent Plugins packs under `.strike/powers/` (workspace wins over global) naming MCP servers + skills + activation `keywords`; keyword suggestion (never auto-activates); per-session refcounted activation over an injected MCP `Connector`, deny-listed servers keep a pack inactive | `plugin`, stdlib |
 | `internal/product/models` | models.dev catalog client, 24h cache with stale fallback | stdlib, net/http |
 | `internal/persist/history` | Project-scoped prompt history | stdlib |
 | `internal/daemon/rootstart` | Shared unattended root starter (`Launcher`). Triggers and the scheduler (#1276) both call it. Empty permission mode resolves to plan. | `protocol`, stdlib |

@@ -38,7 +38,7 @@ func (c *clock) Add(d time.Duration) {
 func TestEvaluate(t *testing.T) {
 	specs := []CheckSpec{{Kind: KindHTTP, Name: "api"}, {Kind: KindGitHubChecks, Name: "ci"}}
 	deadline := t0.Add(time.Hour)
-	res := func(api, ci string) []CheckResult {
+	res := func(api, ci string) []Round {
 		var out []CheckResult
 		if api != "" {
 			out = append(out, CheckResult{Name: "api", State: api})
@@ -46,11 +46,16 @@ func TestEvaluate(t *testing.T) {
 		if ci != "" {
 			out = append(out, CheckResult{Name: "ci", State: ci})
 		}
-		return out
+		if out == nil {
+			return nil
+		}
+		return []Round{{Results: out}}
 	}
+	// Single-round cases use threshold 1, so one failing observation is
+	// already a confirmed regression.
 	cases := []struct {
 		name        string
-		latest      []CheckResult
+		rounds      []Round
 		now         time.Time
 		wantVerdict string
 		wantFinal   bool
@@ -58,7 +63,7 @@ func TestEvaluate(t *testing.T) {
 	}{
 		{"healthy mid-window does not settle", res(StateHealthy, StateHealthy), t0, "", false, ""},
 		{"pending mid-window does not settle", res(StatePending, StateHealthy), t0, "", false, ""},
-		{"failing mid-window is regression", res(StateFailing, StateHealthy), t0, VerdictRegression, true, "failing: api"},
+		{"failing mid-window is regression", res(StateFailing, StateHealthy), t0, VerdictRegression, true, "failing: api (1 consecutive)"},
 		{"failing beats unreachable", res(StateFailing, StateUnreachable), deadline, VerdictRegression, true, "failing: api"},
 		{"all healthy at deadline", res(StateHealthy, StateHealthy), deadline, VerdictHealthy, true, "all 2 checks healthy"},
 		{"unreachable at deadline is inconclusive", res(StateHealthy, StateUnreachable), deadline, VerdictInconclusive, true, "ci (unreachable)"},
@@ -68,14 +73,61 @@ func TestEvaluate(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			v, reason, final := Evaluate(specs, tc.latest, tc.now, deadline)
+			v, reason, final := Evaluate(specs, tc.rounds, 1, tc.now, deadline)
 			if v != tc.wantVerdict || final != tc.wantFinal || !strings.Contains(reason, tc.wantReason) {
 				t.Fatalf("Evaluate = (%q, %q, %v), want (%q, ~%q, %v)", v, reason, final, tc.wantVerdict, tc.wantReason, tc.wantFinal)
 			}
 		})
 	}
-	if v, _, final := Evaluate(nil, nil, deadline, deadline); v != VerdictInconclusive || !final {
+	if v, _, final := Evaluate(nil, nil, 1, deadline, deadline); v != VerdictInconclusive || !final {
 		t.Fatalf("no specs = %q %v, want inconclusive final", v, final)
+	}
+}
+
+func TestEvaluateConsecutiveFailures(t *testing.T) {
+	specs := []CheckSpec{{Kind: KindHTTP, Name: "api"}}
+	deadline := t0.Add(time.Hour)
+	seq := func(states ...string) []Round {
+		var out []Round
+		for _, st := range states {
+			if st == "" {
+				// A round that did not include the check.
+				out = append(out, Round{Results: []CheckResult{{Name: "other", State: StateFailing}}})
+				continue
+			}
+			out = append(out, Round{Results: []CheckResult{{Name: "api", State: st}}})
+		}
+		return out
+	}
+	F, H, U := StateFailing, StateHealthy, StateUnreachable
+	cases := []struct {
+		name        string
+		rounds      []Round
+		threshold   int
+		now         time.Time
+		wantVerdict string
+		wantFinal   bool
+		wantReason  string
+	}{
+		{"one failure is a blip", seq(F), 3, t0, "", false, ""},
+		{"two failures still a blip", seq(H, F, F), 3, t0, "", false, ""},
+		{"three consecutive failures settle", seq(H, F, F, F), 3, t0, VerdictRegression, true, "api (3 consecutive)"},
+		{"zero threshold takes default 3", seq(F, F, F), 0, t0, VerdictRegression, true, "api (3 consecutive)"},
+		{"zero threshold below default", seq(F, F), 0, t0, "", false, ""},
+		{"recovery resets the streak", seq(F, F, H, F, F), 3, t0, "", false, ""},
+		{"unreachable breaks the streak", seq(F, F, U, F), 3, t0, "", false, ""},
+		{"rounds without the check are skipped", seq(F, "", F, "", F), 3, t0, VerdictRegression, true, "api (3 consecutive)"},
+		{"threshold 1 settles on first failure", seq(H, F), 1, t0, VerdictRegression, true, "api (1 consecutive)"},
+		{"unconfirmed failure at deadline is inconclusive", seq(H, F), 3, deadline, VerdictInconclusive, true, "api (failing 1 of 3 consecutive needed)"},
+		{"healthy after blip at deadline is healthy", seq(F, F, H), 3, deadline, VerdictHealthy, true, "all 1 checks healthy"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v, reason, final := Evaluate(specs, tc.rounds, tc.threshold, tc.now, deadline)
+			if v != tc.wantVerdict || final != tc.wantFinal || !strings.Contains(reason, tc.wantReason) {
+				t.Fatalf("Evaluate = (%q, %q, %v), want (%q, ~%q, %v)", v, reason, final, tc.wantVerdict, tc.wantReason, tc.wantFinal)
+			}
+		})
 	}
 }
 
@@ -323,23 +375,38 @@ func TestWatchFlipsToRegressionMidWindow(t *testing.T) {
 		t.Fatalf("healthy mid-window should keep watching: %+v", w)
 	}
 
+	if w.FailureThreshold != DefaultFailureThreshold {
+		t.Fatalf("threshold = %d, want default %d", w.FailureThreshold, DefaultFailureThreshold)
+	}
 	tg.set(http.StatusBadGateway)
+	// The first DefaultFailureThreshold-1 failures are blips: still watching.
+	for i := 1; i < DefaultFailureThreshold; i++ {
+		c.Add(time.Minute)
+		w, err = svc.Poll(context.Background(), w.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if w.Status != StatusWatching || w.Verdict != "" || w.Latest[1].State != StateFailing {
+			t.Fatalf("failure %d settled early: %+v", i, w)
+		}
+	}
 	c.Add(time.Minute)
 	w, err = svc.Poll(context.Background(), w.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w.Status != StatusDone || w.Verdict != VerdictRegression || !strings.Contains(w.Reason, "api") {
+	if w.Status != StatusDone || w.Verdict != VerdictRegression || !strings.Contains(w.Reason, "api (3 consecutive)") {
 		t.Fatalf("want regression, got %+v", w)
 	}
-	if len(w.Rounds) != 2 || w.Latest[1].Detail != "status 502, want 200" {
-		t.Fatalf("evidence = %+v", w.Latest)
+	wantRounds := 1 + DefaultFailureThreshold
+	if len(w.Rounds) != wantRounds || w.Latest[1].Detail != "status 502, want 200" {
+		t.Fatalf("evidence = %d rounds %+v", len(w.Rounds), w.Latest)
 	}
 
 	// Finished watches are immutable to polls.
 	tg.set(http.StatusOK)
 	again, err := svc.Poll(context.Background(), w.ID)
-	if err != nil || again.Verdict != VerdictRegression || len(again.Rounds) != 2 {
+	if err != nil || again.Verdict != VerdictRegression || len(again.Rounds) != wantRounds {
 		t.Fatalf("poll after verdict = %+v %v", again, err)
 	}
 }
@@ -480,7 +547,11 @@ func TestCreateValidation(t *testing.T) {
 		{"bad sha", Input{Repo: "acme/app", SHA: "main", Checks: ok}, "sha"},
 		{"negative pr", Input{Repo: "acme/app", SHA: testSHA, PR: -1, Checks: ok}, "pr"},
 		{"no checks", Input{Repo: "acme/app", SHA: testSHA}, "at least one check"},
-		{"unknown kind", Input{Repo: "acme/app", SHA: testSHA, Checks: []CheckSpec{{Kind: "shell"}}}, "kind must be"},
+		{"unknown kind", Input{Repo: "acme/app", SHA: testSHA, Checks: []CheckSpec{{Kind: "bogus"}}}, "kind must be"},
+		{"shell without command", Input{Repo: "acme/app", SHA: testSHA, Checks: []CheckSpec{{Kind: KindShell}}}, "command is required"},
+		{"shell with url", Input{Repo: "acme/app", SHA: testSHA, Checks: []CheckSpec{{Kind: KindShell, Command: "true", URL: "http://x/"}}}, "shell takes no url"},
+		{"http with command", Input{Repo: "acme/app", SHA: testSHA, Checks: []CheckSpec{{Kind: KindHTTP, URL: "http://x/", Command: "true"}}}, "http takes no command"},
+		{"github with command", Input{Repo: "acme/app", SHA: testSHA, Checks: []CheckSpec{{Kind: KindGitHubChecks, Command: "true"}}}, "takes no url"},
 		{"http without url", Input{Repo: "acme/app", SHA: testSHA, Checks: []CheckSpec{{Kind: KindHTTP}}}, "url is required"},
 		{"http bad scheme", Input{Repo: "acme/app", SHA: testSHA, Checks: []CheckSpec{{Kind: KindHTTP, URL: "file:///etc/passwd"}}}, "absolute http"},
 		{"http bad status", Input{Repo: "acme/app", SHA: testSHA, Checks: []CheckSpec{{Kind: KindHTTP, URL: "http://x/", ExpectStatus: 99}}}, "expectStatus"},
@@ -491,6 +562,8 @@ func TestCreateValidation(t *testing.T) {
 		{"interval too short", Input{Repo: "acme/app", SHA: testSHA, Checks: ok, IntervalSeconds: 1}, "intervalSeconds"},
 		{"interval over window", Input{Repo: "acme/app", SHA: testSHA, Checks: ok, WindowSeconds: 60, IntervalSeconds: 120}, "must not exceed"},
 		{"bad session", Input{Repo: "acme/app", SHA: testSHA, Checks: ok, SessionID: "../x y"}, "sessionId"},
+		{"threshold negative", Input{Repo: "acme/app", SHA: testSHA, Checks: ok, FailureThreshold: -1}, "failureThreshold"},
+		{"threshold too high", Input{Repo: "acme/app", SHA: testSHA, Checks: ok, FailureThreshold: MaxFailureThreshold + 1}, "failureThreshold"},
 	}
 	svc, _ := newService(t, nil, &clock{now: t0})
 	for _, tc := range cases {
@@ -508,8 +581,12 @@ func TestCreateValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if w.WindowSeconds != 1800 || w.IntervalSeconds != 60 {
-		t.Fatalf("defaults = %d/%d", w.WindowSeconds, w.IntervalSeconds)
+	if w.WindowSeconds != 1800 || w.IntervalSeconds != 60 || w.FailureThreshold != 3 {
+		t.Fatalf("defaults = %d/%d/%d", w.WindowSeconds, w.IntervalSeconds, w.FailureThreshold)
+	}
+	w, err = svc.Create(Input{Repo: "acme/app", SHA: testSHA, Checks: ok, FailureThreshold: 1})
+	if err != nil || w.FailureThreshold != 1 {
+		t.Fatalf("explicit threshold = %+v %v", w, err)
 	}
 }
 

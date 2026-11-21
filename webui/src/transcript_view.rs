@@ -39,6 +39,8 @@ pub struct TranscriptHandlers {
     pub retry: Callback<(String,)>,
     pub fork: Callback<(i32,)>,
     pub open_file: Callback<(String, u32)>,
+    /// "Edit & resend" on the newest user message (#1361).
+    pub edit_last: Callback<(u32,)>,
 }
 
 /// Find-in-transcript state republished by the shell (#1342, unioned
@@ -75,11 +77,17 @@ pub fn TranscriptPane(
     };
     let draft = RwSignal::new(String::new());
     let pinned = RwSignal::new(true);
+    // A share link renders this pane read-only (#1565): no rename, retry,
+    // fork, regenerate, export, or Share of its own.
+    let read_only = use_context::<crate::share::ReadOnlyTranscript>().is_some();
     let cursor = RwSignal::new(None::<u32>);
     let cursor_session = RwSignal::new(String::new());
     let rename_for = RwSignal::new(String::new());
     let seen_session = RwSignal::new(None::<String>);
     let win_start = RwSignal::new(tw::TAIL);
+    // #1372: per-session reasoning toggle, off by default; reset on
+    // session switch below and on reload (never persisted).
+    let show_reasoning = RwSignal::new(false);
     Effect::new(move |_| {
         let next = session.get();
         let prev = seen_session.get_untracked();
@@ -99,6 +107,7 @@ pub fn TranscriptPane(
         win_start.set(tw::TAIL);
         folds.map.set(HashMap::new());
         folds.dismissed.update_untracked(|d| *d = None);
+        show_reasoning.set(false);
     });
     let scroller = NodeRef::<leptos::html::Div>::new();
     let scroller_fx = scroller;
@@ -312,6 +321,9 @@ pub fn TranscriptPane(
     let open_file = handlers.open_file;
     let retry = handlers.retry;
     let fork = handlers.fork;
+    let edit_last = handlers.edit_last;
+    // Only the newest user message offers Edit & resend (#1361).
+    let last_you = Memo::new(move |_| transcript.with(|t| t.last_user_id()));
     let export_timeline = handlers.export_timeline;
     let _ = (handlers.export_markdown, handlers.send);
     let regenerate = handlers.regenerate;
@@ -368,6 +380,9 @@ pub fn TranscriptPane(
             pinned.set(false);
             scroll_message(next);
         };
+        if read_only && matches!(key.as_str(), "t" | "f" | "r" | "g" | "e") {
+            return;
+        }
         match key.as_str() {
             "j" | "ArrowDown" => {
                 ev.prevent_default();
@@ -440,6 +455,10 @@ pub fn TranscriptPane(
             "e" => {
                 ev.prevent_default();
                 export_timeline.run(());
+            }
+            k if k == crate::reasoning::TOGGLE_KEY => {
+                ev.prevent_default();
+                show_reasoning.update(|v| *v = !*v);
             }
             _ => {}
         }
@@ -563,9 +582,27 @@ pub fn TranscriptPane(
                     <button type="button" class="sx-quiet" on:click=move |_| commit_rename()>"Save"</button>
                     <button type="button" class="sx-quiet" on:click=cancel_rename>"Cancel"</button>
                 </Show>
+                <Show when=move || !read_only && !editing.get()>
+                    <button type="button" class="sx-quiet" data-share-open="true" title="Share a read-only link to this session"
+                        on:click=move |_| crate::share::request_open()>"Share"</button>
+                </Show>
             </div>
             <Show when=move || !note.get().is_empty()>
                 <p class="sx-note" role="alert">{move || note.get()}</p>
+            </Show>
+            // #1372: the toggle appears once the session has reasoning;
+            // a session without any renders nothing new.
+            <Show when=move || transcript.with(|t| !t.reasoning.is_empty())>
+                <div class="sx-toolbar sx-reasoning-toolbar">
+                    <button
+                        type="button"
+                        class="sx-quiet"
+                        data-reasoning-toggle="true"
+                        title="Show or hide model reasoning for this session (h)"
+                        aria-pressed=move || if show_reasoning.get() { "true" } else { "false" }
+                        on:click=move |_| show_reasoning.update(|v| *v = !*v)
+                    >{move || crate::reasoning::toggle_label(show_reasoning.get())}</button>
+                </div>
             </Show>
             {move || {
                 // Count what is visibly open among the folds that exist
@@ -619,8 +656,9 @@ pub fn TranscriptPane(
                 <Show when=move || !loading.get() && transcript.with(|t| t.messages.is_empty()) && load_error.get().is_empty()>
                     <div class="sx-empty">
                         <strong>{move || empty_headline(tick.get())}</strong>
-                        <p>"Send a message to start."</p>
+                        <p>{if read_only { "Nothing in this session yet." } else { "Send a message to start." }}</p>
                         <button
+                            hidden=read_only
                             type="button"
                             class="secondary"
                             data-add-provider="true"
@@ -665,14 +703,32 @@ pub fn TranscriptPane(
                                 // each `<details open>` re-syncs with the
                                 // fold state (see `FoldState`).
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
+                                // #1372: reasoning renders above the line
+                                // it preceded (below a user line, which
+                                // only holds a turn's trailing reasoning),
+                                // and only while the toggle is on.
+                                let thought = r.reasoning.clone().filter(|_| show_reasoning.get());
+                                let below = r.msg.role == Role::You;
+                                let (above, after) = if below { (None, thought) } else { (thought, None) };
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, fold_open, folds)}
+                                    {above.map(|text| reasoning_block(text, false))}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, edit_last, last_you, r.hits, r.current, r.elapsed, r.usage, r.verify, r.files, r.steer, r.tail, fold_open, folds)}
+                                    {after.map(|text| reasoning_block(text, false))}
                                 }
                             })
                         }
                     }
                 />
+                {move || {
+                    // #1372: reasoning still streaming, not yet attached
+                    // to a line, at the tail of the turn.
+                    if !show_reasoning.get() {
+                        return None;
+                    }
+                    let live = transcript.with(|t| t.reasoning.live().to_string());
+                    (!live.trim().is_empty()).then(|| reasoning_block(live, true))
+                }}
             </div>
             <Show when=move || !pinned.get() && transcript.with(|t| !t.messages.is_empty())>
                 <button type="button" class="sx-jump" on:click=jump>"Latest"</button>
@@ -813,6 +869,11 @@ struct RowData {
     current: Option<crate::transcript_find::TMatch>,
     elapsed: Option<String>,
     usage: Option<(String, String)>,
+    reasoning: Option<String>,
+    verify: Option<crate::turn_verify::TurnVerify>,
+    files: Option<crate::turn_files::TurnFiles>,
+    steer: Option<crate::steer_ack::AckState>,
+    tail: Option<crate::tool_tail::ToolTail>,
 }
 
 fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
@@ -840,7 +901,26 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
         usage: t
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
+        reasoning: t.reasoning.for_message(msg.id).map(str::to_owned),
+        verify: t.verify_for(msg.id).cloned(),
+        files: t.files_for(msg.id).cloned(),
+        steer: t.steer_acks.get(msg.id),
+        tail: t.tail_for(msg.id).cloned(),
     })
+}
+
+/// One reasoning block (#1372): muted, collapsible, labelled as not the
+/// answer. Open when shown — the user asked to see it.
+fn reasoning_block(text: String, live: bool) -> impl IntoView {
+    view! {
+        <details class="sx-reasoning" data-reasoning=if live { "live" } else { "done" } open=true>
+            <summary>
+                <span class="sx-reasoning-label">{crate::reasoning::block_label(live)}</span>
+                <span class="sx-reasoning-note">"not part of the answer"</span>
+            </summary>
+            <pre class="sx-reasoning-text">{text}</pre>
+        </details>
+    }
 }
 
 /// Runs `f` in a task after the current one, by which point pending
@@ -1046,10 +1126,16 @@ fn message_view(
     open_file: Callback<(String, u32)>,
     retry: Callback<(String,)>,
     _fork: Callback<(i32,)>,
+    edit_last: Callback<(u32,)>,
+    last_you: Memo<Option<u32>>,
     find_hits: Vec<crate::transcript_find::TMatch>,
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
     turn_usage: Option<(String, String)>,
+    turn_verify: Option<crate::turn_verify::TurnVerify>,
+    turn_files: Option<crate::turn_files::TurnFiles>,
+    steer: Option<crate::steer_ack::AckState>,
+    tail: Option<crate::tool_tail::ToolTail>,
     fold_open: bool,
     folds: FoldState,
 ) -> impl IntoView {
@@ -1062,6 +1148,7 @@ fn message_view(
     let detail = msg.detail.clone();
     let diff = msg.diff.clone();
     let chips = msg.chips.clone();
+    let sent_attachments = msg.attachments.clone();
     let copy_text = if msg.copy_text.is_empty() {
         body.clone()
     } else {
@@ -1074,11 +1161,26 @@ fn message_view(
     let auth_notice =
         msg.role == Role::Notice && msg.badge == crate::transcript::PROVIDER_AUTH_CODE;
     let reconnect = msg.reconnect.clone();
+    // #1371: end-of-turn failure markers carry their stop reason as a
+    // hook for scoped styling and browser checks; every other line has
+    // no attribute.
+    let turn_stop: Option<String> =
+        crate::turn_failure::stop_reason_of(&msg.key).map(str::to_string);
+    // #1359: compaction / budget markers carry their kind as a hook for
+    // scoped styling and browser checks; other lines have no attribute.
+    let compaction: Option<String> = msg
+        .key
+        .strip_prefix(crate::compaction_marks::KEY_PREFIX)
+        .map(str::to_string);
+    let compaction_fold = compaction.is_some();
     let auth_retry = retry_text.trim().to_string();
     let stamp = line_stamp(msg.at_ms);
     let stamp_full = line_full_time(msg.at_ms);
     let has_stamp = !stamp.is_empty();
     let prose = matches!(msg.role, Role::You | Role::Strike);
+    // Edit & resend needs a composer: never on the read-only share view.
+    let is_you = msg.role == Role::You
+        && use_context::<crate::share::ReadOnlyTranscript>().is_none();
     // Find-in-transcript (#1342): this message's match ranges, split by
     // field. When a field has ranges it renders through MarkedText —
     // the same trade #1398 made on the old bubble path: markdown / link
@@ -1128,12 +1230,19 @@ fn message_view(
         format!("sx-msg sx-{role}{}", if on { " sx-on" } else { "" })
     };
     let copy_btn = copy_text.clone();
+    // Lessons capture (#1376): "Remember this" on the user's own messages,
+    // shown only while the page's capture gate (memory mode) allows it.
+    let lesson_gate = use_context::<crate::lessons::CaptureGate>();
+    let lesson_text = (msg.role == Role::You && !copy_text.trim().is_empty()).then(|| copy_text.clone());
+    // #1384: assistant replies get a read-aloud control beside Copy.
+    // Tool, child, and system lines are not read.
+    let speak = (msg.role == Role::Strike && !copy_text.trim().is_empty()).then(|| copy_text.clone());
     // Per-button copy feedback (#1582): the label only reads "Copied"
     // once the awaited clipboard write resolves; a rejection reads
     // "Copy failed" instead of silence. Reverts after 2s.
     let copy_state = RwSignal::new(None::<bool>);
     view! {
-        <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role>
+        <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role data-turn-stop=turn_stop data-compaction=compaction>
             <header>
                 {if find_title {
                     view! { <span class="sx-who"><crate::transcript_find::MarkedText text=title.clone() kind="inline" ranges=title_ranges current=cur_title /></span> }.into_any()
@@ -1154,6 +1263,9 @@ fn message_view(
                 {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
                 {turn_elapsed.clone().map(|label| view! { <span class="turn-elapsed" title="Turn elapsed time">{label}</span> })}
                 {turn_usage.clone().map(|(label, detail)| view! { <span class="turn-usage" title=detail>{label}</span> })}
+                {turn_verify.clone().map(|v| view! {
+                    <span class="turn-verify" data-verify=v.state.label() title=v.detail.clone() aria-label=v.detail>{v.state.label()}</span>
+                })}
                 {diff.clone().map(|d| view! {
                     <span class="sx-diff" aria-label=format!("+{} -{}", d.added, d.deleted)>
                         <span class="sx-add">{format!("+{}", d.added)}</span>
@@ -1169,6 +1281,27 @@ fn message_view(
                             crate::clipboard::after_ms(2_000, move || copy_state.set(None));
                         });
                     }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
+                    {is_you.then(|| view! {
+                        <Show when=move || last_you.get() == Some(id)>
+                            <button
+                                type="button"
+                                class="sx-quiet sx-edit-resend"
+                                title="Load this message into the composer to edit and resend it (Ctrl/Cmd+Up)"
+                                on:click=move |_| edit_last.run((id,))
+                            >"Edit & resend"</button>
+                        </Show>
+                    })}
+                    {lesson_text.zip(lesson_gate).map(|(text, gate)| view! {
+                        <Show when=move || gate.0.get()>
+                            <button type="button" class="sx-quiet" data-action="lesson-remember"
+                                title="Save this message as a lesson future sessions load"
+                                on:click={
+                                    let text = text.clone();
+                                    move |_| { let _ = crate::shell::dispatch("lesson-remember", &text); }
+                                }>"Remember this"</button>
+                        </Show>
+                    })}
+                    {speak.map(|text| view! { <crate::tts::ReadAloud id=id text=text /> })}
                 </span>
             </header>
             {if find_body {
@@ -1184,6 +1317,9 @@ fn message_view(
             } else {
                 view! { <p class="sx-body">{body.clone()}</p> }.into_any()
             }}
+            {steer.map(|ack| view! {
+                <p class="steer-ack" data-steer-state=ack.key() role="note">{ack.text()}</p>
+            })}
             {if !prose && !chips.is_empty() {
                 view! {
                     <div class="sx-chips">
@@ -1193,6 +1329,11 @@ fn message_view(
             } else {
                 view! { <span></span> }.into_any()
             }}
+            {(!sent_attachments.is_empty()).then(|| view! {
+                <crate::transcript_attachments::SentAttachments items=sent_attachments.clone() />
+            })}
+            {turn_files.map(|f| turn_files_view(f, open_file))}
+            {tail.map(crate::tool_tail::tail_view)}
             {auth_notice.then(|| {
                 let target = reconnect.clone();
                 let resend = auth_retry.clone();
@@ -1225,6 +1366,8 @@ fn message_view(
                     "Diff"
                 } else if auth_notice {
                     "Details"
+                } else if compaction_fold {
+                    "Summary and residue"
                 } else {
                     "Output"
                 };
@@ -1284,6 +1427,60 @@ fn message_view(
     }
 }
 
+/// Per-turn file-change summary (#1365): a collapsed chip on the turn's
+/// final line, expanding in place to the paths grouped by kind. Updated
+/// and created paths open in the document pane exactly like file chips;
+/// deleted paths are plain text (there is nothing left to open).
+fn turn_files_view(
+    files: crate::turn_files::TurnFiles,
+    open_file: Callback<(String, u32)>,
+) -> impl IntoView {
+    let label = files.label();
+    let total = files.total();
+    let groups: Vec<(&'static str, Vec<String>)> = files
+        .groups()
+        .into_iter()
+        .map(|(head, paths)| (head, paths.to_vec()))
+        .collect();
+    view! {
+        <details class="turn-files" data-turn-files=total.to_string()>
+            <summary>{label}</summary>
+            {groups.into_iter().map(|(head, paths)| {
+                let deleted = head == "Deleted";
+                view! {
+                    <div class="turn-files-group" data-turn-files-kind=head.to_lowercase()>
+                        <span class="turn-files-head">{head}</span>
+                        <ul>
+                            {paths.into_iter().map(|path| {
+                                if deleted {
+                                    view! { <li><span class="turn-files-path">{path}</span></li> }.into_any()
+                                } else {
+                                    let open = path.clone();
+                                    let attr = path.clone();
+                                    view! {
+                                        <li>
+                                            <a
+                                                class="turn-files-path"
+                                                href="#file"
+                                                data-path=attr
+                                                on:click=move |ev: web_sys::MouseEvent| {
+                                                    ev.prevent_default();
+                                                    dispatch_open_file(&open, 0);
+                                                    open_file.run((open.clone(), 0));
+                                                }
+                                            >{path}</a>
+                                        </li>
+                                    }.into_any()
+                                }
+                            }).collect_view()}
+                        </ul>
+                    </div>
+                }
+            }).collect_view()}
+        </details>
+    }
+}
+
 fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl IntoView {
     blocks
         .into_iter()
@@ -1317,6 +1514,7 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                     }
                 }
                 Block::Code { lang, text } => {
+                    let mermaid = crate::mermaid::is_mermaid(&lang).then(|| text.clone());
                     let copy = text.clone();
                     // #1575: known fence languages get the file viewer's
                     // `ev-*` token spans; unknown/empty stay plain text.
@@ -1324,7 +1522,7 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                     // Same honest per-button feedback as the message
                     // Copy button (#1582).
                     let copy_state = RwSignal::new(None::<bool>);
-                    view! {
+                    let fence = view! {
                         <div class="sx-fence">
                             <div class="sx-fence-bar">
                                 <span class="sx-lang">{lang}</span>
@@ -1339,7 +1537,16 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                             </div>
                             <pre class="sx-code">{code}</pre>
                         </div>
-                    }.into_any()
+                    };
+                    // Mermaid fence → diagram, with this code block as the
+                    // source view and the parse-failure fallback (#1368).
+                    match mermaid {
+                        Some(source) => view! {
+                            <crate::mermaid::MermaidBlock source=source>{fence}</crate::mermaid::MermaidBlock>
+                        }
+                        .into_any(),
+                        None => fence.into_any(),
+                    }
                 }
             }
         })

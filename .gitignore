@@ -7,6 +7,9 @@ coverage.out
 */worktrees
 webui/target/
 webui/load-guard/target/
+webui/ideas-inbox/target/
+webui/status-card/target/
+webui/composer-drafts/target/
 webui/protocol-schema/target/
 desktop/target/
 desktop/app/gen/
