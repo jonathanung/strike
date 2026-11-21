@@ -8384,7 +8384,7 @@ try {
   }
 
   await seedRepeatedWorkflow({ home, port, token });
-  await skillProposalsCheck({ send, repoDir: process.cwd() });
+  await skillProposalsCheck({ send, repoDir: process.cwd(), port, token });
 
   console.log("webui-smoke ok");
 } catch (err) {

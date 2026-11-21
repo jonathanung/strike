@@ -914,6 +914,10 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) (result error) {
 		return err
 	}
 	notifySrv.Store(srv)
+	// Skill proposals (#1913): weekly scan for workspaces that opted in.
+	if !opts.readOnly {
+		go srv.RunSkillProposalCadence(ctx)
+	}
 
 	ln, err := net.Listen("tcp", opts.addr)
 	if err != nil {
