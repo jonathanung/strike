@@ -298,7 +298,7 @@ func TestReviewRoutesOnThrowawayRepo(t *testing.T) {
 	if !ok {
 		t.Fatal("send did not submit a user input")
 	}
-	for _, want := range []string{ReviewTurnHeader, "### alpha.txt", "Rejected and reverted", "-FIRST CHANGE", "Comment on lines 17-19:\n  > use a constant"} {
+	for _, want := range []string{ReviewTurnHeader, "### alpha.txt", "Rejected and reverted", "+FIRST CHANGE", "Comment on lines 17-19:\n  > use a constant"} {
 		if !strings.Contains(in.Text, want) {
 			t.Errorf("turn missing %q:\n%s", want, in.Text)
 		}
