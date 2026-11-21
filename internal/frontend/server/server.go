@@ -624,6 +624,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/deploy-watches/{id}", s.handleDeployWatchGet)
 	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/poll", s.handleDeployWatchPoll)
 	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/cancel", s.handleDeployWatchCancel)
+	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/fix-session", s.handleDeployWatchFixSession)
+	s.mux.HandleFunc("POST /v1/deploy-watches/{id}/revert-pr", s.handleDeployWatchRevertPR)
 	s.mux.HandleFunc("GET /v1/roots", s.handleRoots)
 	s.mux.HandleFunc("POST /v1/roots", s.handleRootCreate)
 	s.mux.HandleFunc("POST /v1/roots/{id}/activate", s.handleRootActivate)
