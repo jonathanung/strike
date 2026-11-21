@@ -2502,8 +2502,10 @@ try {
   });
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitUntil(
+    // Right after Page.navigate the new document may not have a body yet;
+    // read it as empty so the wait retries instead of throwing.
     `(() => {
-      const t = document.body.innerText;
+      const t = document.body?.innerText ?? "";
       const sent = [...document.querySelectorAll("[data-sent-attachments]")].some((el) => el.innerText.includes("annotate-shot-annotated.png"));
       if (sent && t.includes("annotate smoke 1545") && t.includes("Annotations on annotate-shot.png") && t.includes('[pin x=50%, y=50%] "move this button"')) return true;
       const msgs = [...document.querySelectorAll(".sx-msg")].slice(-3).map((m) => m.innerText.slice(0, 300));
@@ -6234,6 +6236,75 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+
+  // Prompt sharpen (#1385): Alt+P sends the draft to the daemon's
+  // one-shot rewrite (echo stands in for the model), shows the
+  // original-vs-sharpened preview, and changes nothing until Accept.
+  // Undo restores the original; Esc on the preview rejects untouched.
+  const sharpenDraft = "fix the flaky thing";
+  const composerText = async () =>
+    evaluate(`(() => { const el = document.querySelector("#composer-input"); return el ? el.value : null; })()`);
+  await setDraft(sharpenDraft);
+  await press("p", { altKey: true });
+  await waitFor(
+    "sharpen preview with original and rewrite",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const diff = document.querySelector("[data-sharpen-diff]");
+        return JSON.stringify({
+          accept: !!document.querySelector("[data-sharpen-accept]"),
+          diff: diff ? diff.innerText : "",
+          state: document.querySelector("[data-feature=prompt-sharpen]")?.getAttribute("data-sharpen-state") || "",
+        });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: p.accept && p.diff.includes(sharpenDraft) && p.diff.includes("You said:"), ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if ((await composerText()) !== sharpenDraft) {
+    throw new Error(`sharpen changed the draft before Accept: ${JSON.stringify(await composerText())}`);
+  }
+  await evaluate(`document.querySelector("[data-sharpen-accept]")?.click()`);
+  await waitFor(
+    "accepted rewrite replaces the draft, Undo offered",
+    async () => {
+      const value = (await composerText()) || "";
+      const undo = await evaluate(`!!document.querySelector("[data-sharpen-undo]")`);
+      return { ok: value.startsWith("You said:") && value.includes(sharpenDraft) && undo, value, undo };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector("[data-sharpen-undo]")?.click()`);
+  await waitFor(
+    "undo restores the original draft",
+    async () => {
+      const value = await composerText();
+      return { ok: value === sharpenDraft, value };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await press("p", { altKey: true });
+  await waitFor(
+    "second sharpen preview",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-sharpen-accept]")`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`(() => {
+    const el = document.querySelector("[data-sharpen-accept]");
+    el?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+    return true;
+  })()`);
+  await waitFor(
+    "Esc rejects and leaves the draft byte-identical",
+    async () => {
+      const value = await composerText();
+      const open = await evaluate(`!!document.querySelector("[data-feature=prompt-sharpen]")`);
+      return { ok: !open && value === sharpenDraft, value, open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await setDraft("");
 
   // Session dials (#1572 autonomy, #1569 Fast): both start at the
   // daemon-reported default, flip only after the daemon confirms the
