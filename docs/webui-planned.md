@@ -705,6 +705,7 @@ Daemon wiring shipped (#1881): `team.spawn` takes optional `model` and
 | `GET /v1/bestofn?root=` | This session's runs, newest first |
 | `GET /v1/bestofn/{id}` | One run: per-candidate status, elapsed, summary, diffstat, verification |
 | `POST /v1/bestofn/{id}/cancel` | Interrupt every running candidate (`team.child_interrupt`) |
+| `POST /v1/bestofn/{id}/compare` | Ask the owner session for commentary on how the runs differ (one user turn; once per run; only after every run stopped and before a decision) |
 | `POST /v1/bestofn/{id}/adopt` | `{childId}`: apply the winner's patch, then remove every candidate worktree |
 | `POST /v1/bestofn/{id}/keep-none` | Discard all and remove every candidate worktree |
 
@@ -724,8 +725,17 @@ Cancel all, Adopt (confirmed) and Keep none (confirmed). Wording and
 parsing live in `webui/best-of-n` (unit-tested in CI); the browser check
 is `scripts/webui-best-of-n-check.mjs`.
 
-Not built yet: parent-agent commentary on how the results differ, and
-per-candidate tokens/cost (`child.completed` does not carry usage today).
+Commentary and usage (#1962): `child.completed` carries optional `usage`
+(tokens summed over the child's streams, `costUsd` when the model is
+priced), and each candidate row shows it. A provider that reports nothing
+shows nothing, never a zero. **Compare** appears once every run stopped:
+it submits one user turn to the owning session asking for a short note
+on how the runs differ, explicitly not a verdict or ranking. It spends a
+parent turn, so it runs only on click and once per run; a busy session
+refuses with a retry hint. Adopt stays a separate confirmed step.
+
+Not built yet: UAT screenshots / video for #1346 (owed on the PR; no
+local `strike serve` was allowed in the lane that shipped #1962).
 
 ## MCP elicitation
 

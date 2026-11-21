@@ -653,6 +653,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/bestofn/{id}", s.handleBestOfNGet)
 	s.mux.HandleFunc("POST /v1/bestofn/{id}/adopt", s.handleBestOfNAdopt)
 	s.mux.HandleFunc("POST /v1/bestofn/{id}/cancel", s.handleBestOfNCancel)
+	s.mux.HandleFunc("POST /v1/bestofn/{id}/compare", s.handleBestOfNCompare)
 	s.mux.HandleFunc("POST /v1/bestofn/{id}/keep-none", s.handleBestOfNKeepNone)
 	s.mux.HandleFunc("GET /v1/goals", s.handleGoalsList)
 	s.mux.HandleFunc("POST /v1/goals", s.handleGoalsSet)

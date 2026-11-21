@@ -126,6 +126,41 @@ pub fn verified_label(verified: Option<bool>) -> &'static str {
     }
 }
 
+/// Usage column: `12.3k tokens · $0.042`. Empty when the provider reported
+/// nothing, so an unknown count never reads as zero.
+pub fn usage_label(tokens: Option<i64>, cost_usd: Option<f64>) -> String {
+    let tokens = tokens.map(|t| {
+        let t = t.max(0);
+        let n = if t >= 1_000_000 {
+            format!("{:.1}M", t as f64 / 1_000_000.0)
+        } else if t >= 1_000 {
+            format!("{:.1}k", t as f64 / 1_000.0)
+        } else {
+            t.to_string()
+        };
+        format!("{n} tokens")
+    });
+    let cost = cost_usd.filter(|c| c.is_finite() && *c >= 0.0).map(|c| {
+        if c < 0.01 {
+            format!("${c:.4}")
+        } else {
+            format!("${c:.2}")
+        }
+    });
+    match (tokens, cost) {
+        (Some(t), Some(c)) => format!("{t} · {c}"),
+        (Some(t), None) => t,
+        (None, Some(c)) => c,
+        (None, None) => String::new(),
+    }
+}
+
+/// The parent session can comment on how the runs differ once every run
+/// stopped, before a decision, and only once (it spends a parent turn).
+pub fn can_compare(complete: bool, decided: bool, requested: bool) -> bool {
+    complete && !decided && !requested
+}
+
 /// A candidate can be adopted once every run stopped, nothing was decided
 /// yet, and it finished successfully.
 pub fn can_adopt(status: &str, complete: bool, decided: bool) -> bool {
@@ -206,6 +241,26 @@ mod tests {
         assert_eq!(diffstat_label(3, 10, 2), "3 files · +10 −2");
         assert_eq!(verified_label(None), "");
         assert_eq!(verified_label(Some(false)), "Verification failed");
+    }
+
+    #[test]
+    fn usage_is_absent_not_zero() {
+        assert_eq!(usage_label(None, None), "");
+        assert_eq!(usage_label(Some(0), None), "0 tokens");
+        assert_eq!(usage_label(Some(950), None), "950 tokens");
+        assert_eq!(usage_label(Some(12_345), Some(0.042)), "12.3k tokens · $0.04");
+        assert_eq!(usage_label(Some(2_500_000), Some(1.5)), "2.5M tokens · $1.50");
+        assert_eq!(usage_label(Some(10), Some(0.0012)), "10 tokens · $0.0012");
+        assert_eq!(usage_label(None, Some(0.25)), "$0.25");
+        assert_eq!(usage_label(Some(10), Some(f64::NAN)), "10 tokens");
+    }
+
+    #[test]
+    fn compare_once_after_everything_stopped() {
+        assert!(can_compare(true, false, false));
+        assert!(!can_compare(false, false, false));
+        assert!(!can_compare(true, true, false));
+        assert!(!can_compare(true, false, true));
     }
 
     #[test]

@@ -470,6 +470,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 			DelegationID: delegID,
 			BudgetKind:   budgetKind,
 			Finalization: finalization,
+			Usage:        h.usageSnapshot(),
 		}
 		e.emit(completed)
 		e.persistChildEvent(childID, completed)
