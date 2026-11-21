@@ -121,3 +121,21 @@ func writeProjectSurfaces(w io.Writer, s config.ProjectSurfaces) {
 	section("Steering", s.Steering)
 	section("Unreadable", s.Errors)
 }
+
+// serveTrustAtStart returns the lookup strike serve hands the cockpit so it
+// can say a grant or revoke takes effect on the next start (#1781). Only the
+// workspace this daemon assembled is known; every other root reports
+// known=false.
+func serveTrustAtStart(root string, trusted bool) func(string) (bool, bool) {
+	want, err := workspacetrust.CanonicalRoot(root)
+	if err != nil {
+		return nil
+	}
+	return func(r string) (bool, bool) {
+		got, err := workspacetrust.CanonicalRoot(r)
+		if err != nil || got != want {
+			return false, false
+		}
+		return trusted, true
+	}
+}

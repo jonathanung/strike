@@ -230,3 +230,25 @@ func TestWriteProjectSurfacesRendersNamesAndCommandLines(t *testing.T) {
 		}
 	}
 }
+
+func TestServeTrustAtStartKnowsOnlyItsRoot(t *testing.T) {
+	root, other := t.TempDir(), t.TempDir()
+	for _, trusted := range []bool{true, false} {
+		lookup := serveTrustAtStart(root, trusted)
+		if lookup == nil {
+			t.Fatal("lookup is nil")
+		}
+		if got, known := lookup(root); !known || got != trusted {
+			t.Fatalf("lookup(root) = %v,%v want %v,true", got, known, trusted)
+		}
+		if _, known := lookup(filepath.Join(root, ".")); !known {
+			t.Fatal("lookup does not canonicalize")
+		}
+		if _, known := lookup(other); known {
+			t.Fatal("lookup(other) known, want unknown")
+		}
+	}
+	if serveTrustAtStart("", true) != nil {
+		t.Fatal("empty root lookup should be nil")
+	}
+}

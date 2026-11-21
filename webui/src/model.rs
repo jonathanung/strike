@@ -245,6 +245,10 @@ pub struct BootstrapCapabilities {
     /// present, live engine, and not `--read-only`.
     #[serde(default, rename = "projectInit")]
     pub project_init: bool,
+    /// True when `GET /v1/workspace/trust` reports the workspace trust
+    /// state and the repo config it gates (#1781).
+    #[serde(default, rename = "workspaceTrust")]
+    pub workspace_trust: bool,
 }
 
 /// One `/v1/init` reply (#1581). `exists` with a non-empty `error` is the
@@ -271,6 +275,191 @@ pub fn project_init_outcome(status: u16, body: &str) -> Result<ProjectInitReply,
             if reply.error.trim().is_empty() {
                 reply.error = "AGENTS.md already exists".to_string();
             }
+        }
+        return Ok(reply);
+    }
+    Err(diag_error_message(status, body))
+}
+
+/// One repo-supplied process or endpoint in the trust enumeration. Env,
+/// headers and keys are never sent by the daemon.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct TrustExecutable {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub url: String,
+}
+
+impl TrustExecutable {
+    /// `name: command args…`, or `name: url` for an endpoint-only entry.
+    pub fn line(&self) -> String {
+        let target = if self.command.is_empty() && !self.url.is_empty() {
+            self.url.clone()
+        } else {
+            let mut parts = vec![self.command.clone()];
+            parts.extend(self.args.iter().cloned());
+            parts.join(" ").trim().to_string()
+        };
+        if target.is_empty() {
+            self.name.clone()
+        } else {
+            format!("{}: {}", self.name, target)
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct TrustHook {
+    #[serde(default)]
+    pub event: String,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub action: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct TrustFile {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub path: String,
+}
+
+/// `config.ProjectSurfaces` as the daemon serializes it: what the repo
+/// would load once trusted, enumerated without loading any of it.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct TrustSurfaces {
+    #[serde(default, rename = "configFiles")]
+    pub config_files: Vec<String>,
+    #[serde(default, rename = "configKeys")]
+    pub config_keys: Vec<String>,
+    #[serde(default, rename = "permissionRules")]
+    pub permission_rules: u32,
+    #[serde(default)]
+    pub mcp: Vec<TrustExecutable>,
+    #[serde(default)]
+    pub lsp: Vec<TrustExecutable>,
+    #[serde(default)]
+    pub harnesses: Vec<TrustExecutable>,
+    #[serde(default)]
+    pub providers: Vec<TrustExecutable>,
+    #[serde(default)]
+    pub hooks: Vec<TrustHook>,
+    #[serde(default)]
+    pub agents: Vec<TrustFile>,
+    #[serde(default)]
+    pub skills: Vec<TrustFile>,
+    #[serde(default)]
+    pub workflows: Vec<TrustFile>,
+    #[serde(default)]
+    pub plugins: Vec<String>,
+    #[serde(default)]
+    pub steering: Vec<String>,
+    #[serde(default)]
+    pub errors: Vec<String>,
+}
+
+/// One titled group of lines on the trust card.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrustSection {
+    pub title: &'static str,
+    pub lines: Vec<String>,
+}
+
+impl TrustSurfaces {
+    /// The card's groups in the same order and wording as
+    /// `strike trust status`; empty groups are dropped.
+    pub fn sections(&self) -> Vec<TrustSection> {
+        let execs = |items: &[TrustExecutable]| items.iter().map(|e| e.line()).collect::<Vec<_>>();
+        let files = |items: &[TrustFile]| {
+            items
+                .iter()
+                .map(|f| format!("{} ({})", f.name, f.path))
+                .collect::<Vec<_>>()
+        };
+        let mut config = Vec::new();
+        if !self.config_keys.is_empty() {
+            config.push(format!("overrides: {}", self.config_keys.join(", ")));
+        }
+        if self.permission_rules > 0 {
+            config.push(format!("permission rules: {}", self.permission_rules));
+        }
+        config.extend(self.config_files.iter().cloned());
+        let hooks = self
+            .hooks
+            .iter()
+            .map(|h| {
+                if h.command.is_empty() {
+                    format!("{}: {} (rule)", h.event, h.action)
+                } else {
+                    format!("{}: {}", h.event, h.command)
+                }
+            })
+            .collect::<Vec<_>>();
+        let groups = vec![
+            TrustSection { title: "Config", lines: config },
+            TrustSection { title: "MCP servers", lines: execs(&self.mcp[..]) },
+            TrustSection { title: "LSP servers", lines: execs(&self.lsp[..]) },
+            TrustSection { title: "Harnesses", lines: execs(&self.harnesses[..]) },
+            TrustSection { title: "Providers", lines: execs(&self.providers[..]) },
+            TrustSection { title: "Hooks", lines: hooks },
+            TrustSection { title: "Agents", lines: files(&self.agents[..]) },
+            TrustSection { title: "Skills", lines: files(&self.skills[..]) },
+            TrustSection { title: "Workflows", lines: files(&self.workflows[..]) },
+            TrustSection { title: "Plugins", lines: self.plugins.clone() },
+            TrustSection { title: "Steering", lines: self.steering.clone() },
+            TrustSection { title: "Unreadable", lines: self.errors.clone() },
+        ];
+        groups.into_iter().filter(|g| !g.lines.is_empty()).collect()
+    }
+}
+
+/// One `GET/POST /v1/workspace/trust` reply (#1781).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct WorkspaceTrustReply {
+    #[serde(default)]
+    pub root: String,
+    #[serde(default)]
+    pub trusted: bool,
+    #[serde(default, rename = "trustedAt")]
+    pub trusted_at: String,
+    #[serde(default)]
+    pub untrustable: bool,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub surfaces: TrustSurfaces,
+    #[serde(default)]
+    pub mutable: bool,
+    #[serde(default, rename = "restartRequired")]
+    pub restart_required: bool,
+    #[serde(default)]
+    pub error: String,
+}
+
+impl WorkspaceTrustReply {
+    /// The persistent "Untrusted workspace" badge shows only when the repo
+    /// actually ships config that trust would enable.
+    pub fn badge_visible(&self) -> bool {
+        !self.trusted && !self.surfaces.sections().is_empty()
+    }
+}
+
+/// Reads a `/v1/workspace/trust` response. 2xx and the 422 untrustable
+/// refusal (which still carries the status body) are states to render;
+/// anything else is the daemon's error sentence.
+pub fn workspace_trust_outcome(status: u16, body: &str) -> Result<WorkspaceTrustReply, String> {
+    if (200..300).contains(&status) || status == 422 {
+        let mut reply: WorkspaceTrustReply =
+            serde_json::from_str(body).map_err(|e| e.to_string())?;
+        if status == 422 && reply.error.trim().is_empty() {
+            reply.error = "workspace root cannot be trusted".to_string();
         }
         return Ok(reply);
     }
@@ -1606,6 +1795,79 @@ mod tests {
         // Download diagnostics control stays disabled rather than lying.
         let boot: Bootstrap = serde_json::from_str(r#"{"skills":[]}"#).unwrap();
         assert!(!boot.capabilities.diag);
+    }
+
+    #[test]
+    fn bootstrap_reads_the_workspace_trust_capability() {
+        let boot: Bootstrap = serde_json::from_str(
+            r#"{"capabilities":{"workspaceTrust":true},"skills":[],"composerCommands":[]}"#,
+        )
+        .unwrap();
+        assert!(boot.capabilities.workspace_trust);
+        let off: Bootstrap = serde_json::from_str(r#"{"skills":[]}"#).unwrap();
+        assert!(!off.capabilities.workspace_trust);
+    }
+
+    #[test]
+    fn workspace_trust_sections_match_cli_wording() {
+        let reply = workspace_trust_outcome(
+            200,
+            r#"{"root":"/r","trusted":false,"summary":"1 MCP server","mutable":true,
+               "surfaces":{"root":"/r","configFiles":["/r/.strike/config"],"configKeys":["model"],
+               "permissionRules":2,"mcp":[{"name":"evil","command":"npx","args":["-y","evil"]},
+               {"name":"remote","url":"https://mcp.example"}],
+               "providers":[{"name":"openai","url":""}],
+               "hooks":[{"event":"pre_tool_use","command":"echo hi"},{"event":"stop","action":"log"}],
+               "agents":[{"name":"a","path":"/r/.strike/agents/a.md"}],"steering":["/r/AGENTS.md"]}}"#,
+        )
+        .unwrap();
+        assert!(reply.badge_visible());
+        assert!(reply.mutable);
+        let sections = reply.surfaces.sections();
+        let titles: Vec<&str> = sections.iter().map(|s| s.title).collect();
+        assert_eq!(
+            titles,
+            vec!["Config", "MCP servers", "Providers", "Hooks", "Agents", "Steering"]
+        );
+        assert_eq!(
+            sections[0].lines,
+            vec!["overrides: model", "permission rules: 2", "/r/.strike/config"]
+        );
+        assert_eq!(
+            sections[1].lines,
+            vec!["evil: npx -y evil", "remote: https://mcp.example"]
+        );
+        assert_eq!(sections[2].lines, vec!["openai"], "blank URL row shows the name only");
+        assert_eq!(sections[3].lines, vec!["pre_tool_use: echo hi", "stop: log (rule)"]);
+        assert_eq!(sections[4].lines, vec!["a (/r/.strike/agents/a.md)"]);
+    }
+
+    #[test]
+    fn workspace_trust_badge_hides_when_trusted_or_empty() {
+        let trusted = workspace_trust_outcome(
+            200,
+            r#"{"root":"/r","trusted":true,"surfaces":{"steering":["/r/AGENTS.md"]}}"#,
+        )
+        .unwrap();
+        assert!(!trusted.badge_visible());
+        let empty = workspace_trust_outcome(200, r#"{"root":"/r","surfaces":{}}"#).unwrap();
+        assert!(!empty.badge_visible());
+    }
+
+    #[test]
+    fn workspace_trust_outcome_reads_refusals() {
+        let home = workspace_trust_outcome(
+            422,
+            r#"{"root":"/home/u","untrustable":true,"error":"workspace root cannot be trusted: /home/u"}"#,
+        )
+        .unwrap();
+        assert!(home.untrustable);
+        assert!(home.error.contains("cannot be trusted"));
+        assert_eq!(
+            workspace_trust_outcome(403, r#"{"error":"daemon is --read-only"}"#).unwrap_err(),
+            "daemon is --read-only"
+        );
+        assert_eq!(workspace_trust_outcome(500, "").unwrap_err(), "HTTP 500");
     }
 
     #[test]

@@ -62,6 +62,7 @@ mod transcript_view;
 mod triggers;
 mod turn_elapsed;
 mod turn_usage;
+mod workspace_trust;
 mod workspaces;
 use crate::shell::icon;
 
@@ -1085,6 +1086,9 @@ fn App() -> impl IntoView {
     let ledger_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // Bootstrap capability `workspaceTrust` (#1781): gates the untrusted
+    // workspace badge and trust card.
+    let workspace_trust_capable = RwSignal::new(false);
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -1695,6 +1699,7 @@ fn App() -> impl IntoView {
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
                                 ledger_capable.set(boot.capabilities.ledger);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                workspace_trust_capable.set(boot.capabilities.workspace_trust);
                                 skills.set(boot.skills);
                                 commands.set(boot.composer_commands);
                                 if !catalog_once.get_untracked() {
@@ -4947,6 +4952,14 @@ fn App() -> impl IntoView {
                     // to the conversation. Visually hidden; the status tabs
                     // and chat-mode bar already show the session name.
                     <h1 id="chat-heading" class="sr-only">{move || chat_title.get()}</h1>
+                    // #1781: persistent untrusted-workspace badge + trust card.
+                    <workspace_trust::WorkspaceTrust
+                        base=base
+                        token=token
+                        root=active_root
+                        status=status
+                        capable=workspace_trust_capable
+                    />
                     {move || {
                         let _ = tick.get();
                         let active = active_root.get();

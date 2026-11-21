@@ -109,6 +109,15 @@ type Options struct {
 	Sandbox *SandboxSnapshot
 	// ReadOnly rejects mutating protocol ops (POST /v1/ops and WS op frames).
 	ReadOnly bool
+	// WorkspaceTrustPath is the workspace trust store file
+	// (~/.strike/workspace-trust.json) behind GET/POST /v1/workspace/trust
+	// (#1781). Empty disables the routes (501).
+	WorkspaceTrustPath string
+	// WorkspaceTrustAtStart reports the trust decision the running sessions
+	// were assembled with for a canonical workspace root (known=false when
+	// that root was not assembled by this process). Used to flag that a
+	// grant/revoke takes effect on the next start. Nil means unknown.
+	WorkspaceTrustAtStart func(root string) (trusted, known bool)
 	// WorkDir is the process working directory. Customize uses it as the
 	// workspace scope when no live session is attached. Apps uses it as the
 	// git workspace for GitHub triage. The browser cannot choose it. Empty
@@ -645,6 +654,8 @@ func (s *Server) routes() {
 	// Project init (#1581): AGENTS.md bootstrap via host.ProjectInit.
 	s.mux.HandleFunc("GET /v1/init", s.handleProjectInitGet)
 	s.mux.HandleFunc("POST /v1/init", s.handleProjectInitPost)
+	s.mux.HandleFunc("GET /v1/workspace/trust", s.handleWorkspaceTrustGet)
+	s.mux.HandleFunc("POST /v1/workspace/trust", s.handleWorkspaceTrustPost)
 	s.mux.HandleFunc("POST /v1/attachments", s.handleAttachmentIngest)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)
 	s.mux.HandleFunc("GET /v1/sidechat", s.handleSideChatList)

@@ -32,6 +32,7 @@ import (
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/audit"
 	"github.com/jonathanung/strike/internal/trust/usageaudit"
+	"github.com/jonathanung/strike/internal/trust/workspacetrust"
 )
 
 const serveUsage = `Web agent workspace (live engine + durable session attach).
@@ -329,6 +330,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var sandboxSnap *server.SandboxSnapshot
 	var sideChat server.SideChatModel
 	var keepAwake *keepawake.Service
+	// trustAtStart reports the workspace trust decision this daemon was
+	// assembled with (#1781); nil in attach-only mode.
+	var trustAtStart func(root string) (trusted, known bool)
 	var taskRuns *taskrun.Store
 	var terminalSandbox sandbox.Policy
 	var terminalSandboxFor func(sessionID, workDir string) (sandbox.Policy, bool)
@@ -591,6 +595,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		taskRuns = a.taskRuns
 		terminalSandbox = a.sandboxPolicy
 		terminalSandboxLoaded = true
+		trustAtStart = serveTrustAtStart(a.trustRoot, a.trustedAtStart)
 		terminalSandboxFor = func(sessionID, workDir string) (sandbox.Policy, bool) {
 			id := strings.TrimSpace(sessionID)
 			if id == "" && liveHub != nil {
@@ -772,6 +777,8 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		},
 		Sandbox:               sandboxSnap,
 		ReadOnly:              opts.readOnly,
+		WorkspaceTrustPath:    workspacetrust.DefaultPath(config.GlobalRoot()),
+		WorkspaceTrustAtStart: trustAtStart,
 		Audit:                 auditSink,
 		Attachments:           sharedAttachments,
 		UsageAuditDir:         usageDir,
