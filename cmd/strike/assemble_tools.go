@@ -91,6 +91,10 @@ type assembled struct {
 	harnessClose func() error
 	// schedulerClose shuts down the shared in-process admission controller.
 	schedulerClose func()
+	// procScheduler and procSchedPolicy are that controller and its bash
+	// classification; script schedules acquire the same leases.
+	procScheduler   *scheduler.Scheduler
+	procSchedPolicy *scheduler.Effective
 	// spawnRoot creates additional concurrent root engines (interactive multi-root).
 	// resumeID empty = new session; non-empty opens that durable root.
 	spawnRoot rootSpawner
@@ -1377,6 +1381,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return first
 		},
 		schedulerClose:  sched.Close,
+		procScheduler:   sched,
+		procSchedPolicy: schedEff,
 		spawnRoot:       spawn,
 		spawnUnattended: spawnUnattended,
 		firstSlot:       first,
