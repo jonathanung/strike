@@ -103,6 +103,8 @@ pub struct Message {
     /// the envelope carried one. Empty for legacy log lines. Used by the
     /// orphan sweep (#1506) to scope a `turn.completed` to its own turn.
     pub turn_id: String,
+    /// Attachments sent with a `user.message` (#1389). Empty elsewhere.
+    pub attachments: Vec<crate::transcript_attachments::SentAttachment>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -509,6 +511,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: field_str(&data, "turnId"),
+                    attachments: crate::transcript_attachments::parse_images(&data),
                 });
                 self.turn_start = Some(id);
                 self.absorb();
@@ -563,6 +566,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "turn.completed" => {
@@ -604,6 +608,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: field_str(&data, "turnId"),
+                    attachments: Vec::new(),
                 });
             }
             "tool.end" => {
@@ -661,6 +666,7 @@ impl Transcript {
                         reconnect: String::new(),
                         at_ms,
                         turn_id: field_str(&data, "turnId"),
+                        attachments: Vec::new(),
                     });
                 }
             }
@@ -722,6 +728,7 @@ impl Transcript {
                         reconnect: provider,
                         at_ms,
                         turn_id: String::new(),
+                        attachments: Vec::new(),
                     });
                     return;
                 }
@@ -742,6 +749,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "permission.asked" => {
@@ -780,6 +788,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "permission.resolved" => {
@@ -1089,6 +1098,7 @@ impl Transcript {
             reconnect: String::new(),
             at_ms,
             turn_id: String::new(),
+            attachments: Vec::new(),
         });
     }
 }
