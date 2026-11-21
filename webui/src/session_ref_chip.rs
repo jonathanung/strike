@@ -89,6 +89,8 @@ pub fn SessionRefChips(
                 {move || {
                     let root_now = root.get();
                     let map = sizes.get();
+                    // The route may not know a title the session list does.
+                    let (listed_titles, _) = crate::composer_triggers::session_catalog();
                     ids.get().into_iter().map(|id| {
                         let state = if id == root_now {
                             Size::own()
@@ -97,7 +99,12 @@ pub fn SessionRefChips(
                                 .cloned()
                                 .unwrap_or(Size::Loading)
                         };
-                        let name = state.name(&id);
+                        let listed = listed_titles
+                            .iter()
+                            .find(|(sid, _)| *sid == id)
+                            .map(|(_, t)| t.as_str())
+                            .unwrap_or("");
+                        let name = state.name(&id, listed);
                         let detail = state.detail();
                         let kind = state.state();
                         let openable = state.openable();

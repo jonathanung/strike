@@ -125,10 +125,12 @@ impl Size {
         }
     }
 
-    /// Chip label: the session title once known, else the id.
-    pub fn name(&self, id: &str) -> String {
+    /// Chip label: the route's title, else the session list's title
+    /// (`listed`), else the id.
+    pub fn name(&self, id: &str, listed: &str) -> String {
         match self {
             Size::Ready { title, .. } if !title.trim().is_empty() => title.trim().to_string(),
+            _ if !listed.trim().is_empty() => listed.trim().to_string(),
             _ => id.to_string(),
         }
     }
@@ -272,11 +274,15 @@ mod tests {
             (Size::from_error("HTTP 500"), "a", "Size unavailable: HTTP 500", "failed", false),
         ];
         for (size, name, detail, state, openable) in cases {
-            assert_eq!(size.name("a"), name);
+            assert_eq!(size.name("a", ""), name);
             assert_eq!(size.detail(), detail);
             assert_eq!(size.state(), state);
             assert_eq!(size.openable(), openable);
         }
         assert_eq!(Size::from_error("HTTP 404"), Size::Missing);
+        let untitled = ready("", 10);
+        assert_eq!(untitled.name("a", " Listed "), "Listed");
+        assert_eq!(Size::Loading.name("a", "Listed"), "Listed");
+        assert_eq!(ready("Route", 10).name("a", "Listed"), "Route");
     }
 }
