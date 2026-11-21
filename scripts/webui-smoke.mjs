@@ -14,7 +14,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -366,6 +366,24 @@ try {
     join(sessionsDir, "elapsed-session.meta.json"),
     JSON.stringify({ title: "Elapsed replay" }) + "\n",
   );
+  // Stale/large resume (#1502) fixtures: the last usage.reported carries
+  // the recorded context occupancy; the file mtime is the activity time.
+  const staleAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+  for (const [id, used, stale] of [
+    ["stale-large", 950000, true],
+    ["stale-small", 1000, true],
+    ["fresh-large", 950000, false],
+  ]) {
+    const file = join(sessionsDir, `${id}.jsonl`);
+    await writeFile(
+      file,
+      line(`resume fixture ${id}`) +
+        JSON.stringify({ type: "usage.reported", time: "2026-10-26T06:00:02Z", data: { used: { n: used, known: true } } }) +
+        "\n",
+    );
+    await writeFile(join(sessionsDir, `${id}.meta.json`), JSON.stringify({ title: `Resume ${id}` }) + "\n");
+    if (stale) await utimes(file, staleAt, staleAt);
+  }
   const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
     throw new Error(`content search ${found.status} ${found.text.slice(0, 300)}`);
@@ -3705,6 +3723,74 @@ try {
     }),
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Stale/large resume warning (#1502): opening a session idle for 3 days
+  // whose last recorded context is ~950k tokens shows the inline card;
+  // a stale small one and a fresh large one open with no card. Resume
+  // anyway dismisses it and remembers the dismissal for that size.
+  const listedTokens = ((await listJSON("/v1/sessions")).sessions || []).find((s) => s.id === "stale-large")?.historyTokens;
+  if (listedTokens !== 950000) {
+    throw new Error(`session list historyTokens for stale-large = ${listedTokens}`);
+  }
+  const staleCard = async () =>
+    evaluate(
+      `(() => { const el = document.querySelector("[data-stale-resume]"); return el ? el.getAttribute("data-stale-resume") + "|" + el.innerText : ""; })()`,
+    );
+  const openRow = async (id) => {
+    await waitFor(
+      `resume fixture row ${id}`,
+      async () => ({ ok: (await evaluate(`!!document.querySelector(${JSON.stringify(rowSel(id))})`)) === true }),
+      { timeout: STEP_MS, interval: 250 },
+    );
+    const clicked = await evaluate(
+      `(() => { const row = document.querySelector(${JSON.stringify(rowSel(id))}); const btn = row && row.querySelector(".ss-main"); if (btn) btn.click(); return !!btn; })()`,
+    );
+    if (clicked !== true) throw new Error(`could not open ${id}`);
+    await waitFor(
+      `${id} open`,
+      async () => ({
+        ok:
+          (await evaluate(
+            `(() => { const el = document.querySelector('[data-session-id][aria-selected="true"]'); return el ? el.getAttribute("data-session-id") : ""; })()`,
+          )) === id,
+      }),
+      { timeout: STEP_MS, interval: 250 },
+    );
+  };
+  const expectNoCard = async (id) => {
+    await delay(750);
+    const card = await staleCard();
+    if (card) throw new Error(`stale-resume card shown for ${id}: ${card.slice(0, 200)}`);
+  };
+  await openRow("stale-small");
+  await expectNoCard("stale-small");
+  await openRow("fresh-large");
+  await expectNoCard("fresh-large");
+  await openRow("stale-large");
+  const shownCard = await waitFor(
+    "stale-resume card on the stale, large session",
+    async () => {
+      const card = (await staleCard()) || "";
+      return { ok: card.startsWith("stale-large|") && card.includes("tokens of history") && card.includes("3d ago"), card };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  for (const label of ["Resume anyway", "Start fresh", "Cancel"]) {
+    if (!shownCard.card.includes(label)) throw new Error(`stale-resume card missing ${label}: ${shownCard.card}`);
+  }
+  await clickSel(`[data-stale-resume-action="resume"]`);
+  await waitFor(
+    "stale-resume card dismissed by Resume anyway",
+    async () => ({ ok: !(await staleCard()) }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const dismissed = JSON.parse((await evaluate(`localStorage.getItem("strike.staleResume.dismissed") || "{}"`)) || "{}");
+  if (dismissed["stale-large"] !== 950000) {
+    throw new Error(`stale-resume dismissal not remembered: ${JSON.stringify(dismissed)}`);
+  }
+  await openRow("stale-small");
+  await openRow("stale-large");
+  await expectNoCard("stale-large after dismissal");
+
   // Session restore (#1391): the viewed session is persisted like theme
   // and layout, so a reload returns to it; a saved id whose session was
   // deleted falls back to another session instead of an empty screen.

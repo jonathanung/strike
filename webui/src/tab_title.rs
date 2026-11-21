@@ -115,6 +115,7 @@ mod tests {
             status: String::new(),
             last_activity_at: 0,
             unread,
+            history_tokens: 0,
         }
     }
 

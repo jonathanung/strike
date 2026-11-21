@@ -3163,3 +3163,30 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .files-head .hint, .changes-head .hint { margin: 0; }
 /* feature:files-refresh end */
+/* feature:stale-resume begin */
+/* Stale/large resume warning (#1502): one inline card at the top of the
+   opened session. Tokens only; --warning is the theme's caution colour. */
+.stale-resume {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) 10px;
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 12%, var(--surface));
+}
+.stale-resume-text {
+  margin: 0;
+  flex: 1 1 260px;
+  font-size: var(--type-sm);
+  line-height: 1.4;
+}
+.stale-resume-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* feature:stale-resume end */

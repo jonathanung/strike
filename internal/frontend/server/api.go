@@ -41,6 +41,9 @@ type sessionListItem struct {
 	Status         string `json:"status,omitempty"`
 	Unread         bool   `json:"unread"`
 	LastActivityAt int64  `json:"lastActivityAt,omitempty"`
+	// HistoryTokens is the context occupancy recorded on the session's last
+	// usage.reported (#1502); omitted when unknown — never estimated.
+	HistoryTokens int64 `json:"historyTokens,omitempty"`
 }
 
 type agentsResponse struct {
@@ -847,11 +850,12 @@ func listSessionFiles(dir string) ([]sessionListItem, error) {
 			continue // roots only in switcher
 		}
 		out = append(out, sessionListItem{
-			ID:          info.ID,
-			Title:       info.Title,
-			Mtime:       info.UpdatedAt.Unix(),
-			ForkedFrom:  info.ForkedFrom,
-			WorkspaceID: info.WorkspaceID,
+			ID:            info.ID,
+			Title:         info.Title,
+			Mtime:         info.UpdatedAt.Unix(),
+			ForkedFrom:    info.ForkedFrom,
+			WorkspaceID:   info.WorkspaceID,
+			HistoryTokens: sessionHistoryTokens(info.Path, info.ID),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

@@ -120,7 +120,7 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/sessions` | **yes** | Durable session list (roots only) + `liveId` |
 | `GET`/`POST` | `/v1/diag` | **yes** | Redacted prompt/config diagnostic bundle (JSON download; live only; `?root=` when multi-root). Bootstrap capability `diag`. **503** when unsupported (attach-only / no live). |
 | `GET`/`POST` | `/v1/init` | **yes** | Project init (#1581): `GET` previews `{path, exists}` for AGENTS.md in the root's working directory (`?root=` when multi-root); `POST` writes it via host `ProjectInit`. **409** when AGENTS.md already exists (never overwrites; TUI `/init` confirms replace). **403** attach-only / `--read-only`; **501** without the host service; **404** unknown `?root=`. Bootstrap capability `projectInit`. |
-| `GET` | `/v1/sessions` | **yes** | Session list + `liveId` |
+| `GET` | `/v1/sessions` | **yes** | Session list + `liveId`. Each row may carry `historyTokens` (#1502): the context occupancy recorded on the session's last `usage.reported` (`used`), read from the log tail and cached by size/mtime; omitted when unknown or when a compaction followed it — never estimated. The cockpit uses it to warn before resuming a stale, large session |
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
 | `GET` | `/v1/sessions/{id}/children` | **yes** | Child/subagent sessions under a root |
 | `POST` | `/v1/sessions/{id}/fork` | **yes** | Fork durable session → new id |
