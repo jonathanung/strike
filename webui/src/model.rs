@@ -482,6 +482,35 @@ pub struct TeamSnapshot {
     pub lead_id: String,
     #[serde(default)]
     pub members: HashMap<String, TeamMember>,
+    /// Delegations by id (#1381), the daemon's `DelegationSnapshot` map.
+    /// Go marshals an empty map as `null`, which reads as empty here.
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub delegations: HashMap<String, Delegation>,
+}
+
+/// One delegation (DTO mirror of the daemon's `DelegationSnapshot`):
+/// queued | working | blocked | review | done | failed | canceled.
+/// `session_id` is empty until a child session exists.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct Delegation {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub state: String,
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub reason: String,
+}
+
+fn null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
 }
 
 #[derive(Clone, Debug)]

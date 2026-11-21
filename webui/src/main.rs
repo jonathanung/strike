@@ -23,6 +23,7 @@ mod editor;
 mod load_epoch;
 mod localfiles;
 mod customize;
+mod delegation_board;
 mod gateway;
 mod gateway_qr;
 mod git;
@@ -65,6 +66,7 @@ mod turn_elapsed;
 mod turn_usage;
 mod workspaces;
 use crate::shell::icon;
+use crate::delegation_board::DelegationBoard;
 
 
 use std::cell::{Cell, RefCell};
@@ -1086,6 +1088,8 @@ fn App() -> impl IntoView {
     let ledger_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // #1381: delegation board rows from the /v1/team poll.
+    let delegation_rows = RwSignal::new(Vec::<delegation_board::BoardRow>::new());
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -1407,6 +1411,10 @@ fn App() -> impl IntoView {
                     let now = now_ms();
                     let prev = activity.get_untracked();
                     let rows = rows_from_team(&prev, &team, now);
+                    let board = delegation_board::board_rows(&team);
+                    if delegation_rows.get_untracked() != board {
+                        delegation_rows.set(board);
+                    }
                     let rows = if rows.is_empty() {
                         activity_panel(
                             &[],
@@ -5666,6 +5674,7 @@ fn App() -> impl IntoView {
                     <Show when=move || !children_note.get().is_empty()>
                         <p class="hint" data-children-note="true">{move || children_note.get()}</p>
                     </Show>
+                    <DelegationBoard rows=delegation_rows />
                     <Show when=move || activity.get().is_empty()>
                         {move || {
                             let failed = !children_note.get().is_empty();
