@@ -478,7 +478,7 @@ touched; unresolved rows **must** keep the listed tier.
 | Issues list/write/export | `/issues`, issues window | issues panel + API | shipped | preserve | B | read/export; writes 403 |
 | Workflows catalog/start | `/workflow`, builder modal | `Workflows.tsx`, `/v1/workflows*` | shipped | #1079 | B | read; start blocked attach |
 | Workflow drafts | workflow builder | draft APIs when cap | shipped | #1079 | B | per API |
-| Context doctor | `/context`, context window | context inspector tab | shipped | preserve | B | read |
+| Context doctor | `/context`, context window | Context doctor dialog (statusline meter / palette; `inspect.prompt`); pin/exclude is slice 2 (#1537) | shipped (read-only) | preserve | B | read |
 | Timeline | `/timeline`, timeline modal | `Timeline.tsx` | shipped | preserve | B | read |
 | Diag bundle | `/diag` | `GET /v1/diag` download | shipped | preserve | B | 503 |
 

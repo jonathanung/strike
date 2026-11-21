@@ -631,6 +631,23 @@ Not built yet:
 - Property order follows the field names (the cockpit's JSON maps are
   sorted), not the server's key order.
 
+## Ship to PR
+
+The Git tab's "Create pull request" action (#1340) previews the current
+branch against its base (`GET /v1/git/pr`: commits, diffstat, uncommitted
+changes, whether a push is needed, an existing open PR, and an editable
+title/body drafted from the session title and commits). `POST /v1/git/pr`
+pushes `refs/heads/<branch>` to origin only with `confirmPush` (never a
+force-push), needs `allowDirty` when the tree has uncommitted changes, then
+runs the host's `gh pr create` (draft by default) and links the PR to the
+session (`prUrl` / `prNumber` / `prState` in the session meta). It refuses a
+detached HEAD, the default branch / main / master, and a non-GitHub origin
+with a plain message; an existing open PR is returned (the action becomes
+"Open pull request"), never duplicated. No token crosses to the browser.
+Not in this slice: non-GitHub forges, pushing to a remote other than
+origin, and the live checks chip (PR watch, #1356, reads the same session
+fields).
+
 ## Not planned as a copy
 
 Stall is already a real badge when the team roster sets `budget.stall`.
