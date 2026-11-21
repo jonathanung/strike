@@ -746,6 +746,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialAutonomy    protocol.Autonomy
 			initialFallbackP   string
 			initialFallbackM   string
+			initialVerbosity   protocol.Verbosity
 			initialPermMode    = cfg.PermissionMode
 			initialPhaseWF     string
 			initialPhaseIndex  int
@@ -776,6 +777,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialAutonomy = restored.Autonomy
 			initialFallbackP = restored.FallbackProvider
 			initialFallbackM = restored.FallbackModel
+			initialVerbosity = restored.Verbosity
 			// Managed permissionMode wins over session resume (enterprise lock).
 			if !cfg.Managed.PermissionMode {
 				initialPermMode = restored.PermissionMode
@@ -984,6 +986,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialModel:            initialModel,
 			InitialEffort:           initialEffort,
 			InitialAutonomy:         initialAutonomy,
+			InitialVerbosity:        initialVerbosity,
 			InitialFallbackProvider: initialFallbackP,
 			InitialFallbackModel:    initialFallbackM,
 			InitialPermissionMode:   initialPermMode,

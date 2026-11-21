@@ -71,6 +71,15 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 			return
 		}
 		e.setAutonomy(op.Mode)
+	case protocol.SetVerbosity:
+		if e.turnActive() {
+			e.emit(protocol.EngineError{
+				Correlation: e.sessionCorr(),
+				Message:     "cannot change verbosity while a turn is running",
+			})
+			return
+		}
+		e.setVerbosity(op.Level)
 	case protocol.SetPermissionMode:
 		// Allowed mid-turn: posture applies to subsequent tool asks in the
 		// same turn (pending asks are rejected by the permission service).

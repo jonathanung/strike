@@ -133,6 +133,9 @@ type Options struct {
 	// InitialAutonomy is the exit-gate policy at startup. Empty becomes
 	// AutonomySupervised so the dial is always explicit.
 	InitialAutonomy protocol.Autonomy
+	// InitialVerbosity is the response style at startup (#1369); the zero
+	// value sends nothing and stays silent.
+	InitialVerbosity protocol.Verbosity
 	// InitialPermissionMode is the tool-permission posture at startup. Empty
 	// becomes PermissionModeDefault so the dial is always explicit.
 	InitialPermissionMode protocol.PermissionMode
@@ -518,6 +521,8 @@ type Engine struct {
 	effort   protocol.Effort
 	// autonomy is the session exit-gate policy (supervised|agent|checks|skip-all).
 	autonomy protocol.Autonomy
+	// verbosity is the session response style (#1369); empty sends nothing.
+	verbosity protocol.Verbosity
 	// permMode is the session tool-permission posture dial.
 	permMode protocol.PermissionMode
 	// memMode is normal, incognito, or temporary. Empty is treated as normal.
@@ -1145,6 +1150,10 @@ func (e *Engine) Run(ctx context.Context) {
 	// Restore the session fallback model (#1350) when one was set.
 	if p := strings.TrimSpace(e.opts.InitialFallbackProvider); p != "" {
 		e.handleSetFallback(protocol.SetFallbackModel{Provider: p, Model: e.opts.InitialFallbackModel})
+	}
+	// Like effort, an unset style stays silent.
+	if e.opts.InitialVerbosity != protocol.VerbosityDefault {
+		e.setVerbosity(e.opts.InitialVerbosity)
 	}
 	// Permission mode rules + emit before AgentSelected so unbuffered event
 	// consumers that wait on AgentSelected as "startup ready" do not deadlock.

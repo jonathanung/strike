@@ -73,6 +73,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		AutonomySelected{Correlation: corr, Mode: AutonomyAgent},
 		PermissionModeSelected{Correlation: corr, Mode: PermissionModeYolo},
 		FastSelected{Correlation: corr, Enabled: true},
+		VerbositySelected{Correlation: corr, Level: VerbosityConcise, Delivery: VerbosityDeliveryInstruction},
 		FilesInvalidated{Correlation: corr, Paths: []string{"a.go", "b.go"}, Reason: "external_editor"},
 		PathOverlap{
 			Correlation: childCorr,
@@ -951,6 +952,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"autonomy.selected":      AutonomySelected{},
 		"permission.mode":        PermissionModeSelected{},
 		"fast.selected":          FastSelected{},
+		"verbosity.selected":     VerbositySelected{},
 		"files.invalidated":      FilesInvalidated{},
 		"engine.error":           EngineError{},
 		"child.started":          ChildStarted{},

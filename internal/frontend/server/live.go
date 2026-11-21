@@ -482,13 +482,17 @@ type StatusSnapshot struct {
 	// (#1350); empty when none is set.
 	FallbackProvider string `json:"fallbackProvider,omitempty"`
 	FallbackModel    string `json:"fallbackModel,omitempty"`
-	PermissionMode   string `json:"permissionMode,omitempty"`
-	Phase            string `json:"phase,omitempty"`
-	Workflow         string `json:"workflow,omitempty"`
-	CWD              string `json:"cwd,omitempty"`
-	Busy             bool   `json:"busy"`
-	ContextUsed      int    `json:"contextUsed,omitempty"`
-	ContextLimit     int    `json:"contextLimit,omitempty"`
+	// Verbosity is the session response style (#1369; empty = default) and
+	// VerbosityDelivery how it reaches the model (none|instruction).
+	Verbosity         string `json:"verbosity,omitempty"`
+	VerbosityDelivery string `json:"verbosityDelivery,omitempty"`
+	PermissionMode    string `json:"permissionMode,omitempty"`
+	Phase             string `json:"phase,omitempty"`
+	Workflow          string `json:"workflow,omitempty"`
+	CWD               string `json:"cwd,omitempty"`
+	Busy              bool   `json:"busy"`
+	ContextUsed       int    `json:"contextUsed,omitempty"`
+	ContextLimit      int    `json:"contextLimit,omitempty"`
 	// ContextFit is the latest context.fit_warning level (warn|critical).
 	// Empty after compaction, or after a usage report falls under 80% of
 	// ContextLimit (the engine's fitWarnRatio). It is not a second limit.
@@ -1034,6 +1038,9 @@ func (l *Live) applyStatus(ev protocol.Event) {
 	case protocol.FallbackModelSelected:
 		l.status.FallbackProvider = e.Provider
 		l.status.FallbackModel = e.Model
+	case protocol.VerbositySelected:
+		l.status.Verbosity = string(e.Level)
+		l.status.VerbosityDelivery = e.Delivery
 	case protocol.PermissionModeSelected:
 		l.status.PermissionMode = string(e.Mode)
 	case protocol.PhaseChanged:

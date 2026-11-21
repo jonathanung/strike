@@ -175,6 +175,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		InitialPriority:            restored.Priority,
 		InitialTitled:              restored.Titled || snap.Title != "",
 		InitialAutonomy:            restored.Autonomy,
+		InitialVerbosity:           restored.Verbosity,
 		InitialPermissionMode:      childPermMode,
 		InitialAlwaysGrants:        restored.AlwaysGrants,
 		InitialFolderGrants:        restored.FolderGrants,

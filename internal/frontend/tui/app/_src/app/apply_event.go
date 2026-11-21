@@ -843,6 +843,8 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 		return e.Correlation, true
 	case protocol.ModelFallback:
 		return e.Correlation, true
+	case protocol.VerbositySelected:
+		return e.Correlation, true
 	case protocol.UsageReported:
 		return e.Correlation, true
 	case protocol.CompactionStarted:

@@ -53,6 +53,17 @@ const (
 // Model fallback reasons (#1350).
 const ModelFallbackReasonUnavailable = pub.ModelFallbackReasonUnavailable
 
+// Verbosity dial (#1369).
+type Verbosity = pub.Verbosity
+
+const (
+	VerbosityDefault             = pub.VerbosityDefault
+	VerbosityConcise             = pub.VerbosityConcise
+	VerbosityDetailed            = pub.VerbosityDetailed
+	VerbosityDeliveryNone        = pub.VerbosityDeliveryNone
+	VerbosityDeliveryInstruction = pub.VerbosityDeliveryInstruction
+)
+
 // Phase resume recovery statuses.
 const (
 	PhaseStatusMissing  = pub.PhaseStatusMissing
@@ -167,6 +178,7 @@ type (
 	SetAutonomy             = pub.SetAutonomy
 	SetPermissionMode       = pub.SetPermissionMode
 	SetFast                 = pub.SetFast
+	SetVerbosity            = pub.SetVerbosity
 	StartWorkflow           = pub.StartWorkflow
 	StopWorkflow            = pub.StopWorkflow
 	FilesChanged            = pub.FilesChanged
@@ -231,6 +243,7 @@ type (
 	AutonomySelected        = pub.AutonomySelected
 	PermissionModeSelected  = pub.PermissionModeSelected
 	FastSelected            = pub.FastSelected
+	VerbositySelected       = pub.VerbositySelected
 	FilesInvalidated        = pub.FilesInvalidated
 	PathOverlap             = pub.PathOverlap
 	PathOverlapHolder       = pub.PathOverlapHolder
@@ -375,7 +388,11 @@ func Efforts() []Effort                           { return pub.Efforts() }
 func ParseEffort(value string) (Effort, bool)     { return pub.ParseEffort(value) }
 func Autonomies() []Autonomy                      { return pub.Autonomies() }
 func ParseAutonomy(value string) (Autonomy, bool) { return pub.ParseAutonomy(value) }
-func PermissionModes() []PermissionMode           { return pub.PermissionModes() }
+func Verbosities() []Verbosity                    { return pub.Verbosities() }
+func ParseVerbosity(value string) (Verbosity, bool) {
+	return pub.ParseVerbosity(value)
+}
+func PermissionModes() []PermissionMode { return pub.PermissionModes() }
 func ParsePermissionMode(value string) (PermissionMode, bool) {
 	return pub.ParsePermissionMode(value)
 }
