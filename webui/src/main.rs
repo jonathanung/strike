@@ -95,6 +95,7 @@ mod storage;
 mod tab_title;
 mod themes;
 mod task_runner;
+mod team_message;
 mod file_history;
 mod quick_open;
 mod transcript_find;
@@ -132,6 +133,7 @@ mod spec_authoring;
 mod workflows;
 mod workflow_run;
 use crate::shell::icon;
+use crate::team_message::TeamMessageComposer;
 use crate::identity::IdentityDisc;
 use crate::delegation_board::DelegationBoard;
 use crate::child_signals::TeamMessagesFeed;
@@ -1227,6 +1229,11 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // #1573: bootstrap `teamControl` plus a live team with members gate the
+    // activity panel's Message action; absent otherwise, never disabled.
+    let team_control_capable = RwSignal::new(false);
+    let team_live = RwSignal::new(false);
+    let message_target = RwSignal::new(None::<team_message::Target>);
     // #1381: delegation board rows from the /v1/team poll.
     let delegation_rows = RwSignal::new(Vec::<delegation_board::BoardRow>::new());
     // Bootstrap capability `plugins` (#1570): gates plugin lifecycle.
@@ -1672,6 +1679,7 @@ fn App() -> impl IntoView {
                     let now = now_ms();
                     let prev = activity.get_untracked();
                     let rows = rows_from_team(&prev, &team, now);
+                    team_live.set(team.available && !rows.is_empty());
                     let board = delegation_board::board_rows(&team);
                     if delegation_rows.get_untracked() != board {
                         delegation_rows.set(board);
@@ -1701,7 +1709,10 @@ fn App() -> impl IntoView {
                     };
                     activity.set(rows);
                 }
-                Err(e) => team_note.set(e),
+                Err(e) => {
+                    team_live.set(false);
+                    team_note.set(e);
+                }
             }
         });
     };
@@ -2024,6 +2035,7 @@ fn App() -> impl IntoView {
                                 crate::local_issues::set_issues_capable(boot.capabilities.issues);
                                 issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                team_control_capable.set(boot.capabilities.team_control);
                                 plugins_capable.set(boot.capabilities.plugins);
                                 config_files_capable.set(boot.capabilities.config_files);
                                 crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
@@ -6813,6 +6825,9 @@ fn App() -> impl IntoView {
                         <span class="hint">"Live tasks"</span>
                         <span class="row-actions">
                             <button type="button" class="secondary side-chat-open-activity" on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
+                            <Show when=move || team_control_capable.get() && team_live.get()>
+                                <button type="button" class="secondary" data-team-message-all="true" on:click=move |_| message_target.set(Some(team_message::Target::All))>"Message all"</button>
+                            </Show>
                             <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
                         </span>
                     </header>
@@ -6828,6 +6843,7 @@ fn App() -> impl IntoView {
                     <Show when=move || !children_note.get().is_empty()>
                         <p class="hint" data-children-note="true">{move || children_note.get()}</p>
                     </Show>
+                    <TeamMessageComposer base=base token=token root=active_root activity=activity target=message_target />
                     <DelegationBoard rows=delegation_rows />
                     <Show when=move || activity.get().is_empty()>
                         {move || {
@@ -6875,6 +6891,8 @@ fn App() -> impl IntoView {
                                 let name = row.name.clone();
                                 let name_chat = name.clone();
                                 let sid_chat = sid.clone();
+                                let sid_msg = sid.clone();
+                                let name_msg = name.clone();
                                 let escalation = team_escalations.with(|m| m.get(&sid).cloned());
                                 let who = name.clone();
                                 let disc_key = identity::child_key(&name, &sid);
@@ -6928,6 +6946,19 @@ fn App() -> impl IntoView {
                                                     open_side(sid_chat.clone(), name_chat.clone());
                                                 }
                                             }>"Side chat"</button>
+                                            <Show when=move || team_control_capable.get() && team_live.get()>
+                                                <button type="button" class="secondary" data-team-message-open=sid_msg.clone() on:click={
+                                                    let sid_msg = sid_msg.clone();
+                                                    let name_msg = name_msg.clone();
+                                                    move |ev: web_sys::MouseEvent| {
+                                                        ev.stop_propagation();
+                                                        message_target.set(Some(team_message::Target::Child {
+                                                            session_id: sid_msg.clone(),
+                                                            name: name_msg.clone(),
+                                                        }));
+                                                    }
+                                                }>"Message"</button>
+                                            </Show>
                                             <button class="secondary" disabled=move || !running on:click={
                                                 let sid_stop = sid_stop.clone();
                                                 move |ev: web_sys::MouseEvent| {
