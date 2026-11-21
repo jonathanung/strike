@@ -58,6 +58,7 @@ mod shell;
 mod side_chat;
 mod status;
 mod term;
+mod tool_tail;
 mod terminal;
 mod transcript;
 mod transcript_view;
