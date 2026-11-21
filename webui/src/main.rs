@@ -16,6 +16,7 @@ mod apps;
 mod approval_outcome;
 mod approvals;
 mod approvals_ui;
+mod away_briefing_view;
 mod chat_mode;
 mod child_signals;
 mod clipboard;
@@ -30,6 +31,7 @@ mod diagnostics;
 mod draft_size;
 mod drafts;
 mod editor;
+mod files_invalidated;
 mod lessons;
 mod elicitation;
 mod elicitation_ui;
@@ -40,6 +42,7 @@ mod local_issues;
 mod mermaid;
 mod localfiles;
 mod customize;
+mod delegation_board;
 mod deploy_watch;
 mod gateway;
 mod gateway_peek;
@@ -122,6 +125,7 @@ mod workflows;
 mod workflow_run;
 use crate::shell::icon;
 use crate::identity::IdentityDisc;
+use crate::delegation_board::DelegationBoard;
 use crate::child_signals::TeamMessagesFeed;
 
 
@@ -162,6 +166,7 @@ use crate::approvals_ui::{
     apply_perm_notes, commit_autonomy, commit_session_mode, ApprovalCards, ApprovalHost,
     ApprovalMenu, AutonomyMenu,
 };
+use crate::away_briefing_view::AwayBriefing;
 use crate::status_card_view::{ChildStatusCard, SessionStatusCard};
 use crate::transcript::Transcript;
 use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
@@ -1214,6 +1219,8 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // #1381: delegation board rows from the /v1/team poll.
+    let delegation_rows = RwSignal::new(Vec::<delegation_board::BoardRow>::new());
     // Bootstrap capability `plugins` (#1570): gates plugin lifecycle.
     let plugins_capable = RwSignal::new(false);
     // Typed config-source list (#1493), from bootstrap `configFiles`.
@@ -1494,6 +1501,11 @@ fn App() -> impl IntoView {
     let memory_mode_known = RwSignal::new(false);
     let memory_menu = RwSignal::new(false);
     let storage_rev = RwSignal::new(0u32);
+    // files.invalidated (#1380): bumped (debounced) when the daemon says
+    // files changed underneath the session; the Files/Changes load Effect
+    // observes it so the open panel refetches.
+    let files_rev = RwSignal::new(0u32);
+    let files_debounce: Rc<Cell<files_invalidated::Debounce>> = Rc::new(Cell::new(Default::default()));
     // Lessons capture (#1376): rows show "Remember this" only while the
     // confirmed memory mode allows storing; the draft is page-owned.
     let lesson_gate = Signal::derive(move || {
@@ -1643,6 +1655,10 @@ fn App() -> impl IntoView {
                     let now = now_ms();
                     let prev = activity.get_untracked();
                     let rows = rows_from_team(&prev, &team, now);
+                    let board = delegation_board::board_rows(&team);
+                    if delegation_rows.get_untracked() != board {
+                        delegation_rows.set(board);
+                    }
                     let (names, escalations) = team_signal_maps(&team);
                     if team_names.get_untracked() != names {
                         team_names.set(names);
@@ -2115,6 +2131,7 @@ fn App() -> impl IntoView {
     let wipe_on_replay = RwSignal::new(false);
     let tail_fx = tail.clone();
     let cursor_fx = live_cursor.clone();
+    let debounce_fx = files_debounce.clone();
     Effect::new(move |_| {
         let root = active_root.get();
         let b = base.get();
@@ -2219,6 +2236,7 @@ fn App() -> impl IntoView {
         let epoch_msg = epoch;
         let epochs_msg = stream_epoch;
         let cursor_msg = cursor_fx.clone();
+        let debounce_msg = debounce_fx.clone();
         let on_msg =
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
                 if epochs_msg.get_untracked() != epoch_msg {
@@ -2308,6 +2326,9 @@ fn App() -> impl IntoView {
                     let artifact_rev = transcript_cb.with_untracked(|t| t.artifact_updates);
                     if artifact_rev != storage_rev.get_untracked() {
                         storage_rev.set(artifact_rev);
+                    }
+                    if files_invalidated::is_event(&data) {
+                        files_invalidated::refresh_soon(debounce_msg.clone(), files_rev);
                     }
                     let prev = LiveModelState {
                         provider: provider_name.get_untracked(),
@@ -3697,6 +3718,7 @@ fn App() -> impl IntoView {
     Effect::new(move |_| {
         let tab = side_tab.get();
         let _ = files_path.get();
+        let _ = files_rev.get();
         if tab == "files" {
             load_files();
         } else if tab == "changes" {
@@ -5771,6 +5793,7 @@ fn App() -> impl IntoView {
                     // to the conversation. Visually hidden; the status tabs
                     // and chat-mode bar already show the session name.
                     <h1 id="chat-heading" class="sr-only">{move || chat_title.get()}</h1>
+                    <AwayBriefing base=base token=token roots=roots on_focus=on_notify />
                     // #1781: persistent untrusted-workspace badge + trust card.
                     <workspace_trust::WorkspaceTrust
                         base=base
@@ -6678,6 +6701,7 @@ fn App() -> impl IntoView {
                     <Show when=move || !children_note.get().is_empty()>
                         <p class="hint" data-children-note="true">{move || children_note.get()}</p>
                     </Show>
+                    <DelegationBoard rows=delegation_rows />
                     <Show when=move || activity.get().is_empty()>
                         {move || {
                             let failed = !children_note.get().is_empty();
