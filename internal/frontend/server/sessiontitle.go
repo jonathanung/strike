@@ -53,7 +53,8 @@ type titleProposal struct {
 // proposeSessionTitle scans a raw session log for the session's own user
 // messages and SessionTitled events. Malformed or unknown lines are skipped:
 // a damaged line must not block retitling from the rest of the record.
-// ok is false (with an error code) when there is nothing new to title from.
+// A non-empty code (titleCodeEmpty / titleCodeSingle) means there is
+// nothing new to title from and the proposal carries no title.
 func proposeSessionTitle(sessionID, current string, raw []byte) (titleProposal, string) {
 	var msgs []string // derived titles of own user messages, oldest first
 	var autoTitle string

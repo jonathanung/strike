@@ -323,7 +323,10 @@ pub(crate) fn SessionPanel(
         let ticket = crate::load_epoch::begin(reload_epoch);
         // A reload may bring new messages: drop settled regenerate notes
         // and refusals, keep in-flight rows.
-        regen.update(|m| m.retain(|_, st| *st == crate::regenerate_title::RowState::Pending));
+        let pending = crate::regenerate_title::RowState::Pending;
+        if regen.with_untracked(|m| m.values().any(|st| *st != pending)) {
+            regen.update(|m| m.retain(|_, st| *st == pending));
+        }
         spawn_local(async move {
             // Still current only while no newer reload has started and
             // the panel still points at the gateway this reload was
