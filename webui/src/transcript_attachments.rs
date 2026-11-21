@@ -175,6 +175,7 @@ pub fn SentAttachments(items: Vec<SentAttachment>) -> impl IntoView {
 fn sent_chip(item: SentAttachment, auth: Option<AttachmentAuth>) -> impl IntoView {
     let name = chip_name(&item);
     let kind = kind_label(&item);
+    let kind_attr = kind.clone();
     let path = attachment_path(&item.reference);
     let thumb_wanted = is_thumbnail(&item.mime);
     let mime = item.mime.clone();
@@ -222,7 +223,7 @@ fn sent_chip(item: SentAttachment, auth: Option<AttachmentAuth>) -> impl IntoVie
         });
     };
     view! {
-        <span class=move || chip_class(unavailable()) data-attach-kind=kind.clone()>
+        <span class=move || chip_class(unavailable()) data-attach-kind=kind_attr>
             {move || match thumb.get() {
                 Thumb::Ready(url) if thumb_wanted => view! { <img src=url alt="" /> }.into_any(),
                 _ => view! { <span></span> }.into_any(),
