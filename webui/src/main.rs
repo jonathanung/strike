@@ -72,6 +72,7 @@ mod turn_elapsed;
 mod turn_failure;
 mod turn_usage;
 mod workspaces;
+mod workflow_run;
 use crate::shell::icon;
 
 
@@ -1184,6 +1185,12 @@ fn App() -> impl IntoView {
     // solely on `fast.selected`. Neither is set optimistically on click.
     let autonomy = RwSignal::new("supervised".to_string());
     let autonomy_menu = RwSignal::new(false);
+    // Live workflow run (#1574): daemon-reported only — seeded from
+    // bootstrap status, then moved solely by `phase.changed`.
+    let wf_run = RwSignal::new(workflow_run::WorkflowRun::default());
+    Effect::new(move |_| {
+        workflow_run::set_active(wf_run.with(|w| w.is_active()));
+    });
     let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
@@ -1721,9 +1728,31 @@ fn App() -> impl IntoView {
                                                 .to_string(),
                                         );
                                     }
+                                    wf_run.set(workflow_run::WorkflowRun::from_status(
+                                        &st.workflow,
+                                        &st.phase,
+                                    ));
                                     session_cwd.set(st.cwd);
                                     live_busy.set(st.busy);
                                     live_busy_root.set(root);
+                                }
+                                // #1574: refresh the Start workflow… choices
+                                // from the daemon catalog for this session.
+                                {
+                                    let (cb, ct) = (b.clone(), t.clone());
+                                    spawn_local(async move {
+                                        if let Ok(list) = get_json::<workflow_run::CatalogList>(
+                                            &cb,
+                                            &ct,
+                                            "/v1/workflows",
+                                        )
+                                        .await
+                                        {
+                                            workflow_run::set_catalog(
+                                                workflow_run::catalog_choices(&list.workflows),
+                                            );
+                                        }
+                                    });
                                 }
                                 diag_capable.set(boot.capabilities.diag);
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
@@ -1894,6 +1923,7 @@ fn App() -> impl IntoView {
         fast_on.set(false);
         autonomy.set("supervised".to_string());
         autonomy_menu.set(false);
+        wf_run.set(workflow_run::WorkflowRun::default());
         context_used.set(0);
         context_limit.set(0);
         context_fit.set(String::new());
@@ -2027,6 +2057,10 @@ fn App() -> impl IntoView {
                         note: model_note.get_untracked(),
                         note_after: model_note_after.get_untracked(),
                     };
+                    let wf_next = workflow_run::reduce(wf_run.get_untracked(), &data);
+                    if wf_next != wf_run.get_untracked() {
+                        wf_run.set(wf_next);
+                    }
                     let next = reduce_envelope(prev, &data);
                     provider_name.set(next.provider);
                     model_name.set(next.model);
@@ -3860,6 +3894,64 @@ fn App() -> impl IntoView {
             set_memory("temporary".into());
             Ok(())
         }),
+    );
+
+    // Workflow run performers (#1574). Both post the browser-certified
+    // ops and never touch `wf_run`: the chip moves only on the
+    // daemon's `phase.changed`. A refusal is an `engine.error` that the
+    // model-note reducer shows verbatim (it arms on `model_note_after`).
+    let post_workflow_op = move |typ: &'static str, data: serde_json::Value| {
+        let root = active_root.get_untracked();
+        if root.is_empty() {
+            model_note.set("No live session yet — open or start one first.".into());
+            return;
+        }
+        model_note_after.set(now_ms() as i64);
+        model_note.set(String::new());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(&b, &t, &root, typ, data).await {
+                model_note.set(format!("{typ} failed: {e}"));
+                model_note_after.set(0);
+            }
+        });
+    };
+    let request_workflow_stop = move || -> Result<(), String> {
+        let active = wf_run.get_untracked();
+        if !active.is_active() {
+            return Err("No workflow is active on this session.".into());
+        }
+        if !crate::confirm::ask(
+            workflow_run::stop_confirm(&active),
+            Rc::new(move || post_workflow_op("workflow.stop", serde_json::json!({}))),
+        ) {
+            return Err(crate::confirm::BUSY.into());
+        }
+        Ok(())
+    };
+    shell::bind(
+        "workflow-start",
+        Rc::new(move |args: &str| {
+            let name = workflow_run::start_target(args)?;
+            let active = wf_run.get_untracked();
+            let data = serde_json::json!({ "name": name.clone() });
+            match workflow_run::replace_confirm(&active, &name) {
+                None => post_workflow_op("workflow.start", data),
+                Some(request) => {
+                    if !crate::confirm::ask(
+                        request,
+                        Rc::new(move || post_workflow_op("workflow.start", data.clone())),
+                    ) {
+                        return Err(crate::confirm::BUSY.into());
+                    }
+                }
+            }
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "workflow-stop",
+        Rc::new(move |_args: &str| request_workflow_stop()),
     );
 
     // Session delete palette performer (#1358). The contrib command has
@@ -5697,6 +5789,16 @@ fn App() -> impl IntoView {
                                     model_menu.set(false);
                                     autonomy_menu.update(|v| *v = !*v);
                                 }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
+                                // #1574: the live workflow run, only while the
+                                // daemon reports one. Stop asks first.
+                                <Show when=move || wf_run.with(|w| w.is_active())>
+                                    <span class="composer-glance workflow-glance" data-workflow-status="true" title="Active workflow and phase, as reported by the daemon. Start another from the palette: Start workflow…">{move || wf_run.with(|w| w.label())}</span>
+                                    <button type="button" class="composer-glance workflow-stop" data-workflow-stop="true" title="Stop the active workflow (asks first)" aria-label=move || format!("Stop workflow {}", wf_run.with(|w| w.workflow.clone())) on:click=move |_| {
+                                        if let Err(e) = request_workflow_stop() {
+                                            model_note.set(e);
+                                        }
+                                    }>"Stop"</button>
+                                </Show>
                                 <Show when=move || fast_on.get()>
                                     <span class="composer-glance" data-fast-status="true" title="Fast (priority service tier) is on for this session, as confirmed by the daemon. The current provider may not support priority tier.">"Fast · on"</span>
                                 </Show>
