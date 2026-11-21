@@ -34,9 +34,10 @@ pub enum Target {
 }
 
 /// True when a child in this display state can still take mail.
-/// Display states come from `model::display_state`.
+/// Display states come from `model::display_state`; `blocked` is the
+/// terminal ChildStatus the daemon reports as a closed mailbox.
 pub fn can_receive(state: &str) -> bool {
-    !matches!(state, "done" | "failed" | "stopped")
+    !matches!(state, "done" | "failed" | "stopped" | "blocked")
 }
 
 /// Why a terminal child cannot be messaged.
@@ -45,6 +46,7 @@ pub fn terminal_note(name: &str, state: &str) -> String {
         "done" => "has finished",
         "failed" => "has failed",
         "stopped" => "was stopped",
+        "blocked" => "ended blocked",
         _ => "is no longer running",
     };
     format!("{name} {how} and cannot receive messages. Retry it to start a new run.")
@@ -518,6 +520,12 @@ mod tests {
                 "hi",
                 "c was stopped and cannot receive messages. Retry it to start a new run.",
             ),
+            (
+                child("d"),
+                Some("blocked"),
+                "hi",
+                "d ended blocked and cannot receive messages. Retry it to start a new run.",
+            ),
         ];
         for (target, state, body, want) in cases {
             let err = build_request(&target, state, body, "message", "normal", "r", "k")
@@ -533,10 +541,10 @@ mod tests {
 
     #[test]
     fn receivable_states() {
-        for s in ["running", "stalled", "blocked", "idle", "waiting"] {
+        for s in ["running", "stalled", "idle", "waiting"] {
             assert!(can_receive(s), "{s}");
         }
-        for s in ["done", "failed", "stopped"] {
+        for s in ["done", "failed", "stopped", "blocked"] {
             assert!(!can_receive(s), "{s}");
         }
     }
