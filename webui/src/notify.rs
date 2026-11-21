@@ -309,6 +309,65 @@ fn clear_read_ids(notes: &[Note], seen: &[String], dismissed: &[String]) -> Vec<
         .collect()
 }
 
+/// One line of the centre after grouping (#1826).
+#[derive(Clone, Debug, PartialEq)]
+enum Entry {
+    /// A single row, or (`member`) one row of an expanded group.
+    Note { note: Note, member: bool },
+    /// Two or more consecutive rows with the same kind and session.
+    /// `key` is the oldest member's id, stable while newer rows arrive on
+    /// top; `open` when expanded (its members follow as `member` rows).
+    Group { key: String, notes: Vec<Note>, open: bool },
+}
+
+impl Entry {
+    /// Every notification id this line stands for.
+    fn ids(&self) -> Vec<String> {
+        match self {
+            Entry::Note { note, .. } => vec![note.id.clone()],
+            Entry::Group { notes, .. } => notes.iter().map(|n| n.id.clone()).collect(),
+        }
+    }
+}
+
+/// Rows that may collapse together: same kind and the same (non-empty)
+/// session. Rows with no session never group.
+fn same_group(a: &Note, b: &Note) -> bool {
+    !a.session_id.is_empty() && a.kind == b.kind && a.session_id == b.session_id
+}
+
+/// Collapse consecutive same kind + session rows of `list` (already
+/// filtered and ordered) into counted groups. An expanded group (its key
+/// in `expanded`) is followed by its members, in order.
+fn group_entries(list: &[Note], expanded: &[String]) -> Vec<Entry> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < list.len() {
+        let mut j = i + 1;
+        while j < list.len() && same_group(&list[i], &list[j]) {
+            j += 1;
+        }
+        if j - i < 2 {
+            out.push(Entry::Note { note: list[i].clone(), member: false });
+        } else {
+            let notes = list[i..j].to_vec();
+            let key = notes[notes.len() - 1].id.clone();
+            let open = expanded.iter().any(|k| k == &key);
+            out.push(Entry::Group { key, notes: notes.clone(), open });
+            if open {
+                out.extend(notes.into_iter().map(|note| Entry::Note { note, member: true }));
+            }
+        }
+        i = j;
+    }
+    out
+}
+
+/// A line is unread when any notification it stands for is unread.
+fn entry_unread(entry: &Entry, seen: &[String]) -> bool {
+    entry.ids().iter().any(|id| !seen.iter().any(|s| s == id))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct BannerMark {
     high: i64,
@@ -818,6 +877,9 @@ fn NoteRow(
     activate: UnsyncCallback<Note>,
     toggle_mute: UnsyncCallback<String>,
     dismiss: UnsyncCallback<String>,
+    /// One row of an expanded group (#1826): indented under its header.
+    #[prop(optional)]
+    member: bool,
 ) -> impl IntoView {
     let title = note.title.clone();
     let body = note.body.clone();
@@ -828,10 +890,11 @@ fn NoteRow(
     let show_body = !body.is_empty();
     let show_when = !when.is_empty();
     let mute_label = if muted { "Unmute" } else { "Mute" };
-    let row_class = if active {
-        "notify-row on"
-    } else {
-        "notify-row"
+    let row_class = match (active, member) {
+        (true, true) => "notify-row notify-member on",
+        (true, false) => "notify-row on",
+        (false, true) => "notify-row notify-member",
+        (false, false) => "notify-row",
     };
     let mute = if session.is_empty() {
         ().into_any()
@@ -859,6 +922,76 @@ fn NoteRow(
     }
 }
 
+/// A collapsed (or expanded) run of same kind + session rows (#1826).
+/// Opening it expands and marks every member read; opening it again
+/// collapses. Dismiss hides every member.
+#[component]
+fn GroupRow(
+    notes: Vec<Note>,
+    group_key: String,
+    open: bool,
+    active: bool,
+    unread: bool,
+    muted: bool,
+    toggle: UnsyncCallback<(String, Vec<String>)>,
+    toggle_mute: UnsyncCallback<String>,
+    dismiss_all: UnsyncCallback<Vec<String>>,
+) -> impl IntoView {
+    let count = notes.len();
+    let newest = notes[0].clone();
+    let ids: Vec<String> = notes.iter().map(|n| n.id.clone()).collect();
+    let kind = kind_label(&newest.kind).to_string();
+    let when = short_when(&newest.at);
+    let show_when = !when.is_empty();
+    let session = newest.session_id.clone();
+    let hint = if open {
+        "Showing all. Open again to collapse.".to_string()
+    } else {
+        format!("{} more like this. Open to expand.", count - 1)
+    };
+    let row_class = if active {
+        "notify-row notify-group on"
+    } else {
+        "notify-row notify-group"
+    };
+    let mute_label = if muted { "Unmute" } else { "Mute" };
+    let mute = if session.is_empty() {
+        ().into_any()
+    } else {
+        view! {
+            <button class="secondary notify-mute" on:click=move |_| toggle_mute.run(session.clone())>{mute_label}</button>
+        }
+        .into_any()
+    };
+    let toggle_ids = ids.clone();
+    let toggle_key = group_key.clone();
+    view! {
+        <div class=row_class data-notify-group=group_key data-count=count.to_string()>
+            <button
+                class="notify-open"
+                aria-expanded=if open { "true" } else { "false" }
+                on:click=move |_| toggle.run((toggle_key.clone(), toggle_ids.clone()))
+            >
+                <span class="notify-kicker">
+                    <span class="notify-kind">{kind}</span>
+                    <span class="notify-group-count" aria-label=format!("{count} notifications")>{format!("\u{00d7}{count}")}</span>
+                    <Show when=move || unread><span class="notify-dot"></span></Show>
+                    <Show when=move || muted><span class="notify-muted">"Muted"</span></Show>
+                    <Show when=move || show_when><span class="notify-when">{when.clone()}</span></Show>
+                </span>
+                <span class="notify-title">{newest.title.clone()}</span>
+                <span class="notify-body">{hint}</span>
+            </button>
+            {mute}
+            <button
+                class="secondary notify-dismiss"
+                aria-label=format!("Dismiss {count} notifications")
+                on:click=move |_| dismiss_all.run(ids.clone())
+            >"Dismiss"</button>
+        </div>
+    }
+}
+
 fn event_in_centre(ev: &web_sys::Event) -> bool {
     let Some(el) = event_target(ev) else {
         return false;
@@ -881,6 +1014,8 @@ pub fn NotificationBell(
     let seen = RwSignal::new(load_seen_for(&base.get_untracked()));
     let dismissed = RwSignal::new(load_dismissed_for(&base.get_untracked()));
     let cursor = RwSignal::new(0usize);
+    // Keys of expanded notification groups (#1826). Page-local.
+    let expanded = RwSignal::new(Vec::<String>::new());
     let load_error = RwSignal::new(String::new());
     let form_error = RwSignal::new(String::new());
     let perm = RwSignal::new(notification_permission());
@@ -1316,6 +1451,43 @@ pub fn NotificationBell(
         save_dismissed_for(&base.get_untracked(), &dismissed.get_untracked());
     });
 
+    // #1826: a group's Dismiss hides every member at once.
+    let dismiss_all = UnsyncCallback::new(move |ids: Vec<String>| {
+        let mut next = dismissed.get_untracked();
+        let before = next.len();
+        for id in ids {
+            if !id.is_empty() && !next.iter().any(|d| d == &id) {
+                next.push(id);
+            }
+        }
+        if next.len() != before {
+            dismissed.set(next.clone());
+            save_dismissed_for(&base.get_untracked(), &next);
+        }
+    });
+
+    // #1826: opening a collapsed group expands it and marks every member
+    // read with one POST /v1/notifications/seen; opening it again collapses.
+    let toggle_group = UnsyncCallback::new(move |(key, ids): (String, Vec<String>)| {
+        if expanded.get_untracked().iter().any(|k| k == &key) {
+            expanded.update(|list| list.retain(|k| k != &key));
+            return;
+        }
+        expanded.update(|list| list.push(key));
+        let have = seen.get_untracked();
+        let fresh: Vec<String> = ids
+            .into_iter()
+            .filter(|id| !id.is_empty() && !have.iter().any(|s| s == id))
+            .collect();
+        if fresh.is_empty() {
+            return;
+        }
+        seen.update(|list| list.extend(fresh.iter().cloned()));
+        save_seen_for(&base.get_untracked(), &seen.get_untracked());
+        let remote: Vec<String> = fresh.into_iter().filter(|id| !id.starts_with("local-")).collect();
+        push_seen(base.get_untracked(), token.get_untracked(), remote, 0);
+    });
+
     let on_key =
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
             let key = ev.key();
@@ -1347,7 +1519,10 @@ pub fn NotificationBell(
             if settings.get_untracked() || event_in_field(&ev) || !event_in_centre(&ev) {
                 return;
             }
-            let list = visible_notes(&items.get_untracked(), &dismissed.get_untracked());
+            let list = group_entries(
+                &visible_notes(&items.get_untracked(), &dismissed.get_untracked()),
+                &expanded.get_untracked(),
+            );
             if list.is_empty() {
                 return;
             }
@@ -1360,7 +1535,12 @@ pub fn NotificationBell(
             } else if key == "Enter" {
                 ev.prevent_default();
                 let i = cursor.get_untracked().min(list.len() - 1);
-                activate.run(list[i].clone());
+                match list[i].clone() {
+                    Entry::Note { note, .. } => activate.run(note),
+                    Entry::Group { key, notes, .. } => {
+                        toggle_group.run((key, notes.into_iter().map(|n| n.id).collect()))
+                    }
+                }
             }
         });
     if let Some(window) = web_sys::window() {
@@ -1479,7 +1659,10 @@ pub fn NotificationBell(
                                     </Show>
                                     <div class="notify-list" aria-live="polite">
                                         {move || {
-                                            let list = visible_notes(&items.get(), &dismissed.get());
+                                            let list = group_entries(
+                                                &visible_notes(&items.get(), &dismissed.get()),
+                                                &expanded.get(),
+                                            );
                                             let muted = prefs.get().muted.clone();
                                             let seen_now = seen.get();
                                             if list.is_empty() && load_error.get().is_empty() {
@@ -1487,26 +1670,50 @@ pub fn NotificationBell(
                                                     <p class="notify-empty">"Nothing yet. Approvals, finished work, and a dropped gateway show up here."</p>
                                                 }.into_any();
                                             }
-                                            list.into_iter().enumerate().map(|(i, note)| {
-                                                let unread_row = !seen_now.iter().any(|id| id == &note.id);
-                                                let is_muted = muted.iter().any(|id| {
-                                                    id == &note.session_id || id == &note.subject_id
-                                                });
-                                                view! {
-                                                    <NoteRow
-                                                        note=note
-                                                        active=cursor.get() == i
-                                                        unread=unread_row
-                                                        muted=is_muted
-                                                        activate=activate
-                                                        toggle_mute=toggle_mute
-                                                        dismiss=dismiss
-                                                    />
+                                            list.into_iter().enumerate().map(|(i, entry)| {
+                                                let unread_row = entry_unread(&entry, &seen_now);
+                                                let active = cursor.get() == i;
+                                                match entry {
+                                                    Entry::Note { note, member } => {
+                                                        let is_muted = muted.iter().any(|id| {
+                                                            id == &note.session_id || id == &note.subject_id
+                                                        });
+                                                        view! {
+                                                            <NoteRow
+                                                                note=note
+                                                                active=active
+                                                                unread=unread_row
+                                                                muted=is_muted
+                                                                activate=activate
+                                                                toggle_mute=toggle_mute
+                                                                dismiss=dismiss
+                                                                member=member
+                                                            />
+                                                        }.into_any()
+                                                    }
+                                                    Entry::Group { key, notes, open } => {
+                                                        let is_muted = muted.iter().any(|id| {
+                                                            id == &notes[0].session_id || id == &notes[0].subject_id
+                                                        });
+                                                        view! {
+                                                            <GroupRow
+                                                                notes=notes
+                                                                group_key=key
+                                                                open=open
+                                                                active=active
+                                                                unread=unread_row
+                                                                muted=is_muted
+                                                                toggle=toggle_group
+                                                                toggle_mute=toggle_mute
+                                                                dismiss_all=dismiss_all
+                                                            />
+                                                        }.into_any()
+                                                    }
                                                 }
                                             }).collect_view().into_any()
                                         }}
                                     </div>
-                                    <p class="notify-keys">"Alt+N opens this panel. Up and Down move. Enter opens. Esc closes."</p>
+                                    <p class="notify-keys">"Alt+N opens this panel. Up and Down move. Enter opens or expands a group. Esc closes."</p>
                                 </div>
                         }>
                             <div>
@@ -1936,6 +2143,96 @@ mod tests {
         assert_eq!(merged[0].id, "local-update-v2");
         upsert_update_note(&mut list, None);
         assert!(list.iter().all(|n| !n.id.starts_with("local-update-")));
+    }
+
+    fn session_note(id: &str, seq: i64, kind: &str, session: &str) -> Note {
+        Note {
+            kind: kind.into(),
+            session_id: session.into(),
+            ..plain_note(id, seq)
+        }
+    }
+
+    fn shape(entries: &[Entry]) -> Vec<String> {
+        entries
+            .iter()
+            .map(|e| match e {
+                Entry::Note { note, member: false } => note.id.clone(),
+                Entry::Note { note, member: true } => format!("  {}", note.id),
+                Entry::Group { key, notes, open } => {
+                    format!("[{key} x{}{}]", notes.len(), if *open { " open" } else { "" })
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn group_entries_collapses_consecutive_same_kind_and_session() {
+        let notes = vec![
+            session_note("f5", 9, "child.finished", "s1"),
+            session_note("f4", 8, "child.finished", "s1"),
+            session_note("f3", 7, "child.finished", "s1"),
+            session_note("b1", 6, "child.blocked", "s1"),
+            session_note("f2", 5, "child.finished", "s2"),
+            session_note("f1", 4, "child.finished", "s1"),
+            session_note("g2", 3, "gateway.down", ""),
+            session_note("g1", 2, "gateway.down", ""),
+        ];
+        let cases: Vec<(&str, Vec<String>, Vec<&str>)> = vec![
+            (
+                "collapsed",
+                vec![],
+                vec!["[f3 x3]", "b1", "f2", "f1", "g2", "g1"],
+            ),
+            (
+                "expanded group lists its members in order",
+                vec!["f3".to_string()],
+                vec!["[f3 x3 open]", "  f5", "  f4", "  f3", "b1", "f2", "f1", "g2", "g1"],
+            ),
+            (
+                "unknown expanded key changes nothing",
+                vec!["zz".to_string()],
+                vec!["[f3 x3]", "b1", "f2", "f1", "g2", "g1"],
+            ),
+        ];
+        for (name, expanded, want) in cases {
+            assert_eq!(shape(&group_entries(&notes, &expanded)), want, "{name}");
+        }
+        assert!(group_entries(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn group_key_is_stable_when_a_newer_row_joins() {
+        let older = vec![
+            session_note("f2", 2, "child.finished", "s1"),
+            session_note("f1", 1, "child.finished", "s1"),
+        ];
+        let mut newer = vec![session_note("f3", 3, "child.finished", "s1")];
+        newer.extend(older.clone());
+        let expanded = vec!["f1".to_string()];
+        assert_eq!(shape(&group_entries(&older, &expanded))[0], "[f1 x2 open]");
+        assert_eq!(shape(&group_entries(&newer, &expanded))[0], "[f1 x3 open]");
+    }
+
+    #[test]
+    fn group_unread_when_any_member_unread() {
+        let group = Entry::Group {
+            key: "a".into(),
+            notes: vec![
+                session_note("b", 2, "child.finished", "s1"),
+                session_note("a", 1, "child.finished", "s1"),
+            ],
+            open: false,
+        };
+        let cases = [
+            (vec![], true),
+            (vec!["a".to_string()], true),
+            (vec!["a".to_string(), "b".to_string()], false),
+        ];
+        for (seen, want) in cases {
+            assert_eq!(entry_unread(&group, &seen), want, "seen={seen:?}");
+        }
+        assert_eq!(group.ids(), vec!["b".to_string(), "a".to_string()]);
     }
 
     #[test]

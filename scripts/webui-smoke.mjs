@@ -2843,6 +2843,89 @@ try {
     { timeout: STEP_MS, interval: 200 },
   );
 
+  // Notification grouping (#1826): stub GET /v1/notifications with two
+  // consecutive child.finished rows for one session plus an unrelated
+  // row. The centre must show one counted, unread group; opening it
+  // expands the members, clears the dot, and marks both read with one
+  // POST /v1/notifications/seen (captured, not sent to the daemon).
+  const notifyStub = JSON.stringify({
+    notifications: [
+      { id: "smoke-grp-2", seq: 9002, kind: "child.finished", sessionId: "smoke-grp-s1", title: "smoke child two finished", at: "2026-11-01T10:02:00Z" },
+      { id: "smoke-grp-1", seq: 9001, kind: "child.finished", sessionId: "smoke-grp-s1", title: "smoke child one finished", at: "2026-11-01T10:01:00Z" },
+      { id: "smoke-grp-0", seq: 9000, kind: "approval.needed", sessionId: "smoke-grp-s2", title: "smoke approval", at: "2026-11-01T10:00:00Z" },
+    ],
+    prefs: { enabled: false, quiet: { enabled: false, start: "22:00", end: "07:00" }, mutedSessions: [] },
+    latest: 9002,
+    seen: { upTo: 0, ids: [] },
+  });
+  const seenPosts = [];
+  const onNotifyPaused = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.method !== "Fetch.requestPaused") return;
+    const url = msg.params.request?.url || "";
+    const seenPost = url.includes("/v1/notifications/seen");
+    if (seenPost) seenPosts.push(msg.params.request?.postData || "");
+    send("Fetch.fulfillRequest", {
+      requestId: msg.params.requestId,
+      responseCode: 200,
+      responseHeaders: [{ name: "Content-Type", value: "application/json" }],
+      body: Buffer.from(seenPost ? "{}" : notifyStub).toString("base64"),
+    });
+  };
+  ws.addEventListener("message", onNotifyPaused);
+  await send("Fetch.enable", {
+    patterns: [
+      { urlPattern: "*/v1/notifications", requestStage: "Request" },
+      { urlPattern: "*/v1/notifications/seen", requestStage: "Request" },
+    ],
+  });
+  try {
+    await evaluate(`(() => { if (!document.querySelector(".notify-panel")) document.querySelector(".notify-bell")?.click(); return true; })()`);
+    const groupProbe = `(() => {
+      const g = document.querySelector('.notify-panel [data-notify-group="smoke-grp-1"]');
+      const open = g && g.querySelector(".notify-open");
+      return {
+        group: !!g,
+        count: g ? g.getAttribute("data-count") : "",
+        expanded: open ? open.getAttribute("aria-expanded") : "",
+        dot: !!(g && g.querySelector(".notify-dot")),
+        members: [...document.querySelectorAll(".notify-panel .notify-member .notify-title")].map((t) => t.textContent.trim()),
+        approval: [...document.querySelectorAll(".notify-panel .notify-title")].some((t) => t.textContent.includes("smoke approval")),
+      };
+    })()`;
+    await waitFor(
+      "notification group collapsed with a count and unread dot",
+      async () => {
+        const v = await evaluate(groupProbe);
+        return { ok: v.group && v.count === "2" && v.expanded === "false" && v.dot && v.members.length === 0 && v.approval, ...v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await evaluate(`document.querySelector('.notify-panel [data-notify-group="smoke-grp-1"] .notify-open').click()`);
+    await waitFor(
+      "notification group expands and marks every member read",
+      async () => {
+        const v = await evaluate(groupProbe);
+        const posted = seenPosts.some((b) => b.includes("smoke-grp-1") && b.includes("smoke-grp-2"));
+        return {
+          ok:
+            v.expanded === "true" &&
+            !v.dot &&
+            v.members.join("|") === "smoke child two finished|smoke child one finished" &&
+            posted,
+          posted,
+          seenPosts: seenPosts.slice(0, 3),
+          ...v,
+        };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  } finally {
+    await send("Fetch.disable", {});
+    ws.removeEventListener("message", onNotifyPaused);
+    await evaluate(`(() => { if (document.querySelector(".notify-panel")) document.querySelector(".notify-bell")?.click(); return true; })()`);
+  }
+
   await runPalette("Memory");
   const memoryText = (
     await waitFor(
