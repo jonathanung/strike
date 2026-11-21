@@ -95,6 +95,8 @@ func sideChatRefusal(opType string) string {
 		return "side chat cannot steer the running turn"
 	case "question.reply":
 		return "side chat cannot answer a pending question for the session"
+	case "elicitation.reply":
+		return "side chat cannot answer a tool's request for input"
 	case "interrupt":
 		return "side chat cannot interrupt the session"
 	case "":
