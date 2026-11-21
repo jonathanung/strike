@@ -380,10 +380,15 @@ func (b *Builder) Observe(ev protocol.Event, t time.Time) {
 			}
 		}
 		ent := b.ensurePermission(e.RequestID, e.SessionID, e.TurnID, t)
-		if e.Decision == protocol.DecisionReject {
+		switch e.Decision {
+		case protocol.DecisionReject:
 			ent.State = StateFailed
 			ent.Error = clip(redact.String("rejected"), b.opts.ErrorPreviewMax)
-		} else {
+		case protocol.DecisionExpired:
+			// The ask died unanswered (#1387): not an approval.
+			ent.State = StateCanceled
+			ent.Error = clip(redact.String("expired"), b.opts.ErrorPreviewMax)
+		default:
 			ent.State = StateCompleted
 		}
 		ent.OutputPreview = clip(redact.String(string(e.Decision)), b.opts.OutputPreviewMax)

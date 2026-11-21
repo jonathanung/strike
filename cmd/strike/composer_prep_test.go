@@ -21,7 +21,7 @@ func TestComposerPrepareFileSkillAndMode(t *testing.T) {
 		Template: "Ship it.\n\n$ARGUMENTS",
 	}}
 
-	file := composerPrepare("see @notes.txt", dir, nil)
+	file := composerPrepare("see @notes.txt", dir, nil, nil)
 	if file.Action != engine.InputText {
 		t.Fatalf("file action = %q", file.Action)
 	}
@@ -29,7 +29,7 @@ func TestComposerPrepareFileSkillAndMode(t *testing.T) {
 		t.Fatalf("file prep = %#v", file)
 	}
 
-	mode := composerPrepare("/mode plan", dir, nil)
+	mode := composerPrepare("/mode plan", dir, nil, nil)
 	if mode.Action != engine.InputOp {
 		t.Fatalf("mode action = %q", mode.Action)
 	}
@@ -37,7 +37,7 @@ func TestComposerPrepareFileSkillAndMode(t *testing.T) {
 		t.Fatalf("mode op = %#v", mode.Op)
 	}
 
-	skill := composerPrepare("$commit the notes", dir, skills)
+	skill := composerPrepare("$commit the notes", dir, skills, nil)
 	if skill.Action != engine.InputText || !strings.Contains(skill.ModelText, "the notes") {
 		t.Fatalf("skill = %#v", skill)
 	}
@@ -45,7 +45,7 @@ func TestComposerPrepareFileSkillAndMode(t *testing.T) {
 		t.Fatalf("display = %q", skill.Display)
 	}
 
-	bang := composerPrepare("!echo hi", dir, nil)
+	bang := composerPrepare("!echo hi", dir, nil, nil)
 	if bang.Action != engine.InputShell || bang.Shell != "echo hi" {
 		t.Fatalf("bang = %#v", bang)
 	}
