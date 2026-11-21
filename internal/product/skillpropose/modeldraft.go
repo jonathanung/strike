@@ -29,6 +29,7 @@ const MaxModelDrafts = 5
 const (
 	maxModelBodyRunes = 6000
 	maxModelDescRunes = 200
+	maxModelNameRunes = 80
 	modelDraftSystem  = `You turn a workflow a developer repeated across coding sessions into a reusable agent skill.
 Reply with one JSON object and nothing else: {"description": "...", "body": "..."}.
 description: one sentence saying when to use the skill.
@@ -105,7 +106,7 @@ func ModelDraft(ctx context.Context, p Proposal, model DraftModel) (Proposal, er
 	if err != nil {
 		return p, err
 	}
-	name = oneLine(redact.String(name))
+	name = clip(oneLine(redact.String(name)), maxModelNameRunes)
 	if name == "" {
 		return p, errors.New("drafting model did not say which model replied")
 	}

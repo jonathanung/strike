@@ -1045,7 +1045,7 @@ pub fn CustomizePane(
                         <p class="hint">{move || crate::skill_proposals::rule_text(&proposals.get())}</p>
                         <div class="cz-proposals-model">
                             <button type="button" class="secondary" data-cz-proposals-model=move || proposals.get().model_draft.to_string()
-                                disabled=move || proposals_busy.get() || !proposals.get().model_draft_available
+                                disabled=move || proposals_busy.get() || (!proposals.get().model_draft_available && !proposals.get().model_draft)
                                 on:click=move |_| {
                                     let on = !proposals.get_untracked().model_draft;
                                     proposals_call("PATCH", "/v1/skill-proposals", json!({"modelDraft": on}), false);

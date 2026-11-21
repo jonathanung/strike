@@ -243,3 +243,17 @@ func TestScanKeepsModelDraftOnlyWhileOn(t *testing.T) {
 		t.Fatalf("rescan with model drafting off kept the model draft: %+v", ws.Pending[0])
 	}
 }
+
+func TestModelDraftClipsLongModelName(t *testing.T) {
+	reply := `{"description":"d","body":"b"}`
+	got, err := ModelDraft(context.Background(), localProposal(), fixedModel(reply, strings.Repeat("big model ", 20), nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len([]rune(got.Model)); n != maxModelNameRunes {
+		t.Fatalf("model name runes = %d, want %d", n, maxModelNameRunes)
+	}
+	if !strings.HasPrefix(got.Body, "Drafted by "+got.Model+" from 3 sessions") {
+		t.Fatalf("body = %q", got.Body)
+	}
+}
