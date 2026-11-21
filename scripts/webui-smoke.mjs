@@ -14,6 +14,8 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
+import { mdReviewBrowserCheck } from "./webui-md-review-check.mjs";
+import { seedSkillUsage, skillUsageCheck } from "./webui-skill-usage-check.mjs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,6 +31,25 @@ const chromePort = 9222 + (process.pid % 200);
 // ends immediately unless degrade is on before the daemon reads config.
 await mkdir(join(home, ".strike"), { recursive: true });
 await writeFile(join(home, ".strike", "config"), '{"sandboxAllowDegrade":true}\n');
+
+// Theme catalog (#1529): a user theme the daemon's GET /v1/themes lists.
+// The cockpit picker must offer it, paint it, and keep it across reload.
+const smokeTheme = {
+  id: "smoke-sunset",
+  name: "Smoke Sunset",
+  accent: { dark: "#fb923c", light: "#c2410c" },
+  background: { dark: "#1b1020", light: "#fff8f0" },
+  text: { dark: "#ffe8d0", light: "#2a1a10" },
+};
+await mkdir(join(home, ".strike", "themes"), { recursive: true });
+await writeFile(
+  join(home, ".strike", "themes", `${smokeTheme.id}.json`),
+  JSON.stringify({
+    name: smokeTheme.name,
+    id: smokeTheme.id,
+    colors: { accent: smokeTheme.accent, background: smokeTheme.background, text: smokeTheme.text },
+  }),
+);
 
 // Decision ledger seed (#1485). There is no ledger write route, and the
 // store loads its file once at open, so the file must exist before the
@@ -238,6 +259,30 @@ try {
       throw new Error(`second client read state = ${JSON.stringify(other.seen)} latest=${latest}`);
     }
   }
+  // #1564: Web Push registry. No real push service is contacted: the https
+  // endpoint below is never reachable and is removed straight away.
+  {
+    const authed = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const base = `http://127.0.0.1:${port}/v1/notifications`;
+    const keyRes = await fetch(`${base}/push-key`, { headers: authed });
+    const key = keyRes.status === 200 ? (await keyRes.json()).publicKey : "";
+    if (!/^[A-Za-z0-9_-]{86,88}$/.test(key || "")) throw new Error(`push-key ${keyRes.status} ${key}`);
+    const noAuth = await fetch(`${base}/push-key`);
+    if (noAuth.status !== 401) throw new Error(`push-key without token = ${noAuth.status}`);
+    // A real browser key pair is not needed for registry checks; reuse the
+    // daemon's own public key as a valid P-256 point.
+    const sub = (endpoint) => JSON.stringify({ endpoint, expirationTime: null, keys: { p256dh: key, auth: "BTBZMqHH6r4Tts7J_aSIgg" } });
+    const plain = await fetch(`${base}/push-subscriptions`, { method: "POST", headers: authed, body: sub("http://push.invalid/x") });
+    if (plain.status !== 400) throw new Error(`plain-http push endpoint accepted: ${plain.status}`);
+    const added = await fetch(`${base}/push-subscriptions`, { method: "POST", headers: authed, body: sub("https://push.invalid/smoke") });
+    if (added.status !== 201) throw new Error(`push subscribe ${added.status} ${await added.text()}`);
+    const status = await (await fetch(base, { headers: authed })).json();
+    if (!status.push || status.push.subscriptions !== 1 || JSON.stringify(status).includes("push.invalid")) {
+      throw new Error(`push status ${JSON.stringify(status.push)}`);
+    }
+    const removed = await fetch(`${base}/push-subscriptions`, { method: "DELETE", headers: authed, body: JSON.stringify({ endpoint: "https://push.invalid/smoke" }) });
+    if (removed.status !== 204) throw new Error(`push unsubscribe ${removed.status}`);
+  }
   const healthBody = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
   if (!healthBody.ok || !(healthBody.now > 0)) {
     throw new Error(`health missing now: ${JSON.stringify(healthBody)}`);
@@ -296,6 +341,41 @@ try {
   }
   if (!listedText.includes("markdownFile") || !listedText.includes(".md")) {
     throw new Error(`memory list missing plain-file path body=${listedText.slice(0, 500)}`);
+  }
+  // #1339: instance backup. The archive verifies, never carries the
+  // seeded credential, names its exclusions, and a dry-run restore onto
+  // the same gateway skips the identical memory entry. A tampered
+  // archive is refused before anything is planned.
+  const backupRes = await fetch(`http://127.0.0.1:${port}/v1/backup/export`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const backupText = await backupRes.text();
+  if (
+    !backupRes.ok ||
+    !backupText.includes('"format":"strike.instance-backup"') ||
+    backupText.includes(secret) ||
+    !backupText.includes("provider credentials") ||
+    !(backupRes.headers.get("content-disposition") || "").includes("strike-backup.json")
+  ) {
+    throw new Error(`backup export check failed status=${backupRes.status} body=${backupText.slice(0, 400)}`);
+  }
+  const backupPlan = await fetch(`http://127.0.0.1:${port}/v1/backup/restore?dryRun=1`, {
+    method: "POST",
+    headers: auth,
+    body: backupText,
+  });
+  const backupPlanBody = await backupPlan.json().catch(() => ({}));
+  if (!backupPlan.ok || backupPlanBody.dryRun !== true || !(backupPlanBody.counts?.memory?.skip >= 1)) {
+    throw new Error(`backup dry-run check failed status=${backupPlan.status} body=${JSON.stringify(backupPlanBody).slice(0, 400)}`);
+  }
+  const backupTampered = await fetch(`http://127.0.0.1:${port}/v1/backup/restore?dryRun=1`, {
+    method: "POST",
+    headers: auth,
+    body: backupText.replace("smoke likes plain files", "smoke likes tampering"),
+  });
+  const backupTamperedText = await backupTampered.text();
+  if (backupTampered.status !== 400 || !backupTamperedText.includes("integrity check")) {
+    throw new Error(`backup tamper check failed status=${backupTampered.status} body=${backupTamperedText.slice(0, 300)}`);
   }
   // Seed one knowledge pin for the Knowledge search check (#1469).
   const putPin = await fetch(`http://127.0.0.1:${port}/v1/knowledge`, {
@@ -387,6 +467,36 @@ try {
     envLine("user.message", "2026-10-26T06:10:00Z", { text: "quick follow up" }) +
     envLine("text.delta", "2026-10-26T06:10:10Z", { text: "fast answer" }) +
     envLine("turn.completed", "2026-10-26T06:10:20Z", { stopReason: "end_turn" }) +
+    // Compaction visibility (#1359): markers between turns (outside any
+    // turn, so the elapsed check is unchanged), plus one schema-rejected
+    // compaction.completed that must degrade to a title-only marker.
+    envLine("context.fit_warning", "2026-10-26T06:15:00Z", {
+      estimatedTokens: 180000,
+      contextLimit: 200000,
+      level: "warn",
+      message: "context is getting full",
+    }) +
+    envLine("compaction.started", "2026-10-26T06:15:01Z", { reason: "threshold", strategy: "summarize" }) +
+    envLine("compaction.completed", "2026-10-26T06:15:02Z", {
+      reason: "threshold",
+      strategy: "summarize",
+      removed: 6,
+      kept: 2,
+      summary: "Earlier the slow replay ran sleep 180.",
+      residue: { schemaVersion: "1", facts: [{ id: "f1", kind: "fact", text: "bash slept for 180s" }] },
+    }) +
+    envLine("session.budget_warning", "2026-10-26T06:15:03Z", {
+      level: "80",
+      kind: "cost_usd",
+      costUsd: 4,
+      maxCostUsd: 5,
+      ratio: 0.8,
+      message: "80% of session budget",
+    }) +
+    // `removed: null` is valid for the daemon's Go decoder (resume must
+    // still work) but rejected by the cockpit's generated schema, so it
+    // exercises the minimal-marker degradation path.
+    envLine("compaction.completed", "2026-10-26T06:15:04Z", { reason: "manual", removed: null }) +
     envLine("user.message", "2026-10-26T06:20:00Z", { text: "old log turn" }) +
     envLine("tool.begin", null, { callId: "c9", name: "bash", args: { command: "sleep 240" } }) +
     envLine("tool.end", "2026-10-26T06:24:00Z", { callId: "c9", name: "bash", output: "done" }) +
@@ -454,6 +564,33 @@ try {
   await writeFile(
     join(sessionsDir, "tail-session.meta.json"),
     JSON.stringify({ title: "Tool tail replay" }) + "\n",
+  );
+  // Verification badge (#1373) fixture: one turn per state plus a turn
+  // with no verification payload, which must render no badge.
+  const verifyTurn = (n, text, verification) =>
+    envLine("user.message", `2026-10-28T06:0${n}:00Z`, { text: `verify prompt ${n}` }) +
+    envLine("text.delta", `2026-10-28T06:0${n}:05Z`, { text }) +
+    envLine(
+      "turn.completed",
+      `2026-10-28T06:0${n}:10Z`,
+      verification ? { stopReason: "end_turn", verification } : { stopReason: "end_turn" },
+    );
+  const verifySession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-28T06:00:00Z" }) +
+    "\n" +
+    verifyTurn(1, "answer gated", { passed: true, claimed: true, verified: true, summary: "go test passed" }) +
+    verifyTurn(2, "answer claimed", { passed: false, claimed: true, verified: false }) +
+    verifyTurn(3, "answer failed", {
+      passed: false,
+      claimed: false,
+      verified: true,
+      checks: [{ kind: "cmd", value: "go test ./...", passed: false }],
+    }) +
+    verifyTurn(4, "answer ungated", null);
+  await writeFile(join(sessionsDir, "verify-session.jsonl"), verifySession);
+  await writeFile(
+    join(sessionsDir, "verify-session.meta.json"),
+    JSON.stringify({ title: "Verification replay" }) + "\n",
   );
   const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
@@ -1752,6 +1889,67 @@ try {
     `document.body.innerText.includes("diagnostic bundle downloaded")`,
     "diag download success confirmation",
   );
+  // #1493: Config sources lists the daemon's GET /v1/config-sources rows in
+  // daemon order, read-only. Global rows do not depend on the session root,
+  // so every one must render, in the same order, with the same exists flag.
+  {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/config-sources`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status !== 200) throw new Error(`config-sources HTTP ${res.status}`);
+    const wire = (await res.json()).sources || [];
+    const globals = wire.filter((s) => s.scope === "global");
+    const main = globals.find((s) => s.slot === "config");
+    if (!main || main.exists !== true) {
+      throw new Error(`smoke seeds ~/.strike/config, so the global main config must exist: ${JSON.stringify(wire).slice(0, 600)}`);
+    }
+    const want = JSON.stringify(globals.map((s) => [s.display, String(!!s.exists)]));
+    await waitUntil(
+      `(() => {
+        const want = ${JSON.stringify(want)};
+        const rows = [...document.querySelectorAll('[data-config-sources] li.config-source')]
+          .map((li) => [li.getAttribute("data-config-source"), li.getAttribute("data-exists")]);
+        const globals = JSON.parse(want);
+        let at = 0;
+        for (const g of globals) {
+          const i = rows.findIndex((r, k) => k >= at && r[0] === g[0] && r[1] === g[1]);
+          if (i < 0) return JSON.stringify({ missing: g, rows });
+          at = i + 1;
+        }
+        const text = document.querySelector("[data-config-sources]")?.innerText || "";
+        return text.includes("Main config") && text.includes("Global") && !document.querySelector("[data-config-sources-unavailable]");
+      })()`,
+      "config sources render the daemon's global rows in order",
+    );
+  }
+  // #1339: Settings > Backup. Export downloads the archive; restore reads
+  // a chosen file and previews the plan without writing anything.
+  await waitUntil(
+    `!!document.querySelector('[data-action="backup-export"]') && !document.querySelector('[data-action="backup-export"]').disabled`,
+    "backup export control",
+  );
+  await evaluate(`document.querySelector('[data-action="backup-export"]').click()`);
+  await waitUntil(
+    `!!document.querySelector('[data-backup-export-status]') && document.body.innerText.includes("Downloaded strike-backup.json")`,
+    "backup export confirmation",
+  );
+  await evaluate(`(() => {
+    const input = document.querySelector('[data-action="backup-restore-file"]');
+    const dt = new DataTransfer();
+    dt.items.add(new File([${JSON.stringify(backupText)}], "strike-backup.json", { type: "application/json" }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  await waitUntil(
+    `!!document.querySelector('[data-action="backup-restore-preview"]') && !document.querySelector('[data-action="backup-restore-preview"]').disabled`,
+    "backup restore file read",
+  );
+  await evaluate(`document.querySelector('[data-action="backup-restore-preview"]').click()`);
+  await waitUntil(
+    `!!document.querySelector('[data-backup-report="preview"]') && document.body.innerText.includes("Restore preview") && document.body.innerText.includes("memory:")`,
+    "backup restore preview",
+  );
   await evaluate(`document.querySelector('input[data-choice="lg"]').click()`);
   await evaluate(`document.querySelector('input[data-choice="compact"]').click()`);
   await waitUntil(
@@ -1824,6 +2022,29 @@ try {
     [...document.querySelectorAll(".gw-pop button")].find((b) => b.textContent === "Save").click();
     return true;
   })()`);
+  // #1539: the saved profile shows up as a read-only peek group in the
+  // Sessions list, under a Local label, badged from a real probe — here
+  // unreachable, never a fake count. The Sessions rail lives in the
+  // chat view (settings was open above), so go there first; mounting
+  // the list is itself one of the peek's refresh triggers.
+  await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
+  await waitUntil(`!!document.querySelector(".ss-panel")`, "sessions list for the peek");
+  await waitUntil(`(() => {
+    const group = [...document.querySelectorAll(".ss-peek [data-peek-gateway]")]
+      .find((el) => (el.textContent || "").includes("bad"));
+    if (!group) return false;
+    return group.getAttribute("data-peek-state") === "unreachable"
+      && (group.textContent || "").includes("Unreachable")
+      && !(group.textContent || "").includes(" running · ")
+      && !!document.querySelector(".ss-peek-local");
+  })()`, "cross-gateway peek group for the saved bad gateway");
+  // Manual refresh re-probes and lands on the same honest badge.
+  await evaluate(`document.querySelector('[data-action="peek-refresh"]')?.click()`);
+  await waitUntil(`(() => {
+    const group = [...document.querySelectorAll(".ss-peek [data-peek-gateway]")]
+      .find((el) => (el.textContent || "").includes("bad"));
+    return !!group && group.getAttribute("data-peek-state") === "unreachable";
+  })()`, "peek refresh keeps the unreachable badge");
   await waitUntil(`(() => {
     const hit = [...document.querySelectorAll("[data-command-id]")].some((el) => (el.textContent || "").includes("Switch to gateway: bad"));
     if (hit) return true;
@@ -1907,6 +2128,12 @@ try {
     "settings recovered",
   );
   await editorBrowserCheck({
+    send,
+    port,
+    token,
+    repoDir: process.cwd(),
+  });
+  await mdReviewBrowserCheck({
     send,
     port,
     token,
@@ -2037,6 +2264,47 @@ try {
   if (rejected.status !== 400) {
     throw new Error(`empty attachment status ${rejected.status}`);
   }
+  // Sent attachments in the transcript (#1389): GET serves the stored
+  // blob with its stored MIME, and a user.input carrying an image + PDF
+  // renders both chips under the "you" bubble after a reload, with the
+  // image thumbnail loaded from the GET route.
+  const pngRef = JSON.parse(uploadedBody).ref;
+  const pdfB64 = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n").toString("base64");
+  const pdfUp = await fetch(`http://127.0.0.1:${port}/v1/attachments`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "smoke-spec.pdf", mime: "application/pdf", data: pdfB64 }),
+  });
+  const pdfBody = await pdfUp.text();
+  if (pdfUp.status !== 200) throw new Error(`pdf ingest failed ${pdfUp.status} ${pdfBody.slice(0, 300)}`);
+  const pdfRef = JSON.parse(pdfBody).ref;
+  const gotPng = await fetch(`http://127.0.0.1:${port}/v1/attachments/${encodeURIComponent(pngRef)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (gotPng.status !== 200 || gotPng.headers.get("content-type") !== "image/png") {
+    throw new Error(`attachment GET ${gotPng.status} ${gotPng.headers.get("content-type")}`);
+  }
+  const noAuth = await fetch(`http://127.0.0.1:${port}/v1/attachments/${encodeURIComponent(pngRef)}`);
+  if (noAuth.status !== 401) throw new Error(`attachment GET without token = ${noAuth.status}`);
+  const missingAtt = await fetch(`http://127.0.0.1:${port}/v1/attachments/att%3Asha256%3A${"0".repeat(64)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (missingAtt.status !== 404) throw new Error(`attachment GET unknown ref = ${missingAtt.status}`);
+  const sentWithFiles = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "user.input",
+      data: {
+        text: "transcript attachments smoke 1389",
+        images: [
+          { ref: pngRef, mime: "image/png", name: "smoke-shot.png" },
+          { ref: pdfRef, mime: "application/pdf", name: "smoke-spec.pdf" },
+        ],
+      },
+    }),
+  });
+  if (!sentWithFiles.ok) throw new Error(`user.input with attachments ${sentWithFiles.status} ${await sentWithFiles.text()}`);
   // Attachment honesty (#1561): on the echo provider the engine drops
   // every attachment, so the composer must say so before send (warn,
   // not block). Removing the file clears the warning.
@@ -2053,7 +2321,7 @@ try {
     `(() => { const w = document.querySelector("[data-attach-warning]"); return !!w && w.offsetParent !== null && w.innerText.includes("honesty-shot.png") && w.innerText.includes("echo provider does not accept attachments"); })()`,
     "composer warns that echo drops the attachment",
   );
-  await evaluate(`(() => { const b = [...document.querySelectorAll(".attach-chip button")].find((x) => x.closest(".attach-chip")?.innerText.includes("honesty-shot.png")); b?.click(); return !!b; })()`);
+  await evaluate(`(() => { const b = [...document.querySelectorAll('.attach-chip button[aria-label="Remove attachment"]')].find((x) => x.closest(".attach-chip")?.innerText.includes("honesty-shot.png")); b?.click(); return !!b; })()`);
   await waitUntil(`!document.querySelector("[data-attach-warning]")`, "attachment warning clears with the file");
   // Office + media classification (#1390): a docx with its real browser
   // MIME is accepted as a document, an mp4 header as video, a plain zip
@@ -2142,8 +2410,82 @@ try {
     `(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); const v = chip && chip.querySelector("video.attach-media"); return !!v && v.controls && v.src.startsWith("blob:"); })()`,
     "mp4 composer chip shows video controls",
   );
-  await evaluate(`(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); chip?.querySelector("button")?.click(); return !!chip; })()`);
+  await evaluate(`(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); chip?.querySelector('button[aria-label="Remove attachment"]')?.click(); return !!chip; })()`);
   await waitUntil(`![...document.querySelectorAll(".attach-chip")].some((c) => c.innerText.includes("smoke-clip.mp4"))`, "mp4 chip removed");
+  // Visual annotate (#1545): attach an image, drop a pin with a note,
+  // send, and the single turn carries the coordinate block; removing an
+  // image with unsent marks asks first.
+  const attachPng = (name) => evaluate(`(() => {
+    const input = document.querySelector('input[data-chat-attach="true"]');
+    const bytes = Uint8Array.from(atob(${JSON.stringify(png)}), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], ${JSON.stringify(name)}, { type: "image/png" }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  const chipFor = (name) => `[...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes(${JSON.stringify(name)}))`;
+  const placePin = async (name, note) => {
+    await waitUntil(`!!(${chipFor(name)})?.querySelector('[data-annotate-open]')`, `annotate action on ${name}`);
+    await evaluate(`(${chipFor(name)}).querySelector('[data-annotate-open]').click()`);
+    await waitUntil(`(() => { const img = document.querySelector('[data-annotate] .annotate-canvas img'); return !!img && img.complete && img.getBoundingClientRect().width > 0; })()`, "annotate overlay image");
+    await evaluate(`(() => {
+      const canvas = document.querySelector('[data-annotate] .annotate-canvas');
+      const r = canvas.querySelector('img').getBoundingClientRect();
+      const at = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0, pointerId: 7, bubbles: true, isPrimary: true };
+      canvas.dispatchEvent(new PointerEvent("pointerdown", at));
+      canvas.dispatchEvent(new PointerEvent("pointerup", at));
+      return true;
+    })()`);
+    await waitUntil(`document.querySelectorAll('[data-annotate-marks] li').length === 1 && document.querySelector('[data-annotate-marks]').innerText.includes("[pin x=50%, y=50%]")`, "pin listed with coordinates");
+    await evaluate(`(() => {
+      const input = document.querySelector('[data-annotate-marks] input');
+      input.value = ${JSON.stringify(note)};
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      document.querySelector('[data-annotate-done]').click();
+      return true;
+    })()`);
+    await waitUntil(`!document.querySelector('[data-annotate]') && (${chipFor(name)})?.querySelector('[data-attach-marks]')?.innerText === "1 mark"`, "overlay closed and chip shows 1 mark");
+  };
+  await attachPng("annotate-discard.png");
+  await placePin("annotate-discard.png", "throwaway");
+  await evaluate(`(${chipFor("annotate-discard.png")}).querySelector('button[aria-label="Remove attachment"]').click()`);
+  await waitUntil(`(() => { const d = document.querySelector(".confirm-dialog"); return !!d && d.innerText.includes("1 mark"); })()`, "removing an annotated image asks first");
+  await evaluate(`document.querySelector('[data-confirm="accept"]').click()`);
+  await waitUntil(`!(${chipFor("annotate-discard.png")})`, "annotated image removed after explicit yes");
+  await attachPng("annotate-shot.png");
+  await placePin("annotate-shot.png", "move this button");
+  await evaluate(`(() => {
+    const ta = document.getElementById("composer-input");
+    const proto = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+    proto.set.call(ta, "annotate smoke 1545");
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    document.getElementById("send-primary").click();
+    return true;
+  })()`);
+  await waitUntil(
+    `(() => {
+      const draft = document.getElementById("composer-input")?.value || "";
+      const chips = document.querySelectorAll(".attach-chip").length;
+      if (draft === "" && chips === 0) return true;
+      return JSON.stringify({ draft, chips, notes: [...document.querySelectorAll(".hint, .queue-note, [role=status]")].map((n) => n.innerText).filter(Boolean).slice(0, 8) });
+    })()`,
+    "annotated send accepted (composer cleared)",
+  );
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+  });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await waitUntil(
+    `(() => {
+      const t = document.body.innerText;
+      const sent = [...document.querySelectorAll("[data-sent-attachments]")].some((el) => el.innerText.includes("annotate-shot-annotated.png"));
+      if (sent && t.includes("annotate smoke 1545") && t.includes("Annotations on annotate-shot.png") && t.includes('[pin x=50%, y=50%] "move this button"')) return true;
+      const msgs = [...document.querySelectorAll(".sx-msg")].slice(-3).map((m) => m.innerText.slice(0, 300));
+      return JSON.stringify({ sent, msgs });
+    })()`,
+    "sent turn carries the composite and the annotation block after reload",
+  );
   await send("Runtime.evaluate", {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
   });
@@ -2152,6 +2494,15 @@ try {
     "cockpit reload after attachment checks (Run a command, Terminal)",
     textProbe((t) => t.includes("Run a command") && t.includes("Terminal")),
     { timeout: WAIT_MS, interval: 250 },
+  );
+  await waitUntil(
+    `(() => {
+      const box = [...document.querySelectorAll("[data-sent-attachments]")].find((el) => el.innerText.includes("smoke-shot.png"));
+      if (!box) return false;
+      const img = box.querySelector(".sx-attach-chip img");
+      return box.innerText.includes("smoke-spec.pdf") && !!img && img.src.startsWith("blob:") && img.complete && img.naturalWidth > 0;
+    })()`,
+    "sent image + PDF chips render after reload with a loaded thumbnail",
   );
 
   // Usage + Audit (#1286): open each view and confirm its controls
@@ -2618,6 +2969,79 @@ try {
     { timeout: WAIT_MS, interval: 250 },
   );
 
+  // Lessons capture (#1376): "Remember this" on a user message opens a
+  // pre-filled draft; Cancel stores nothing; Save stores a tagged lesson
+  // through /v1/memory. The entry is removed again so later memory counts
+  // are unaffected.
+  const lessonKey = "lesson-smoke-capture";
+  const memoryKeys = async () => {
+    const r = await fetch(`http://127.0.0.1:${port}/v1/memory?scope=project`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const j = await r.json();
+    return (j.entries || []).map((e) => ({ key: e.key, tags: e.tags || [], value: e.value }));
+  };
+  const openLessonDraft = async () => {
+    const clicked = await evaluate(`(() => {
+      const btn = [...document.querySelectorAll('[data-role="you"] [data-action="lesson-remember"]')].pop();
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+    if (clicked !== "clicked") throw new Error(`no Remember this action on a user message (${clicked})`);
+    await waitFor(
+      "lesson draft opens pre-filled from the message",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const d = document.querySelector('[data-lesson="draft"]');
+          if (!d) return JSON.stringify({ open: false });
+          return JSON.stringify({
+            open: true,
+            value: d.querySelector('[data-lesson="value"]').value,
+            key: d.querySelector('[data-lesson="key"]').value,
+            scope: d.querySelector('[data-lesson-scope="project"]').getAttribute("aria-pressed"),
+          });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        return { ok: !!(p.open && p.value.trim() && p.key.startsWith("lesson-") && p.scope === "true"), ...p };
+      },
+      { timeout: STEP_MS, interval: 200 },
+    );
+  };
+  const lessonBefore = (await memoryKeys()).length;
+  await openLessonDraft();
+  await evaluate(`document.querySelector('[data-lesson="cancel"]').click()`);
+  await waitFor(
+    "lesson draft cancel closes without storing",
+    async () => ({
+      ok:
+        (await evaluate(`!!document.querySelector('[data-lesson="draft"]')`)) === false &&
+        (await memoryKeys()).length === lessonBefore,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await openLessonDraft();
+  await evaluate(`(() => {
+    const el = document.querySelector('[data-lesson="key"]');
+    el.value = ${JSON.stringify(lessonKey)};
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector('[data-lesson="save"]').click();
+    return true;
+  })()`);
+  await waitFor(
+    "saved lesson is stored with the lesson tag and the draft closes",
+    async () => {
+      const rows = await memoryKeys();
+      const row = rows.find((r) => r.key === lessonKey);
+      const open = await evaluate(`!!document.querySelector('[data-lesson="draft"]')`);
+      return { ok: !!row && row.tags.includes("lesson") && !!row.value && open === false, body: JSON.stringify(row) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await fetch(`http://127.0.0.1:${port}/v1/memory/${lessonKey}?scope=project`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
   // Local issues (#1500): create → listed under Open → close → listed under
   // Closed → still closed after the panel remounts (fresh daemon read) and
   // in the daemon's own list. An empty title is refused inline.
@@ -3058,6 +3482,52 @@ try {
     throw new Error(`outbox retry was not deduped: ${seedRetry.status} ${seedRetryBody}`);
   }
 
+  // #1565: share link create -> open with no credential -> revoke -> dead end.
+  {
+    const authed = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const st = await (await fetch(`http://127.0.0.1:${port}/v1/status`, { headers: authed })).json();
+    const sid = st.sessionId;
+    if (!sid) throw new Error(`share smoke: no live session id ${JSON.stringify(st)}`);
+    const sharesUrl = `http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(sid)}/shares`;
+    // The session log is written by the engine; give the seed a moment.
+    let minted;
+    for (let i = 0; i < 50; i++) {
+      minted = await fetch(sharesUrl, { method: "POST", headers: authed, body: JSON.stringify({ ttlSeconds: 3600 }) });
+      if (minted.status !== 404) break;
+      await delay(200);
+    }
+    if (minted.status !== 201) throw new Error(`share mint ${minted.status} ${await minted.text()}`);
+    const grant = await minted.json();
+    if (!grant.path || !grant.path.startsWith("/#share=") || grant.path.includes("?")) {
+      throw new Error(`share link not fragment-carried: ${grant.path}`);
+    }
+    const redeem = () =>
+      fetch(`http://127.0.0.1:${port}/share/v1/transcript`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: grant.token, after: 0 }),
+      });
+    let opened;
+    let openedBody = "";
+    for (let i = 0; i < 50; i++) {
+      opened = await redeem();
+      openedBody = await opened.text();
+      if (opened.status !== 200 || openedBody.includes("read the makefile")) break;
+      await delay(200);
+    }
+    if (opened.status !== 200 || !openedBody.includes("read the makefile")) {
+      throw new Error(`share redeem ${opened.status} ${openedBody.slice(0, 300)}`);
+    }
+    const asGateway = await fetch(`http://127.0.0.1:${port}/v1/sessions`, {
+      headers: { Authorization: `Bearer ${grant.token}` },
+    });
+    if (asGateway.status !== 401) throw new Error(`share token opened /v1/sessions: ${asGateway.status}`);
+    const revoked = await fetch(`${sharesUrl}/${encodeURIComponent(grant.id)}`, { method: "DELETE", headers: authed });
+    if (revoked.status !== 204) throw new Error(`share revoke ${revoked.status}`);
+    const dead = await redeem();
+    if (dead.status !== 404) throw new Error(`revoked share still opens: ${dead.status}`);
+  }
+
   await evaluate(`document.querySelector(".side-chat-open-activity").click()`);
 
   const panel = await waitFor(
@@ -3109,11 +3579,16 @@ try {
   };
 
   await ask("what is the agent doing?");
+  // The question shows on a pending card while the side turn runs (#1363),
+  // so wait for the settled answer before the next ask.
   const answered = await waitFor(
     "side chat to echo the asked question",
     async () => {
       const t = await panelText();
-      return { ok: t.includes("what is the agent doing?"), text: t };
+      const settled = await evaluate(
+        `document.querySelectorAll("[data-side-chat-answer]").length > 0 && !document.querySelector("[data-side-chat-pending]")`,
+      );
+      return { ok: t.includes("what is the agent doing?") && settled === true, text: t };
     },
     { timeout: STEP_MS, interval: 250 },
   );
@@ -3926,6 +4401,138 @@ try {
       await rm(join(process.cwd(), stashFile), { force: true });
     }
   }
+  // Review queue (#1324): seed two separate edits in a tracked file,
+  // accept nothing, reject the first hunk (two taps: Reject, then
+  // "Revert this hunk?") and require it reverted on disk, comment on the
+  // second hunk, then Send review and require exactly one transcript
+  // turn labelled "Review". Runs only when the seed file is unmodified
+  // so a developer's own edits are never touched; restored in finally.
+  const reviewSeed = join(process.cwd(), "AGENTS.md");
+  const reviewOriginal = await readFile(reviewSeed, "utf8");
+  const reviewStatus = await gitStatusPaths();
+  if (reviewStatus.unstaged.includes("AGENTS.md") || reviewStatus.staged.includes("AGENTS.md")) {
+    console.log("review queue smoke: skipped (AGENTS.md already modified)");
+  } else {
+    try {
+      const seeded = reviewOriginal.split("\n");
+      seeded[0] = "# strike-cli (smoke-review-first-1324)";
+      seeded.push("smoke-review-second-1324");
+      await writeFile(reviewSeed, seeded.join("\n"));
+      await clickSideTab("Review", "Review queue");
+      const reviewProbe = async () => {
+        const raw = await evaluate(`(() => {
+          const file = document.querySelector('[data-rq-file="AGENTS.md"]');
+          const hunks = file ? [...file.querySelectorAll("[data-rq-hunk]")] : [];
+          const send = document.querySelector(".rq-send-btn");
+          return JSON.stringify({
+            hunks: hunks.length,
+            first: hunks[0] ? hunks[0].textContent.includes("smoke-review-first-1324") : false,
+            summary: (document.querySelector("[data-rq-summary]") || {}).textContent || "",
+            sendDisabled: send ? send.disabled : null,
+            note: (document.querySelector(".rq-note") || {}).textContent || "",
+          });
+        })()`);
+        return JSON.parse(raw || "{}");
+      };
+      const reviewClick = async (expr, label) => {
+        await waitFor(
+          label,
+          async () => {
+            const v = await evaluate(`(() => { const b = ${expr}; if (!b) return "missing"; if (b.disabled) return "disabled"; b.click(); return "clicked"; })()`);
+            return { ok: v === "clicked", v };
+          },
+          { timeout: WAIT_MS, interval: 250 },
+        );
+      };
+      await waitFor(
+        "review queue lists two AGENTS.md hunks, send disabled",
+        async () => {
+          const p = await reviewProbe();
+          return { ok: p.hunks === 2 && p.first && p.sendDisabled === true && p.summary.includes("0 comments"), ...p };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      const firstHunk = `document.querySelector('[data-rq-file="AGENTS.md"] [data-rq-hunk] .rq-reject')`;
+      await reviewClick(firstHunk, "review reject (first tap)");
+      await waitFor(
+        "review reject asks for confirmation",
+        async () => {
+          const label = await evaluate(`(${firstHunk} || {}).textContent || ""`);
+          return { ok: String(label).includes("Revert this hunk?"), label };
+        },
+        { timeout: STEP_MS, interval: 200 },
+      );
+      await reviewClick(firstHunk, "review reject (confirm)");
+      await waitFor(
+        "rejected hunk reverted on disk and listed",
+        async () => {
+          const disk = await readFile(reviewSeed, "utf8");
+          const p = await reviewProbe();
+          return {
+            ok: !disk.includes("smoke-review-first-1324") && disk.includes("smoke-review-second-1324") && p.hunks === 1 && p.summary.includes("1 rejected hunk"),
+            ...p,
+          };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      await reviewClick(`document.querySelector('[data-rq-file="AGENTS.md"] .rq-comment-open')`, "review comment open");
+      await waitFor(
+        "review comment composer opens with a line range",
+        async () => {
+          const v = await evaluate(`(() => {
+            const ta = document.querySelector(".rq-composer textarea");
+            const start = document.querySelector('.rq-composer input[aria-label="Start line"]');
+            if (!ta || !start || !start.value) return "missing";
+            ta.value = "smoke review comment 1324";
+            ta.dispatchEvent(new Event("input", { bubbles: true }));
+            return "typed";
+          })()`);
+          return { ok: v === "typed", v };
+        },
+        { timeout: STEP_MS, interval: 200 },
+      );
+      await reviewClick(`document.querySelector(".rq-composer .rq-save")`, "review add comment");
+      await waitFor(
+        "review comment listed and send enabled",
+        async () => {
+          const p = await reviewProbe();
+          const listed = await evaluate(`[...document.querySelectorAll(".rq-comment")].some((c) => c.textContent.includes("smoke review comment 1324"))`);
+          return { ok: listed === true && p.summary.includes("1 comment") && p.sendDisabled === false, listed, ...p };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      const reviewTurns = async () =>
+        Number(
+          await evaluate(
+            `[...document.querySelectorAll('article[data-role="you"] .sx-who')].filter((e) => (e.textContent || "").trim() === "Review").length`,
+          ),
+        );
+      const turnsBefore = await reviewTurns();
+      await reviewClick(`document.querySelector(".rq-send-btn")`, "review send");
+      await waitFor(
+        "review arrives as one transcript turn labelled Review and the queue clears",
+        async () => {
+          const turns = await reviewTurns();
+          const p = await reviewProbe();
+          return { ok: turns === turnsBefore + 1 && p.summary.includes("0 comments · 0 rejected hunks"), turns, turnsBefore, ...p };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      // Let the echo turn the review started finish before later sections.
+      await waitFor(
+        "review turn completes",
+        async () => {
+          const res = await fetch(`http://127.0.0.1:${port}/v1/review`, { headers: { Authorization: `Bearer ${token}` } });
+          const body = res.ok ? await res.json() : {};
+          return { ok: res.ok && body.busy === false, status: res.status, busy: body.busy };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+    } finally {
+      await writeFile(reviewSeed, reviewOriginal);
+    }
+    await clickSideTab("Git", "Staged");
+  }
   await waitUntil(`(() => {
     if ((document.body.innerText || "").includes("session.childIsolation")) return true;
     const cmd = document.querySelector('[data-command-id="panel-worktrees"]');
@@ -3987,6 +4594,116 @@ try {
     },
     { timeout: STEP_MS, interval: 250 },
   );
+  // Search in files (#1406): seed a fixture dir under the daemon's work
+  // dir, search from the Files-pane box, and check: matches grouped by
+  // file with marked text, the no-results state, the capped state (per-
+  // file cap of 20), and click-to-line landing in the document viewer.
+  // Needles are built at runtime so this script's own source never
+  // matches. DOM probes use textContent so the layout cannot hide them.
+  const sifDir = join(process.cwd(), "smoke-search-in-files");
+  const sifTag = Date.now().toString(36);
+  const sifNeedle = ["sif", "needle", sifTag].join("");
+  const sifCap = ["sif", "cap", sifTag].join("");
+  await rm(sifDir, { recursive: true, force: true });
+  await mkdir(sifDir, { recursive: true });
+  try {
+    await writeFile(join(sifDir, "alpha.txt"), `one\ntwo\nfind ${sifNeedle.toUpperCase()} here\n`);
+    await writeFile(
+      join(sifDir, "beta.txt"),
+      `${sifNeedle} top\nb2\nb3\nb4\nb5\nb6\nagain ${sifNeedle} below\n`,
+    );
+    await writeFile(
+      join(sifDir, "capped.txt"),
+      Array.from({ length: 25 }, (_, i) => `${sifCap} ${i + 1}`).join("\n") + "\n",
+    );
+    const sifTab = await evaluate(`(() => {
+      const btn = [...document.querySelectorAll(".side-tabs button")].find((b) => (b.textContent || "").includes("Files"));
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+    if (sifTab !== "clicked") {
+      throw new Error(`search-in-files: Files side tab ${sifTab}\n${await diagnostics()}`);
+    }
+    // Fill the box and press Enter. Re-sent on each poll until the
+    // expected state shows, which also rides out the daemon's 2s file
+    // index cache right after the fixture was written.
+    const sifSearch = (q) =>
+      evaluate(`(() => {
+        const input = document.querySelector("[data-search-in-files]");
+        if (!input) return "missing";
+        const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+        proto.set.call(input, ${JSON.stringify(q)});
+        input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "sent";
+      })()`);
+    const sifState = `(() => {
+      const files = [...document.querySelectorAll("[data-sif-file]")].map((el) => el.getAttribute("data-sif-file"));
+      const hits = [...document.querySelectorAll(".sif-hit")].map((b) => b.getAttribute("data-sif-path") + ":" + b.getAttribute("data-sif-line"));
+      const summary = document.querySelector(".sif-summary");
+      return {
+        files,
+        hits,
+        marks: document.querySelectorAll(".sif-hit mark.tf-mark").length,
+        summary: summary ? summary.textContent || "" : "",
+        capped: summary ? summary.getAttribute("data-sif-capped") : "",
+      };
+    })()`;
+    const sifWait = (label, q, ok) =>
+      waitFor(
+        label,
+        async () => {
+          const v = await evaluate(sifState);
+          if (ok(v)) return { ok: true, ...v };
+          const sent = await sifSearch(q);
+          return { ok: false, sent, ...v };
+        },
+        { timeout: WAIT_MS, interval: 750 },
+      );
+    const rel = (name) => `smoke-search-in-files/${name}`;
+    await sifWait("search-in-files: matches grouped by file", sifNeedle, (v) =>
+      v.files.length === 2 &&
+      v.files.includes(rel("alpha.txt")) &&
+      v.files.includes(rel("beta.txt")) &&
+      v.hits.join(",") === [rel("alpha.txt") + ":3", rel("beta.txt") + ":1", rel("beta.txt") + ":7"].join(",") &&
+      v.marks === 3 &&
+      v.capped === "false",
+    );
+    await sifWait("search-in-files: no-results state", `${sifNeedle}-absent`, (v) =>
+      v.hits.length === 0 && v.summary.startsWith("No matches for") && v.capped === "false",
+    );
+    await sifWait("search-in-files: capped state", sifCap, (v) =>
+      v.hits.length === 20 && v.capped === "true" && v.summary.includes("results are partial"),
+    );
+    await sifWait("search-in-files: results again for click-to-line", sifNeedle, (v) => v.hits.length === 3);
+    const sifClicked = await evaluate(`(() => {
+      const b = document.querySelector('.sif-hit[data-sif-path=${JSON.stringify(rel("beta.txt"))}][data-sif-line="7"]');
+      if (!b) return "missing";
+      b.click();
+      return "clicked";
+    })()`);
+    if (sifClicked !== "clicked") {
+      throw new Error(`search-in-files: result button ${sifClicked}`);
+    }
+    await waitFor(
+      "search-in-files: document viewer opened the file at the line",
+      async () => {
+        const v = await evaluate(`(() => {
+          const doc = document.querySelector('[data-ev-root="open"]');
+          return {
+            path: doc ? doc.getAttribute("data-ev-path") || "" : "",
+            lines: doc ? doc.querySelectorAll(".ev-line").length : 0,
+            text: doc ? (doc.textContent || "").includes(${JSON.stringify(`again ${sifNeedle} below`)}) : false,
+          };
+        })()`);
+        return { ok: v.path.endsWith("beta.txt") && v.lines >= 7 && v.text, ...v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  } finally {
+    await rm(sifDir, { recursive: true, force: true });
+  }
   // Session delete (#1358): seed a session, close its root so it is
   // saved but not open, then delete it through the cockpit. Cancelling
   // the confirm must issue no request; confirming must remove it from
@@ -4567,6 +5284,50 @@ try {
     },
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Compaction visibility (#1359): the replay's four valid markers render
+  // inline in order; the completed marker shows removed/kept with summary
+  // and residue in a collapsed fold. The schema-rejected payload must not
+  // break the transcript (everything after it still renders); if the
+  // daemon delivers it, it shows as a title-only marker. (Observed in CI:
+  // the daemon path did not deliver that line, so the minimal-marker
+  // rendering itself is covered by the Rust unit tests.)
+  await waitFor(
+    "compaction and budget markers in the replayed transcript",
+    async () => {
+      const v = await evaluate(`(() => {
+        const marks = [...document.querySelectorAll("article[data-compaction]")];
+        const done = marks.find((m) => m.getAttribute("data-compaction") === "completed");
+        const fold = done && done.querySelector("details.sx-fold");
+        const last = marks[marks.length - 1];
+        return {
+          kinds: marks.map((m) => m.getAttribute("data-compaction")).join(","),
+          titles: marks.map((m) => (m.querySelector(".sx-who")?.textContent || "").trim()).join("|"),
+          counts: done ? done.innerText.includes("Removed 6 messages, kept 2 messages") : false,
+          foldClosed: !!fold && !fold.open,
+          foldText: fold ? fold.textContent : "",
+          budget: (marks[3]?.innerText || "").includes("$4.00 of $5.00 session cost"),
+          extra: marks.length - 4,
+          extraTitleOnly: marks.length < 5 || !last.querySelector(".sx-body"),
+          after: document.body.innerText.includes("old answer"),
+        };
+      })()`);
+      return {
+        ok:
+          v.kinds.startsWith("fit,started,completed,budget") &&
+          v.titles.startsWith("Context near limit|Compacting context|Context compacted|Budget warning") &&
+          v.extra <= 1 &&
+          v.extraTitleOnly &&
+          v.counts &&
+          v.foldClosed &&
+          v.foldText.includes("Earlier the slow replay ran sleep 180.") &&
+          v.foldText.includes("bash slept for 180s") &&
+          v.budget &&
+          v.after,
+        ...v,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
   // Turn failure (#1371): the same replay ends its two failing turns with
   // a stop marker each (error, loop_detected), in order, badged failed;
   // the loop guard's own line names the tool; clean turns get none.
@@ -4653,6 +5414,59 @@ try {
           v.quick,
         ...v,
       };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // Verification badge (#1373): resume the seeded session; each gated
+  // turn's final line carries the TUI label for its state, and the turn
+  // without a payload carries none.
+  let verifyClicked = "missing";
+  try {
+    await waitFor(
+      "verification badge resume row",
+      async () => {
+        verifyClicked = await evaluate(`(() => {
+          const row = document.querySelector('[data-session-id="verify-session"]');
+          const btn = row && row.querySelector(".ss-main");
+          if (!btn) return "missing";
+          btn.click();
+          return "clicked";
+        })()`);
+        return { ok: verifyClicked === "clicked", clicked: verifyClicked };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  } catch {
+    // reported below with the last observed state
+  }
+  if (verifyClicked !== "clicked") {
+    throw new Error(`verification badge resume click -> ${verifyClicked}`);
+  }
+  await waitFor(
+    "verification badges per turn state",
+    async () => {
+      const v = await evaluate(`(() => {
+        const badges = [...document.querySelectorAll(".turn-verify")].map((b) => ({
+          state: b.getAttribute("data-verify"),
+          text: b.textContent.trim(),
+          on: (b.closest("article")?.innerText || "").split("\\n").find((l) => l.startsWith("answer")) || "",
+        }));
+        const ungated = [...document.querySelectorAll("article")].find((a) =>
+          (a.innerText || "").includes("answer ungated"),
+        );
+        return {
+          badges: JSON.stringify(badges),
+          ungatedFound: Boolean(ungated),
+          ungatedBadge: Boolean(ungated && ungated.querySelector(".turn-verify")),
+        };
+      })()`);
+      const want = JSON.stringify([
+        { state: "verified", text: "verified", on: "answer gated" },
+        { state: "claimed", text: "claimed", on: "answer claimed" },
+        { state: "unverified", text: "unverified", on: "answer failed" },
+      ]);
+      return { ok: v.badges === want && v.ungatedFound && !v.ungatedBadge, ...v };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
@@ -4867,6 +5681,72 @@ try {
   const schedOrig = schedAfterSave.schedules.find((s) => s.name === "Smoke schedule");
   if (!schedCopy || schedCopy.enabled !== false || !schedOrig || schedOrig.enabled !== true) {
     throw new Error(`schedule duplicate saved state copy=${JSON.stringify(schedCopy)} orig=${JSON.stringify(schedOrig)}`);
+  }
+
+  // Script schedules (#1777): Script is an explicit choice, the first
+  // submit only shows the confirm step (full command, mode, sandbox dial)
+  // and writes nothing; "Confirm and arm" creates it armed.
+  const scriptCmd = "echo smoke-script-1777";
+  await evaluate(`document.querySelector(".sched .section-head button.secondary").click()`);
+  await evaluate(`(() => {
+    const name = document.getElementById("schedule-name");
+    name.value = "Smoke script";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    const src = document.getElementById("schedule-source");
+    src.value = "script";
+    src.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  await waitFor(
+    "script command field after choosing Script",
+    async () => ({ ok: (await evaluate(`!!document.getElementById("schedule-command")`)) === true }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    const cmd = document.getElementById("schedule-command");
+    cmd.value = ${JSON.stringify(scriptCmd)};
+    cmd.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector(".sched-form .sched-actions .primary").click();
+  })()`);
+  await waitFor(
+    "script confirm step repeats the command, mode, and sandbox dial",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        cmd: (document.getElementById("schedule-confirm-command") || {}).textContent || "",
+        text: (document.querySelector(".sched-confirm") || {}).innerText || "",
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: p.cmd === scriptCmd && (p.text || "").includes("Mode:") && (p.text || "").includes("Sandbox:"),
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const schedBeforeArm = await (
+    await fetch(`http://127.0.0.1:${port}/v1/schedules`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (schedBeforeArm.schedules.some((s) => s.name === "Smoke script")) {
+    throw new Error("script schedule was written before the confirm step");
+  }
+  await evaluate(`document.getElementById("schedule-confirm").click()`);
+  await waitFor(
+    "script schedule armed notice and script badge",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        text: document.body ? document.body.innerText : "",
+        badge: [...document.querySelectorAll(".sched-row")].some((r) => r.textContent.includes("Smoke script") && !!r.querySelector(".sched-script-badge")),
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: (p.text || "").includes("Script schedule armed") && p.badge === true, badge: p.badge };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const schedAfterArm = await (
+    await fetch(`http://127.0.0.1:${port}/v1/schedules`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  const armed = schedAfterArm.schedules.find((s) => s.name === "Smoke script");
+  if (!armed || armed.source !== "script" || armed.command !== scriptCmd || !armed.armedAt || armed.overlap !== "skip") {
+    throw new Error(`script schedule armed state ${JSON.stringify(armed)}`);
   }
 
   // Scheduler presets (#1495): the section lists the daemon catalog, Apply
@@ -5651,6 +6531,7 @@ try {
     join(home, ".strike", "skills", "smoke-note.md"),
     "---\nname: smoke-note\ndescription: seeded note\n---\nSay hello from smoke.\n",
   );
+  await seedSkillUsage(home);
   await writeFile(
     join(home, ".strike", "mcp.json"),
     JSON.stringify({
@@ -5665,6 +6546,56 @@ try {
     }
     return ev.result?.result?.value;
   };
+  // #1529: pick the seeded user theme from the catalog-backed picker
+  // before the reload below, then prove it survived the reload.
+  const themeProbe = `(() => {
+    const el = document.documentElement;
+    const cs = getComputedStyle(el);
+    return JSON.stringify({
+      theme: el.getAttribute("data-theme") || "",
+      scheme: el.getAttribute("data-scheme") || "",
+      acid: cs.getPropertyValue("--acid").trim().toLowerCase(),
+      ground: cs.getPropertyValue("--ground").trim().toLowerCase(),
+      saved: localStorage.getItem("strike.theme") || "",
+      note: document.querySelector("[data-theme-catalog-note]")?.innerText || "",
+    });
+  })()`;
+  const themePainted = async (label, wantId) => {
+    let last = {};
+    for (let i = 0; i < 60; i++) {
+      last = JSON.parse(String(await evalJson(themeProbe)));
+      const side = last.scheme === "light" ? "light" : "dark";
+      const ok =
+        wantId === smokeTheme.id
+          ? last.theme === wantId &&
+            last.saved === wantId &&
+            last.acid === smokeTheme.accent[side] &&
+            last.ground === smokeTheme.background[side]
+          : last.theme === wantId && last.saved === wantId && last.acid !== smokeTheme.accent[side];
+      if (ok) return last;
+      await delay(250);
+    }
+    throw new Error(`${label}: ${JSON.stringify(last)}\n${await diagnostics()}`);
+  };
+  await evalJson(`document.querySelector('[data-action="open-settings"]')?.click()`);
+  for (let i = 0; i < 60; i++) {
+    const ready = await evalJson(`(() => {
+      const input = document.querySelector('.settings-page input[data-theme-choice="${smokeTheme.id}"]');
+      return !!input && !input.disabled && !document.querySelector("[data-theme-catalog-note]");
+    })()`);
+    if (ready === true) break;
+    if (i === 59) {
+      throw new Error(`catalog user theme missing from the settings picker: ${String(await evalJson(themeProbe))}\n${await diagnostics()}`);
+    }
+    await delay(250);
+  }
+  const pickerText = String(await evalJson(`document.querySelector(".settings-page .theme-grid")?.innerText || ""`));
+  if (!pickerText.includes(smokeTheme.name) || !pickerText.includes("User theme") || !pickerText.includes("Nord")) {
+    throw new Error(`theme picker should list the user theme beside bundled themes: ${pickerText.slice(0, 600)}`);
+  }
+  await evalJson(`document.querySelector('.settings-page input[data-theme-choice="${smokeTheme.id}"]').click()`);
+  await themePainted("user theme applied from the catalog", smokeTheme.id);
+
   await evalJson(`localStorage.setItem("strike.token", ${JSON.stringify(token)})`);
   await send("Page.reload", { ignoreCache: true });
   for (let i = 0; i < 40; i++) {
@@ -5676,6 +6607,20 @@ try {
     if (i === 39) throw new Error(`reload did not show the cockpit: ${String(body).slice(0, 300)}`);
     await delay(250);
   }
+  await themePainted("user theme persisted across reload", smokeTheme.id);
+  await evalJson(`document.querySelector('[data-action="open-settings"]')?.click()`);
+  for (let i = 0; i < 60; i++) {
+    const clicked = await evalJson(`(() => {
+      const input = document.querySelector('.settings-page input[data-theme-choice="strike"]');
+      if (!input) return false;
+      input.click();
+      return true;
+    })()`);
+    if (clicked === true) break;
+    if (i === 59) throw new Error("settings picker did not return after reload");
+    await delay(250);
+  }
+  await themePainted("back to Strike after the user theme", "strike");
 
   let customizeText = "";
   for (let i = 0; i < 40; i++) {
@@ -5690,6 +6635,7 @@ try {
   if (!customizeText.includes("smoke-note")) {
     throw new Error(`customize catalog missing smoke-note: ${customizeText.slice(0, 500)}`);
   }
+  await skillUsageCheck({ send });
 
   await evalJson(`(() => {
     const tabs = document.querySelector('[aria-label="Customize sections"]');

@@ -627,3 +627,63 @@ func TestScriptOutcomeRecording(t *testing.T) {
 		})
 	}
 }
+
+func TestScriptNoticeOnlyForFinishedOrFailed(t *testing.T) {
+	t0 := time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
+	two := 2
+	cases := []struct {
+		name   string
+		result ScriptResult
+		refuse bool
+		want   bool
+		failed bool
+	}{
+		{name: "finished", result: finishedResult(t0), want: true},
+		{name: "failed", result: ScriptResult{Status: StatusFailed, StartedAt: t0, ExitCode: &two, Output: []byte("boom")}, want: true, failed: true},
+		{name: "denied", result: ScriptResult{Status: StatusDenied, Decision: DecisionDeny}, refuse: true},
+		{name: "error", result: ScriptResult{Status: StatusError, Error: "start: boom"}, refuse: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			clock := &testClock{t: t0}
+			script := newFakeScript(tc.result)
+			script.refuse = tc.refuse
+			var mu sync.Mutex
+			var notices []ScriptNotice
+			svc, err := Open(dir, Hooks{Now: clock.now, Script: script.run, Notify: func(n ScriptNotice) {
+				mu.Lock()
+				notices = append(notices, n)
+				mu.Unlock()
+			}}, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sch, err := svc.Create(armedSpec("nightly", t0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			clock.set(t0.Add(time.Hour))
+			svc.Tick(context.Background(), false)
+			clock.set(t0.Add(2 * time.Hour))
+			svc.WaitScripts()
+			mu.Lock()
+			defer mu.Unlock()
+			if !tc.want {
+				if len(notices) != 0 {
+					t.Fatalf("notices %+v", notices)
+				}
+				return
+			}
+			got, _ := svc.Get(sch.ID)
+			if len(notices) != 1 {
+				t.Fatalf("notices %+v", notices)
+			}
+			n := notices[0]
+			if n.ScheduleID != sch.ID || n.RunID != got.Runs[0].ID || n.Name != "nightly" || n.Failed != tc.failed ||
+				n.ExitCode == nil || *n.ExitCode != *tc.result.ExitCode {
+				t.Fatalf("notice %+v", n)
+			}
+		})
+	}
+}

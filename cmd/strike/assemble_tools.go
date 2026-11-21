@@ -18,6 +18,8 @@ import (
 	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/harness/scheduler"
 	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/internal/composer/sessionref"
+	"github.com/jonathanung/strike/internal/composer/triggers"
 	"github.com/jonathanung/strike/internal/enginebind"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/host/local"
@@ -83,6 +85,12 @@ type assembled struct {
 	// trustNotice says repo config was skipped as untrusted ("" when trusted
 	// or when the repo ships none) (#1352).
 	trustNotice string
+	// trustDir / trustRoot / trustedAtStart record the workspace and trust
+	// decision this assembly was built with, so the cockpit trust card acts
+	// on that workspace and can say a grant/revoke needs a restart (#1781).
+	trustDir       string
+	trustRoot      string
+	trustedAtStart bool
 	// mcpClose stops MCP server sessions (stdio/HTTP; process-scoped).
 	mcpClose func() error
 	// lspClose stops language server sessions (stdio; process-scoped).
@@ -898,7 +906,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			SessionID: sid,
 			Select:    selectProvider,
 			PrepareInput: func(text, dir string) engine.InputPrep {
-				return composerPrepare(text, dir, skills)
+				return composerPrepare(text, dir, skills, &triggers.Sessions{
+					Self: sid,
+					Read: sessionref.Reader(sessions.Dir(), sessionref.DefaultTurns),
+				})
 			},
 			Registry:       registry,
 			WorkDir:        toolDir,
@@ -1365,6 +1376,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		worktreeClose:  first.wtClose,
 		worktreeNotice: first.wtNotice,
 		trustNotice:    wsTrust.notice(),
+		trustDir:       launchDir,
+		trustRoot:      wsTrust.root,
+		trustedAtStart: wsTrust.trusted,
 		mcpClose: func() error {
 			return mcpMgr.Close()
 		},

@@ -103,6 +103,8 @@ pub struct Message {
     /// the envelope carried one. Empty for legacy log lines. Used by the
     /// orphan sweep (#1506) to scope a `turn.completed` to its own turn.
     pub turn_id: String,
+    /// Attachments sent with a `user.message` (#1389). Empty elsewhere.
+    pub attachments: Vec<crate::transcript_attachments::SentAttachment>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -310,6 +312,12 @@ pub struct Transcript {
     /// `sessionId` of the turn in progress (from `turn.started`), so a
     /// child session's streams are not counted on the parent's turn.
     turn_session: String,
+    /// Per-turn verification badges (#1373), keyed like `turn_elapsed` by
+    /// the turn's final message id. Only turns whose `turn.completed`
+    /// carried a verification report get an entry.
+    pub turn_verify: HashMap<u32, crate::turn_verify::TurnVerify>,
+    /// Steer acknowledgement markers (#1343), keyed by message id.
+    pub steer_acks: crate::steer_ack::SteerAcks,
     /// Live `tool.output` tails (#1374), keyed by the tool card's message
     /// id. Removed when the call's `tool.end` arrives; a call that never
     /// ends keeps its last tail as the only record of what it printed.
@@ -340,8 +348,16 @@ impl Transcript {
             turn_usage: HashMap::new(),
             usage_acc: crate::turn_usage::TurnUsage::default(),
             turn_session: String::new(),
+            turn_verify: HashMap::new(),
+            steer_acks: crate::steer_ack::SteerAcks::default(),
             tool_tails: HashMap::new(),
         }
+    }
+
+    /// The verification badge stamped on this message, if it is the final
+    /// line of a completed turn whose payload carried a report (#1373).
+    pub fn verify_for(&self, id: u32) -> Option<&crate::turn_verify::TurnVerify> {
+        self.turn_verify.get(&id)
     }
 
     /// The live output tail of tool card `id`, while it has one (#1374).
@@ -476,7 +492,13 @@ impl Transcript {
         // are skipped, and a known event whose payload does not match the
         // schema is dropped. Parsing below still reads the raw object.
         match protocol_schema::decode_event(raw) {
-            Ok(protocol_schema::Event::Unknown { .. }) | Err(_) => return,
+            Ok(protocol_schema::Event::Unknown { .. }) => return,
+            Err(_) => {
+                // #1359: a compaction/budget payload the schema rejects
+                // still leaves a title-only marker where it happened.
+                self.apply_malformed_mark(raw);
+                return;
+            }
             Ok(_) => {}
         }
         let v: Value = match serde_json::from_str(raw) {
@@ -502,12 +524,16 @@ impl Transcript {
                 self.trigger_note.clear();
                 let text = field_str(&data, "text");
                 let shown = display_user_text(&strip_echo_progress(&text));
+                // #1324: a review-queue turn is labelled as a review, not
+                // shown as if the operator had typed it.
+                let review = crate::review_queue::is_review_turn(&text);
+                let (ack_text, ack_shown) = (text.clone(), shown.clone());
                 let id = self.push(Message {
                     id: 0,
                     role: Role::You,
-                    title: "You".into(),
+                    title: if review { "Review".into() } else { "You".into() },
                     body: shown.clone(),
-                    badge: String::new(),
+                    badge: if review { "review".into() } else { String::new() },
                     detail: String::new(),
                     key: String::new(),
                     call_id: String::new(),
@@ -519,9 +545,16 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: field_str(&data, "turnId"),
+                    attachments: crate::transcript_attachments::parse_images(&data),
                 });
+                self.steer_acks.on_user_message(id, &ack_text, &ack_shown);
                 self.turn_start = Some(id);
                 self.absorb();
+            }
+            "turn.steered" => {
+                let text = field_str(&data, "text");
+                let mode = field_str(&data, "mode");
+                self.steer_acks.on_steered(&self.messages, &text, &mode);
             }
             "session.titled" => self.note_titled(&field_str(&data, "title")),
             "turn.started" => {
@@ -573,6 +606,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "turn.completed" => {
@@ -580,7 +614,8 @@ impl Transcript {
                 self.sweep_orphaned_at_turn_end(&field_str(&data, "turnId"));
                 self.absorb();
                 let usage = std::mem::take(&mut self.usage_acc);
-                self.stamp_turn(at_ms, usage);
+                let verify = crate::turn_verify::turn_verify(&data);
+                self.stamp_turn(at_ms, usage, verify);
                 // #1371: an abnormal stop gets its own end-of-turn line,
                 // pushed after the turn is stamped so the elapsed/usage
                 // labels and fork keep-counts stay on the turn's real
@@ -651,6 +686,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: field_str(&data, "turnId"),
+                    attachments: Vec::new(),
                 });
             }
             "tool.output" => {
@@ -732,6 +768,7 @@ impl Transcript {
                         reconnect: String::new(),
                         at_ms,
                         turn_id: field_str(&data, "turnId"),
+                        attachments: Vec::new(),
                     });
                 }
             }
@@ -759,7 +796,56 @@ impl Transcript {
                 card.at_ms = at_ms;
                 self.upsert_child(card);
             }
+            "child.escalated" => {
+                // #1375: a child tripped a budget/stall/loop. One persistent
+                // line names the child, the trip and the action taken; the
+                // later child.completed card still carries the outcome.
+                let session = field_str(&data, "sessionId");
+                let mut name = field_str(&data, "name");
+                if name.is_empty() {
+                    name = session.chars().take(8).collect();
+                }
+                if name.is_empty() {
+                    name = "A child".into();
+                }
+                let body = crate::child_signals::escalation_sentence(
+                    &field_str(&data, "kind"),
+                    &field_str(&data, "reason"),
+                    &field_str(&data, "action"),
+                );
+                self.push(Message {
+                    id: 0,
+                    role: Role::Notice,
+                    title: format!("{name} escalated"),
+                    body: body.clone(),
+                    badge: "escalated".into(),
+                    detail: String::new(),
+                    key: String::new(),
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: body,
+                    reconnect: String::new(),
+                    at_ms,
+                    attachments: Vec::new(),
+                    turn_id: field_str(&data, "turnId"),
+                });
+            }
             "artifact.updated" => self.artifact_updates = self.artifact_updates.wrapping_add(1),
+            "compaction.started"
+            | "compaction.completed"
+            | "context.fit_warning"
+            | "session.budget_warning" => {
+                if self.foreign_session(&data) {
+                    return;
+                }
+                if let Some(mark) = crate::compaction_marks::mark(typ, &data) {
+                    self.assistant_open = false;
+                    self.push_mark(mark, at_ms, field_str(&data, "turnId"));
+                }
+            }
             "engine.error" => {
                 let message = field_str(&data, "message");
                 if message.is_empty() {
@@ -793,6 +879,7 @@ impl Transcript {
                         reconnect: provider,
                         at_ms,
                         turn_id: String::new(),
+                        attachments: Vec::new(),
                     });
                     return;
                 }
@@ -813,6 +900,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "permission.asked" => {
@@ -851,6 +939,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "permission.resolved" => {
@@ -863,12 +952,45 @@ impl Transcript {
                     .rev()
                     .find(|m| m.key == request_id && m.role == Role::Permission)
                 {
+                    // Name how the ask ended (#1387): Allowed, Denied, or
+                    // Expired when it died with no answer.
+                    msg.title = crate::approval_outcome::resolved_title(&decision).into();
                     msg.badge = if decision.is_empty() {
                         "done".into()
                     } else {
                         decision
                     };
                 }
+            }
+            "permission.decided" if crate::approval_outcome::is_latched_denial(&data) => {
+                // A repeat of an action the user already denied: no card,
+                // one line saying why (#1387).
+                let permission = field_str(&data, "permission");
+                let patterns = pattern_list(&data);
+                let body = if patterns.is_empty() {
+                    permission.clone()
+                } else {
+                    format!("{permission} · {patterns}")
+                };
+                self.push(Message {
+                    id: 0,
+                    role: Role::Permission,
+                    title: "Denied".into(),
+                    body,
+                    badge: "denied".into(),
+                    detail: crate::approval_outcome::LATCHED_DETAIL.into(),
+                    key: String::new(),
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: permission,
+                    reconnect: String::new(),
+                    at_ms,
+                    attachments: Vec::new(),
+                    turn_id: String::new(),
+                });
             }
             _ => {}
         }
@@ -924,6 +1046,55 @@ impl Transcript {
             reconnect: String::new(),
             at_ms,
             turn_id,
+            attachments: Vec::new(),
+        });
+    }
+
+    /// Minimal marker for a compaction/budget envelope whose payload the
+    /// generated schema rejected (#1359). Anything else stays dropped.
+    fn apply_malformed_mark(&mut self, raw: &str) {
+        let Ok(v) = serde_json::from_str::<Value>(raw) else {
+            return;
+        };
+        let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let Some(mark) = crate::compaction_marks::minimal(typ) else {
+            return;
+        };
+        let at_ms = v
+            .get("time")
+            .and_then(|t| t.as_str())
+            .map(crate::model::rfc3339_to_ms)
+            .unwrap_or(0.0);
+        self.assistant_open = false;
+        self.push_mark(mark, at_ms, String::new());
+    }
+
+    /// One compaction/budget marker line (#1359): a notice whose summary
+    /// and residue sit in the collapsed detail fold.
+    fn push_mark(&mut self, mark: crate::compaction_marks::Mark, at_ms: f64, turn_id: String) {
+        let copy = if mark.body.is_empty() {
+            mark.title.clone()
+        } else {
+            format!("{}\n{}", mark.title, mark.body)
+        };
+        self.push(Message {
+            id: 0,
+            role: Role::Notice,
+            title: mark.title,
+            body: mark.body,
+            badge: mark.badge,
+            detail: mark.detail,
+            key: mark.key,
+            call_id: String::new(),
+            diff: None,
+            chips: Vec::new(),
+            keep_events: -1,
+            retry_text: String::new(),
+            copy_text: copy,
+            reconnect: String::new(),
+            at_ms,
+            turn_id,
+            attachments: Vec::new(),
         });
     }
 
@@ -1064,7 +1235,12 @@ impl Transcript {
         }
     }
 
-    fn stamp_turn(&mut self, completed_ms: f64, usage: crate::turn_usage::TurnUsage) {
+    fn stamp_turn(
+        &mut self,
+        completed_ms: f64,
+        usage: crate::turn_usage::TurnUsage,
+        verify: Option<crate::turn_verify::TurnVerify>,
+    ) {
         let Some(id) = self.turn_start else {
             return;
         };
@@ -1099,6 +1275,11 @@ impl Transcript {
             // reported a known input or output count.
             if usage.label().is_some() {
                 self.turn_usage.insert(last_id, usage);
+            }
+            // Verification badge (#1373): same final line, from the
+            // payload only; no report, no badge.
+            if let Some(v) = verify {
+                self.turn_verify.insert(last_id, v);
             }
         }
         self.turn_start = None;
@@ -1202,6 +1383,7 @@ impl Transcript {
             reconnect: String::new(),
             at_ms,
             turn_id: String::new(),
+            attachments: Vec::new(),
         });
     }
 }
@@ -2155,6 +2337,134 @@ pub fn provider_auth_headline(provider: &str) -> String {
 mod tests {
     use super::*;
 
+    fn notices(t: &Transcript) -> Vec<(String, String)> {
+        t.messages
+            .iter()
+            .filter(|m| m.role == Role::Notice)
+            .map(|m| (m.title.clone(), m.key.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn compaction_and_budget_markers_render_inline_in_order() {
+        // Real envelope shapes, as the engine emits them mid-session.
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "long task"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"turnId": "t1", "sessionId": "s1"})));
+        t.apply_envelope(&env(
+            "context.fit_warning",
+            serde_json::json!({"sessionId": "s1", "turnId": "t1", "estimatedTokens": 180000,
+                "contextLimit": 200000, "level": "warn", "message": "context is getting full"}),
+        ));
+        t.apply_envelope(&env(
+            "compaction.started",
+            serde_json::json!({"sessionId": "s1", "turnId": "t1", "reason": "threshold", "strategy": "summarize"}),
+        ));
+        t.apply_envelope(&env(
+            "compaction.completed",
+            serde_json::json!({"sessionId": "s1", "turnId": "t1", "reason": "threshold",
+                "strategy": "summarize", "removed": 6, "kept": 2, "summary": "Earlier work summarised.",
+                "residue": {"schemaVersion": "1", "facts": [{"id": "f1", "text": "tests pass"}]}}),
+        ));
+        t.apply_envelope(&env(
+            "session.budget_warning",
+            serde_json::json!({"sessionId": "s1", "level": "80", "kind": "cost_usd",
+                "costUsd": 4.0, "maxCostUsd": 5.0, "ratio": 0.8, "message": "80% of session budget"}),
+        ));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "done"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({"turnId": "t1", "stopReason": "end_turn"})));
+        let roles: Vec<Role> = t.messages.iter().map(|m| m.role).collect();
+        assert_eq!(
+            roles,
+            [Role::You, Role::Notice, Role::Notice, Role::Notice, Role::Notice, Role::Strike]
+        );
+        assert_eq!(
+            notices(&t),
+            [
+                ("Context near limit".to_string(), "compaction:fit".to_string()),
+                ("Compacting context".to_string(), "compaction:started".to_string()),
+                ("Context compacted".to_string(), "compaction:completed".to_string()),
+                ("Budget warning".to_string(), "compaction:budget".to_string()),
+            ]
+        );
+        let done = &t.messages[3];
+        assert!(done.body.starts_with("Removed 6 messages, kept 2 messages"), "{}", done.body);
+        assert!(done.detail.contains("Summary\nEarlier work summarised."));
+        assert!(done.detail.contains("Facts kept\n- tests pass"));
+        assert!(!protocol_leak(&visible(&t)), "{}", visible(&t));
+    }
+
+    #[test]
+    fn malformed_compaction_payload_degrades_to_minimal_marker() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "go"})));
+        // `removed` as a string fails the generated schema.
+        t.apply_envelope(&env("compaction.completed", serde_json::json!({"removed": "lots"})));
+        t.apply_envelope(&env("session.budget_warning", serde_json::json!("not an object")));
+        // `null` counts pass the daemon's Go decoder but not the schema.
+        t.apply_envelope(&env(
+            "compaction.completed",
+            serde_json::json!({"reason": "manual", "removed": null}),
+        ));
+        // Legacy payload: no counts, no strategy — still a marker.
+        t.apply_envelope(&env("compaction.completed", serde_json::json!({"reason": "manual"})));
+        // A malformed event this module does not own stays dropped.
+        t.apply_envelope(&env("tool.end", serde_json::json!({"isError": "nope"})));
+        t.apply_envelope(r#"{"type":"compaction.started","data":"#);
+        let got = notices(&t);
+        assert_eq!(
+            got,
+            [
+                ("Context compacted".to_string(), "compaction:completed".to_string()),
+                ("Budget warning".to_string(), "compaction:budget".to_string()),
+                ("Context compacted".to_string(), "compaction:completed".to_string()),
+                ("Context compacted".to_string(), "compaction:completed".to_string()),
+            ]
+        );
+        assert_eq!(t.messages[1].body, "");
+        assert_eq!(t.messages[3].body, "");
+        assert_eq!(t.messages[4].body, "Requested manually");
+        assert_eq!(t.messages.len(), 5);
+    }
+
+    #[test]
+    fn foreign_session_compaction_adds_no_marker() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("turn.started", serde_json::json!({"sessionId": "root"})));
+        t.apply_envelope(&env(
+            "compaction.completed",
+            serde_json::json!({"sessionId": "child", "removed": 1, "kept": 1}),
+        ));
+        assert!(notices(&t).is_empty());
+        t.apply_envelope(&env(
+            "compaction.completed",
+            serde_json::json!({"sessionId": "root", "removed": 1, "kept": 1}),
+        ));
+        assert_eq!(notices(&t).len(), 1);
+    }
+
+    #[test]
+    fn markers_replay_identically() {
+        let lines = [
+            env_at("user.message", serde_json::json!({"text": "a"}), "2026-10-26T06:00:00Z"),
+            env_at("compaction.started", serde_json::json!({"reason": "manual", "strategy": "trim"}), "2026-10-26T06:00:01Z"),
+            env_at("compaction.completed", serde_json::json!({"reason": "manual", "strategy": "trim", "removed": 4, "kept": 3}), "2026-10-26T06:00:02Z"),
+            env_at("context.fit_warning", serde_json::json!({"level": "critical", "estimatedTokens": 9, "contextLimit": 8}), "2026-10-26T06:00:03Z"),
+        ];
+        let build = || {
+            let mut t = Transcript::new();
+            for l in &lines {
+                t.apply_envelope(l);
+            }
+            t
+        };
+        let (a, b) = (build(), build());
+        assert_eq!(a.messages, b.messages);
+        let stamps: Vec<f64> = a.messages.iter().map(|m| m.at_ms).collect();
+        assert!(stamps.windows(2).all(|w| w[0] < w[1]), "{stamps:?}");
+        assert_eq!(a.messages[3].title, "Context over limit");
+    }
+
     /// #1371: one turn ending with `stopReason`, after a short answer.
     fn turn_ending(stop: Value) -> Transcript {
         let mut t = Transcript::new();
@@ -2690,6 +3000,42 @@ mod tests {
         t.apply_envelope(&env("turn.completed", serde_json::json!({"turnId": "t1"})));
         let row = t.messages.iter().find(|m| m.call_id == "a").expect("row");
         assert_eq!(row.badge, "no result");
+    }
+
+    #[test]
+    fn child_escalated_renders_a_line() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "child.escalated",
+            serde_json::json!({
+                "sessionId": "abcd1234ef",
+                "name": "scout",
+                "kind": "stall",
+                "reason": "no progress for 300s",
+                "action": "finalizing",
+                "terminalStatus": "blocked"
+            }),
+        ));
+        let line = t
+            .messages
+            .iter()
+            .find(|m| m.badge == "escalated")
+            .expect("escalation line");
+        assert_eq!(line.role, Role::Notice);
+        assert_eq!(line.title, "scout escalated");
+        assert_eq!(
+            line.body,
+            "Stalled: no progress for 300s. Action: finishing with a handoff."
+        );
+
+        // No name: fall back to the short session id.
+        t.apply_envelope(&env(
+            "child.escalated",
+            serde_json::json!({"sessionId": "abcd1234ef", "kind": "tokens", "reason": "", "action": "interrupted"}),
+        ));
+        let last = t.messages.last().unwrap();
+        assert_eq!(last.title, "abcd1234 escalated");
+        assert_eq!(last.body, "Token budget. Action: stopped.");
     }
 
     #[test]
@@ -3300,6 +3646,47 @@ mod tests {
         assert!(matches!(blocks[0], Block::Paragraph(_)));
     }
 
+    // #1373: per-turn verification badge.
+    fn verify_turn(t: &mut Transcript, prompt: &str, done: Value) -> u32 {
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": prompt})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "answer"})));
+        let last = t.messages.last().unwrap().id;
+        t.apply_envelope(&env("turn.completed", done));
+        last
+    }
+
+    #[test]
+    fn verification_badge_stamps_final_line_from_payload_only() {
+        use crate::turn_verify::VerifyState;
+        let mut t = Transcript::new();
+        let a = verify_turn(
+            &mut t,
+            "one",
+            serde_json::json!({"verification": {"passed": true, "claimed": true, "verified": true}}),
+        );
+        let b = verify_turn(
+            &mut t,
+            "two",
+            serde_json::json!({"verification": {"passed": false, "claimed": true, "verified": false}}),
+        );
+        let c = verify_turn(
+            &mut t,
+            "three",
+            serde_json::json!({"verification": {"passed": false, "claimed": false, "verified": true}}),
+        );
+        let d = verify_turn(&mut t, "four", serde_json::json!({"stopReason": "end_turn"}));
+        assert_eq!(t.verify_for(a).unwrap().state, VerifyState::Verified);
+        assert_eq!(t.verify_for(b).unwrap().state, VerifyState::Claimed);
+        assert_eq!(t.verify_for(c).unwrap().state, VerifyState::Unverified);
+        assert!(t.verify_for(d).is_none(), "no payload, no badge");
+        assert_eq!(t.turn_verify.len(), 3);
+        // Only the final line of each turn carries it.
+        for m in &t.messages {
+            if ![a, b, c].contains(&m.id) {
+                assert!(t.verify_for(m.id).is_none(), "{}", m.id);
+            }
+        }
+    }
     // #1374: live tool.output tail.
     fn begin(t: &mut Transcript, call: &str) -> u32 {
         t.apply_envelope(&env(

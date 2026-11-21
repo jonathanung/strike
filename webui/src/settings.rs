@@ -8,7 +8,8 @@ use leptos::task::spawn_local;
 use serde_json::Value;
 
 use crate::api::{get_json, patch_json};
-use crate::appearance::{known_theme, ChoiceRow, ThemeChoices};
+use crate::appearance::{ChoiceRow, ThemeChoices};
+use theme_catalog::{selectable, CatalogState};
 use crate::localfiles::{fetch_local_files, FileList, LocalFiles};
 
 thread_local! {
@@ -36,6 +37,8 @@ pub fn SettingsPage(
     mode: RwSignal<String>,
     status: RwSignal<String>,
     theme: RwSignal<String>,
+    theme_catalog: RwSignal<CatalogState>,
+    theme_note: RwSignal<String>,
     scheme: RwSignal<String>,
     font: RwSignal<String>,
     density: RwSignal<String>,
@@ -46,6 +49,7 @@ pub fn SettingsPage(
     on_cleared: impl Fn() + Copy + Send + Sync + 'static,
     diag_capable: RwSignal<bool>,
     project_init_capable: RwSignal<bool>,
+    config_files_capable: RwSignal<bool>,
     root: RwSignal<String>,
 ) -> impl IntoView {
     let _ = (gateway, mode, on_cleared);
@@ -84,7 +88,7 @@ pub fn SettingsPage(
     Effect::new(move |_| {
         let saved = field(&dials.get(), "theme");
         let browser = theme.get();
-        let mismatch = known_theme(&saved) && saved != browser;
+        let mismatch = theme_catalog.with(|c| selectable(&saved, c)) && saved != browser;
         THEME_MISMATCH.with(|cell| cell.set(mismatch));
         DAEMON_THEME.with(|slot| *slot.borrow_mut() = saved);
     });
@@ -120,7 +124,7 @@ pub fn SettingsPage(
         "settings.use-daemon-theme",
         Rc::new(move |_| {
             let id = DAEMON_THEME.with(|slot| slot.borrow().clone());
-            if known_theme(&id) {
+            if theme_catalog.with_untracked(|c| selectable(&id, c)) {
                 save_theme(id);
             }
             Ok(())
@@ -131,7 +135,7 @@ pub fn SettingsPage(
     }
     if crate::park::take("settings.use-daemon-theme").is_some() {
         let id = DAEMON_THEME.with(|slot| slot.borrow().clone());
-        if known_theme(&id) {
+        if theme_catalog.with_untracked(|c| selectable(&id, c)) {
             save_theme(id);
         }
     }
@@ -143,7 +147,10 @@ pub fn SettingsPage(
             </header>
             <section class="card settings-section">
                 <h2 class="panel-title">"Appearance"</h2>
-                <ThemeChoices group="settings-theme" current=theme on_pick=save_theme />
+                <ThemeChoices group="settings-theme" current=theme catalog=theme_catalog on_pick=save_theme />
+                <Show when=move || !theme_note.get().is_empty()>
+                    <p class="banner" role="status" data-theme-fallback="">{move || theme_note.get()}</p>
+                </Show>
                 <ChoiceRow
                     group="settings-scheme"
                     legend="Scheme"
@@ -178,6 +185,15 @@ pub fn SettingsPage(
                     capable=project_init_capable
                 />
             </section>
+            <section class="card settings-section" id="settings-config-sources">
+                <h2 class="panel-title">"Config sources"</h2>
+                <crate::config_sources::ConfigSources
+                    base=base
+                    token=token
+                    root=root
+                    capable=config_files_capable
+                />
+            </section>
             <section class="card settings-section">
                 <h2 class="panel-title">"Diagnostics"</h2>
                 <crate::diag::DiagDownload
@@ -187,6 +203,10 @@ pub fn SettingsPage(
                     status=status
                     diag_capable=diag_capable
                 />
+            </section>
+            <section class="card settings-section" id="settings-backup">
+                <h2 class="panel-title">"Backup"</h2>
+                <crate::instance_backup::InstanceBackup base=base token=token status=status />
             </section>
             <Show when=move || show_files.get()>
                 <section class="card settings-section" id="settings-files">

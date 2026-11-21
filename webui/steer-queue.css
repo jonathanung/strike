@@ -237,3 +237,14 @@ button.confirming {
   flex: 0 0 auto;
 }
 /* feature:offline-outbox end */
+/* feature:steer-ack begin */
+.steer-ack {
+  margin: 4px 0 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--sharp);
+  color: var(--muted);
+  font-size: var(--type-sm);
+  line-height: 1.4;
+}
+.steer-ack[data-steer-state="missed"] { border-left-color: var(--muted); }
+/* feature:steer-ack end */

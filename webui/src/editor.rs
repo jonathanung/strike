@@ -1712,6 +1712,8 @@ struct DocBody {
     writable: bool,
     #[serde(default, rename = "writeBlock")]
     write_block: String,
+    #[serde(default)]
+    size: i64,
 }
 
 #[derive(Deserialize)]
@@ -2343,13 +2345,29 @@ pub fn DocumentPane(
     jump_line: RwSignal<u32>,
     want_diff: RwSignal<bool>,
     editing: RwSignal<bool>,
+    /// Live root and its busy state, for Markdown Review sends (#1366).
+    root: RwSignal<String>,
+    busy: Memo<bool>,
+    /// Open-file history (#1395), owned by the page so it outlives the
+    /// pane (which unmounts whenever no document is open).
+    history: RwSignal<crate::file_history::FileHistory>,
 ) -> impl IntoView {
     let content = RwSignal::new(String::new());
+    // Markdown Review (#1366): the passage selected in the rendered view.
+    let review_quote = RwSignal::new(String::new());
     let draft = RwSignal::new(String::new());
     let sha = RwSignal::new(String::new());
     let mtime = RwSignal::new(String::new());
     let loaded_path = RwSignal::new(String::new());
     let binary = RwSignal::new(false);
+    // Binary/image viewer (#1393): file size from the view, the shown
+    // image's local URL (blob: or data:), a load/error note, the
+    // fit/full-size toggle, and a generation guard for raw fetches.
+    let doc_size = RwSignal::new(0i64);
+    let image_url = RwSignal::new(String::new());
+    let image_note = RwSignal::new(String::new());
+    let image_full = RwSignal::new(false);
+    let image_gen = RwSignal::new(0u32);
     let truncated = RwSignal::new(false);
     let writable = RwSignal::new(false);
     let write_block = RwSignal::new(String::new());
@@ -2565,8 +2583,10 @@ pub fn DocumentPane(
                     content.set(doc.content.clone());
                     draft.set(doc.content);
                     sha.set(doc.sha256);
+                    doc_size.set(doc.size);
                     mtime.set(doc.mtime_unix_nano);
                     loaded_path.set(doc.path.clone());
+                    history.update(|h| h.visit(&doc.path));
                     binary.set(doc.binary);
                     truncated.set(doc.truncated);
                     writable.set(doc.writable && !doc.binary && !doc.truncated);
@@ -2584,6 +2604,9 @@ pub fn DocumentPane(
                     status.set(http_message(&e));
                     loading.set(false);
                     writable.set(false);
+                    // A Back/Forward step onto a file that no longer
+                    // opens still lands, so the next step goes past it.
+                    history.update(|h| h.step_failed(&p));
                 }
             }
         });
@@ -2678,6 +2701,76 @@ pub fn DocumentPane(
             }
         });
     });
+
+    // Image viewer (#1393): fetch the raw bytes of a binary image once it
+    // has loaded, show them from a local URL, and drop the previous URL
+    // on every file change and when the pane unmounts.
+    Effect::new(move |_| {
+        let is_binary = binary.get();
+        let p = loaded_path.get();
+        let _ = sha.get();
+        let gen = image_gen.get_untracked().wrapping_add(1);
+        image_gen.set(gen);
+        let old = image_url.get_untracked();
+        if !old.is_empty() {
+            crate::workspace_image::revoke_url(&old);
+            image_url.set(String::new());
+        }
+        image_note.set(String::new());
+        image_full.set(false);
+        if !is_binary || !crate::workspace_image::is_image_path(&p) {
+            return;
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let q = format!("/v1/file/raw?path={}", js_encode(&p));
+            let answer = crate::api::get_bytes(&b, &t, &q).await;
+            if image_gen.get_untracked() != gen {
+                return;
+            }
+            match answer {
+                Ok((bytes, ctype)) => {
+                    let url = if crate::workspace_image::is_svg_path(&p) {
+                        Some(crate::workspace_image::svg_data_url(&bytes))
+                    } else {
+                        crate::workspace_image::blob_url(&bytes, &ctype)
+                    };
+                    match url {
+                        Some(u) => image_url.set(u),
+                        None => image_note.set("Could not display this image.".into()),
+                    }
+                }
+                Err(e) => image_note.set(e),
+            }
+        });
+    });
+    on_cleanup(move || {
+        crate::workspace_image::revoke_url(&image_url.get_untracked());
+    });
+
+    // Download any binary through the same raw route (#1393), so no file
+    // class is a dead end.
+    let download_raw = move || {
+        let p = loaded_path.get_untracked();
+        if p.is_empty() {
+            return;
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let q = format!("/v1/file/raw?path={}", js_encode(&p));
+            match crate::api::get_bytes(&b, &t, &q).await {
+                Ok((bytes, ctype)) => {
+                    let name = crate::workspace_image::file_name(&p);
+                    status.set(if crate::workspace_image::save_bytes(name, &ctype, &bytes) {
+                        "Downloaded.".into()
+                    } else {
+                        "Download didn't work in this browser.".into()
+                    });
+                }
+                Err(e) => status.set(e),
+            }
+        });
+    };
 
     let step = move |delta: i32| {
         let n = hits.get_untracked().len();
@@ -2895,9 +2988,33 @@ pub fn DocumentPane(
         }
     });
 
+    // File Back/Forward (#1395): request the neighbouring entry through
+    // `path`, like any other open, so the unsaved guard (#1394) can hold
+    // it; history moves only when that file loads.
+    let file_step = move |delta: i32| {
+        let mut target = None;
+        history.update(|h| target = h.begin_step(delta));
+        if let Some(p) = target {
+            jump_line.set(0);
+            want_diff.set(false);
+            path.set(p);
+        }
+    };
+
     let on_key = move |ev: web_sys::KeyboardEvent| {
         let key = ev.key();
         let cmd = ev.meta_key() || ev.ctrl_key();
+        // Alt+[ / Alt+] step file history. `code` because Alt changes
+        // the produced character on some layouts (macOS Option).
+        if ev.alt_key() && !cmd && !ev.shift_key() {
+            let code = ev.code();
+            if code == "BracketLeft" || code == "BracketRight" {
+                ev.prevent_default();
+                ev.stop_propagation();
+                file_step(if code == "BracketLeft" { -1 } else { 1 });
+                return;
+            }
+        }
         if key == "Escape" {
             ev.stop_propagation();
             // While the unsaved guard (#1394) is open, Escape is
@@ -3002,6 +3119,24 @@ pub fn DocumentPane(
             on:keydown=on_key
         >
             <div class="ev-bar">
+                <button
+                    type="button"
+                    class="secondary ev-hist"
+                    data-ev-hist-back=true
+                    aria-label="Previous file"
+                    title="Previous file (Alt+[)"
+                    disabled=move || !history.with(|h| h.can_back())
+                    on:click=move |_| file_step(-1)
+                >"‹"</button>
+                <button
+                    type="button"
+                    class="secondary ev-hist"
+                    data-ev-hist-forward=true
+                    aria-label="Next file"
+                    title="Next file (Alt+])"
+                    disabled=move || !history.with(|h| h.can_forward())
+                    on:click=move |_| file_step(1)
+                >"›"</button>
                 <span class="ev-path">{move || {
                     let p = loaded_path.get();
                     if p.is_empty() { path.get() } else { p }
@@ -3316,8 +3451,51 @@ pub fn DocumentPane(
             <Show when=move || loading.get()>
                 <p class="hint">"Loading…"</p>
             </Show>
-            <Show when=move || binary.get()>
-                <p class="hint">"Binary file. Nothing to show."</p>
+            <Show when=move || binary.get() && !loading.get()>
+                <div class="ev-binary" data-ev-binary=true>
+                    <Show when=move || crate::workspace_image::is_image_path(&loaded_path.get())>
+                        <Show
+                            when=move || !image_url.get().is_empty()
+                            fallback=move || view! {
+                                <p class="hint" data-ev-image-note="">{move || {
+                                    let note = image_note.get();
+                                    if note.is_empty() { "Loading image…".to_string() } else { note }
+                                }}</p>
+                            }
+                        >
+                            <button
+                                type="button"
+                                class=move || if image_full.get() { "ev-image-btn full" } else { "ev-image-btn" }
+                                data-ev-image-toggle=true
+                                aria-pressed=move || if image_full.get() { "true" } else { "false" }
+                                title=move || if image_full.get() { "Fit to pane" } else { "Show full size" }
+                                on:click=move |_| image_full.update(|v| *v = !*v)
+                            >
+                                <img
+                                    class="ev-image"
+                                    data-ev-image=true
+                                    src=move || image_url.get()
+                                    alt=move || crate::workspace_image::file_name(&loaded_path.get()).to_string()
+                                />
+                            </button>
+                        </Show>
+                    </Show>
+                    <Show when=move || !crate::workspace_image::is_image_path(&loaded_path.get())>
+                        <p class="hint">"Binary file. There is no preview for this type."</p>
+                    </Show>
+                    <div class="ev-binary-meta">
+                        <span class="hint" data-ev-binary-meta="">{move || {
+                            crate::workspace_image::binary_meta(&loaded_path.get(), doc_size.get(), &sha.get())
+                        }}</span>
+                        <button
+                            type="button"
+                            class="secondary"
+                            data-ev-binary-download=true
+                            title="Download this file"
+                            on:click=move |_| download_raw()
+                        >"Download file"</button>
+                    </div>
+                </div>
             </Show>
             <Show when=move || blame_on.get() && !blame_note.get().is_empty()>
                 <p class="hint ev-blame-note" data-ev-blame-note=true>{move || blame_note.get()}</p>
@@ -3357,7 +3535,24 @@ pub fn DocumentPane(
             })}
             <div class="ev-body">
                 <Show when=move || !binary.get() && !loading.get() && preview.get()>
-                    {move || view! { <MarkdownView text=content.get() outline=true /> }}
+                    <div
+                        id={crate::markdown_review::HOST_ID}
+                        class="mdr-host"
+                        on:mouseup=move |_| crate::markdown_review::capture(review_quote)
+                        on:keyup=move |_| crate::markdown_review::capture(review_quote)
+                        on:touchend=move |_| crate::markdown_review::capture(review_quote)
+                    >
+                        {move || view! { <MarkdownView text=content.get() outline=true /> }}
+                    </div>
+                    <crate::markdown_review::MdReviewPanel
+                        base=base
+                        token=token
+                        root=root
+                        busy=busy
+                        path=loaded_path
+                        content=content
+                        quote=review_quote
+                    />
                 </Show>
                 <Show when=move || !binary.get() && !loading.get() && !preview.get() && !editing.get()>
                     {move || view! {
