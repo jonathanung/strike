@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -148,6 +149,24 @@ func DecodePackage(data []byte) (Package, error) {
 	return pkg, nil
 }
 
+// ValidatePackage checks the header fields DecodePackage checks, for a
+// package that arrived inside another document (instance backup, #1339).
+func ValidatePackage(pkg Package) error {
+	if pkg.Format != PackageFormat {
+		return fmt.Errorf("session package: unsupported format %q", pkg.Format)
+	}
+	if pkg.Version != PackageVersion {
+		return fmt.Errorf("session package: unsupported version %d (want %d)", pkg.Version, PackageVersion)
+	}
+	if pkg.SchemaVersion > LogSchemaVersion {
+		return &SchemaVersionError{Found: pkg.SchemaVersion, Support: LogSchemaVersion}
+	}
+	if pkg.SchemaVersion < 0 {
+		return fmt.Errorf("session package: invalid schemaVersion %d", pkg.SchemaVersion)
+	}
+	return nil
+}
+
 // ImportPackage creates a new session from a portable package under dir.
 // The new session gets a fresh id; meta.ForkedFrom is left empty (import is
 // not a live fork). Source lineage is available on the package's SourceID.
@@ -156,7 +175,72 @@ func ImportPackage(dir string, pkg Package) (Info, error) {
 	return importPackageInto(NewManager(dir), pkg)
 }
 
+// RestorePackage writes pkg back under its original session id (instance
+// restore, #1339). Unlike ImportPackage it keeps SourceID and the
+// parent/lead links so a restored team tree stays intact. A session that
+// already exists under that id is refused: callers decide whether to skip
+// it or restore a copy through ImportPackage.
+func (m *Manager) RestorePackage(pkg Package) (Info, error) {
+	id := strings.TrimSpace(pkg.SourceID)
+	if err := validateID(id); err != nil {
+		return Info{}, fmt.Errorf("session package: %w", err)
+	}
+	return importPackageAs(m, pkg, restoreTarget{
+		id:     id,
+		parent: strings.TrimSpace(pkg.Meta.ParentSessionID),
+		lead:   strings.TrimSpace(pkg.Meta.LeadSessionID),
+	})
+}
+
+// ImportPackageTitled imports pkg as a new session (fresh id) titled title.
+// Empty title keeps the package title. Instance restore uses it for the
+// "restore as a copy" conflict policy.
+func (m *Manager) ImportPackageTitled(pkg Package, title string) (Info, error) {
+	return importPackageAs(m, pkg, restoreTarget{title: strings.TrimSpace(title)})
+}
+
+// SameEvents reports whether a and b carry the same ordered event types
+// and payloads. Envelope times are ignored: they are log bookkeeping, and
+// a byte-identical transcript is what "already restored" means (#1339).
+func SameEvents(a, b Package) bool {
+	if len(a.Events) != len(b.Events) {
+		return false
+	}
+	for i := range a.Events {
+		if a.Events[i].Type != b.Events[i].Type {
+			return false
+		}
+		if !sameJSON(a.Events[i].Data, b.Events[i].Data) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameJSON compares two JSON documents ignoring insignificant whitespace,
+// since a package round-trip through MarshalIndent re-indents raw payloads.
+func sameJSON(a, b json.RawMessage) bool {
+	var ca, cb bytes.Buffer
+	if err := json.Compact(&ca, a); err != nil {
+		return bytes.Equal(a, b)
+	}
+	if err := json.Compact(&cb, b); err != nil {
+		return false
+	}
+	return bytes.Equal(ca.Bytes(), cb.Bytes())
+}
+
+// restoreTarget overrides the session identity an import writes. The zero
+// value is a plain import: fresh id, new root, package title.
+type restoreTarget struct {
+	id, parent, lead, title string
+}
+
 func importPackageInto(m *Manager, pkg Package) (Info, error) {
+	return importPackageAs(m, pkg, restoreTarget{})
+}
+
+func importPackageAs(m *Manager, pkg Package, target restoreTarget) (Info, error) {
 	if m == nil {
 		return Info{}, fmt.Errorf("session package: nil manager")
 	}
@@ -174,12 +258,18 @@ func importPackageInto(m *Manager, pkg Package) (Info, error) {
 	}
 
 	title := strings.TrimSpace(pkg.Meta.Title)
+	if target.title != "" {
+		title = target.title
+	}
 	if title == "" {
 		title = "imported session"
 	}
 	info, err := m.Create(CreateOptions{
-		Title:      title,
-		ProjectKey: strings.TrimSpace(pkg.Meta.ProjectKey),
+		ID:              target.id,
+		ParentSessionID: target.parent,
+		LeadSessionID:   target.lead,
+		Title:           title,
+		ProjectKey:      strings.TrimSpace(pkg.Meta.ProjectKey),
 	})
 	if err != nil {
 		return Info{}, fmt.Errorf("import: create: %w", err)
@@ -188,8 +278,9 @@ func importPackageInto(m *Manager, pkg Package) (Info, error) {
 	if _, err := UpdateMeta(m.dir, info.ID, func(meta *Meta) {
 		meta.Title = title
 		meta.ProjectKey = strings.TrimSpace(pkg.Meta.ProjectKey)
-		// Do not copy ParentSessionID / LeadSessionID / Worktree* — import is a
-		// new root. ForkedFrom stays empty (distinct from Manager.Fork).
+		// Do not copy Worktree* or PR side-effects. Parent/lead links come
+		// only from RestorePackage (via Create); a plain import is a new
+		// root. ForkedFrom stays empty (distinct from Manager.Fork).
 		if pkg.Meta.CreatedAt != "" {
 			meta.CreatedAt = pkg.Meta.CreatedAt
 		}
@@ -229,6 +320,14 @@ func importPackageInto(m *Manager, pkg Package) (Info, error) {
 	if err := m.rememberModel(info.ID, model); err != nil {
 		_ = m.Destroy(info.ID)
 		return Info{}, fmt.Errorf("import: model: %w", err)
+	}
+	// A session.titled event in the log renames the session as it replays;
+	// an explicit copy title must win over it.
+	if target.title != "" {
+		if _, err := m.Rename(info.ID, target.title); err != nil {
+			_ = m.Destroy(info.ID)
+			return Info{}, fmt.Errorf("import: title: %w", err)
+		}
 	}
 	if err := m.Close(info.ID); err != nil {
 		return Info{}, err

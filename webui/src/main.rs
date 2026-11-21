@@ -17,8 +17,10 @@ mod approvals_ui;
 mod chat_mode;
 mod child_signals;
 mod clipboard;
+mod compaction_marks;
 mod confirm;
 mod composer_triggers;
+mod config_sources;
 mod diag;
 mod draft_size;
 mod drafts;
@@ -36,6 +38,7 @@ mod gateway_peek;
 mod gateway_qr;
 mod git;
 mod goals;
+mod instance_backup;
 mod mobile;
 mod provider_signin;
 mod providers;
@@ -44,6 +47,7 @@ mod reasoning;
 mod rule_author;
 mod sandbox_explain;
 mod schedule;
+mod search_in_files;
 mod scheduler_presets;
 mod model;
 mod notify;
@@ -94,6 +98,7 @@ mod turn_verify;
 mod workspace_image;
 mod workspace_trust;
 mod workspaces;
+mod workflows;
 mod workflow_run;
 use crate::shell::icon;
 use crate::child_signals::TeamMessagesFeed;
@@ -1117,6 +1122,8 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // Typed config-source list (#1493), from bootstrap `configFiles`.
+    let config_files_capable = RwSignal::new(false);
     // #1375: daemon-aggregated team signals from the /v1/team poll — the
     // bounded inter-agent mail, member names for its From/To, the lead id,
     // and each child's latest escalation sentence by session id.
@@ -1393,6 +1400,10 @@ fn App() -> impl IntoView {
     let doc_path = RwSignal::new(String::new());
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
+    // Search in files (#1406): the Files-pane box's query and a run
+    // counter the palette command bumps to start a search.
+    let sif_query = RwSignal::new(String::new());
+    let sif_run = RwSignal::new(0u32);
     let doc_editing = RwSignal::new(false);
     // Open a file in the document viewer: the one path the Files pane's
     // Open and quick-open (#1396) share.
@@ -1852,6 +1863,7 @@ fn App() -> impl IntoView {
                                 crate::local_issues::set_issues_capable(boot.capabilities.issues);
                                 issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                config_files_capable.set(boot.capabilities.config_files);
                                 crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
                                 skills.set(boot.skills);
                                 loops_capable.set(boot.capabilities.loops);
@@ -4719,6 +4731,20 @@ fn App() -> impl IntoView {
         }),
     );
     shell::bind(
+        "search-in-files.run",
+        Rc::new(move |args: &str| {
+            let q = args.trim();
+            if q.is_empty() {
+                return Err("Type the text to find.".into());
+            }
+            side_tab.set("files".into());
+            mode.set("chat".into());
+            sif_query.set(q.to_string());
+            sif_run.update(|n| *n = n.wrapping_add(1));
+            Ok(())
+        }),
+    );
+    shell::bind(
         "workspaces.change",
         Rc::new(move |_| {
             picker_open.set(true);
@@ -5061,6 +5087,7 @@ fn App() -> impl IntoView {
                 status=status
                 diag_capable=diag_capable
                 project_init_capable=project_init_capable
+                config_files_capable=config_files_capable
                 root=active_root
                 theme=theme_id
                 theme_catalog=themes_state
@@ -5107,6 +5134,9 @@ fn App() -> impl IntoView {
                 active_root=active_root
                 status=status
             />
+        </Show>
+        <Show when=move || mode.get() == "workflows" fallback=move || ()>
+            <workflows::WorkflowsPage base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "triggers" fallback=move || ()>
             <triggers::TriggersPage
@@ -6171,6 +6201,17 @@ fn App() -> impl IntoView {
                                 <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
                                 <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
                             </div>
+                            <search_in_files::SearchInFiles
+                                base=base
+                                token=token
+                                query=sif_query
+                                run=sif_run
+                                on_open=Callback::new(move |(path, line): (String, u32)| {
+                                    doc_diff.set(false);
+                                    doc_line.set(line);
+                                    doc_path.set(path);
+                                })
+                            />
                             <p class="hint">"Click a file to open it. @ mentions it in chat; drag also inserts @path."</p>
                             <Show when=move || file_history.with(|h| !h.recent(1).is_empty())>
                                 <div class="files-recent" data-ev-recent=true>
