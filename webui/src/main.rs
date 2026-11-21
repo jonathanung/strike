@@ -51,6 +51,7 @@ mod session_panel;
 mod storage;
 mod tab_title;
 mod task_runner;
+mod file_history;
 mod transcript_find;
 mod usage_audit;
 mod session_delete;
@@ -1167,6 +1168,9 @@ fn App() -> impl IntoView {
     let boot_ms = now_ms();
     let focus = RwSignal::new(false);
     let back_stack = RwSignal::new(Vec::<String>::new());
+    // Open-file history and recents (#1395): in-memory, global across
+    // sessions like the Files pane, mirroring the session stacks here.
+    let file_history = RwSignal::new(file_history::FileHistory::default());
     let forward_stack = RwSignal::new(Vec::<String>::new());
     // Kept for the shell host bridge (palette session list / breadcrumb
     // label), which merges with the browser-local pins. The session panel
@@ -5053,6 +5057,7 @@ fn App() -> impl IntoView {
                             jump_line=doc_line
                             want_diff=doc_diff
                             editing=doc_editing
+                            history=file_history
                         />
                     </Show>
                     <Show when=move || tf_open.get() && doc_path.get().is_empty()>
@@ -5849,6 +5854,29 @@ fn App() -> impl IntoView {
                                 <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
                             </div>
                             <p class="hint">"Click a file to open it. @ mentions it in chat; drag also inserts @path."</p>
+                            <Show when=move || file_history.with(|h| !h.recent(1).is_empty())>
+                                <div class="files-recent" data-ev-recent=true>
+                                    <p class="hint">"Recent"</p>
+                                    <ul class="plain">
+                                        {move || file_history.with(|h| h.recent(file_history::RECENT_SHOWN)).into_iter().map(|p| {
+                                            let label = p.clone();
+                                            let attr = p.clone();
+                                            let title = p.clone();
+                                            view! {
+                                                <li class="ev-fileline">
+                                                    <button class="link file-row" data-ev-recent-open=attr title=title
+                                                        on:click=move |_| {
+                                                            doc_line.set(0);
+                                                            doc_diff.set(false);
+                                                            doc_path.set(p.clone());
+                                                        }
+                                                    >{label}</button>
+                                                </li>
+                                            }
+                                        }).collect_view()}
+                                    </ul>
+                                </div>
+                            </Show>
                             <Show when=move || !files_error.get().is_empty()>
                                 <div class="notice" role="alert">
                                     <span>{move || files_error.get()}</span>

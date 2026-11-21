@@ -2244,6 +2244,9 @@ pub fn DocumentPane(
     jump_line: RwSignal<u32>,
     want_diff: RwSignal<bool>,
     editing: RwSignal<bool>,
+    /// Open-file history (#1395), owned by the page so it outlives the
+    /// pane (which unmounts whenever no document is open).
+    history: RwSignal<crate::file_history::FileHistory>,
 ) -> impl IntoView {
     let content = RwSignal::new(String::new());
     let draft = RwSignal::new(String::new());
@@ -2454,6 +2457,7 @@ pub fn DocumentPane(
                     sha.set(doc.sha256);
                     mtime.set(doc.mtime_unix_nano);
                     loaded_path.set(doc.path.clone());
+                    history.update(|h| h.visit(&doc.path));
                     binary.set(doc.binary);
                     truncated.set(doc.truncated);
                     writable.set(doc.writable && !doc.binary && !doc.truncated);
@@ -2737,9 +2741,33 @@ pub fn DocumentPane(
         }
     });
 
+    // File Back/Forward (#1395): request the neighbouring entry through
+    // `path`, like any other open, so the unsaved guard (#1394) can hold
+    // it; history moves only when that file loads.
+    let file_step = move |delta: i32| {
+        let mut target = None;
+        history.update(|h| target = h.begin_step(delta));
+        if let Some(p) = target {
+            jump_line.set(0);
+            want_diff.set(false);
+            path.set(p);
+        }
+    };
+
     let on_key = move |ev: web_sys::KeyboardEvent| {
         let key = ev.key();
         let cmd = ev.meta_key() || ev.ctrl_key();
+        // Alt+[ / Alt+] step file history. `code` because Alt changes
+        // the produced character on some layouts (macOS Option).
+        if ev.alt_key() && !cmd && !ev.shift_key() {
+            let code = ev.code();
+            if code == "BracketLeft" || code == "BracketRight" {
+                ev.prevent_default();
+                ev.stop_propagation();
+                file_step(if code == "BracketLeft" { -1 } else { 1 });
+                return;
+            }
+        }
         if key == "Escape" {
             ev.stop_propagation();
             // While the unsaved guard (#1394) is open, Escape is
@@ -2844,6 +2872,24 @@ pub fn DocumentPane(
             on:keydown=on_key
         >
             <div class="ev-bar">
+                <button
+                    type="button"
+                    class="secondary ev-hist"
+                    data-ev-hist-back=true
+                    aria-label="Previous file"
+                    title="Previous file (Alt+[)"
+                    disabled=move || !history.with(|h| h.can_back())
+                    on:click=move |_| file_step(-1)
+                >"‹"</button>
+                <button
+                    type="button"
+                    class="secondary ev-hist"
+                    data-ev-hist-forward=true
+                    aria-label="Next file"
+                    title="Next file (Alt+])"
+                    disabled=move || !history.with(|h| h.can_forward())
+                    on:click=move |_| file_step(1)
+                >"›"</button>
                 <span class="ev-path">{move || {
                     let p = loaded_path.get();
                     if p.is_empty() { path.get() } else { p }
