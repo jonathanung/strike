@@ -3163,3 +3163,22 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .files-head .hint, .changes-head .hint { margin: 0; }
 /* feature:files-refresh end */
+
+/* feature:context-doctor begin (#1537) */
+.context-doctor { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+.context-doctor h3 { margin: 12px 0 4px; font-size: var(--type-sm); }
+.context-doctor-summary { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 8px 0; }
+.context-doctor-kv { display: contents; }
+.context-doctor-kv dt { color: var(--muted); }
+.context-doctor-kv dd { margin: 0; overflow-wrap: anywhere; }
+.context-doctor-layers { margin: 0; padding-left: 0; list-style: none; }
+.context-doctor-layer { display: flex; flex-direction: column; padding: 4px 0; border-bottom: 1px solid var(--rule); }
+.context-doctor-layer .path { color: var(--muted); font-size: var(--type-sm); overflow-wrap: anywhere; }
+.context-doctor-warning { margin: 6px 0; padding: 6px 8px; border: 1px solid var(--rule); }
+.context-doctor-warning[data-level="warn"] { border-color: var(--acid); }
+.context-doctor-warning[data-level="error"] { border-color: var(--signal); color: var(--signal); }
+.context-doctor[data-pressure="error"] { border-color: var(--signal); box-shadow: 4px 4px 0 var(--signal); }
+.context-doctor-stale { font-style: italic; }
+/* feature:context-doctor end */
+/* feature:context-doctor (entry) */
+button.context-doctor-open { background: transparent; border: 0; padding: 0; font-family: inherit; text-decoration: underline dotted; cursor: pointer; min-height: 0; }
