@@ -13,7 +13,9 @@ error-copy = { path = "error-copy" }
 load-guard = { path = "load-guard" }
 status-card = { path = "status-card" }
 composer-drafts = { path = "composer-drafts" }
+signin-flow = { path = "signin-flow" }
 transcript-window = { path = "transcript-window" }
+theme-catalog = { path = "theme-catalog" }
 js-sys = "0.3"
 send_wrapper = "0.6"
 wasm-bindgen = "0.2"

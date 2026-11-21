@@ -667,7 +667,7 @@ pub fn TranscriptPane(
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, r.verify, r.tail, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, r.verify, r.steer, r.tail, fold_open, folds)}
                                 }
                             })
                         }
@@ -814,6 +814,7 @@ struct RowData {
     elapsed: Option<String>,
     usage: Option<(String, String)>,
     verify: Option<crate::turn_verify::TurnVerify>,
+    steer: Option<crate::steer_ack::AckState>,
     tail: Option<crate::tool_tail::ToolTail>,
 }
 
@@ -843,6 +844,7 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
         verify: t.verify_for(msg.id).cloned(),
+        steer: t.steer_acks.get(msg.id),
         tail: t.tail_for(msg.id).cloned(),
     })
 }
@@ -1055,6 +1057,7 @@ fn message_view(
     turn_elapsed: Option<String>,
     turn_usage: Option<(String, String)>,
     turn_verify: Option<crate::turn_verify::TurnVerify>,
+    steer: Option<crate::steer_ack::AckState>,
     tail: Option<crate::tool_tail::ToolTail>,
     fold_open: bool,
     folds: FoldState,
@@ -1068,6 +1071,7 @@ fn message_view(
     let detail = msg.detail.clone();
     let diff = msg.diff.clone();
     let chips = msg.chips.clone();
+    let sent_attachments = msg.attachments.clone();
     let copy_text = if msg.copy_text.is_empty() {
         body.clone()
     } else {
@@ -1212,6 +1216,9 @@ fn message_view(
             } else {
                 view! { <p class="sx-body">{body.clone()}</p> }.into_any()
             }}
+            {steer.map(|ack| view! {
+                <p class="steer-ack" data-steer-state=ack.key() role="note">{ack.text()}</p>
+            })}
             {if !prose && !chips.is_empty() {
                 view! {
                     <div class="sx-chips">
@@ -1221,6 +1228,9 @@ fn message_view(
             } else {
                 view! { <span></span> }.into_any()
             }}
+            {(!sent_attachments.is_empty()).then(|| view! {
+                <crate::transcript_attachments::SentAttachments items=sent_attachments.clone() />
+            })}
             {tail.map(crate::tool_tail::tail_view)}
             {auth_notice.then(|| {
                 let target = reconnect.clone();

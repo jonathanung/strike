@@ -15,6 +15,7 @@ mod approval_outcome;
 mod approvals;
 mod approvals_ui;
 mod chat_mode;
+mod child_signals;
 mod clipboard;
 mod confirm;
 mod composer_triggers;
@@ -34,7 +35,9 @@ mod gateway_qr;
 mod git;
 mod goals;
 mod mobile;
+mod provider_signin;
 mod providers;
+mod push;
 mod rule_author;
 mod sandbox_explain;
 mod schedule;
@@ -47,7 +50,9 @@ mod onboarding;
 mod outbox;
 mod park;
 mod permissions_explain;
+mod plan_card;
 mod steer_queue;
+mod steer_ack;
 mod model_menu;
 mod model_menu_view;
 mod session_list;
@@ -56,6 +61,7 @@ mod settings;
 mod session_panel;
 mod storage;
 mod tab_title;
+mod themes;
 mod task_runner;
 mod file_history;
 mod quick_open;
@@ -73,6 +79,7 @@ mod term;
 mod tool_tail;
 mod terminal;
 mod transcript;
+mod transcript_attachments;
 mod transcript_view;
 mod update_check;
 mod triggers;
@@ -80,9 +87,11 @@ mod turn_elapsed;
 mod turn_failure;
 mod turn_usage;
 mod turn_verify;
+mod workspace_image;
 mod workspaces;
 mod workflow_run;
 use crate::shell::icon;
+use crate::child_signals::TeamMessagesFeed;
 
 
 use std::cell::{Cell, RefCell};
@@ -164,10 +173,6 @@ pub(crate) fn remove_key(key: &str) {
     }
 }
 
-fn known_theme(id: &str) -> bool {
-    appearance::known_theme(id)
-}
-
 fn event_in_field(ev: &web_sys::KeyboardEvent) -> bool {
     let Some(target) = ev.target() else {
         return false;
@@ -182,7 +187,7 @@ fn event_in_field(ev: &web_sys::KeyboardEvent) -> bool {
         || el.get_attribute("contenteditable").is_some()
 }
 
-fn theme_color(theme: &str, scheme: &str) -> &'static str {
+pub(crate) fn theme_color(theme: &str, scheme: &str) -> &'static str {
     match (theme, scheme) {
         ("nord", "light") => "#eceff4",
         ("nord", _) => "#2e3440",
@@ -199,28 +204,6 @@ fn theme_color(theme: &str, scheme: &str) -> &'static str {
         (_, "light") => "#ffffff",
         _ => "#14131c",
     }
-}
-
-/// Applies a bundled TUI theme. Surfaces a theme file omits stay on the
-/// Strike ladder for that scheme (see webui/style.css).
-fn apply_theme(theme: &str, scheme: &str) {
-    let theme = if known_theme(theme) { theme } else { "strike" };
-    let scheme = if scheme == "light" { "light" } else { "dark" };
-    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-        if let Some(el) = doc.document_element() {
-            let _ = el.set_attribute("data-theme", theme);
-            let _ = el.set_attribute("data-scheme", scheme);
-        }
-        if let Some(meta) = doc
-            .query_selector("meta[name=\"theme-color\"]")
-            .ok()
-            .flatten()
-        {
-            let _ = meta.set_attribute("content", theme_color(theme, scheme));
-        }
-    }
-    save("strike.theme", theme);
-    save("strike.scheme", scheme);
 }
 
 fn apply_layout(layout: &str) {
@@ -987,6 +970,27 @@ fn short_id(id: &str) -> String {
     tail.chars().skip(count - 6).collect()
 }
 
+/// Member names by session id and escalation sentences by session id,
+/// from one team snapshot (#1375).
+fn team_signal_maps(team: &TeamSnapshot) -> (HashMap<String, String>, HashMap<String, String>) {
+    let mut names = HashMap::new();
+    let mut escalations = HashMap::new();
+    for (key, member) in &team.members {
+        let sid = if member.session_id.is_empty() {
+            key.clone()
+        } else {
+            member.session_id.clone()
+        };
+        if !member.name.is_empty() {
+            names.insert(sid.clone(), member.name.clone());
+        }
+        if let Some(esc) = &member.escalation {
+            escalations.insert(sid, child_signals::escalation_line(esc));
+        }
+    }
+    (names, escalations)
+}
+
 fn rows_from_team(prev: &[ActivityRow], team: &TeamSnapshot, now: f64) -> Vec<ActivityRow> {
     let mut rows = Vec::new();
     for (key, member) in &team.members {
@@ -1096,6 +1100,7 @@ fn apply_status_payload(
 fn App() -> impl IntoView {
     let base = RwSignal::new(load("strike.base"));
     let token = RwSignal::new(gateway::initial_token());
+    provide_context(transcript_attachments::AttachmentAuth { base, token });
     let status = RwSignal::new("connecting…".to_string());
     // Bootstrap capability `diag` (#1489): gates Download diagnostics.
     let diag_capable = RwSignal::new(false);
@@ -1105,6 +1110,13 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // #1375: daemon-aggregated team signals from the /v1/team poll — the
+    // bounded inter-agent mail, member names for its From/To, the lead id,
+    // and each child's latest escalation sentence by session id.
+    let team_messages = RwSignal::new(Vec::<crate::model::TeamMessage>::new());
+    let team_names = RwSignal::new(HashMap::<String, String>::new());
+    let team_lead = RwSignal::new(String::new());
+    let team_escalations = RwSignal::new(HashMap::<String, String>::new());
     // Bootstrap capability `loops` (#1588): session /loop jobs.
     let loops_capable = RwSignal::new(false);
     let loop_rows = RwSignal::new(Vec::<session_loops::SessionLoop>::new());
@@ -1260,12 +1272,15 @@ fn App() -> impl IntoView {
     } else {
         "queue".to_string()
     });
+    // The requested theme id. It may name a daemon catalog theme (#1529);
+    // themes::paint decides how it is drawn and falls back to Strike with
+    // a note when the catalog does not know it.
     let theme_id = RwSignal::new({
         let t = load("strike.theme");
-        if known_theme(&t) {
-            t
+        if t.trim().is_empty() {
+            "strike".to_string()
         } else {
-            "strike".into()
+            t
         }
     });
     let scheme_id: RwSignal<String> = RwSignal::new(if load("strike.scheme") == "light" {
@@ -1273,6 +1288,19 @@ fn App() -> impl IntoView {
     } else {
         "dark".to_string()
     });
+    let themes_state = RwSignal::new(theme_catalog::CatalogState::Loading);
+    let theme_note = RwSignal::new(String::new());
+    let repaint_theme = move || {
+        let paint = themes::paint(
+            &theme_id.get_untracked(),
+            &scheme_id.get_untracked(),
+            &themes_state.get_untracked(),
+        );
+        theme_note.set(paint.note().to_string());
+        if let theme_catalog::Paint::Fallback { keep: false, .. } = paint {
+            theme_id.set(theme_catalog::DEFAULT_ID.to_string());
+        }
+    };
     let font_id = RwSignal::new(appearance::normalize_font(&load("strike.font")));
     let density_id = RwSignal::new(appearance::normalize_density(&load("strike.density")));
     let onboarded = RwSignal::new(load("strike.onboarded") == "1");
@@ -1311,6 +1339,8 @@ fn App() -> impl IntoView {
         });
     });
     let queue_items = RwSignal::new(Vec::<steer_queue::QueueItem>::new());
+    // Agent plan checklist (#1354): the live todowrite list.
+    let plan = RwSignal::new(plan_card::PlanState::default());
     let queue_focus = RwSignal::new(String::new());
     let editing_id = RwSignal::new(String::new());
     let edit_draft = RwSignal::new(String::new());
@@ -1403,7 +1433,21 @@ fn App() -> impl IntoView {
     let changes = RwSignal::new(Vec::<model::ChangedFile>::new());
     let changes_error = RwSignal::new(String::new());
     let phone_pane = RwSignal::new(mobile::PANE_CHAT.to_string());
-    apply_theme(&theme_id.get_untracked(), &scheme_id.get_untracked());
+    repaint_theme();
+    Effect::new(move |_| {
+        themes_state.track();
+        repaint_theme();
+    });
+    Effect::new(move |_| {
+        let (b, t) = (base.get(), token.get());
+        themes_state.set(theme_catalog::CatalogState::Loading);
+        spawn_local(async move {
+            let state = themes::fetch(&b, &t).await;
+            if base.get_untracked() == b && token.get_untracked() == t {
+                themes_state.set(state);
+            }
+        });
+    });
     appearance::apply_type(&font_id.get_untracked(), &density_id.get_untracked());
     apply_layout(&layout.get_untracked());
     Effect::new(move |_| {
@@ -1455,6 +1499,19 @@ fn App() -> impl IntoView {
                     let now = now_ms();
                     let prev = activity.get_untracked();
                     let rows = rows_from_team(&prev, &team, now);
+                    let (names, escalations) = team_signal_maps(&team);
+                    if team_names.get_untracked() != names {
+                        team_names.set(names);
+                    }
+                    if team_escalations.get_untracked() != escalations {
+                        team_escalations.set(escalations);
+                    }
+                    if team_lead.get_untracked() != team.lead_id {
+                        team_lead.set(team.lead_id.clone());
+                    }
+                    if team_messages.get_untracked() != team.messages {
+                        team_messages.set(team.messages.clone());
+                    }
                     let rows = if rows.is_empty() {
                         activity_panel(
                             &[],
@@ -1926,6 +1983,7 @@ fn App() -> impl IntoView {
             tf_query.set(String::new());
             tf_idx.set(0);
             queue_items.set(Vec::new());
+            plan.set(plan_card::PlanState::default());
             editing_id.set(String::new());
             edit_draft.set(String::new());
             steer_note.set(String::new());
@@ -2010,6 +2068,11 @@ fn App() -> impl IntoView {
                 if let Some(data) = ev.data().as_string() {
                     note_live_title(sessions_cb, roots_cb, &titled_root, &data);
                     transcript_cb.update(|t| t.apply_envelope(&data));
+                    let mut plan_changed = false;
+                    plan.update_untracked(|p| plan_changed = p.apply_envelope(&data));
+                    if plan_changed {
+                        plan.notify();
+                    }
                     let on_note = |note: steer_queue::LiveNote| match note {
                         steer_queue::LiveNote::Queue(items) => {
                             let editing = editing_id.get_untracked();
@@ -2903,13 +2966,13 @@ fn App() -> impl IntoView {
     };
 
     let set_theme = move |theme: String| {
-        let theme = if known_theme(&theme) {
-            theme
+        let theme = theme.trim().to_string();
+        theme_id.set(if theme.is_empty() {
+            theme_catalog::DEFAULT_ID.to_string()
         } else {
-            "strike".into()
-        };
-        theme_id.set(theme.clone());
-        apply_theme(&theme, &scheme_id.get_untracked());
+            theme
+        });
+        repaint_theme();
     };
     let set_scheme = move |scheme: String| {
         let scheme: String = if scheme == "light" {
@@ -2917,8 +2980,8 @@ fn App() -> impl IntoView {
         } else {
             "dark".to_string()
         };
-        scheme_id.set(scheme.clone());
-        apply_theme(&theme_id.get_untracked(), &scheme);
+        scheme_id.set(scheme);
+        repaint_theme();
     };
     let set_font = move |font: String| {
         font_id.set(appearance::normalize_font(&font));
@@ -4973,6 +5036,7 @@ fn App() -> impl IntoView {
                 token=token
                 status=status
                 theme=theme_id
+                theme_catalog=themes_state
                 on_theme=set_theme
                 on_done=finish_onboarding
             />
@@ -4988,6 +5052,8 @@ fn App() -> impl IntoView {
                 project_init_capable=project_init_capable
                 root=active_root
                 theme=theme_id
+                theme_catalog=themes_state
+                theme_note=theme_note
                 scheme=scheme_id
                 font=font_id
                 density=density_id
@@ -5503,6 +5569,7 @@ fn App() -> impl IntoView {
                                 }}
                             </div>
                         </Show>
+                        <plan_card::PlanCard plan=plan />
                         <div class="steer-queue" id="steer-queue">
                             <OutboxList outbox=outbox root=active_root gateway=gateway />
                             <session_loops::LoopRows base=base token=token root=active_root capable=loops_capable loops=loop_rows note=loop_note />
@@ -5989,6 +6056,7 @@ fn App() -> impl IntoView {
                                 let name = row.name.clone();
                                 let name_chat = name.clone();
                                 let sid_chat = sid.clone();
+                                let escalation = team_escalations.with(|m| m.get(&sid).cloned());
                                 let who = name.clone();
                                 let agent = row.agent.clone();
                                 let agent_label = agent.clone();
@@ -6055,6 +6123,9 @@ fn App() -> impl IntoView {
                                                 }>"Retry"</button>
                                             </Show>
                                         </div>
+                                        {escalation.map(|line| view! {
+                                            <p class="child-escalation" data-child-escalation="true">{line}</p>
+                                        })}
                                         <Show when=move || expanded>
                                             <ChildStatusCard row=row_card.clone() />
                                         </Show>
@@ -6063,6 +6134,7 @@ fn App() -> impl IntoView {
                             }).collect_view()
                         }}
                     </ul>
+                    <TeamMessagesFeed messages=team_messages names=team_names lead_id=team_lead />
                     </div>
                     </Show>
                     <Show when=move || side_tab.get() == "files">
@@ -6408,5 +6480,31 @@ mod memory_mode_tests {
             (true, "incognito".to_string())
         );
         assert_eq!(revert_memory_mode(None), (false, String::new()));
+    }
+}
+
+#[cfg(test)]
+mod team_signal_maps_tests {
+    use super::*;
+
+    #[test]
+    fn maps_names_and_escalations_by_session() {
+        let team: TeamSnapshot = serde_json::from_str(
+            r#"{"available":true,"members":{
+                "k1":{"sessionId":"c1","name":"scout","escalation":{"kind":"loop","reason":"same call x5","action":"interrupted"}},
+                "c2":{"name":""},
+                "c3":{"sessionId":"c3","name":"fixer"}
+            }}"#,
+        )
+        .unwrap();
+        let (names, escalations) = team_signal_maps(&team);
+        assert_eq!(names.get("c1").map(String::as_str), Some("scout"));
+        assert_eq!(names.get("c3").map(String::as_str), Some("fixer"));
+        assert!(!names.contains_key("c2"));
+        assert_eq!(escalations.len(), 1);
+        assert_eq!(
+            escalations.get("c1").map(String::as_str),
+            Some("Loop detected: same call x5. Action: stopped.")
+        );
     }
 }
