@@ -2132,8 +2132,8 @@ try {
   );
   const diagStub = JSON.stringify({
     diagnostics: [
-      { path: "AGENTS.md", line: 10, character: 1, severity: "error", source: "smoke", code: "E1", message: "smoke diag error ten" },
-      { path: "AGENTS.md", line: 12, character: 3, severity: "warning", source: "smoke", message: "smoke diag warning twelve" },
+      { path: "cmd/strike/main.go", line: 10, character: 1, severity: "error", source: "smoke", code: "E1", message: "smoke diag error ten" },
+      { path: "cmd/strike/main.go", line: 12, character: 3, severity: "warning", source: "smoke", message: "smoke diag warning twelve" },
       { path: "go.mod", line: 1, character: 1, severity: "error", source: "smoke", message: "smoke diag go mod" },
     ],
     count: 3,
@@ -2161,14 +2161,14 @@ try {
           return { files, entries };
         })()`);
         return {
-          ok: v.files.join(",") === "AGENTS.md,go.mod" && v.entries.join(",") === "AGENTS.md:10,AGENTS.md:12,go.mod:1",
+          ok: v.files.join(",") === "cmd/strike/main.go,go.mod" && v.entries.join(",") === "cmd/strike/main.go:10,cmd/strike/main.go:12,go.mod:1",
           ...v,
         };
       },
       { timeout: WAIT_MS, interval: 500 },
     );
     const diagClicked = await evaluate(`(() => {
-      const b = document.querySelector('.diag-entry[data-diag-path="AGENTS.md"][data-diag-line="10"]');
+      const b = document.querySelector('.diag-entry[data-diag-path="cmd/strike/main.go"][data-diag-line="10"]');
       if (!b) return "missing";
       b.click();
       return "clicked";
@@ -2188,7 +2188,7 @@ try {
             badge: badge ? (badge.textContent || "").trim() : "",
           };
         })()`);
-        return { ok: v.path.endsWith("AGENTS.md") && v.lines >= 10 && v.badge === "1 error", ...v };
+        return { ok: v.path.endsWith("cmd/strike/main.go") && v.lines >= 10 && v.badge === "1 error", ...v };
       },
       { timeout: WAIT_MS, interval: 250 },
     );
