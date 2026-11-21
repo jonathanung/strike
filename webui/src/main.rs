@@ -6274,6 +6274,29 @@ fn App() -> impl IntoView {
                                     <span class="name">"Use a skill"</span>
                                     <span class="path">"Skills loaded for this daemon"</span>
                                 </button>
+                                <button type="button" class="palette-row" data-plus-approval="true" on:click=move |_| {
+                                    plus_open.set(false);
+                                    autonomy_menu.set(false);
+                                    mode_menu.set(true);
+                                }>
+                                    <span class="name">{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</span>
+                                    <span class="path">"Who answers tool asks in this session"</span>
+                                </button>
+                                <button type="button" class="palette-row" data-plus-verbosity="true" on:click=move |_| {
+                                    plus_open.set(false);
+                                    crate::shell::show_palette_at(crate::verbosity::COMMAND);
+                                }>
+                                    <span class="name">"Response style"</span>
+                                    <span class="path">"Concise, Default, or Detailed for this session"</span>
+                                </button>
+                                <button type="button" class="palette-row" data-plus-autonomy="true" on:click=move |_| {
+                                    plus_open.set(false);
+                                    mode_menu.set(false);
+                                    autonomy_menu.set(true);
+                                }>
+                                    <span class="name">{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</span>
+                                    <span class="path">"Who clears a workflow phase exit"</span>
+                                </button>
                                 <button type="button" class="palette-row" data-prompts-open-menu="true" on:click=move |_| {
                                     plus_open.set(false);
                                     let _ = crate::shell::dispatch(prompt_library::INSERT_ID, "");
@@ -6813,6 +6836,25 @@ fn App() -> impl IntoView {
                                     model_menu.set(false);
                                     autonomy_menu.update(|v| *v = !*v);
                                 }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
+                                // #1924: phones show one safety chip in place of
+                                // the Approval and Autonomy chips so the row
+                                // fits one 44px line at 360px. Non-default
+                                // values stay named and flagged; tapping it
+                                // opens "+" where both pickers live.
+                                <button type="button" class=move || {
+                                    if approvals::safety_summary(&perm_mode.get(), &autonomy.get()).danger {
+                                        "composer-glance approvals-mode-chip safety-glance danger"
+                                    } else {
+                                        "composer-glance approvals-mode-chip safety-glance"
+                                    }
+                                } data-safety-status="true" title="Approval mode and autonomy. Opens + to change either." aria-label=move || approvals::safety_summary(&perm_mode.get(), &autonomy.get()).aria on:click=move |_| {
+                                    mode_menu.set(false);
+                                    model_menu.set(false);
+                                    autonomy_menu.set(false);
+                                    ac_open.set(false);
+                                    ac_force.set(String::new());
+                                    plus_open.update(|v| *v = !*v);
+                                }>{move || approvals::safety_summary(&perm_mode.get(), &autonomy.get()).label}</button>
                                 <crate::fallback::FallbackChip base=base token=token active_root=active_root status=status busy=Signal::derive(move || session_busy_now.get()) />
                                 <crate::verbosity::VerbosityChip base=base token=token active_root=active_root status=status busy=Signal::derive(move || session_busy_now.get()) />
                                 // #1574: the live workflow run, only while the
