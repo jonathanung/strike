@@ -86,6 +86,7 @@ async function composerAt(page, check, viewport, grab) {
       const tb = t ? t.getBoundingClientRect() : null;
       return {
         hidden: false,
+        phone: document.body.getAttribute("data-phone") === "1",
         barScroll: bar.scrollWidth > bar.clientWidth + 1,
         chipScroll: chips.scrollWidth > chips.clientWidth + 1,
         clipped,
@@ -95,8 +96,15 @@ async function composerAt(page, check, viewport, grab) {
     })()`);
     check(Boolean(fit), `composer missing at ${width}x${height}`);
     if (!fit || fit.hidden) continue;
-    check(!fit.barScroll && !fit.chipScroll, `composer row scrolls sideways at ${width}x${height}`);
-    check(fit.clipped.length === 0, `composer chip clipped at ${width}x${height}: ${fit.clipped.join(", ")}`);
+    // Phones keep the #1332 chip scroller (wrapping would push the
+    // composer out of a keyboard-open viewport); Send must still be on
+    // screen there. Desktop layouts must not scroll or clip at all.
+    if (!fit.phone) {
+      check(!fit.barScroll && !fit.chipScroll, `composer row scrolls sideways at ${width}x${height}`);
+      check(fit.clipped.length === 0, `composer chip clipped at ${width}x${height}: ${fit.clipped.join(", ")}`);
+    } else {
+      check(!fit.barScroll, `composer bar (Send column) scrolls sideways at ${width}x${height}`);
+    }
     check(fit.sendOnScreen, `Send is off screen at ${width}x${height}`);
     // Phones use a sticky composer over a scrolling pane (#1332); the
     // overlap rule is for the in-flow desktop column.
