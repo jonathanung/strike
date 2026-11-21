@@ -10,6 +10,7 @@
 mod api;
 mod appearance;
 mod apps;
+mod approval_outcome;
 mod approvals;
 mod approvals_ui;
 mod chat_mode;

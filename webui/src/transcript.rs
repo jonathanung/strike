@@ -792,12 +792,44 @@ impl Transcript {
                     .rev()
                     .find(|m| m.key == request_id && m.role == Role::Permission)
                 {
+                    // Name how the ask ended (#1387): Allowed, Denied, or
+                    // Expired when it died with no answer.
+                    msg.title = crate::approval_outcome::resolved_title(&decision).into();
                     msg.badge = if decision.is_empty() {
                         "done".into()
                     } else {
                         decision
                     };
                 }
+            }
+            "permission.decided" if crate::approval_outcome::is_latched_denial(&data) => {
+                // A repeat of an action the user already denied: no card,
+                // one line saying why (#1387).
+                let permission = field_str(&data, "permission");
+                let patterns = pattern_list(&data);
+                let body = if patterns.is_empty() {
+                    permission.clone()
+                } else {
+                    format!("{permission} · {patterns}")
+                };
+                self.push(Message {
+                    id: 0,
+                    role: Role::Permission,
+                    title: "Denied".into(),
+                    body,
+                    badge: "denied".into(),
+                    detail: crate::approval_outcome::LATCHED_DETAIL.into(),
+                    key: String::new(),
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: permission,
+                    reconnect: String::new(),
+                    at_ms,
+                    turn_id: String::new(),
+                });
             }
             _ => {}
         }

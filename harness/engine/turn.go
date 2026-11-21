@@ -551,7 +551,7 @@ func (e *Engine) handleInputQueueSendNow(ctx context.Context, op protocol.InputQ
 		e.pendingUserInputs = nil
 	}
 	e.emitInputQueued()
-	e.startTurnShown(ctx, item.text, item.display, item.images)
+	e.startUserTurn(ctx, item.text, item.display, item.images)
 }
 
 // drainIdleFollowups starts at most one follow-up turn when idle: preferred
@@ -598,8 +598,16 @@ func (e *Engine) startNextPendingUserInput(ctx context.Context) bool {
 		e.pendingUserInputs = nil
 	}
 	e.emitInputQueued()
-	e.startTurnShown(ctx, item.text, item.display, item.images)
+	e.startUserTurn(ctx, item.text, item.display, item.images)
 	return true
+}
+
+// startUserTurn starts a turn from a user message. The user speaking again
+// lifts the permission deny latch (#1387); child notices, mailbox turns and
+// other engine-started turns keep it.
+func (e *Engine) startUserTurn(ctx context.Context, text, display string, images []protocol.ImageAttachment) {
+	e.perms.ClearDenyLatch()
+	e.startTurnShown(ctx, text, display, images)
 }
 
 func (e *Engine) startTurn(ctx context.Context, text string, images []protocol.ImageAttachment) {

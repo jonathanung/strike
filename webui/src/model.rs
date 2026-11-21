@@ -90,6 +90,9 @@ pub struct RootSummary {
     pub permission_pending: bool,
     #[serde(default, rename = "questionPending")]
     pub question_pending: bool,
+    /// Last approval outcome this turn (allowed | denied | expired), #1387.
+    #[serde(default, rename = "askOutcome")]
+    pub ask_outcome: String,
     /// `None` when the field is absent (older daemon). Present `false` is read.
     #[serde(default)]
     pub unread: Option<bool>,
@@ -426,6 +429,8 @@ pub struct SessionRow {
     pub permission_pending: bool,
     /// Live root is waiting on an answer to an agent question (#1451).
     pub question_pending: bool,
+    /// Last approval outcome this turn (allowed | denied | expired), #1387.
+    pub ask_outcome: String,
     /// Unix milliseconds when `status` began.
     pub status_since: i64,
     /// Unix milliseconds of the last user-visible activity. 0 when unknown.
@@ -687,6 +692,7 @@ fn blank_row(id: &str, title: &str, mtime: i64, pinned: bool) -> SessionRow {
         status: String::new(),
         permission_pending: false,
         question_pending: false,
+        ask_outcome: String::new(),
         status_since: 0,
         last_activity_at: 0,
     }
@@ -741,6 +747,7 @@ pub fn merge_sessions(
         }
         entry.permission_pending = r.permission_pending;
         entry.question_pending = r.question_pending;
+        entry.ask_outcome = r.ask_outcome.clone();
         if r.status_since > 0 {
             entry.status_since = r.status_since;
         }
@@ -1310,6 +1317,7 @@ mod tests {
             status: String::new(),
             permission_pending: false,
             question_pending: false,
+            ask_outcome: String::new(),
             status_since: 0,
             last_activity_at: 0,
         }
@@ -1327,6 +1335,7 @@ mod tests {
             last_activity_at: 0,
             permission_pending: false,
             question_pending: false,
+            ask_outcome: String::new(),
             unread: None,
         }];
         let sessions = vec![SessionItem {
@@ -1365,6 +1374,7 @@ mod tests {
             last_activity_at: 9_000,
             permission_pending: true,
             question_pending: false,
+            ask_outcome: String::new(),
             unread: Some(true),
         }];
         let mut seen = HashMap::new();
