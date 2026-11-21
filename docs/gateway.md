@@ -441,6 +441,7 @@ refuses create, poll, and cancel, and does not run the poll loop.
   "environment": "prod",
   "windowSeconds": 1800,
   "intervalSeconds": 60,
+  "failureThreshold": 3,
   "checks": [
     {"kind": "github_checks"},
     {"kind": "http", "name": "api", "url": "https://example.com/health", "expectStatus": 200}
@@ -457,10 +458,15 @@ Check kinds:
   echoes the URL.
 
 Each check is `healthy`, `failing`, `pending`, or `unreachable` on every
-poll. A failing check is a regression and settles the watch at once.
-Otherwise the watch keeps polling until the window closes (default 30
-minutes). It is healthy only if every check was last seen healthy. Anything
-else is `inconclusive`: pending, unreachable, or never observed. Cancelled,
+poll. A check is a regression only after `failureThreshold` consecutive
+failing polls (default 3, range 1-20); that settles the watch at once. A
+shorter failing streak is a blip, and any other observation of that check
+resets the count. Otherwise the watch keeps polling until the window closes
+(default 30 minutes). It is healthy only if every check was last seen
+healthy. Anything else is `inconclusive`: pending, unreachable, never
+observed, or failing without reaching the threshold. Pick a window long
+enough for `failureThreshold` polls at `intervalSeconds`, or a real failure
+can only end as `inconclusive`. Cancelled,
 stale, and `action_required` check runs count as pending, not as a pass.
 Watches persist in `~/.strike/deploy-watches.json` (mode 0600). After a
 daemon restart they resume, and a watch whose window closed while the daemon
