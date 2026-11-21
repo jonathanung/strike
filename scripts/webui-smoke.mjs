@@ -1670,6 +1670,60 @@ try {
     "font and density",
   );
 
+  // #1577: Settings → Guardrails renders daemon-reported effective values,
+  // a tightening change PATCHes /v1/settings and re-reads it, an invalid
+  // value shows the daemon's reason, and a loosening change confirms first.
+  await waitUntil(
+    `(() => {
+      const g = document.querySelector('[data-section="guardrails"]');
+      if (!g) return "no guardrails section";
+      const t = g.querySelector('[data-effective="turnTimeoutS"]')?.textContent || "";
+      const c = g.querySelector('[data-effective="maxSessionCostUSD"]')?.textContent || "";
+      const host = g.querySelector('[data-dial="childIsolation"] input[data-choice="shared"]');
+      return t.includes("1800s") && c === "unlimited" && !!host && host.checked && !host.disabled;
+    })()`,
+    "guardrails group shows daemon defaults",
+  );
+  const guardSubmit = (key, value) => evaluate(`(() => {
+    const row = document.querySelector('[data-dial="${key}"]');
+    const input = row.querySelector("input");
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    set.call(input, ${JSON.stringify(value)});
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    row.querySelector('[data-action="guard-save"]').click();
+    return true;
+  })()`);
+  const guardDaemon = async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/settings`, { headers: { Authorization: `Bearer ${token}` } });
+    return res.json();
+  };
+  await guardSubmit("maxSessionCostUSD", "5");
+  await waitUntil(
+    `document.querySelector('[data-effective="maxSessionCostUSD"]')?.textContent === "$5" && !document.querySelector(".confirm-dialog")`,
+    "guardrail cost cap saved without confirm",
+  );
+  if ((await guardDaemon()).maxSessionCostUSD !== 5) {
+    throw new Error("guardrail cost cap did not persist to /v1/settings");
+  }
+  await guardSubmit("maxSessionCostUSD", "lots");
+  await waitUntil(
+    `(document.querySelector('[data-guard-error="maxSessionCostUSD"]')?.textContent || "").includes("maxSessionCostUSD") && document.querySelector('[data-effective="maxSessionCostUSD"]')?.textContent === "$5"`,
+    "guardrail invalid value shows the daemon reason",
+  );
+  await guardSubmit("maxSessionCostUSD", "off");
+  await waitUntil(
+    `(document.getElementById("confirm-body")?.textContent || "").includes("Max session cost")`,
+    "guardrail loosening asks to confirm",
+  );
+  await evaluate(`document.querySelector('[data-confirm="accept"]').click()`);
+  await waitUntil(
+    `document.querySelector('[data-effective="maxSessionCostUSD"]')?.textContent === "unlimited" && !document.querySelector('[data-guard-error="maxSessionCostUSD"]')`,
+    "guardrail cost cap removed after confirm",
+  );
+  if ((await guardDaemon()).maxSessionCostUSD !== 0) {
+    throw new Error("guardrail cost cap removal did not persist to /v1/settings");
+  }
+
   await waitUntil(`(() => {
     if (document.querySelector(".gw-pop")) return true;
     if (!document.querySelector('[data-nav="palette-dialog"]')) {

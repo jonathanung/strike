@@ -3163,3 +3163,45 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .files-head .hint, .changes-head .hint { margin: 0; }
 /* feature:files-refresh end */
+
+/* feature:settings-guardrails begin */
+.guardrails .guard-subtitle {
+  margin: var(--space-3, 12px) 0 var(--space-1, 4px);
+  font-size: var(--type-sm);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.guard-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px 16px;
+}
+.guard-dial {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.guard-dial .hint { margin: 0; }
+.guard-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.guard-label { font-weight: 600; }
+.guard-value {
+  font-family: var(--mono, monospace);
+  font-size: var(--type-sm);
+  color: var(--acid);
+  white-space: nowrap;
+}
+.guard-edit {
+  display: flex;
+  gap: 6px;
+}
+.guard-edit input { flex: 1; min-width: 0; }
+.guard-dial .segmented { flex-wrap: wrap; }
+.guard-dial .banner { margin: 0; }
+/* feature:settings-guardrails end */

@@ -25,6 +25,7 @@ mod customize;
 mod gateway;
 mod gateway_qr;
 mod git;
+mod guardrails;
 mod goals;
 mod mobile;
 mod providers;

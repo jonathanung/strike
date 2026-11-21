@@ -973,6 +973,13 @@ changes after restart; CLI `--turn-timeout` / `--max-cost` still override.
 A project `.strike/config` that sets the same `session.*` key wins over the
 global value at load.
 
+The cockpit renders these in **Settings → Guardrails**: one control per dial
+showing the daemon-reported effective value. Tightening applies at once;
+loosening (raising or removing a cap, delegation `off`/`advise`, handoff
+optional, children back on the host) asks for confirmation first. A rejected
+value shows the daemon's 400 reason. The Git panel's worktree card points at
+the Child isolation control instead of the config file.
+
 `GET` also carries `autoupdateEffective` (the dial after
 `config.EffectiveAutoupdate`: empty/unknown → `notify`) and, once a check has
 run, `updateCheck` (the last `GET /v1/update` result). Reading settings never
