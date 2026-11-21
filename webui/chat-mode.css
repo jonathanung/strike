@@ -224,3 +224,17 @@
 }
 .attach-chip audio.attach-media { height: 32px; }
 /* feature:office-media-attachments end */
+/* feature:attachment-honesty begin */
+.attach-warning {
+  flex-basis: 100%;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--warning);
+  background: var(--ground);
+  color: var(--ink);
+  font-size: var(--type-sm);
+  overflow-wrap: anywhere;
+}
+.attach-warning p { margin: 0; }
+.attach-warning p + p { margin-top: 4px; }
+/* feature:attachment-honesty end */
