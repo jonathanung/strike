@@ -1584,6 +1584,9 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			AckSteer: func(ack tool.SteerAck) error {
 				return e.ackSteer(corr, ack)
 			},
+			DebugSession: func(op tool.DebugOp) (string, error) {
+				return e.agentDebugControl(corr, op)
+			},
 			ReportOutput: func(data string) {
 				if data == "" {
 					return

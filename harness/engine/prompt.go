@@ -355,6 +355,11 @@ func (e *Engine) composeSystemLayers() []promptLayer {
 		})
 	}
 
+	// Active debug session: phase, marker convention and gate (#1961).
+	if layer, ok := e.debugPromptLayer(); ok {
+		layers = append(layers, layer)
+	}
+
 	if text, source := leanCodeLayer(e.opts.LeanCode, e.agent.Name); text != "" {
 		layers = append(layers, promptLayer{
 			Kind:   protocol.PromptLayerLean,

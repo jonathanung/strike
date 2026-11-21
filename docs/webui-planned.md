@@ -616,9 +616,20 @@ unlock (naming any override reason), mark fixed and the summary are also
 transcript notices. At phone width the panel collapses to a status chip
 that opens a bottom sheet.
 
-Not drawn yet: the agent cannot write hypotheses or attach evidence
-itself (no model-facing tool; the user does it in the panel). Bash is not
-inspected by the gate; the permission layer still governs it.
+Agent side (#1961): while a session is active the deferred
+`debug_session` tool is activated and a system note (prompt layer
+`debug:<phase>`) states the phase, the marker convention and the gate.
+The tool sets 2–5 ranked hypotheses, attaches evidence and marks verdicts
+through the same `debugmode.Session`, emitting `debug.updated` so the
+cards appear in the panel. Start, unlock / override, mark fixed and end
+stay user-only: the engine refuses them with a reason. Fix still unlocks
+only through the explicit Unlock button, not automatically on a confirmed
+hypothesis.
+
+Not drawn yet: bash is not inspected by the gate; the permission layer
+still governs it. UAT screenshots / video for #1345 are owed (no local
+serve in the agent lanes that shipped this).
+
 ## Steer acknowledgement
 
 Shipped (#1343): a steered message carries a marker driven only by the

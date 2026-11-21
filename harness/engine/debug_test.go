@@ -245,3 +245,64 @@ func TestInitialDebugResumesGate(t *testing.T) {
 		})
 	}
 }
+
+// agentDebugTool stands in for internal/tools' debug_session: it forwards
+// its op to the engine hook so tests prove the turn wiring.
+type agentDebugTool struct{}
+
+func (agentDebugTool) Name() string            { return "debug_session" }
+func (agentDebugTool) Description() string     { return "test debug_session" }
+func (agentDebugTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (agentDebugTool) Execute(_ context.Context, args json.RawMessage, tc *tool.Context) (tool.Result, error) {
+	var op tool.DebugOp
+	if err := json.Unmarshal(args, &op); err != nil {
+		return tool.Result{}, err
+	}
+	out, err := tc.DebugSession(op)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	return tool.Result{Output: out}, nil
+}
+
+func TestAgentDebugToolSetsHypothesesButCannotUnlock(t *testing.T) {
+	hyps, _ := json.Marshal(tool.DebugOp{Action: protocol.DebugActionHypotheses, Hypotheses: []tool.DebugHypothesis{
+		{ID: "h1", Statement: "off by one"}, {ID: "h2", Statement: "stale cache"},
+	}})
+	unlock, _ := json.Marshal(tool.DebugOp{Action: protocol.DebugActionUnlock, Text: "skip the gate"})
+	prov := newScriptedProvider(
+		toolCallStep(provider.ToolCall{ID: "set", Name: "debug_session", Args: hyps}),
+		toolCallStep(provider.ToolCall{ID: "unlock", Name: "debug_session", Args: unlock}),
+		completedStep("done"),
+	)
+	eng := newDebugEngine(t, t.TempDir(), prov, nil, agentDebugTool{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(ctx)
+
+	debugOp(t, eng, protocol.DebugControl{Action: protocol.DebugActionStart})
+	eng.Ops() <- protocol.UserInput{Text: "find the bug"}
+	_, events := collectThroughTurnCompleted(t, eng.Events())
+
+	var updates []protocol.DebugUpdated
+	for _, ev := range events {
+		if d, ok := ev.(protocol.DebugUpdated); ok {
+			updates = append(updates, d)
+		}
+	}
+	if len(updates) != 1 || updates[0].Action != protocol.DebugActionHypotheses || len(updates[0].Hypotheses) != 2 ||
+		updates[0].Hypotheses[0].ID != "h1" || updates[0].Phase != string(debugmode.PhaseHypothesis) {
+		t.Fatalf("debug.updated from agent = %+v, want one hypotheses event", updates)
+	}
+	ends := toolEnds(events)
+	if set := ends["set"]; set.IsError {
+		t.Fatalf("hypotheses call failed: %+v", set)
+	}
+	refused := ends["unlock"]
+	if !refused.IsError || !strings.Contains(refused.Output, "not allowed") {
+		t.Fatalf("unlock call end = %+v, want refusal with reason", refused)
+	}
+	if ev := debugOp(t, eng, protocol.DebugControl{Action: protocol.DebugActionScan}); ev.Phase != string(debugmode.PhaseHypothesis) || ev.Override != "" {
+		t.Fatalf("state after agent unlock attempt = %+v", ev)
+	}
+}
