@@ -238,7 +238,7 @@ func (s *Server) prWatchStatusFor(ctx context.Context, id string, refresh bool) 
 		})
 	}
 	if st.Attention {
-		s.notifications().add(prAttentionNote(st, now))
+		_ = s.notifications().add(prAttentionNote(st, now))
 	}
 	p.mu.Lock()
 	if p.cache == nil {
@@ -556,18 +556,6 @@ func prAttentionNote(st prWatchStatus, now time.Time) Notification {
 		Href:      noteHref(st.SessionID, ""),
 		At:        now.UTC(),
 	}
-}
-
-// add appends one daemon-originated notification (deduped by ID) and
-// persists it so the stream and the centre see it on their next sync.
-func (n *notifyLog) add(item Notification) bool {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if !n.appendLocked(item) {
-		return false
-	}
-	_ = n.persistLocked()
-	return true
 }
 
 func defaultGHRunner(ctx context.Context, dir string, args ...string) ([]byte, error) {
