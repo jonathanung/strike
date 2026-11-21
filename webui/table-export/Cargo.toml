@@ -1,0 +1,8 @@
+[package]
+name = "table-export"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Serialise a parsed Markdown table as GFM Markdown, CSV (RFC 4180) or TSV for the cockpit's table copy actions."
+
+[dependencies]

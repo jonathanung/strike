@@ -496,3 +496,27 @@ func TestAttachmentDisposition(t *testing.T) {
 		}
 	}
 }
+
+// TestPrepareOpClearsClientLoopID covers #1827: only the daemon's /loop
+// registry may mark a firing, so a client-submitted loopId is dropped.
+func TestPrepareOpClearsClientLoopID(t *testing.T) {
+	t.Parallel()
+	srv := &Server{}
+	tests := []struct {
+		name string
+		in   protocol.UserInput
+	}{
+		{name: "spoofed loop id", in: protocol.UserInput{Text: "hi", LoopID: "l1"}},
+		{name: "ordinary send", in: protocol.UserInput{Text: "hi"}},
+	}
+	for _, tc := range tests {
+		got, err := srv.prepareOp(tc.in, "s1")
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		in, ok := got.(protocol.UserInput)
+		if !ok || in.Text != "hi" || in.LoopID != "" {
+			t.Fatalf("%s: prepareOp = %#v, want text kept and loopId cleared", tc.name, got)
+		}
+	}
+}

@@ -310,6 +310,8 @@ pub(crate) fn SessionPanel(
     let cleanup_busy = RwSignal::new(false);
     let search_epoch = RwSignal::new(LoadEpoch::new());
     let reload_epoch = RwSignal::new(LoadEpoch::new());
+    // Regenerate title (#1370): per-row pending / refusal / failure state.
+    let regen = RwSignal::new(HashMap::<String, crate::regenerate_title::RowState>::new());
     // Saved gateways other than this one (#1539): when there are any,
     // this list is labelled as the Local group above the peek groups.
     let peer_count = RwSignal::new(0usize);
@@ -322,6 +324,12 @@ pub(crate) fn SessionPanel(
         // verdict and then wipe the local pin store for good.
         let (b, t) = (base.get_untracked(), token.get_untracked());
         let ticket = crate::load_epoch::begin(reload_epoch);
+        // A reload may bring new messages: drop settled regenerate notes
+        // and refusals, keep in-flight rows.
+        let pending = crate::regenerate_title::RowState::Pending;
+        if regen.with_untracked(|m| m.values().any(|st| *st != pending)) {
+            regen.update(|m| m.retain(|_, st| *st == pending));
+        }
         spawn_local(async move {
             // Still current only while no newer reload has started and
             // the panel still points at the gateway this reload was
@@ -1250,6 +1258,32 @@ pub(crate) fn SessionPanel(
                         run_bulk(vec![id], "archive", "");
                     }
                 },
+                regen.get(),
+                move |id: String| {
+                    // Regenerate title (#1370): propose -> shared confirm
+                    // -> rename. Only a confirmed proposal is written.
+                    let on_renamed: std::rc::Rc<dyn Fn(String, String)> =
+                        std::rc::Rc::new(move |id: String, title: String| {
+                            sessions.update(|list| {
+                                if let Some(s) = list.iter_mut().find(|s| s.id == id) {
+                                    s.title = title.clone();
+                                }
+                            });
+                            roots.update(|list| {
+                                if let Some(r) = list.iter_mut().find(|r| r.id == id) {
+                                    r.title = title.clone();
+                                }
+                            });
+                            on_refresh();
+                        });
+                    crate::regenerate_title::start(
+                        base.get_untracked(),
+                        token.get_untracked(),
+                        id,
+                        regen,
+                        on_renamed,
+                    );
+                },
             )}
             {move || {
                 let hidden = layout.get().hidden_older;
@@ -1437,6 +1471,8 @@ fn render_rows(
     on_cursor: impl Fn(usize) + Copy + 'static,
     on_copy_id: impl Fn(String) + Copy + 'static,
     on_archive_row: impl Fn(String, bool) + Copy + 'static,
+    regen_states: HashMap<String, crate::regenerate_title::RowState>,
+    on_regen: impl Fn(String) + Copy + 'static,
 ) -> impl IntoView {
     let nav_len = layout
         .items
@@ -1504,6 +1540,28 @@ fn render_rows(
                 let open_main = open_id.clone();
                 let id_attr = id.clone();
                 let archived_row = item.archived;
+                // Regenerate title (#1370) row state, computed before the
+                // label moves into the view.
+                let regen_state = regen_states.get(&id).cloned();
+                let regen_up_front = crate::regenerate_title::disabled_up_front(&label);
+                let regen_blocked = regen_up_front.is_some()
+                    || regen_state.as_ref().is_some_and(|st| st.blocks_action());
+                let regen_note = regen_state
+                    .as_ref()
+                    .map(|st| st.text().to_string())
+                    .or_else(|| regen_up_front.map(str::to_string));
+                let regen_pending = regen_state == Some(crate::regenerate_title::RowState::Pending);
+                // Pending / refusal / failure stays visible on the row (the
+                // action strip itself only shows on hover or focus).
+                let regen_row_note = regen_state
+                    .as_ref()
+                    .filter(|_| is_session)
+                    .map(|st| st.text().to_string());
+                let regen_label = if regen_pending {
+                    "Regenerating\u{2026}"
+                } else {
+                    crate::regenerate_title::LABEL
+                };
                 // #1379: sessions hash their id; child rows hash the child
                 // alias so they match the child's activity row and card.
                 let disc_key = if is_session {
@@ -1549,6 +1607,7 @@ fn render_rows(
                             let copy_id = id.clone();
                             let copy_hook = id.clone();
                             let archive_id = id.clone();
+                            let regen_id = id.clone();
                             view! {
                                 <div class="ss-actions">
                                     <button
@@ -1569,8 +1628,23 @@ fn render_rows(
                                             on_archive_row(archive_id.clone(), archived_row);
                                         }
                                     >{if archived_row { "Unarchive" } else { "Archive" }}</button>
+                                    <button
+                                        type="button"
+                                        class="ss-quiet"
+                                        data-ss-regen-id=regen_id.clone()
+                                        disabled=regen_blocked
+                                        aria-busy=regen_pending.to_string()
+                                        title=regen_note.clone().unwrap_or_default()
+                                        on:click=move |ev: web_sys::MouseEvent| {
+                                            ev.stop_propagation();
+                                            on_regen(regen_id.clone());
+                                        }
+                                    >{regen_label}</button>
                                 </div>
                             }
+                        })}
+                        {regen_row_note.map(|note| view! {
+                            <p class="ss-regen-note" role="status">{note}</p>
                         })}
                     </div>
                 }

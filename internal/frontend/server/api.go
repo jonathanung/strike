@@ -41,6 +41,10 @@ type sessionListItem struct {
 	Status         string `json:"status,omitempty"`
 	Unread         bool   `json:"unread"`
 	LastActivityAt int64  `json:"lastActivityAt,omitempty"`
+	// PR linkage captured by the host (#1356). Empty when none.
+	PRURL    string `json:"prUrl,omitempty"`
+	PRNumber int    `json:"prNumber,omitempty"`
+	PRState  string `json:"prState,omitempty"`
 }
 
 type agentsResponse struct {
@@ -865,6 +869,9 @@ func listSessionFiles(dir string) ([]sessionListItem, error) {
 			Mtime:       info.UpdatedAt.Unix(),
 			ForkedFrom:  info.ForkedFrom,
 			WorkspaceID: info.WorkspaceID,
+			PRURL:       info.PRURL,
+			PRNumber:    info.PRNumber,
+			PRState:     session.NormalizePRState(info.PRState),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

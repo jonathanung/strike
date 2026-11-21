@@ -129,7 +129,12 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     attributed block (`--- session: <id> ---`), never the raw log; a
     self-reference or a missing/pruned session attaches nothing and posts a
     notice. `GET /v1/sessions/{id}/reference` reports that block's size
-    (chars, ~tokens) for display before send. `!` asks through the bash permission model and
+    (chars, ~tokens) for display before send. In the composer, `@` lists
+    recent sessions under a Sessions section (title match, then fuzzy);
+    picking one inserts `@session:<id> `, and each token renders a chip
+    with that size, the 404 sentence for a missing session, or "attaches
+    nothing" for the current session. A chip's Open button resumes the
+    referenced session (#1906). `!` asks through the bash permission model and
     does not start a model turn. The composer `+` menu and the suggestion
     popup only list those real actions (`composerCommands` and `skills` on
     bootstrap, files from `/v1/files/search`). A shell ask shows Allow once /

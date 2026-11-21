@@ -15,10 +15,17 @@
 //!
 //! The pending state (sent, not yet applied) is the composer's steer note:
 //! the steer has no transcript line until the engine applies it. Nothing
-//! here is inferred from timing. A "what changed" summary or a conflict
-//! needs an agent-emitted event that does not exist yet (see
-//! docs/webui-planned.md), so the marker never invents one. Ordinary
-//! queued sends never get a marker: only `turn.steered` creates one.
+//! here is inferred from timing. Ordinary queued sends never get a marker:
+//! only `turn.steered` creates one.
+//!
+//! #1860: when the agent calls its `steer_ack` tool, the engine emits
+//! `turn.steer_ack {summary, conflict, reason}` answering the oldest applied
+//! steer of the turn it has not answered yet. The marker then adds the
+//! agent's own "Now: …" line, or a distinct conflict state with the reason.
+//! The stop and queue controls stay the actions. With no such event the
+//! marker stays at plain "acknowledged": the summary is never invented.
+//! Engine and cockpit pair acks with steers the same way (FIFO per turn,
+//! dropped at `turn.completed`), so replay reproduces the live view.
 
 use std::collections::HashMap;
 
@@ -50,12 +57,59 @@ impl AckState {
     }
 }
 
+/// Placeholder in the ack FIFO for an applied steer with no marked line.
+const NO_LINE: u32 = u32::MAX;
+
+/// The agent's own words on a steer (`turn.steer_ack`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AgentAck {
+    pub summary: String,
+    pub conflict: bool,
+    pub reason: String,
+}
+
+/// Everything the marker on one steered message shows.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SteerMark {
+    pub state: AckState,
+    pub agent: Option<AgentAck>,
+}
+
+impl SteerMark {
+    pub fn key(&self) -> &'static str {
+        match &self.agent {
+            Some(a) if a.conflict => "conflict",
+            _ => self.state.key(),
+        }
+    }
+
+    pub fn text(&self) -> String {
+        match &self.agent {
+            Some(a) if a.conflict => {
+                let mut out = format!("Steer conflicts with the agent's plan: {}", a.reason);
+                if !a.summary.is_empty() {
+                    out.push_str(&format!(" Now: {}", a.summary));
+                }
+                out.push_str(" Stop or queue to change course.");
+                out
+            }
+            Some(a) if !a.summary.is_empty() => format!("{} Now: {}", self.state.text(), a.summary),
+            _ => self.state.text().to_string(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SteerAcks {
     by_msg: HashMap<u32, AckState>,
     /// Texts of steers that fell back to the next-turn queue, waiting for
     /// their `user.message`.
     fallback: Vec<String>,
+    /// Agent acknowledgements, keyed by the steered message id.
+    agent: HashMap<u32, AgentAck>,
+    /// Applied steers of the running turn the agent has not answered yet,
+    /// oldest first (mirrors the engine's FIFO).
+    awaiting: Vec<u32>,
 }
 
 impl SteerAcks {
@@ -63,19 +117,63 @@ impl SteerAcks {
         self.by_msg.get(&id).copied()
     }
 
-    /// A `turn.steered` event. `messages` is the transcript so far.
-    pub fn on_steered(&mut self, messages: &[Message], text: &str, mode: &str) {
-        if text.is_empty() {
+    /// The full marker for message `id`, if it is a steer.
+    pub fn mark(&self, id: u32) -> Option<SteerMark> {
+        self.get(id).map(|state| SteerMark {
+            state,
+            agent: self.agent.get(&id).cloned(),
+        })
+    }
+
+    /// A `turn.steer_ack` event: answers the oldest unanswered steer.
+    pub fn on_steer_ack(&mut self, summary: &str, conflict: bool, reason: &str) {
+        let summary = summary.trim();
+        let reason = reason.trim();
+        if summary.is_empty() && !conflict {
             return;
         }
+        if self.awaiting.is_empty() {
+            return;
+        }
+        let id = self.awaiting.remove(0);
+        if id == NO_LINE {
+            return;
+        }
+        self.agent.insert(
+            id,
+            AgentAck {
+                summary: summary.to_string(),
+                conflict,
+                reason: if conflict { reason.to_string() } else { String::new() },
+            },
+        );
+    }
+
+    /// The turn ended: unanswered steers keep their plain marker.
+    pub fn on_turn_completed(&mut self) {
+        self.awaiting.clear();
+    }
+
+    /// A `turn.steered` event. `messages` is the transcript so far.
+    pub fn on_steered(&mut self, messages: &[Message], text: &str, mode: &str) {
         let state = match mode {
             "queued_fallback" => {
-                self.fallback.push(text.to_string());
+                if !text.is_empty() {
+                    self.fallback.push(text.to_string());
+                }
                 return;
             }
             "cancel_restart" => AckState::Restarted,
             _ => AckState::Applied,
         };
+        // The engine queues every applied steer for an agent ack. Keep the
+        // FIFO aligned even when no line can carry the marker (image-only
+        // steer, unmatched text): its ack is then consumed and dropped
+        // instead of landing on a later steer.
+        if text.is_empty() {
+            self.awaiting.push(NO_LINE);
+            return;
+        }
         // The engine emits the steer's user.message right before this
         // event, so the newest matching line without a marker is it.
         if let Some(msg) = messages.iter().rev().find(|m| {
@@ -84,6 +182,9 @@ impl SteerAcks {
                 && !self.by_msg.contains_key(&m.id)
         }) {
             self.by_msg.insert(msg.id, state);
+            self.awaiting.push(msg.id);
+        } else {
+            self.awaiting.push(NO_LINE);
         }
     }
 
@@ -176,12 +277,107 @@ mod tests {
         assert_eq!(live.steer_acks, replayed.steer_acks);
     }
 
+    fn steer(t: &mut Transcript, text: &str, mode: &str) -> u32 {
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": text, "turnId": "t1"})));
+        let id = last_you(t);
+        t.apply_envelope(&env("turn.steered", serde_json::json!({"text": text, "mode": mode, "turnId": "t1", "targetTurnId": "t1"})));
+        id
+    }
+
+    #[test]
+    fn agent_summary_renders_only_when_emitted() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("turn.started", serde_json::json!({"turnId": "t1"})));
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "build it", "turnId": "t1"})));
+        let id = steer(&mut t, "use the v2 api", "boundary");
+        let plain = t.steer_acks.mark(id).unwrap();
+        assert_eq!(plain.key(), "acknowledged");
+        assert_eq!(plain.text(), AckState::Applied.text(), "no event, no summary");
+
+        t.apply_envelope(&env("turn.steer_ack", serde_json::json!({"turnId": "t1", "targetTurnId": "t1", "summary": "switching to v2"})));
+        let mark = t.steer_acks.mark(id).unwrap();
+        assert_eq!(mark.key(), "acknowledged");
+        assert!(mark.text().ends_with("Now: switching to v2"), "{}", mark.text());
+    }
+
+    #[test]
+    fn conflict_is_distinct_and_acks_pair_in_order() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("turn.started", serde_json::json!({"turnId": "t1"})));
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "refactor auth", "turnId": "t1"})));
+        let first = steer(&mut t, "keep the old api", "boundary");
+        let second = steer(&mut t, "also add tests", "cancel_restart");
+        t.apply_envelope(&env("turn.steer_ack", serde_json::json!({"turnId": "t1", "summary": "keeping v1", "conflict": true, "reason": "the plan removes v1"})));
+        t.apply_envelope(&env("turn.steer_ack", serde_json::json!({"turnId": "t1", "summary": "adding tests"})));
+        let a = t.steer_acks.mark(first).unwrap();
+        assert_eq!(a.key(), "conflict");
+        assert!(a.text().contains("the plan removes v1"), "{}", a.text());
+        assert!(a.text().contains("Stop or queue"), "{}", a.text());
+        let b = t.steer_acks.mark(second).unwrap();
+        assert_eq!(b.key(), "acknowledged");
+        assert!(b.text().ends_with("Now: adding tests"));
+        // A third ack has no steer to answer and changes nothing.
+        let before = t.steer_acks.clone();
+        t.apply_envelope(&env("turn.steer_ack", serde_json::json!({"turnId": "t1", "summary": "extra"})));
+        assert_eq!(t.steer_acks, before);
+    }
+
+    #[test]
+    fn ack_never_crosses_a_turn_or_marks_ordinary_messages() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("turn.started", serde_json::json!({"turnId": "t1"})));
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "first", "turnId": "t1"})));
+        let id = steer(&mut t, "go left", "boundary");
+        t.apply_envelope(&env("turn.completed", serde_json::json!({"turnId": "t1"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"turnId": "t2"})));
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "next", "turnId": "t2"})));
+        let ordinary = last_you(&t);
+        t.apply_envelope(&env("turn.steer_ack", serde_json::json!({"turnId": "t2", "summary": "late"})));
+        assert_eq!(t.steer_acks.mark(id).unwrap().agent, None);
+        assert_eq!(t.steer_acks.mark(ordinary), None);
+    }
+
+    #[test]
+    fn conflict_survives_replay() {
+        let log = vec![
+            env("turn.started", serde_json::json!({"turnId": "t1"})),
+            env("user.message", serde_json::json!({"text": "build it", "turnId": "t1"})),
+            env("user.message", serde_json::json!({"text": "use sqlite", "turnId": "t1"})),
+            env("turn.steered", serde_json::json!({"text": "use sqlite", "mode": "boundary", "turnId": "t1"})),
+            env("turn.steer_ack", serde_json::json!({"turnId": "t1", "summary": "staying on postgres", "conflict": true, "reason": "schema needs jsonb"})),
+            env("turn.completed", serde_json::json!({"turnId": "t1"})),
+        ];
+        let mut replayed = Transcript::new();
+        for line in &log {
+            replayed.apply_envelope(line);
+        }
+        let id = last_you(&replayed);
+        let mark = replayed.steer_acks.mark(id).unwrap();
+        assert_eq!(mark.key(), "conflict");
+        assert!(mark.text().contains("schema needs jsonb"));
+    }
+
     #[test]
     fn unmatched_or_empty_steer_marks_nothing() {
         let mut acks = SteerAcks::default();
         acks.on_steered(&[], "", "boundary");
         acks.on_steered(&[], "nobody", "boundary");
-        assert_eq!(acks, SteerAcks::default());
+        assert_eq!(acks.mark(NO_LINE), None);
+        assert!(acks.by_msg.is_empty() && acks.agent.is_empty());
         assert!(AckState::MissedTurn.text().contains("next message"));
+    }
+
+    #[test]
+    fn image_only_steer_keeps_acks_aligned() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("turn.started", serde_json::json!({"turnId": "t1"})));
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "build it", "turnId": "t1"})));
+        // An image-only steer: no text to match a line.
+        t.apply_envelope(&env("turn.steered", serde_json::json!({"text": "", "mode": "boundary", "turnId": "t1"})));
+        let text_steer = steer(&mut t, "smaller", "boundary");
+        t.apply_envelope(&env("turn.steer_ack", serde_json::json!({"turnId": "t1", "summary": "looking at the screenshot"})));
+        assert_eq!(t.steer_acks.mark(text_steer).unwrap().agent, None, "first ack answers the image steer");
+        t.apply_envelope(&env("turn.steer_ack", serde_json::json!({"turnId": "t1", "summary": "shrinking it"})));
+        assert!(t.steer_acks.mark(text_steer).unwrap().text().ends_with("Now: shrinking it"));
     }
 }

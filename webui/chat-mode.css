@@ -149,6 +149,10 @@
   white-space: nowrap;
 }
 .attach-chip .path { color: var(--signal); }
+.session-ref-chip .path { color: var(--muted); }
+.session-ref-chip[data-session-ref-state="missing"] .path,
+.session-ref-chip[data-session-ref-state="failed"] .path { color: var(--signal); }
+.session-ref-row { margin-bottom: 6px; }
 .attach-chip button {
   height: 22px;
   padding: 0 6px;

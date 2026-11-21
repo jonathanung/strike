@@ -70,6 +70,7 @@ var shortPurposes = map[string]string{
 	"enter_plan_mode": "start the plan→implement workflow",
 	"exit_plan_mode":  "leave plan mode for build or orchestrator",
 	"phase_done":      "advance the active workflow phase gate",
+	"steer_ack":       "acknowledge a mid-turn user steer (summary, conflict)",
 	"toolsearch":      "search registered tool names/descriptions",
 	"definition":      "go to definition via language server",
 	"references":      "find references via language server",
