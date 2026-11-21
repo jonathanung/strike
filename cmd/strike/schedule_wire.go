@@ -27,6 +27,9 @@ func processBypassEnabled(processSkip, unattended bool) bool {
 type scheduleScripts struct {
 	runner *scriptrun.Runner
 	sink   *audit.Sink
+	// notify posts a finished/failed run to the notification centre. It
+	// gets ids, the name, and the exit code only (never command or output).
+	notify func(scheduleID, runID, name string, exitCode *int, failed bool)
 }
 
 // openScheduleService loads the clock next to the workspace registry.
@@ -85,6 +88,11 @@ func openScheduleService(dir string, hub *server.LiveHub, services *host.Service
 	}
 	if scripts.sink != nil {
 		hooks.Audit = scriptAuditHook(scripts.sink)
+	}
+	if notify := scripts.notify; notify != nil {
+		hooks.Notify = func(n schedule.ScriptNotice) {
+			notify(n.ScheduleID, n.RunID, n.Name, n.ExitCode, n.Failed)
+		}
 	}
 	return schedule.Open(dir, hooks, cwd)
 }
