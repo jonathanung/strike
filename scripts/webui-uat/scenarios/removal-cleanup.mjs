@@ -10,7 +10,11 @@
 
 const PROVIDER = "uat-remove-me";
 const GATEWAY = "UAT Remove GW";
-const GATEWAY_URL = "http://127.0.0.1:8787";
+// The gateway profile points at the live UAT gateway's own origin: with
+// probe-first switching (#1523) a switch to a target where nothing
+// listens is refused, and a same-origin gateway is let through even when
+// it answers 401/403, so the token-map steps below can run.
+let GATEWAY_URL = "";
 
 export const scenario = async (ctx) => {
   await ctx.page.evaluate(`document.querySelector('[data-action="onboarding-continue"]')?.click()`);
@@ -82,6 +86,7 @@ export const scenario = async (ctx) => {
   await ctx.shoot("removal-provider-after-reload", ["desk1440", "mobile"]);
 
   // --- Gateways (#1562) ---
+  GATEWAY_URL = String(await ctx.page.evaluate("location.origin"));
   const id1 = await addGatewayProfile(ctx);
   ctx.check(Boolean(id1), "gateway profile was not saved");
   if (!id1) return;
