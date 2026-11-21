@@ -118,6 +118,7 @@ mod turn_files;
 mod turn_failure;
 mod turn_usage;
 mod turn_verify;
+mod verbosity;
 mod workspace_image;
 mod workspace_trust;
 mod workspaces;
@@ -1978,6 +1979,7 @@ fn App() -> impl IntoView {
                                                 .to_string(),
                                         );
                                     }
+                                    crate::verbosity::seed(&st.verbosity, &st.verbosity_delivery);
                                     wf_run.set(workflow_run::WorkflowRun::from_status(
                                         &st.workflow,
                                         &st.phase,
@@ -2193,6 +2195,7 @@ fn App() -> impl IntoView {
         // session's Fast/autonomy across the switch.
         fast_on.set(false);
         autonomy.set("supervised".to_string());
+        crate::verbosity::reset();
         autonomy_menu.set(false);
         wf_run.set(workflow_run::WorkflowRun::default());
         context_used.set(0);
@@ -2364,6 +2367,7 @@ fn App() -> impl IntoView {
                         wf_run.set(wf_next);
                     }
                     let next = reduce_envelope(prev, &data);
+                    crate::verbosity::observe(&data);
                     provider_name.set(next.provider);
                     model_name.set(next.model);
                     effort_level.set(next.effort);
@@ -6660,6 +6664,7 @@ fn App() -> impl IntoView {
                                     model_menu.set(false);
                                     autonomy_menu.update(|v| *v = !*v);
                                 }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
+                                <crate::verbosity::VerbosityChip base=base token=token active_root=active_root status=status busy=Signal::derive(move || session_busy_now.get()) />
                                 // #1574: the live workflow run, only while the
                                 // daemon reports one. Stop asks first.
                                 <Show when=move || wf_run.with(|w| w.is_active())>

@@ -7104,6 +7104,47 @@ try {
     { timeout: STEP_MS, interval: 200 },
   );
 
+  // Response style (#1369): the chip starts at Default, changes only on
+  // the daemon's verbosity.selected, and says it is delivered as a
+  // session instruction while a non-default style is active.
+  await waitFor(
+    "style chip starts at default",
+    async () => {
+      const chip = await evaluate(`document.querySelector('[data-verbosity-status]')?.textContent || ""`);
+      return { ok: chip === "Style · Default", chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const pickStyle = async (id) => {
+    // The chip opens the palette at the style command; pick the choice.
+    await evaluate(`document.querySelector('[data-verbosity-status]')?.click()`);
+    await delay(250);
+    await evaluate(`document.querySelector('[data-choice-id="${id}"]')?.click()`);
+  };
+  await pickStyle("concise");
+  await waitFor(
+    "style chip shows concise via instruction after daemon confirmation",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        chip: document.querySelector('[data-verbosity-status]')?.textContent || "",
+        id: document.querySelector('[data-verbosity-status]')?.getAttribute("data-verbosity-status") || "",
+        title: document.querySelector('[data-verbosity-status]')?.getAttribute("title") || "",
+      })`);
+      const st = JSON.parse(raw || "{}");
+      return { ok: st.chip === "Style · Concise (instruction)" && st.id === "concise" && st.title.includes("session instruction"), ...st };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await pickStyle("default");
+  await waitFor(
+    "style chip back to default",
+    async () => {
+      const chip = await evaluate(`document.querySelector('[data-verbosity-status]')?.textContent || ""`);
+      return { ok: chip === "Style · Default", chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+
   await setDraft("run sleep 30");
   await press("Enter");
   await waitFor(

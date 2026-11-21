@@ -17,7 +17,7 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - **Minor** `protocol.Version` bumps add types or optional fields. **Major** bumps rename, remove, or change meaning. **Patch** bumps do not change encoded JSON.
 - Nil Go slices and maps encode as JSON `null`. Readers treat `null` like an empty list or map.
 
-## Event types (65)
+## Event types (66)
 
 - `admission.decided` → `AdmissionDecided`
 - `agent.contract.timeout` → `AgentContractTimeout`
@@ -80,12 +80,13 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `turn.steered` → `TurnSteered`
 - `usage.reported` → `UsageReported`
 - `user.message` → `UserMessage`
+- `verbosity.selected` → `VerbositySelected`
 - `verification.completed` → `VerificationCompleted`
 - `verification.started` → `VerificationStarted`
 - `wait.resolved` → `WaitResolved`
 - `wait.started` → `WaitStarted`
 
-## Op types (32)
+## Op types (33)
 
 - `compact` → `Compact`
 - `context.controls` → `SetContextControls`
@@ -107,6 +108,7 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `set.effort` → `SetEffort`
 - `set.fast` → `SetFast`
 - `set.permission_mode` → `SetPermissionMode`
+- `set.verbosity` → `SetVerbosity`
 - `steer` → `Steer`
 - `team.board_claim` → `TeamBoardClaim`
 - `team.board_complete` → `TeamBoardComplete`

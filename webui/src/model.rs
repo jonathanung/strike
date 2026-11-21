@@ -159,6 +159,12 @@ pub struct LiveStatus {
     /// empty to the `supervised` default rather than inventing a mode.
     #[serde(default)]
     pub autonomy: String,
+    /// Session response style (#1369): "" default | concise | detailed,
+    /// and how it reaches the model (none | instruction).
+    #[serde(default)]
+    pub verbosity: String,
+    #[serde(default, rename = "verbosityDelivery")]
+    pub verbosity_delivery: String,
     /// Active workflow and phase the daemon reports on every status
     /// (#1574; `StatusSnapshot.Workflow` / `.Phase`). Both empty when no
     /// workflow is active. Later changes arrive as `phase.changed`.
