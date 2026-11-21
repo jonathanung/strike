@@ -113,6 +113,7 @@ fn ElicitationCard(
     let message = pending.with_value(|p| p.message.clone());
     let request_id = pending.with_value(|p| p.request_id.clone());
     let header = format!("{server} asks for input");
+    let aria = header.clone();
 
     let body = if is_url {
         let url = pending.with_value(|p| p.url.clone());
@@ -234,7 +235,7 @@ fn ElicitationCard(
         <article
             class="elicit-card"
             aria-live="polite"
-            aria-label=header.clone()
+            aria-label=aria
             data-pending-elicitation=request_id.clone()
             tabindex="-1"
             on:keydown=on_key
