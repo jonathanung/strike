@@ -1358,6 +1358,7 @@ dependencies = [
  "serde",
  "serde_json",
  "status-card",
+ "theme-catalog",
  "transcript-window",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -1428,6 +1429,10 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
 ]
+
+[[package]]
+name = "theme-catalog"
+version = "0.1.0"
 
 [[package]]
 name = "thiserror"

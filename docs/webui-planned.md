@@ -433,6 +433,27 @@ that push service. The next open replays the daemon log into the centre.
 A gateway drop is detected by the page (the daemon cannot deliver "I am
 gone"); it is not a JSONL record.
 
+## Offline outbox
+
+Shipped (#1325, first slice): when the gateway is unreachable, a text send
+from the composer is queued in a per-gateway `localStorage` outbox (survives
+a tab close or PWA restart) and shown above the composer as "Queued — will
+send when reconnected", with Edit and Delete. On reconnect items flush one at
+a time in the order written, before any new send for the same session. Each
+send carries `X-Strike-Client-Message-Id`; `POST /v1/ops` remembers delivered
+ids per live root (memory, 24h, bounded) and answers a repeat with
+`{"ok":true,"duplicate":true}` without submitting, or 409 while the first
+attempt is still in flight. A send that loses its connection mid-request is
+queued under the same id, so a half-open retry cannot post twice. The op
+(`user.input` or `steer`) is fixed at send time. Approvals are never queued.
+Items older than 24h are held for confirmation (Send) instead of auto-sent;
+a refused send (4xx) holds that session's later items until it is retried or
+deleted.
+
+Not built: queuing attachments (they need an upload while online), a
+daemon-restart-proof dedupe (ids are memory-only), and a hold for sessions
+that finished while the message was queued.
+
 ## Find in transcript
 
 Shipped (#1342): Ctrl/Cmd+F, the Find chip, or the palette command opens
@@ -463,6 +484,26 @@ Not drawn yet: the session flag in the engine turn loop, the protocol
 events, and the cockpit Debug panel (hypothesis card, instrumentation
 list, reproduce checklist, mobile chip). Bash is not inspected by the
 gate; the permission layer still governs it.
+
+## Run with N models
+
+Orchestration core shipped, card not drawn (#1346).
+`internal/daemon/bestofn` validates a comparison (2–4 distinct
+model/effort pairs, non-empty prompt, non-negative per-run budget), shows
+the N× cost multiplier, and builds one spawn spec per model: same prompt,
+the parent's permission mode passed through (never widened), and a
+worktree per candidate when the prompt may edit files (shared otherwise).
+A candidate whose spawn fails, fails mid-run, or is cancelled is recorded
+as such and the comparison completes with the rest; cancelling all
+interrupts only running children. Picking a winner is a separate call
+that requires every candidate to have stopped and the winner to have
+finished; it returns which child to keep and which to archive. "Keep
+none" archives all. A run is decided once.
+
+Not drawn yet: the Spawner wired to `team.spawn` (a per-child model and
+effort field on the spawn op), worktree merge/cleanup on adopt, parent
+commentary, the comparison card and model picker, and verification
+reuse (#780).
 
 ## PR watch
 
