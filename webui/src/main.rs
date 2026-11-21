@@ -22,6 +22,7 @@ mod draft_size;
 mod drafts;
 mod editor;
 mod load_epoch;
+mod local_issues;
 mod localfiles;
 mod customize;
 mod gateway;
@@ -47,6 +48,7 @@ mod steer_queue;
 mod model_menu;
 mod model_menu_view;
 mod session_list;
+mod session_loops;
 mod settings;
 mod session_panel;
 mod storage;
@@ -59,12 +61,15 @@ mod session_restore;
 mod shell;
 mod side_chat;
 mod status;
+mod status_card_view;
 mod term;
+mod tool_tail;
 mod terminal;
 mod transcript;
 mod transcript_view;
 mod triggers;
 mod turn_elapsed;
+mod turn_failure;
 mod turn_usage;
 mod workspaces;
 use crate::shell::icon;
@@ -107,6 +112,7 @@ use crate::approvals_ui::{
     apply_perm_notes, commit_autonomy, commit_session_mode, ApprovalCards, ApprovalHost,
     ApprovalMenu, AutonomyMenu,
 };
+use crate::status_card_view::{ChildStatusCard, SessionStatusCard};
 use crate::transcript::Transcript;
 use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
 use crate::workspaces::WorkspacePicker;
@@ -983,13 +989,6 @@ fn rows_from_team(prev: &[ActivityRow], team: &TeamSnapshot, now: f64) -> Vec<Ac
             continue;
         }
         let state = display_state(member);
-        let mut output = member.terminal_summary.clone();
-        if !member.block_reason.is_empty() {
-            if !output.is_empty() {
-                output.push_str("\n\n");
-            }
-            output.push_str(&member.block_reason);
-        }
         let started_ms = prev
             .iter()
             .find(|p| p.session_id == session_id)
@@ -1017,10 +1016,12 @@ fn rows_from_team(prev: &[ActivityRow], team: &TeamSnapshot, now: f64) -> Vec<Ac
             agent: member.agent.clone(),
             task: member.objective.clone(),
             state,
-            output,
             elapsed_s,
             started_ms,
             expanded,
+            summary: member.terminal_summary.clone(),
+            block_reason: member.block_reason.clone(),
+            budget: model::card_budget(member),
         });
     }
     rows.sort_by(|a, b| a.name.cmp(&b.name).then(a.session_id.cmp(&b.session_id)));
@@ -1087,10 +1088,16 @@ fn App() -> impl IntoView {
     let diag_capable = RwSignal::new(false);
     // Bootstrap capability `ledger` (#1485): gates the Decisions tab.
     let ledger_capable = RwSignal::new(false);
+    // Bootstrap capability `issues` (#1500): gates the Issues tab.
+    let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
     // Bootstrap capability `plugins` (#1570): gates plugin lifecycle.
     let plugins_capable = RwSignal::new(false);
+    // Bootstrap capability `loops` (#1588): session /loop jobs.
+    let loops_capable = RwSignal::new(false);
+    let loop_rows = RwSignal::new(Vec::<session_loops::SessionLoop>::new());
+    let loop_note = RwSignal::new(String::new());
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -1716,10 +1723,17 @@ fn App() -> impl IntoView {
                                 diag_capable.set(boot.capabilities.diag);
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
                                 ledger_capable.set(boot.capabilities.ledger);
+                                crate::local_issues::set_issues_capable(boot.capabilities.issues);
+                                issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
                                 plugins_capable.set(boot.capabilities.plugins);
                                 skills.set(boot.skills);
-                                commands.set(boot.composer_commands);
+                                loops_capable.set(boot.capabilities.loops);
+                                commands.set(if boot.capabilities.loops {
+                                    session_loops::with_loop_commands(boot.composer_commands)
+                                } else {
+                                    boot.composer_commands
+                                });
                                 if !catalog_once.get_untracked() {
                                     catalog_once.set(true);
                                     load_model_catalog();
@@ -2354,6 +2368,31 @@ fn App() -> impl IntoView {
     };
 
     let send = move |which: steer_queue::SendWhich| {
+        // Session /loop (#1588): handled against the loops routes, never
+        // sent as a prompt, and ahead of the context hold so a full window
+        // never blocks /loop stop. Without the capability the draft is kept.
+        let loop_text = draft.get_untracked().trim().to_string();
+        if let Some(cmd) = session_loops::parse(&loop_text) {
+            ac_open.set(false);
+            let root = active_root.get_untracked();
+            if root.is_empty() {
+                status.set("no live session yet".into());
+                return;
+            }
+            if !loops_capable.get_untracked() {
+                loop_note.set("loop: this gateway cannot run loops for this session (attach-only or read-only).".into());
+                return;
+            }
+            if pending_files.get_untracked().iter().any(|f| f.error.is_empty()) {
+                loop_note.set("loop: a loop job is text only. Remove the attachments first.".into());
+                return;
+            }
+            prompt_history.update(|h| h.push(&loop_text));
+            draft.set(String::new());
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(session_loops::run(b, t, root, cmd, active_root, loop_rows, loop_note));
+            return;
+        }
         // Context-hold gate (mirrors send_text): when the context fit is
         // critical/full, do not dispatch and do not clear the draft or
         // pending files, so a held submit never loses typed text. This
@@ -3688,6 +3727,16 @@ fn App() -> impl IntoView {
                 return Err("This daemon does not serve the decision ledger.".into());
             }
             side_tab.set("decisions".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "panel-issues",
+        Rc::new(move |_args: &str| {
+            if !issues_capable.get_untracked() {
+                return Err("Local issues are not available on this gateway.".into());
+            }
+            side_tab.set("issues".into());
             Ok(())
         }),
     );
@@ -5267,6 +5316,7 @@ fn App() -> impl IntoView {
                             </div>
                         </Show>
                         <div class="steer-queue" id="steer-queue">
+                            <session_loops::LoopRows base=base token=token root=active_root capable=loops_capable loops=loop_rows note=loop_note />
                             <Show when=move || !steer_note.get().is_empty()>
                                 <p class="steer-note" role="status">{move || steer_note.get()}</p>
                             </Show>
@@ -5365,13 +5415,18 @@ fn App() -> impl IntoView {
                                         let name = file.name.clone();
                                         let preview = file.preview.clone();
                                         let error = file.error.clone();
-                                        let show_img = !preview.is_empty();
                                         let show_err = !error.is_empty();
+                                        // #1390: audio/video chips get native controls over
+                                        // the same blob URL images use.
+                                        let preview_view = match (preview.is_empty(), chat_mode::preview_kind(&file.mime)) {
+                                            (false, chat_mode::PreviewKind::Image) => view! { <img src=preview.clone() alt="" /> }.into_any(),
+                                            (false, chat_mode::PreviewKind::Audio) => view! { <audio class="attach-media" controls=true preload="metadata" src=preview.clone()></audio> }.into_any(),
+                                            (false, chat_mode::PreviewKind::Video) => view! { <video class="attach-media" controls=true preload="metadata" playsinline=true src=preview.clone()></video> }.into_any(),
+                                            _ => view! { <span></span> }.into_any(),
+                                        };
                                         view! {
                                             <span class="attach-chip">
-                                                <Show when=move || show_img>
-                                                    <img src=preview.clone() alt="" />
-                                                </Show>
+                                                {preview_view}
                                                 <span>
                                                     <span class="name">{name}</span>
                                                     <Show when=move || show_err>
@@ -5408,7 +5463,7 @@ fn App() -> impl IntoView {
                                 }}
                             </Show>
                             <input class="file-pick" type="file" data-chat-file="true" data-chat-attach="true" node_ref=file_input multiple=true
-                                accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,image/svg+xml,text/plain,application/zip,application/gzip"
+                                accept=chat_mode::ACCEPT_TYPES
                                 on:change=move |_| {
                                     if let Some(el) = file_input.get() {
                                         if let Some(files) = el.files() {
@@ -5682,6 +5737,7 @@ fn App() -> impl IntoView {
                         <StatCard label="Blocked".into()>{move || blocked_count().to_string()}</StatCard>
                         <StatCard label="Tasks".into()>{move || activity.get().len().to_string()}</StatCard>
                     </div>
+                    <SessionStatusCard activity=activity roots=roots active_root=active_root children=children tick=tick />
                     <Show when=move || !team_note.get().is_empty()>
                         <p class="hint" data-team-note="true">{move || team_note.get()}</p>
                     </Show>
@@ -5727,7 +5783,7 @@ fn App() -> impl IntoView {
                                 let task_retry = row.task.clone();
                                 let headline = task_headline(&row.task);
                                 let show_task = !headline.is_empty();
-                                let output = row.output.clone();
+                                let row_card = row.clone();
                                 let expanded = row.expanded;
                                 let running = is_running(&state);
                                 let retry = can_retry(&state);
@@ -5801,7 +5857,7 @@ fn App() -> impl IntoView {
                                             </Show>
                                         </div>
                                         <Show when=move || expanded>
-                                            <pre class="output">{if output.is_empty() { "No output yet.".to_string() } else { output.clone() }}</pre>
+                                            <ChildStatusCard row=row_card.clone() />
                                         </Show>
                                     </li>
                                 }
@@ -5939,6 +5995,14 @@ fn App() -> impl IntoView {
                             token=token
                             root=active_root
                             memory_mode=memory_mode
+                            status=status
+                            storage_rev=storage_rev
+                        />
+                    </Show>
+                    <Show when=move || side_tab.get() == "issues" && issues_capable.get()>
+                        <local_issues::LocalIssuesPanel
+                            base=base
+                            token=token
                             status=status
                             storage_rev=storage_rev
                         />

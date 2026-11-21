@@ -491,6 +491,101 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       "editor textarea (re-entered)",
     );
 
+    // Find and replace (#1401): the replace row shows only while
+    // editing; Replace (Enter) rewrites the current hit in the draft
+    // and advances, Replace all rewrites the rest and reports a count,
+    // and Cancel restores the loaded content (replace never saves).
+    const replaceOrig = await evalValue(
+      send,
+      `(() => { const ta = document.querySelector(".ev-editor"); return ta ? ta.value : "no editor"; })()`,
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        ta.value = "line one\\nline two\\nline three\\n";
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        const q = document.getElementById("ev-search");
+        q.value = "line";
+        q.dispatchEvent(new Event("input", { bubbles: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        if (!document.querySelector("[data-ev-replace-row]")) return "no replace row while editing";
+        const n = document.querySelector(".ev-count");
+        return n && n.textContent.trim() === "1/3" ? "ok" : (n ? n.textContent : "no count");
+      })()`,
+      "replace row and three hits",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const r = document.getElementById("ev-replace");
+        r.value = "row";
+        r.dispatchEvent(new Event("input", { bubbles: true }));
+        r.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        if (!ta) return "edit mode lost on Replace";
+        if (ta.value !== "row one\\nline two\\nline three\\n") return "draft = " + JSON.stringify(ta.value);
+        const n = document.querySelector(".ev-count");
+        return n && n.textContent.trim() === "1/2" ? "ok" : "count = " + (n ? n.textContent : "none");
+      })()`,
+      "Replace rewrites the current hit and advances",
+    );
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-replace-all]"); if (!b || b.disabled) return "replace all disabled"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        if (!ta || ta.value !== "row one\\nrow two\\nrow three\\n") return "draft = " + (ta ? JSON.stringify(ta.value) : "no editor");
+        const note = document.querySelector("[data-ev-replace-note]");
+        return note && note.textContent.includes("Replaced 2 matches.") ? "ok" : "note = " + (note ? note.textContent : "none");
+      })()`,
+      "Replace all rewrites every hit with a count",
+    );
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-cancel]"); if (!b) return "no cancel"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("[data-ev-replace-row]") ? "replace row still shown after Cancel" : "ok")()`,
+      "replace row hidden outside edit mode",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const q = document.getElementById("ev-search");
+        q.value = "";
+        q.dispatchEvent(new Event("input", { bubbles: true }));
+        const b = document.querySelector("[data-ev-edit]");
+        if (!b || b.disabled) return "edit disabled";
+        b.click();
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        if (!ta) return "no editor";
+        return ta.value === ${JSON.stringify(replaceOrig)} ? "ok" : "Cancel did not restore: " + JSON.stringify(ta.value);
+      })()`,
+      "Cancel restores the content after replace",
+    );
+
     // Dirty guard (#1394): an unsaved draft must block navigation.
     // Files-pane switch: Stay keeps the draft, Save writes then
     // switches, and a later Back to chat offers Discard. A synthetic
