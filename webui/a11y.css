@@ -1,4 +1,4 @@
-/* feature:a11y begin (#1337)
+/* feature:a11y begin (#1337, #1878)
    Presentation-layer accessibility pass. Loaded after the feature
    stylesheets and before theme.css, so theme.css's block-language
    overrides (e.g. filled .chip.on/.seg.on) still win where they apply. */
@@ -29,6 +29,29 @@
 :root:not([data-scheme="light"]):not([data-theme]),
 :root[data-theme="strike"]:not([data-scheme="light"]) {
   --acid-text: var(--highlight);
+}
+/* #1878: themes whose --acid fails 4.5:1 as text on ground, surface or
+   raised take a passing colour from their own palette (nord3, Alucard
+   purple, Monokai purple), or a darker shade of their own --acid hue
+   where the palette has no passing accent. Measured in
+   scripts/webui-uat/contrast.test.mjs for every theme and scheme. */
+:root[data-theme="nord"][data-scheme="light"] {
+  --acid-text: #4c566a;
+}
+:root[data-theme="dracula"][data-scheme="light"] {
+  --acid-text: #644ac9;
+}
+:root[data-theme="monokai"]:not([data-scheme="light"]) {
+  --acid-text: #ae81ff;
+}
+:root[data-theme="monokai"][data-scheme="light"] {
+  --acid-text: #bd1d57;
+}
+:root[data-theme="tokyo-night"][data-scheme="light"] {
+  --acid-text: #2461b6;
+}
+:root[data-theme="catppuccin"][data-scheme="light"] {
+  --acid-text: #8036e1;
 }
 .seg.on,
 .chip.on,

@@ -224,6 +224,7 @@ pub fn ModelMenu(
                 <div
                     class="model-menu-panel"
                     role="dialog"
+                    aria-modal="true"
                     aria-label="Models"
                     data-model-menu="true"
                     style:left=move || format!("{:.0}px", panel_pos.get().0)

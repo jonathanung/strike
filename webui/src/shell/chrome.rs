@@ -221,11 +221,8 @@ pub fn Chrome() -> impl IntoView {
                 open_palette();
                 return;
             }
-            if palette_open.get_untracked() && key == "Tab" {
-                ev.prevent_default();
-                trap_palette_focus(ev.shift_key());
-                return;
-            }
+            // Tab inside the open palette is trapped by the shared
+            // modal helper (focus_trap.rs, #1878).
             if (ev.meta_key() || ev.ctrl_key()) && key.eq_ignore_ascii_case("k") && !ev.alt_key() {
                 ev.prevent_default();
                 if palette_open.get_untracked() {
@@ -695,56 +692,6 @@ fn alive_slots() -> Vec<super::registry::TopSlot> {
 
 fn choice_rows(id: &str, query: &str) -> Vec<super::registry::Choice> {
     registry::step_rows(id, query)
-}
-
-fn trap_palette_focus(shift: bool) {
-    let Some(doc) = web_sys::window().and_then(|window| window.document()) else {
-        return;
-    };
-    let Some(root) = doc
-        .query_selector("[data-nav='palette-dialog']")
-        .ok()
-        .flatten()
-    else {
-        return;
-    };
-    let Ok(list) =
-        root.query_selector_all("button, input, [href], [tabindex]:not([tabindex='-1'])")
-    else {
-        return;
-    };
-    let count = list.length();
-    if count == 0 {
-        return;
-    }
-    let active = doc.active_element();
-    let mut index = 0i32;
-    for i in 0..count {
-        let Some(node) = list.item(i) else { continue };
-        let same = active
-            .as_ref()
-            .and_then(|el| el.dyn_ref::<web_sys::Node>())
-            .map(|el| el.is_same_node(Some(&node)))
-            .unwrap_or(false);
-        if same {
-            index = i as i32;
-            break;
-        }
-    }
-    let next = if shift {
-        if index == 0 {
-            count - 1
-        } else {
-            (index as u32) - 1
-        }
-    } else {
-        ((index as u32) + 1) % count
-    };
-    if let Some(node) = list.item(next) {
-        if let Some(el) = node.dyn_ref::<web_sys::HtmlElement>() {
-            let _ = el.focus();
-        }
-    }
 }
 
 #[cfg(test)]
