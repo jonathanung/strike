@@ -39,6 +39,8 @@ pub struct TranscriptHandlers {
     pub retry: Callback<(String,)>,
     pub fork: Callback<(i32,)>,
     pub open_file: Callback<(String, u32)>,
+    /// "Edit & resend" on the newest user message (#1361).
+    pub edit_last: Callback<(u32,)>,
 }
 
 /// Find-in-transcript state republished by the shell (#1342, unioned
@@ -312,6 +314,9 @@ pub fn TranscriptPane(
     let open_file = handlers.open_file;
     let retry = handlers.retry;
     let fork = handlers.fork;
+    let edit_last = handlers.edit_last;
+    // Only the newest user message offers Edit & resend (#1361).
+    let last_you = Memo::new(move |_| transcript.with(|t| t.last_user_id()));
     let export_timeline = handlers.export_timeline;
     let _ = (handlers.export_markdown, handlers.send);
     let regenerate = handlers.regenerate;
@@ -667,7 +672,7 @@ pub fn TranscriptPane(
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, edit_last, last_you, r.hits, r.current, r.elapsed, r.usage, fold_open, folds)}
                                 }
                             })
                         }
@@ -1046,6 +1051,8 @@ fn message_view(
     open_file: Callback<(String, u32)>,
     retry: Callback<(String,)>,
     _fork: Callback<(i32,)>,
+    edit_last: Callback<(u32,)>,
+    last_you: Memo<Option<u32>>,
     find_hits: Vec<crate::transcript_find::TMatch>,
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
@@ -1079,6 +1086,7 @@ fn message_view(
     let stamp_full = line_full_time(msg.at_ms);
     let has_stamp = !stamp.is_empty();
     let prose = matches!(msg.role, Role::You | Role::Strike);
+    let is_you = msg.role == Role::You;
     // Find-in-transcript (#1342): this message's match ranges, split by
     // field. When a field has ranges it renders through MarkedText —
     // the same trade #1398 made on the old bubble path: markdown / link
@@ -1169,6 +1177,16 @@ fn message_view(
                             crate::clipboard::after_ms(2_000, move || copy_state.set(None));
                         });
                     }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
+                    {is_you.then(|| view! {
+                        <Show when=move || last_you.get() == Some(id)>
+                            <button
+                                type="button"
+                                class="sx-quiet sx-edit-resend"
+                                title="Load this message into the composer to edit and resend it (Ctrl/Cmd+Up)"
+                                on:click=move |_| edit_last.run((id,))
+                            >"Edit & resend"</button>
+                        </Show>
+                    })}
                 </span>
             </header>
             {if find_body {

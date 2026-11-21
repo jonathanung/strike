@@ -514,6 +514,18 @@ impl Transcript {
                 self.absorb();
             }
             "session.titled" => self.note_titled(&field_str(&data, "title")),
+            "session.rewound" => {
+                // #1361: the engine dropped the last root user turn
+                // (`rewind` op, TUI /rewind, or edit & resend). The
+                // transcript drops the same rows so live and replayed
+                // views read as if that turn was never sent. Child
+                // lineage rewinds do not touch the root transcript.
+                let child = !field_str(&data, "parentSessionId").is_empty()
+                    || data.get("depth").and_then(|d| d.as_i64()).unwrap_or(0) > 0;
+                if !child {
+                    self.drop_last_user_turn();
+                }
+            }
             "turn.started" => {
                 self.assistant_open = false;
                 // A new turn starting means every earlier turn has ended:
@@ -821,6 +833,57 @@ impl Transcript {
             .find(|m| m.role == Role::You)
             .map(|m| m.retry_text.clone())
             .unwrap_or_default()
+    }
+
+    /// Rows reduced to what edit & resend (#1361) needs.
+    pub fn edit_rows(&self) -> Vec<edit_resend::Row> {
+        self.messages
+            .iter()
+            .map(|m| edit_resend::Row {
+                id: m.id,
+                role: match m.role {
+                    Role::You => edit_resend::Role::You,
+                    Role::Strike => edit_resend::Role::Strike,
+                    Role::Tool => edit_resend::Role::Tool,
+                    _ => edit_resend::Role::Other,
+                },
+                file_change: m.role == Role::Tool && edit_resend::is_file_tool(&m.key),
+            })
+            .collect()
+    }
+
+    /// Id of the newest user message (the one edit & resend can edit).
+    pub fn last_user_id(&self) -> Option<u32> {
+        self.messages
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::You)
+            .map(|m| m.id)
+    }
+
+    /// Exact text of message `id` as the user sent it.
+    pub fn sent_text(&self, id: u32) -> Option<String> {
+        self.messages
+            .iter()
+            .find(|m| m.id == id && m.role == Role::You)
+            .map(|m| m.retry_text.clone())
+    }
+
+    /// Apply `session.rewound`: drop the newest user message and every
+    /// row after it. Message ids are never reused, so a cursor or fold
+    /// keyed on a dropped id simply stops matching.
+    fn drop_last_user_turn(&mut self) {
+        let Some(cut) = edit_resend::rewind_cut(&self.edit_rows()) else {
+            return;
+        };
+        for m in &self.messages[cut..] {
+            self.turn_elapsed.remove(&m.id);
+            self.turn_usage.remove(&m.id);
+        }
+        self.messages.truncate(cut);
+        self.assistant_open = false;
+        self.turn_start = None;
+        self.usage_acc = crate::turn_usage::TurnUsage::default();
     }
 
     fn push(&mut self, mut message: Message) -> u32 {
@@ -3038,5 +3101,39 @@ mod tests {
         assert!(t.messages[0].body.contains("**world**"));
         let blocks = parse_markdown(&t.messages[0].body);
         assert!(matches!(blocks[0], Block::Paragraph(_)));
+    }
+
+    #[test]
+    fn session_rewound_drops_the_last_user_turn() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "first"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "one"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "secnod typo"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "two"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        let last = t.last_user_id().expect("last user");
+        assert_eq!(t.sent_text(last).as_deref(), Some("secnod typo"));
+        // A child-lineage rewind leaves the root transcript alone.
+        t.apply_envelope(&env(
+            "session.rewound",
+            serde_json::json!({"parentSessionId": "root", "depth": 1}),
+        ));
+        assert_eq!(t.messages.len(), 4);
+        t.apply_envelope(&env("session.rewound", serde_json::json!({"removed": 2})));
+        let bodies: Vec<&str> = t.messages.iter().map(|m| m.body.as_str()).collect();
+        assert_eq!(bodies, vec!["first", "one"]);
+        assert_ne!(t.last_user_id(), Some(last));
+        // The resend lands as a fresh turn after the kept history.
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "second fixed"})));
+        assert_eq!(t.messages.last().map(|m| m.body.as_str()), Some("second fixed"));
+    }
+
+    #[test]
+    fn session_rewound_on_empty_transcript_is_a_no_op() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("session.rewound", serde_json::json!({})));
+        assert!(t.messages.is_empty());
+        assert_eq!(t.last_user_id(), None);
     }
 }
