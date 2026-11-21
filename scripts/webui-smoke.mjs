@@ -428,6 +428,7 @@ try {
   await writeFile(
     join(sessionsDir, "retitle-session.meta.json"),
     JSON.stringify({ title: "fix the login bug" }) + "\n",
+  );
   // Live tool tail (#1374) fixture: turn 1's call streams a chunk and
   // then ends (the final output replaces the tail); turn 2's chatty call
   // streams 250 lines and never ends, so it keeps a tail bounded to the
