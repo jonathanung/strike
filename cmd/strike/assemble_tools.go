@@ -18,6 +18,8 @@ import (
 	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/harness/scheduler"
 	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/internal/composer/sessionref"
+	"github.com/jonathanung/strike/internal/composer/triggers"
 	"github.com/jonathanung/strike/internal/enginebind"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/host/local"
@@ -91,6 +93,10 @@ type assembled struct {
 	harnessClose func() error
 	// schedulerClose shuts down the shared in-process admission controller.
 	schedulerClose func()
+	// procScheduler and procSchedPolicy are that controller and its bash
+	// classification; script schedules acquire the same leases.
+	procScheduler   *scheduler.Scheduler
+	procSchedPolicy *scheduler.Effective
 	// spawnRoot creates additional concurrent root engines (interactive multi-root).
 	// resumeID empty = new session; non-empty opens that durable root.
 	spawnRoot rootSpawner
@@ -283,6 +289,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		}
 	}
 	sandboxMode, err := resolveSandboxMode(cfg.Sandbox, opts.sandbox, cfg.Managed.Sandbox)
+	var sandboxRuntime string
+	if err == nil {
+		sandboxRuntime, err = resolveSandboxRuntime(cfg.SandboxRuntime, opts.sandboxRuntime, sandboxMode, cfg.Managed.SandboxRuntime)
+	}
 	if err != nil {
 		_ = ledgerStore.Close()
 		_ = artifactStore.Close()
@@ -890,7 +900,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			SessionID: sid,
 			Select:    selectProvider,
 			PrepareInput: func(text, dir string) engine.InputPrep {
-				return composerPrepare(text, dir, skills)
+				return composerPrepare(text, dir, skills, &triggers.Sessions{
+					Self: sid,
+					Read: sessionref.Reader(sessions.Dir(), sessionref.DefaultTurns),
+				})
 			},
 			Registry:       registry,
 			WorkDir:        toolDir,
@@ -964,6 +977,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialPermissionMode: initialPermMode,
 			SandboxMode:           sandboxMode,
 			SandboxAllowDegrade:   cfg.SandboxAllowDegrade,
+			SandboxRuntime:        sandboxRuntime,
 			NetworkAllow:          sessionNetworkAllow(cfg.Network.Allow, opts.skipNetworkAllow() && !unattended),
 			BashSecrets:           cloneBashSecrets(cfg.BashSecrets),
 			ContentGuard: tool.ContentGuardSettings{
@@ -1238,6 +1252,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	)
 	sandboxPolicy.NetworkAllow = sessionNetworkAllow(cfg.Network.Allow, opts.skipNetworkAllow())
 	sandboxPolicy.AllowDegrade = cfg.SandboxAllowDegrade
+	sandboxPolicy.Runtime = sandbox.ResolveRuntime(sandboxRuntime)
 	sandboxExplain := sandbox.Explain(sandboxPolicy)
 	services.Shell = local.NewShell(workDir, sandboxPolicy)
 	// Permission explain/presets for /permission. Live explain binds to the
@@ -1371,6 +1386,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			return first
 		},
 		schedulerClose:  sched.Close,
+		procScheduler:   sched,
+		procSchedPolicy: schedEff,
 		spawnRoot:       spawn,
 		spawnUnattended: spawnUnattended,
 		firstSlot:       first,

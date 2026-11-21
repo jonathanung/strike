@@ -69,6 +69,10 @@ func seededSessionRecord(t *testing.T, sid string) []byte {
 		protocol.PermissionAsked{Correlation: c, RequestID: "r2", Permission: "edit"},
 		protocol.PermissionDecided{Correlation: c, RequestID: "r2", Permission: "edit", Action: "deny", Decision: protocol.DecisionReject},
 		protocol.PermissionAsked{Correlation: c, RequestID: "r3", Permission: "bash"}, // expired: never resolved
+		// #1387: the daemon now closes a dead ask with an expired pair; it
+		// must still count as unresolved, not allowed.
+		protocol.PermissionResolved{Correlation: c, RequestID: "r3", Decision: protocol.DecisionExpired},
+		protocol.PermissionDecided{Correlation: c, RequestID: "r3", Permission: "bash", Action: "ask", Decision: protocol.DecisionExpired},
 		protocol.PermissionDecided{Correlation: c, Permission: "read", Action: "allow"},
 		protocol.ChildStarted{Correlation: child, Name: "scribe", Agent: "general"},
 		protocol.ToolCallBegin{Correlation: child, CallID: "c1", Name: "grep"},

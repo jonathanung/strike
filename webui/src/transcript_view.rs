@@ -667,7 +667,7 @@ pub fn TranscriptPane(
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, r.tail, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, r.verify, r.tail, fold_open, folds)}
                                 }
                             })
                         }
@@ -813,6 +813,7 @@ struct RowData {
     current: Option<crate::transcript_find::TMatch>,
     elapsed: Option<String>,
     usage: Option<(String, String)>,
+    verify: Option<crate::turn_verify::TurnVerify>,
     tail: Option<crate::tool_tail::ToolTail>,
 }
 
@@ -841,6 +842,7 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
         usage: t
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
+        verify: t.verify_for(msg.id).cloned(),
         tail: t.tail_for(msg.id).cloned(),
     })
 }
@@ -1052,6 +1054,7 @@ fn message_view(
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
     turn_usage: Option<(String, String)>,
+    turn_verify: Option<crate::turn_verify::TurnVerify>,
     tail: Option<crate::tool_tail::ToolTail>,
     fold_open: bool,
     folds: FoldState,
@@ -1065,6 +1068,7 @@ fn message_view(
     let detail = msg.detail.clone();
     let diff = msg.diff.clone();
     let chips = msg.chips.clone();
+    let sent_attachments = msg.attachments.clone();
     let copy_text = if msg.copy_text.is_empty() {
         body.clone()
     } else {
@@ -1077,6 +1081,11 @@ fn message_view(
     let auth_notice =
         msg.role == Role::Notice && msg.badge == crate::transcript::PROVIDER_AUTH_CODE;
     let reconnect = msg.reconnect.clone();
+    // #1371: end-of-turn failure markers carry their stop reason as a
+    // hook for scoped styling and browser checks; every other line has
+    // no attribute.
+    let turn_stop: Option<String> =
+        crate::turn_failure::stop_reason_of(&msg.key).map(str::to_string);
     let auth_retry = retry_text.trim().to_string();
     let stamp = line_stamp(msg.at_ms);
     let stamp_full = line_full_time(msg.at_ms);
@@ -1135,12 +1144,16 @@ fn message_view(
     let child_disc = (msg.role == Role::Child)
         .then(|| (crate::identity::child_key(&title, ""), title.clone()));
     let copy_btn = copy_text.clone();
+    // Lessons capture (#1376): "Remember this" on the user's own messages,
+    // shown only while the page's capture gate (memory mode) allows it.
+    let lesson_gate = use_context::<crate::lessons::CaptureGate>();
+    let lesson_text = (msg.role == Role::You && !copy_text.trim().is_empty()).then(|| copy_text.clone());
     // Per-button copy feedback (#1582): the label only reads "Copied"
     // once the awaited clipboard write resolves; a rejection reads
     // "Copy failed" instead of silence. Reverts after 2s.
     let copy_state = RwSignal::new(None::<bool>);
     view! {
-        <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role>
+        <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role data-turn-stop=turn_stop>
             <header>
                 {child_disc.clone().map(|(ident, name)| view! { <crate::identity::IdentityDisc ident=ident name=name /> })}
                 {if find_title {
@@ -1162,6 +1175,9 @@ fn message_view(
                 {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
                 {turn_elapsed.clone().map(|label| view! { <span class="turn-elapsed" title="Turn elapsed time">{label}</span> })}
                 {turn_usage.clone().map(|(label, detail)| view! { <span class="turn-usage" title=detail>{label}</span> })}
+                {turn_verify.clone().map(|v| view! {
+                    <span class="turn-verify" data-verify=v.state.label() title=v.detail.clone() aria-label=v.detail>{v.state.label()}</span>
+                })}
                 {diff.clone().map(|d| view! {
                     <span class="sx-diff" aria-label=format!("+{} -{}", d.added, d.deleted)>
                         <span class="sx-add">{format!("+{}", d.added)}</span>
@@ -1177,6 +1193,16 @@ fn message_view(
                             crate::clipboard::after_ms(2_000, move || copy_state.set(None));
                         });
                     }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
+                    {lesson_text.zip(lesson_gate).map(|(text, gate)| view! {
+                        <Show when=move || gate.0.get()>
+                            <button type="button" class="sx-quiet" data-action="lesson-remember"
+                                title="Save this message as a lesson future sessions load"
+                                on:click={
+                                    let text = text.clone();
+                                    move |_| { let _ = crate::shell::dispatch("lesson-remember", &text); }
+                                }>"Remember this"</button>
+                        </Show>
+                    })}
                 </span>
             </header>
             {if find_body {
@@ -1201,6 +1227,9 @@ fn message_view(
             } else {
                 view! { <span></span> }.into_any()
             }}
+            {(!sent_attachments.is_empty()).then(|| view! {
+                <crate::transcript_attachments::SentAttachments items=sent_attachments.clone() />
+            })}
             {tail.map(crate::tool_tail::tail_view)}
             {auth_notice.then(|| {
                 let target = reconnect.clone();

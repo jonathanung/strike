@@ -23,6 +23,7 @@ pub fn OnboardingCard(
     token: RwSignal<String>,
     status: RwSignal<String>,
     theme: RwSignal<String>,
+    theme_catalog: RwSignal<theme_catalog::CatalogState>,
     on_theme: impl Fn(String) + Copy + Send + Sync + 'static,
     on_done: impl Fn() + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
@@ -74,7 +75,13 @@ pub fn OnboardingCard(
                 daemon_theme.set(saved.clone());
                 if ok
                     && !user_picked.get_untracked()
-                    && crate::appearance::known_theme(&saved)
+                    && !saved.is_empty()
+                    // Until the catalog answers, apply the id anyway: the
+                    // paint falls back to Strike with a note and repaints
+                    // when the catalog loads (#1529).
+                    && theme_catalog.with_untracked(|c| {
+                        c.entries().is_none() || theme_catalog::selectable(&saved, c)
+                    })
                     && saved != theme.get_untracked()
                 {
                     on_theme(saved);
@@ -191,12 +198,13 @@ pub fn OnboardingCard(
                     <section class="onboarding-step" data-step="look" hidden=move || step.get() != 3>
                         <h3>"Pick a look"</h3>
                         <Show when=move || theme_ready.get() fallback=move || view! { <p class="hint">"Checking the theme saved in daemon config…"</p> }>
-                            <ThemeChoices group="onboarding-accent" current=theme on_pick=pick />
+                            <ThemeChoices group="onboarding-accent" current=theme catalog=theme_catalog on_pick=pick />
                             <Show when=move || {
                                 let saved = daemon_theme.get();
-                                !saved.is_empty() && !crate::appearance::known_theme(&saved)
+                                !saved.is_empty()
+                                    && !theme_catalog.with(|c| theme_catalog::selectable(&saved, c))
                             }>
-                                <p class="hint">{move || format!("Daemon config theme: {}. It is not a bundled accent. Finishing leaves it in place until you pick one.", daemon_theme.get())}</p>
+                                <p class="hint">{move || format!("Daemon config theme: {}. The cockpit cannot paint it from the theme catalog. Finishing leaves it in place until you pick one.", daemon_theme.get())}</p>
                             </Show>
                         </Show>
                         <p class="hint">"Strike is the original palette. Light or dark, type size, and density live in Settings and stay in this browser."</p>

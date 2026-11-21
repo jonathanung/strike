@@ -382,3 +382,117 @@ func TestUserInputImagesWithoutStoreRejected(t *testing.T) {
 	default:
 	}
 }
+
+func getAttachment(t *testing.T, srv *Server, ref string, authed bool) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/v1/attachments/"+ref, nil)
+	if authed {
+		req.Header.Set("Authorization", "Bearer secret")
+	}
+	res := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(res, req)
+	return res
+}
+
+func TestAttachmentGetServesStoredBlob(t *testing.T) {
+	store := openAttachmentStore(t)
+	raw := solidPNG(t, color.RGBA{B: 255, A: 255})
+	pngMeta, err := store.Put(raw, attachment.PutInput{MIME: "image/png", Name: "shot one.png", MaxBytes: attachment.DefaultMaxBytes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pdf := []byte("%PDF-1.4\n%\xe2\xe3\xcf\xd3\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n")
+	pdfMeta, err := store.Put(pdf, attachment.PutInput{MIME: "application/pdf", Name: "spec.pdf", MaxBytes: attachment.DefaultMaxBytes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := mustServer(t, Options{Auth: true, Token: "secret", SessionDir: t.TempDir(), Attachments: store})
+
+	cases := []struct {
+		name     string
+		ref      string
+		authed   bool
+		want     int
+		wantMIME string
+		wantBody []byte
+		wantDisp string
+	}{
+		{name: "png inline", ref: attachment.RefFor(pngMeta.SHA256), authed: true, want: http.StatusOK, wantMIME: "image/png", wantBody: raw, wantDisp: "inline; filename*=UTF-8''shot%20one.png"},
+		{name: "png escaped ref", ref: strings.ReplaceAll(attachment.RefFor(pngMeta.SHA256), ":", "%3A"), authed: true, want: http.StatusOK, wantMIME: "image/png", wantBody: raw},
+		{name: "pdf download", ref: attachment.RefFor(pdfMeta.SHA256), authed: true, want: http.StatusOK, wantMIME: "application/pdf", wantBody: pdf, wantDisp: "attachment; filename*=UTF-8''spec.pdf"},
+		{name: "unauthenticated", ref: attachment.RefFor(pngMeta.SHA256), authed: false, want: http.StatusUnauthorized},
+		{name: "unknown ref", ref: attachment.RefPrefix + strings.Repeat("0", 64), authed: true, want: http.StatusNotFound},
+		{name: "malformed ref", ref: "att:sha256:nothex", authed: true, want: http.StatusBadRequest},
+		{name: "not a ref", ref: "etc-passwd", authed: true, want: http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := getAttachment(t, srv, tc.ref, tc.authed)
+			if res.Code != tc.want {
+				t.Fatalf("status = %d, want %d; body = %s", res.Code, tc.want, res.Body.String())
+			}
+			if tc.want != http.StatusOK {
+				return
+			}
+			if got := res.Header().Get("Content-Type"); got != tc.wantMIME {
+				t.Fatalf("Content-Type = %q, want %q", got, tc.wantMIME)
+			}
+			if !bytes.Equal(res.Body.Bytes(), tc.wantBody) {
+				t.Fatalf("body mismatch: %d bytes", res.Body.Len())
+			}
+			if got := res.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+				t.Fatalf("X-Content-Type-Options = %q", got)
+			}
+			if csp := res.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "sandbox") {
+				t.Fatalf("CSP = %q, want sandbox", csp)
+			}
+			if tc.wantDisp != "" {
+				if got := res.Header().Get("Content-Disposition"); got != tc.wantDisp {
+					t.Fatalf("Content-Disposition = %q, want %q", got, tc.wantDisp)
+				}
+			}
+		})
+	}
+}
+
+func TestAttachmentGetStoreAndReadOnly(t *testing.T) {
+	ref := attachment.RefPrefix + strings.Repeat("a", 64)
+	noStore := mustServer(t, Options{SessionDir: t.TempDir()})
+	if res := getAttachment(t, noStore, ref, false); res.Code != http.StatusServiceUnavailable {
+		t.Fatalf("no store = %d %s", res.Code, res.Body.String())
+	}
+
+	store := openAttachmentStore(t)
+	raw := solidPNG(t, color.RGBA{R: 9, A: 255})
+	meta, err := store.Put(raw, attachment.PutInput{MIME: "image/png", MaxBytes: attachment.DefaultMaxBytes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reads stay available on a read-only gateway and are not charged to
+	// the ops rate limit (burst 1 here would refuse the second read).
+	ro := mustServer(t, Options{SessionDir: t.TempDir(), Attachments: store, ReadOnly: true, OpsRate: 1, OpsBurst: 1})
+	for i := 0; i < 3; i++ {
+		res := getAttachment(t, ro, attachment.RefFor(meta.SHA256), false)
+		if res.Code != http.StatusOK {
+			t.Fatalf("read %d = %d %s", i, res.Code, res.Body.String())
+		}
+		if got := res.Header().Get("Content-Disposition"); got != "inline" {
+			t.Fatalf("unnamed disposition = %q", got)
+		}
+	}
+}
+
+func TestAttachmentDisposition(t *testing.T) {
+	cases := []struct{ mime, name, want string }{
+		{"image/png", "", "inline"},
+		{"IMAGE/JPEG", "a.jpg", "inline; filename*=UTF-8''a.jpg"},
+		{"image/svg+xml", "logo.svg", "attachment; filename*=UTF-8''logo.svg"},
+		{"text/html", "x\".html", "attachment; filename*=UTF-8''x%22.html"},
+		{"application/octet-stream", "  ", "attachment"},
+	}
+	for _, tc := range cases {
+		if got := attachmentDisposition(tc.mime, tc.name); got != tc.want {
+			t.Errorf("attachmentDisposition(%q, %q) = %q, want %q", tc.mime, tc.name, got, tc.want)
+		}
+	}
+}
