@@ -23,6 +23,11 @@ type Config struct {
 	GitHub *GitHub
 	// HTTP is the client for http probes.
 	HTTP *http.Client
+	// Shell runs shell checks. Nil refuses them as unreachable.
+	Shell *Shell
+	// Notify posts the monitoring plan and the final verdict (#1783). Nil
+	// posts nothing.
+	Notify Notifier
 	// Now overrides the clock. Tests use it.
 	Now func() time.Time
 }
@@ -32,6 +37,8 @@ type Service struct {
 	store *Store
 	gh    *GitHub
 	http  *http.Client
+	shell *Shell
+	note  Notifier
 	now   func() time.Time
 	// pollMu serializes polls so a manual poll and the loop cannot race on
 	// the same record.
@@ -40,7 +47,7 @@ type Service struct {
 
 // New binds a store to the check backends.
 func New(store *Store, cfg Config) *Service {
-	s := &Service{store: store, gh: cfg.GitHub, http: cfg.HTTP, now: cfg.Now}
+	s := &Service{store: store, gh: cfg.GitHub, http: cfg.HTTP, shell: cfg.Shell, note: cfg.Notify, now: cfg.Now}
 	if s.gh == nil {
 		s.gh = &GitHub{}
 	}
@@ -82,36 +89,53 @@ func (s *Service) Create(in Input) (Watch, error) {
 // Cancel stops an active watch. A cancelled watch did not finish observing,
 // so its verdict is inconclusive. Cancelling a finished watch is a no-op.
 func (s *Service) Cancel(id string) (Watch, error) {
+	w, settled, err := s.cancel(id)
+	if err != nil || !settled {
+		return w, err
+	}
+	return s.settled(context.Background(), w), nil
+}
+
+func (s *Service) cancel(id string) (Watch, bool, error) {
 	s.pollMu.Lock()
 	defer s.pollMu.Unlock()
 	w, err := s.store.Get(id)
 	if err != nil {
-		return Watch{}, err
+		return Watch{}, false, err
 	}
 	if !w.Active() {
-		return w, nil
+		return w, false, nil
 	}
 	w.Status = StatusCancelled
 	w.Verdict = VerdictInconclusive
 	w.Reason = "cancelled before the watch window closed"
 	w.FinishedAt = s.now().UTC()
 	if err := s.store.Put(w); err != nil {
-		return Watch{}, err
+		return Watch{}, false, err
 	}
-	return w, nil
+	return w, true, nil
 }
 
 // Poll runs every check once, records the round, and settles the verdict if
-// it is final. Polling a finished watch returns it unchanged.
+// it is final. Polling a finished watch returns it unchanged. The verdict is
+// posted (best effort) after the record is stored.
 func (s *Service) Poll(ctx context.Context, id string) (Watch, error) {
+	w, settled, err := s.poll(ctx, id)
+	if err != nil || !settled {
+		return w, err
+	}
+	return s.settled(ctx, w), nil
+}
+
+func (s *Service) poll(ctx context.Context, id string) (Watch, bool, error) {
 	s.pollMu.Lock()
 	defer s.pollMu.Unlock()
 	w, err := s.store.Get(id)
 	if err != nil {
-		return Watch{}, err
+		return Watch{}, false, err
 	}
 	if !w.Active() {
-		return w, nil
+		return w, false, nil
 	}
 	round := Round{At: s.now().UTC()}
 	for _, spec := range w.Checks {
@@ -127,7 +151,7 @@ func (s *Service) Poll(ctx context.Context, id string) (Watch, error) {
 	// A poll cut short (daemon shutdown, client gone) observed nothing; do
 	// not record its unreachable results as evidence.
 	if err := ctx.Err(); err != nil {
-		return Watch{}, err
+		return Watch{}, false, err
 	}
 	now := s.now().UTC()
 	w.LastPolledAt = now
@@ -136,16 +160,18 @@ func (s *Service) Poll(ctx context.Context, id string) (Watch, error) {
 	if len(w.Rounds) > maxRounds {
 		w.Rounds = w.Rounds[len(w.Rounds)-maxRounds:]
 	}
+	settled := false
 	if verdict, reason, final := Evaluate(w.Checks, w.Rounds, w.FailureThreshold, now, w.Deadline); final {
 		w.Status = StatusDone
 		w.Verdict = verdict
 		w.Reason = reason
 		w.FinishedAt = now
+		settled = true
 	}
 	if err := s.store.Put(w); err != nil {
-		return Watch{}, err
+		return Watch{}, false, err
 	}
-	return w, nil
+	return w, settled, nil
 }
 
 func (s *Service) observe(ctx context.Context, w Watch, spec CheckSpec) (string, string) {
@@ -157,6 +183,11 @@ func (s *Service) observe(ctx context.Context, w Watch, spec CheckSpec) (string,
 		return s.gh.Check(ctx, w.Repo, w.SHA)
 	case KindHTTP:
 		return probeHTTP(ctx, s.http, spec.URL, spec.ExpectStatus)
+	case KindShell:
+		if s.shell == nil {
+			return StateUnreachable, "shell checks are not available on this server"
+		}
+		return s.shell.Run(ctx, spec.Command)
 	default:
 		return StateUnreachable, "unknown check kind " + spec.Kind
 	}
@@ -265,13 +296,16 @@ func normalize(in Input) (Watch, error) {
 		c.URL = strings.TrimSpace(c.URL)
 		switch c.Kind {
 		case KindGitHubChecks:
-			if c.URL != "" || c.ExpectStatus != 0 {
+			if c.URL != "" || c.ExpectStatus != 0 || c.Command != "" {
 				return Watch{}, invalid("check %d: github_checks takes no url or expectStatus", i)
 			}
 			if c.Name == "" {
 				c.Name = "GitHub checks"
 			}
 		case KindHTTP:
+			if c.Command != "" {
+				return Watch{}, invalid("check %d: http takes no command", i)
+			}
 			if err := validProbeURL(c.URL); err != nil {
 				return Watch{}, invalid("check %d: %v", i, err)
 			}
@@ -284,8 +318,22 @@ func normalize(in Input) (Watch, error) {
 			if c.Name == "" {
 				c.Name = "HTTP probe"
 			}
+		case KindShell:
+			c.Command = strings.TrimSpace(c.Command)
+			if c.Command == "" || len(c.Command) > maxCommand {
+				return Watch{}, invalid("check %d: command is required (max %d bytes)", i, maxCommand)
+			}
+			if strings.ContainsRune(c.Command, 0) {
+				return Watch{}, invalid("check %d: command contains a NUL byte", i)
+			}
+			if c.URL != "" || c.ExpectStatus != 0 {
+				return Watch{}, invalid("check %d: shell takes no url or expectStatus", i)
+			}
+			if c.Name == "" {
+				c.Name = "Shell check"
+			}
 		default:
-			return Watch{}, invalid("check %d: kind must be %s or %s", i, KindGitHubChecks, KindHTTP)
+			return Watch{}, invalid("check %d: kind must be %s, %s, or %s", i, KindGitHubChecks, KindHTTP, KindShell)
 		}
 		if len(c.Name) > maxName {
 			return Watch{}, invalid("check %d: name is too long", i)

@@ -427,9 +427,21 @@ pruned to the 200-row window. Each browser keeps its own copy in
 load. Dismissing a row ("Clear read") stays per-browser. Not built yet:
 collapsing consecutive same-kind, same-session rows into one counted row.
 
-Not built: a third-party web-push service, and an operating-system banner
-while the browser process is quit. Nothing can wake a quit browser without
-that push service. The next open replays the daemon log into the centre.
+Web Push (#1564): Notification settings has a "Turn on push" toggle that
+asks the browser for permission, subscribes through `PushManager` (helper in
+`register.js`), and registers the subscription with
+`POST /v1/notifications/push-subscriptions` (`DELETE` removes it;
+`GET /v1/notifications/push-key` is the VAPID public key). When a new centre
+row would banner (same enabled / quiet hours / mute policy) and needs you —
+an approval or a blocked run — the daemon encrypts `{type, kind, href, tag}`
+(RFC 8291 aes128gcm, VAPID RFC 8292, standard library only) and posts it to
+each subscription. `sw.js` shows fixed text by kind; names, summaries, prompts
+and tool text are never sent. 404/410 from the push service prunes the
+subscription; `GET /v1/notifications` reports `push.lastResult` so the
+toggle can say a push failed. The VAPID key is `push/vapid.json` beside the
+session dir (0600). Unsupported browsers, blocked permission, and iOS
+without Home Screen install are named in the toggle. Not built yet:
+opt-in push for finished or failed runs.
 A gateway drop is detected by the page (the daemon cannot deliver "I am
 gone"); it is not a JSONL record.
 
@@ -484,6 +496,24 @@ Not drawn yet: the session flag in the engine turn loop, the protocol
 events, and the cockpit Debug panel (hypothesis card, instrumentation
 list, reproduce checklist, mobile chip). Bash is not inspected by the
 gate; the permission layer still governs it.
+## Steer acknowledgement
+
+Shipped (#1343): a steered message carries a marker driven only by the
+engine's durable `turn.steered` event (`webui/src/steer_ack.rs`). `boundary`
+reads "Steer acknowledged. The agent has it from its next step.",
+`cancel_restart` reads "The reply restarted with it.", and a
+`queued_fallback` steer marks the later message it was sent as. The marker
+survives reload because the event is in the JSONL. Pending (sent, not yet
+applied) is the composer's steer note: the steer has no transcript line
+until the engine applies it.
+
+Planned, not drawn: the agent's own one-line "now doing X instead of Y"
+summary and a conflict state ("this steer conflicts with my plan"). Both
+need an agent-emitted event, for example `turn.steer_ack {targetTurnId,
+summary, conflict, reason}` emitted by a model-facing acknowledgement tool,
+that does not exist yet. The cockpit's protocol gate drops unknown events,
+so nothing renders them until the engine and schema carry the event. The
+marker never derives a summary or a conflict from timing or a plan diff.
 
 ## Run with N models
 
