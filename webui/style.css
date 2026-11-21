@@ -3163,3 +3163,9 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .files-head .hint, .changes-head .hint { margin: 0; }
 /* feature:files-refresh end */
+
+/* feature:update-check begin */
+.update-mode { border: 0; padding: 0; margin: 0 0 var(--space-2); }
+.update-mode legend { margin-bottom: 4px; }
+.update-status { margin: 0 0 var(--space-2); }
+/* feature:update-check end */

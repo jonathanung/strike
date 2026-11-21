@@ -245,6 +245,9 @@ pub struct BootstrapCapabilities {
     /// present, live engine, and not `--read-only`.
     #[serde(default, rename = "projectInit")]
     pub project_init: bool,
+    /// True when `GET /v1/update` can run the release probe (#1583).
+    #[serde(default, rename = "updateCheck")]
+    pub update_check: bool,
 }
 
 /// One `/v1/init` reply (#1581). `exists` with a non-empty `error` is the

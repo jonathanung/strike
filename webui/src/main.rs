@@ -59,6 +59,7 @@ mod term;
 mod terminal;
 mod transcript;
 mod transcript_view;
+mod update_check;
 mod triggers;
 mod turn_elapsed;
 mod turn_usage;
@@ -1695,6 +1696,7 @@ fn App() -> impl IntoView {
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
                                 ledger_capable.set(boot.capabilities.ledger);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
                                 skills.set(boot.skills);
                                 commands.set(boot.composer_commands);
                                 if !catalog_once.get_untracked() {

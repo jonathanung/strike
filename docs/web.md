@@ -993,6 +993,13 @@ Response: `{ mode, state, current?, latest?, available, message?, error?, checke
 `current` (only after a successful check), `failed` (offline, rate limit, API
 error — never reported as up to date), or `unknown`. Missing capability returns
 501.
+
+The cockpit calls the route once per gateway after bootstrap reports
+`capabilities.updateCheck`, and again from **Settings → Updates** (dial change
+or *Check now*). The Updates section edits the `autoupdate` dial and states the
+result (`off`, available, up to date, or the failure reason). An `available`
+result adds one notification-centre row keyed by the release; dismissing it
+holds until a newer release. The web never installs.
 The cockpit Settings dialog loads `GET`, edits sections, and saves via `PATCH`.
 Browser color scheme (auto/dark/light) is local-only (`data-appearance` +
 `localStorage`), not a host config key.

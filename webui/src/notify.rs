@@ -516,6 +516,44 @@ fn short_when(at: &str) -> String {
     format!("{} {}", &at[5..10], &at[11..16])
 }
 
+const UPDATE_NOTE_PREFIX: &str = "local-update-";
+
+/// The centre row for a newer release (#1583), or None. The id carries the
+/// release, so a dismissal (stored per gateway) holds for that release and
+/// the next release surfaces once. No OS banner: this is a calm notice.
+fn update_note(check: Option<&crate::update_check::UpdateCheck>) -> Option<Note> {
+    let c = check?;
+    if c.state != "available" || c.latest.trim().is_empty() {
+        return None;
+    }
+    let body = if c.current.is_empty() {
+        "Install it on the host with strike upgrade. This page never installs.".to_string()
+    } else {
+        format!("This gateway runs {}. Install it on the host with strike upgrade. This page never installs.", c.current)
+    };
+    Some(Note {
+        id: format!("{UPDATE_NOTE_PREFIX}{}", c.latest.trim()),
+        seq: 0,
+        kind: "update.available".into(),
+        session_id: String::new(),
+        subject_id: String::new(),
+        title: format!("Strike {} is available", c.latest.trim()),
+        body,
+        href: String::new(),
+        request_id: String::new(),
+        banner: false,
+        at: c.checked_at.clone(),
+    })
+}
+
+/// Replace any update row with `note` (None clears it).
+fn upsert_update_note(list: &mut Vec<Note>, note: Option<Note>) {
+    list.retain(|n| !n.id.starts_with(UPDATE_NOTE_PREFIX));
+    if let Some(note) = note {
+        list.insert(0, note);
+    }
+}
+
 fn kind_label(kind: &str) -> &'static str {
     match kind {
         "approval.needed" => "Approval",
@@ -523,6 +561,7 @@ fn kind_label(kind: &str) -> &'static str {
         "child.blocked" => "Blocked",
         "session.finished" => "Session",
         "gateway.disconnected" => "Gateway",
+        "update.available" => "Update",
         _ => "Notice",
     }
 }
@@ -853,6 +892,9 @@ pub fn NotificationBell(
 
     let activate = UnsyncCallback::new(move |note: Note| {
         mark(note.id.clone());
+        if note.kind == "update.available" {
+            let _ = crate::shell::host::set_view("settings");
+        }
         if let Some(target) = parse_focus(&note.href) {
             if let Some(window) = web_sys::window() {
                 let hash = note.href.trim_start_matches("/#").trim_start_matches('#');
@@ -1084,6 +1126,13 @@ pub fn NotificationBell(
         if p.enabled && !quiet_active(&p, local_minutes()) {
             show_os(&note.kind, &note.href, &note.id);
         }
+    });
+
+    // #1583: mirror the update check into one local row.
+    let update = crate::update_check::signal();
+    Effect::new(move |_| {
+        let note = update.with(|c| update_note(c.as_ref()));
+        items.update(|list| upsert_update_note(list, note));
     });
 
     let save = UnsyncCallback::new({
@@ -1724,6 +1773,45 @@ mod tests {
             banner: false,
             at: String::new(),
         }
+    }
+
+    #[test]
+    fn update_note_only_for_an_available_release() {
+        use crate::update_check::UpdateCheck;
+        let mut c = UpdateCheck {
+            state: "available".into(),
+            current: "v1.2.0".into(),
+            latest: "v1.3.0".into(),
+            ..UpdateCheck::default()
+        };
+        let note = update_note(Some(&c)).expect("note");
+        assert_eq!(note.id, "local-update-v1.3.0");
+        assert_eq!(note.kind, "update.available");
+        assert!(!note.banner);
+        assert!(note.body.contains("never installs"));
+        assert_eq!(kind_label(&note.kind), "Update");
+        for state in ["current", "failed", "off", "unknown"] {
+            c.state = state.into();
+            assert!(update_note(Some(&c)).is_none(), "{state}");
+        }
+        assert!(update_note(None).is_none());
+    }
+
+    #[test]
+    fn update_row_is_replaced_and_survives_poll_merge() {
+        let mut list = vec![plain_note("a", 1)];
+        let c = crate::update_check::UpdateCheck {
+            state: "available".into(),
+            latest: "v2".into(),
+            ..Default::default()
+        };
+        upsert_update_note(&mut list, update_note(Some(&c)));
+        upsert_update_note(&mut list, update_note(Some(&c)));
+        assert_eq!(list.iter().filter(|n| n.id.starts_with("local-update-")).count(), 1);
+        let merged = merge_notes(&list, &[plain_note("b", 2)]);
+        assert_eq!(merged[0].id, "local-update-v2");
+        upsert_update_note(&mut list, None);
+        assert!(list.iter().all(|n| !n.id.starts_with("local-update-")));
     }
 
     #[test]
