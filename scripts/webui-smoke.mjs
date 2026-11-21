@@ -3562,15 +3562,19 @@ try {
       async () => {
         const raw = await evaluate(`(() => {
           const row = document.querySelector('[data-idea="${ideaId}"]');
+          const badge = document.querySelector('[data-nav="header"] [data-ideas-badge]');
           return JSON.stringify({
             root: !!document.querySelector("#ideas-root"),
             row: !!row,
             text: row ? row.innerText : "",
+            badge: badge ? badge.innerText : "",
+            quiet: !!document.querySelector("[data-ideas-quiet]"),
           });
         })()`);
         const p = JSON.parse(raw || "{}");
+        // #1926: the open-count badge lives in the shell header, not the rail.
         return {
-          ok: !!(p.root && p.row && p.text.includes("tidy the README") && p.text.includes("stale section") && p.text.includes("Smoke evidence")),
+          ok: !!(p.root && p.row && p.text.includes("tidy the README") && p.text.includes("stale section") && p.text.includes("Smoke evidence") && p.badge.includes("1") && p.quiet),
           ...p,
         };
       },
@@ -3582,10 +3586,13 @@ try {
         const raw = await evaluate(`(() => {
           const btn = document.querySelector('[data-idea="${ideaId}"] .ideas-dismiss');
           if (btn && !btn.disabled) btn.click();
-          return JSON.stringify({ empty: !!document.querySelector("[data-ideas-empty]") });
+          return JSON.stringify({
+            empty: !!document.querySelector("[data-ideas-empty]"),
+            badge: !!document.querySelector('[data-nav="header"] [data-ideas-badge]'),
+          });
         })()`);
         const p = JSON.parse(raw || "{}");
-        return { ok: !!p.empty, ...p };
+        return { ok: !!p.empty && !p.badge, ...p };
       },
       { timeout: WAIT_MS, interval: 400 },
     );
@@ -3593,6 +3600,25 @@ try {
     const stored = (ideasAfter.suggestions || []).find((x) => x.id === ideaId);
     if (!stored || stored.state !== "dismissed" || ideasAfter.open !== 0) {
       throw new Error(`dismissed idea state = ${JSON.stringify(ideasAfter).slice(0, 400)}`);
+    }
+    // #1926: quiet hours are store-enforced; reserved producer sources are
+    // refused over HTTP.
+    const prefsUrl = `${ideasUrl}/prefs`;
+    const allDay = { mutedSources: [], mutedKinds: [], quietHours: { enabled: true, start: "00:00", end: "00:00" } };
+    const quietSet = await fetch(prefsUrl, { method: "PUT", headers: ideaAuth, body: JSON.stringify(allDay) });
+    if (quietSet.status !== 200) {
+      throw new Error(`suggestions quiet hours = ${quietSet.status} ${await quietSet.text()}`);
+    }
+    const quietIdea = { ...idea, evidenceKey: "smoke:quiet" };
+    const held = await fetch(ideasUrl, { method: "POST", headers: ideaAuth, body: JSON.stringify(quietIdea) });
+    if (held.status !== 409) {
+      throw new Error(`suggestions create in quiet hours = ${held.status}`);
+    }
+    allDay.quietHours.enabled = false;
+    await fetch(prefsUrl, { method: "PUT", headers: ideaAuth, body: JSON.stringify(allDay) });
+    const reserved = await fetch(ideasUrl, { method: "POST", headers: ideaAuth, body: JSON.stringify({ ...idea, source: "scheduler" }) });
+    if (reserved.status !== 400) {
+      throw new Error(`suggestions create as reserved producer = ${reserved.status}`);
     }
   }
 

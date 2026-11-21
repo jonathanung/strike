@@ -838,6 +838,13 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) (result error) {
 		Revert:   &deploywatch.Reverter{RepoDir: cwd, GitHub: dwGitHub},
 	})
 	trigSvc.SetDeployWatches(deployWatches)
+	// Ideas inbox trigger producer (#1926): a delivery whose session did
+	// not start becomes one suggestion per trigger, once the server exists.
+	trigSvc.SetProblems(func(p trigger.Problem) {
+		if srv := notifySrv.Load(); srv != nil {
+			srv.SuggestTriggerProblem(p)
+		}
+	})
 	if !opts.readOnly {
 		go deployWatches.Run(ctx, deploywatch.DefaultTick)
 	}

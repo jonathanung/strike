@@ -4125,6 +4125,8 @@ fn App() -> impl IntoView {
         on_focus: on_notify,
     });
     notify::set_unread_host(notify_unread);
+    // #1926: the Ideas badge is a header slot; give it the daemon address.
+    ideas::set_host(base, token);
 
     shell::boot();
     shell::set_host(shell::HostBridge {
@@ -5788,7 +5790,6 @@ fn App() -> impl IntoView {
                     panel_drawer.set(false);
                 }></button>
                 <aside class="rail">
-                    <ideas::IdeasBadge base=base token=token mode=mode />
 <SessionPanel
                         base=base
                         token=token
