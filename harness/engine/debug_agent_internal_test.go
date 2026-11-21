@@ -53,6 +53,19 @@ func TestAgentDebugControlNeedsActiveSession(t *testing.T) {
 	}
 }
 
+func TestAgentDebugControlChildDoesNotDriveParentSession(t *testing.T) {
+	parent := newAgentDebugEngine(t, nil)
+	parent.debug.Store(debugmode.New())
+	child := New(Options{SessionID: "child", debugFrom: parent})
+	_, err := child.agentDebugControl(protocol.Correlation{}, twoHypotheses())
+	if err == nil || !strings.Contains(err.Error(), "belongs to the parent") {
+		t.Fatalf("err = %v", err)
+	}
+	if hs := parent.debug.Load().Snapshot().Hypotheses; len(hs) != 0 {
+		t.Fatalf("child changed parent hypotheses: %+v", hs)
+	}
+}
+
 func TestAgentDebugControlRefusesUserOnlyActions(t *testing.T) {
 	e := newAgentDebugEngine(t, nil)
 	s := debugmode.New()

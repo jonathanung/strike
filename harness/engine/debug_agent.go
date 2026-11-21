@@ -37,6 +37,9 @@ func (e *Engine) agentDebugControl(corr protocol.Correlation, op tool.DebugOp) (
 		return "", fmt.Errorf("debug_session: action %q is not allowed; you may set hypotheses, attach evidence and mark verdicts. %s", action, errDebugUserOnly)
 	}
 	if e.debug.Load() == nil {
+		if e.activeDebug() != nil {
+			return "", errors.New("debug_session: the debug session belongs to the parent agent; report your findings to it instead")
+		}
 		return "", errors.New("debug_session: no debug session is active; the user starts one from the Debug panel")
 	}
 	ctl := protocol.DebugControl{
