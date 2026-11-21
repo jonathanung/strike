@@ -4,7 +4,7 @@
 // Unknown event type strings become Event::Unknown.
 // Unknown JSON fields are ignored. Missing fields are defaults.
 // Unknown op type strings return Err.
-// protocol.Version 1.26.0
+// protocol.Version 1.27.0
 
 use std::collections::HashMap;
 
@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "1.26.0";
+pub const PROTOCOL_VERSION: &str = "1.27.0";
 pub const LEGACY_VERSION: &str = "1.0.0";
 
 /// Open string. Known writer values live in the JSON Schema.
@@ -329,6 +329,8 @@ pub struct ChildCompleted {
     pub budget_kind: String,
     #[serde(default, rename = "finalization")]
     pub finalization: String,
+    #[serde(default, rename = "usage")]
+    pub usage: Option<ChildUsage>,
 }
 
 /// ChildEscalated reports a per-child budget/stall/loop trip (#774 / #879). Emitted on the parent stream before interrupt or finalization. Action is "finalizing" (soft budget: one reserved structured-handoff turn), "interrupted" (hard kill in flight), or "signaled" (soft observability only — unused in hard path). Kind is wall_clock|tokens|cost_usd|tool_calls| dangerous_tools|stall|loop. Correlation is the child session.
@@ -397,6 +399,15 @@ pub struct ChildStarted {
     pub worktree_path: String,
     #[serde(default, rename = "baseRevision")]
     pub base_revision: String,
+}
+
+/// ChildUsage is the provider usage a delegated child accumulated before its terminal status. Tokens sums every stream's reported tokens; CostUSD is nil when no pricing was available for the child's model.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct ChildUsage {
+    #[serde(default, rename = "tokens")]
+    pub tokens: i64,
+    #[serde(default, rename = "costUsd")]
+    pub cost_usd: Option<f64>,
 }
 
 /// Compact requests model-history compaction. Rejected while a turn is running. Strategy selects trim (drop older turns, default) or summarize (model-authored summary). Empty uses the engine/config default.

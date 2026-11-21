@@ -149,8 +149,10 @@ type Outcome struct {
 	FilesChanged int
 	Added        int
 	Removed      int
-	Tokens       int
-	CostUSD      float64
+	// Tokens and CostUSD are nil when the provider reported no usage or no
+	// price, so the card shows nothing rather than a fabricated zero.
+	Tokens  *int
+	CostUSD *float64
 	// Verified is nil when no verification command was configured.
 	Verified *bool
 	// Err is set when the child failed; Finish then marks it failed.

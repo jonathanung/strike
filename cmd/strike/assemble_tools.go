@@ -489,8 +489,12 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tools.NewExitPlanMode(),
 		tools.NewPhaseDone(),
 		tools.NewSteerAck(),
+		tools.NewDebugSession(),
 	)
 	registry.Register(tool.NewToolSearch(registry))
+	// Powers (#1943) scope pack tools to the session that activated them;
+	// engines are built before Powers, so they read the check late.
+	powersVisible := &lateToolVisible{}
 	frameStore := &tool.TUIFrameStore{}
 	if config.DeferToolsEnabled(cfg.DeferTools) {
 		registry.SetDeferLoading(true)
@@ -923,6 +927,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				})
 			},
 			Registry:       registry,
+			ToolVisible:    powersVisible.check,
 			WorkDir:        toolDir,
 			WorkspaceRoots: append([]string(nil), binding.Roots...),
 			Audit:          auditSink,
@@ -1311,9 +1316,14 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	if wsTrust.trusted {
 		powersWS = filepath.Join(launchDir, ".strike", "powers")
 	}
-	services.Powers = local.NewPowers(powersWS, powersGlobal,
-		mcp.NewPackConnector(mcpMgr, local.PowerServerConfig(powersWS, powersGlobal, launchDir)),
-		local.PowersDeny(basePermLayers))
+	// Pack tools and skills are visible only in the session that activated
+	// the pack (#1943); mute state and last-used times persist.
+	packConn := mcp.NewPackConnector(mcpMgr, local.PowerServerConfig(powersWS, powersGlobal, launchDir))
+	var powersScope *local.PowersScope
+	services.Powers, powersScope = local.NewScopedPowers(powersWS, powersGlobal,
+		filepath.Join(globalRoot, "powers-state.json"), packConn, local.PowersDeny(basePermLayers))
+	powersVisible.set(local.PowersToolVisible(powersScope, packConn.ScopedTool))
+	bindPowersSkills(registry, powersScope)
 	services.LSP = local.NewLSP(lspMgr)
 	services.Plugins = local.NewPlugins(workDir)
 	services.Panes = local.NewPanes(workDir)

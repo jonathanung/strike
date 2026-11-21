@@ -503,47 +503,151 @@ pub fn IdeasPage(
             }}
             <details class="fold ideas-controls">
                 <summary>"Inbox controls"</summary>
-                <p class="hint">"Muted sources and kinds cannot deposit ideas."</p>
-                <QuietHoursForm prefs=prefs on_save=Callback::new(move |next: IdeaPrefs| save_prefs(next)) />
-                {move || {
-                    let p = prefs.get();
-                    if p.muted_sources.is_empty() && p.muted_kinds.is_empty() {
-                        return view! { <p class="hint">"Nothing muted."</p> }.into_any();
-                    }
-                    let sources = p.muted_sources.clone();
-                    let kinds = p.muted_kinds.clone();
-                    view! {
-                        <ul class="plain ideas-muted">
-                            {sources.into_iter().map(|s| {
-                                let label = format!("Source: {s}");
-                                view! {
-                                    <li>
-                                        <span>{label}</span>
-                                        <button type="button" class="link" on:click=move |_| {
-                                            let mut next = prefs.get_untracked();
-                                            next.muted_sources.retain(|x| x != &s);
-                                            save_prefs(next);
-                                        }>"Unmute"</button>
-                                    </li>
-                                }
-                            }).collect_view()}
-                            {kinds.into_iter().map(|k| {
-                                let label = format!("Kind: {k}");
-                                view! {
-                                    <li>
-                                        <span>{label}</span>
-                                        <button type="button" class="link" on:click=move |_| {
-                                            let mut next = prefs.get_untracked();
-                                            next.muted_kinds.retain(|x| x != &k);
-                                            save_prefs(next);
-                                        }>"Unmute"</button>
-                                    </li>
-                                }
-                            }).collect_view()}
-                        </ul>
-                    }.into_any()
-                }}
+                <InboxControls prefs=prefs on_save=Callback::new(move |next: IdeaPrefs| save_prefs(next)) />
             </details>
+        </div>
+    }
+}
+
+/// Inbox controls (#1926, #1950): a toggle per reserved producer, the
+/// other muted sources and kinds with Unmute, and quiet hours. The Ideas
+/// page and the Settings section both render it over the same prefs.
+#[component]
+fn InboxControls(prefs: RwSignal<IdeaPrefs>, on_save: Callback<IdeaPrefs>) -> impl IntoView {
+    let unmute_source = move |s: String| {
+        let mut next = prefs.get_untracked();
+        next.muted_sources = ideas_inbox::set_muted(&next.muted_sources, &s, false);
+        on_save.run(next);
+    };
+    let unmute_kind = move |k: String| {
+        let mut next = prefs.get_untracked();
+        next.muted_kinds = ideas_inbox::set_muted(&next.muted_kinds, &k, false);
+        on_save.run(next);
+    };
+    view! {
+        <fieldset class="ideas-producers" data-ideas-producers="true">
+            <legend>"Producers that may deposit ideas"</legend>
+            {ideas_inbox::PRODUCERS.into_iter().map(|(token, label)| {
+                view! {
+                    <label class="ideas-producer">
+                        <input
+                            type="checkbox"
+                            data-producer=token
+                            prop:checked=move || !prefs.get().muted_sources.iter().any(|s| s == token)
+                            on:change=move |ev| {
+                                let allowed = event_target_checked(&ev);
+                                let mut next = prefs.get_untracked();
+                                next.muted_sources = ideas_inbox::set_muted(&next.muted_sources, token, !allowed);
+                                on_save.run(next);
+                            }
+                        />
+                        {format!(" {label}")}
+                    </label>
+                }
+            }).collect_view()}
+            <p class="hint">"A cleared producer is muted: it cannot deposit ideas. Dismissed ideas never come back."</p>
+        </fieldset>
+        <QuietHoursForm prefs=prefs on_save=on_save />
+        {move || {
+            let p = prefs.get();
+            let sources = ideas_inbox::other_muted(&p.muted_sources);
+            let kinds = p.muted_kinds.clone();
+            if sources.is_empty() && kinds.is_empty() {
+                return view! { <p class="hint">"No other sources or kinds muted."</p> }.into_any();
+            }
+            view! {
+                <ul class="plain ideas-muted">
+                    {sources.into_iter().map(|s| {
+                        let label = format!("Source: {s}");
+                        view! {
+                            <li>
+                                <span>{label}</span>
+                                <button type="button" class="link" on:click=move |_| unmute_source(s.clone())>"Unmute"</button>
+                            </li>
+                        }
+                    }).collect_view()}
+                    {kinds.into_iter().map(|k| {
+                        let label = format!("Kind: {k}");
+                        view! {
+                            <li>
+                                <span>{label}</span>
+                                <button type="button" class="link" on:click=move |_| unmute_kind(k.clone())>"Unmute"</button>
+                            </li>
+                        }
+                    }).collect_view()}
+                </ul>
+            }.into_any()
+        }}
+    }
+}
+
+/// Settings section for the Ideas inbox (#1950). Same controls as the
+/// Ideas page's "Inbox controls", saved through the same
+/// `PUT /v1/suggestions/prefs` (muted sources, kinds and quiet hours).
+#[component]
+pub fn IdeasSettings(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoView {
+    let prefs = RwSignal::new(IdeaPrefs::default());
+    let loaded = RwSignal::new(false);
+    let error = RwSignal::new(String::new());
+    let note = RwSignal::new(String::new());
+    let load = move || {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match get_json::<ListDto>(&b, &t, "/v1/suggestions").await {
+                Ok(list) => {
+                    set_open_count(list.open);
+                    prefs.set(list.prefs);
+                    error.set(String::new());
+                }
+                Err(e) => error.set(format!("Could not load inbox controls: {e}")),
+            }
+            loaded.set(true);
+        });
+    };
+    Effect::new(move |_| {
+        let _ = (base.get(), token.get());
+        load();
+    });
+    let save = move |next: IdeaPrefs| {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        // Show the change at once; the reload below restores the daemon's
+        // copy if the save is refused.
+        prefs.set(next.clone());
+        spawn_local(async move {
+            let body = json!({
+                "mutedSources": next.muted_sources,
+                "mutedKinds": next.muted_kinds,
+                "quietHours": {
+                    "enabled": next.quiet_hours.enabled,
+                    "start": next.quiet_hours.start,
+                    "end": next.quiet_hours.end,
+                },
+            });
+            match put_json_value(&b, &t, "/v1/suggestions/prefs", body).await {
+                Ok(_) => {
+                    error.set(String::new());
+                    note.set("Inbox controls saved.".into());
+                }
+                Err(e) => {
+                    note.set(String::new());
+                    error.set(format!("Saving inbox controls failed: {e}"));
+                }
+            }
+            load();
+        });
+    };
+    view! {
+        <div class="ideas-settings" data-settings-ideas="true">
+            <p class="hint">"Which background producers may deposit suggestions in Ideas, and when."</p>
+            <Show when=move || !error.get().is_empty()>
+                <p class="banner" role="alert">{move || error.get()}</p>
+            </Show>
+            <Show when=move || !note.get().is_empty()>
+                <p class="hint" role="status">{move || note.get()}</p>
+            </Show>
+            <Show when=move || loaded.get() fallback=|| view! { <p class="hint">"Loading…"</p> }>
+                <InboxControls prefs=prefs on_save=Callback::new(save) />
+            </Show>
         </div>
     }
 }

@@ -84,7 +84,7 @@ additive fields on all of them.
 | `verification.started` | `VerificationStarted` | Independent completion gates beginning (`scope`: `turn` \| `child`, `gateCount`) |
 | `verification.completed` | `VerificationCompleted` | Gate outcome (`Report`: claimed vs verified, checks, env). A failed `cmd` check may carry `triage` (parsed go test failures, `focusedCommand`, `originalOutput`, bounded `attempts`, `fullGateSkipped`, `exhausted`) (#1178, wire 1.23+) |
 | `turn.completed` | `TurnCompleted` | Optional `verification` report when solo/harness gates ran |
-| `child.completed` | `ChildCompleted` | Optional `verification` when child spawn configured gates |
+| `child.completed` | `ChildCompleted` | Optional `verification` when child spawn configured gates; optional `usage` (`tokens`, `costUsd` when priced) when the child's provider reported usage (1.27.0) |
 | `permission.decided` | `PermissionDecided` | Permission audit (effective action + matched rule layer); optional tool-chain fields `chainId` / `chainRule` / `chainSummary` (#891, wire 1.13+) |
 | `admission.decided` | `AdmissionDecided` | MCP/skill/plugin admission audit (allow\|warn\|block\|quarantine) (#889, wire 1.14+) |
 | `permission.asked` / `permission.resolved` | `PermissionAsked` / `PermissionResolved` | Interactive ask lifecycle |

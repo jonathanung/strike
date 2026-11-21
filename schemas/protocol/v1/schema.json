@@ -480,6 +480,17 @@
         "turnId": {
           "type": "string"
         },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChildUsage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        },
         "verification": {
           "anyOf": [
             {
@@ -630,6 +641,30 @@
         "canceled",
         "blocked"
       ]
+    },
+    "ChildUsage": {
+      "additionalProperties": true,
+      "description": "ChildUsage is the provider usage a delegated child accumulated before its terminal status. Tokens sums every stream's reported tokens; CostUSD is nil when no pricing was available for the child's model.",
+      "properties": {
+        "costUsd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-strike-go-pointer": true
+        },
+        "tokens": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tokens"
+      ],
+      "type": "object"
     },
     "Compact": {
       "additionalProperties": true,
@@ -7786,7 +7821,7 @@
   "x-strike-event-count": 70,
   "x-strike-legacy-version": "1.0.0",
   "x-strike-op-count": 36,
-  "x-strike-protocol-version": "1.26.0",
+  "x-strike-protocol-version": "1.27.0",
   "x-strike-unknown-event": "valid",
   "x-strike-unknown-field": "ignore",
   "x-strike-unknown-op": "reject"

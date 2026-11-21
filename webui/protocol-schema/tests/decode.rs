@@ -115,3 +115,29 @@ fn loop_id_decodes_and_defaults_empty() {
         other => panic!("{other:?}"),
     }
 }
+
+// #1962: child.completed carries optional usage; absent stays None (not zero),
+// and a missing cost stays None when tokens were reported.
+#[test]
+fn child_usage_decodes_and_stays_absent() {
+    let cases = [
+        (
+            r#"{"type":"child.completed","v":"1.27.0","data":{"status":"completed","handoff":{},"usage":{"tokens":1200,"costUsd":0.042}}}"#,
+            Some((1200, Some(0.042))),
+        ),
+        (
+            r#"{"type":"child.completed","v":"1.27.0","data":{"status":"completed","handoff":{},"usage":{"tokens":0}}}"#,
+            Some((0, None)),
+        ),
+        (r#"{"type":"child.completed","v":"1.26.0","data":{"status":"completed","handoff":{}}}"#, None),
+    ];
+    for (raw, want) in cases {
+        match decode_event(raw).expect("child.completed") {
+            Event::ChildCompleted(cc) => {
+                let got = cc.usage.map(|u| (u.tokens, u.cost_usd));
+                assert_eq!(got, want, "{raw}");
+            }
+            other => panic!("child.completed decoded as {other:?}"),
+        }
+    }
+}

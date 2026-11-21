@@ -260,6 +260,7 @@ type (
 	EngineError             = pub.EngineError
 	ChildStarted            = pub.ChildStarted
 	ChildCompleted          = pub.ChildCompleted
+	ChildUsage              = pub.ChildUsage
 	ChildEscalated          = pub.ChildEscalated
 	AgentBudgetView         = pub.AgentBudgetView
 	DelegationChanged       = pub.DelegationChanged

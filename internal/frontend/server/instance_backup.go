@@ -2,15 +2,16 @@ package server
 
 // Instance backup and restore (#1339): GET /v1/backup/export streams one
 // portable archive of this gateway's sessions, memory, knowledge pins,
-// schedules and non-secret settings; POST /v1/backup/restore validates an
+// schedules, issues, plans and non-secret settings (GET /v1/backup/estimate
+// reports its size first); POST /v1/backup/restore validates an
 // archive and either reports what it would do (?dryRun=1) or does it.
 //
 // Restore never overwrites silently: a record the target already has
 // byte-for-byte is skipped, a differing one is restored as a copy under a
 // " (restored)" name or a fresh id, and every decision is reported. Every
 // write goes through the owning store's own API (session.Manager,
-// host.Memory, host.Knowledge, schedule.Service, host.Settings), never raw
-// files.
+// host.Memory, host.Knowledge, schedule.Service, host.Issues, host.Plans,
+// host.Settings), never raw files.
 
 import (
 	"errors"
@@ -66,10 +67,10 @@ var backupAlwaysExcluded = []backup.Exclusion{
 	{Category: "provider credentials (~/.strike/auth.json, API keys, OAuth tokens)", Kind: backup.ExcludeSecret, Reason: "secrets never leave the gateway; sign in again on the target"},
 	{Category: "gateway bearer tokens and pairing codes", Kind: backup.ExcludeSecret, Reason: "a backup must not grant access to the gateway it came from"},
 	{Category: "secret references and environment values (secret://env/*)", Kind: backup.ExcludeSecret, Reason: "values live in the host environment, not in Strike"},
-	{Category: "credential-shaped text inside sessions, memory, knowledge pin notes and schedule prompts", Kind: backup.ExcludeSecret, Reason: "scrubbed by the same redaction as session export"},
+	{Category: "credential-shaped text inside sessions, memory, knowledge pin notes, schedule prompts, issues and plans", Kind: backup.ExcludeSecret, Reason: "scrubbed by the same redaction as session export"},
 	{Category: "script schedules", Kind: backup.ExcludePolicy, Reason: "commands may embed credentials and must be re-armed on the target"},
 	{Category: "permission mode and sandbox dials (global and per schedule)", Kind: backup.ExcludePolicy, Reason: "trust dials are set deliberately on each gateway, never from a file"},
-	{Category: "artifacts, attachments, goals/autopilot state, workspaces and their rules, issues, plans, ledger", Kind: backup.ExcludeLater, Reason: "not covered by archive version 1"},
+	{Category: "artifacts, attachments, goals/autopilot state, workspaces and their rules, ledger", Kind: backup.ExcludeLater, Reason: "not covered by archive version 1 yet"},
 }
 
 func (s *Server) handleBackupExport(w http.ResponseWriter, r *http.Request) {
@@ -176,6 +177,10 @@ func (s *Server) buildBackup(now time.Time) (*backup.Archive, error) {
 		}
 	} else {
 		a.Exclude("schedules", backup.ExcludeUnavailable, "this gateway runs no schedule clock")
+	}
+
+	if err := s.addBackupIssuesAndPlans(a); err != nil {
+		return nil, err
 	}
 
 	pkgs, unreadable, err := exportBackupSessions(s.opts.SessionDir)
@@ -324,6 +329,18 @@ func (s *Server) restoreBackup(a *backup.Archive, apply bool) (*backup.Report, e
 		return nil, err
 	} else if ok {
 		s.restoreBackupSchedules(rep, schedules, apply)
+	}
+	var issues []backupIssue
+	if ok, err := a.Section(backup.SectionIssues, &issues); err != nil {
+		return nil, err
+	} else if ok {
+		s.restoreBackupIssues(rep, issues, apply)
+	}
+	var plans []backupPlan
+	if ok, err := a.Section(backup.SectionPlans, &plans); err != nil {
+		return nil, err
+	} else if ok {
+		s.restoreBackupPlans(rep, plans, apply)
 	}
 	var pkgs []session.Package
 	if ok, err := a.Section(backup.SectionSessions, &pkgs); err != nil {

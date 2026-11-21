@@ -978,3 +978,70 @@ func TestStreamClassifiesRefusals(t *testing.T) {
 		})
 	}
 }
+
+// TestResponsesStreamClassifiesRefusals pins #1963: a Responses API
+// "refusal" output part is the typed refusal stop reason, its prose still
+// reaches the transcript, and a plain status passes through.
+func TestResponsesStreamClassifiesRefusals(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantStop string
+		wantText string
+	}{
+		{
+			name:     "refusal part",
+			body:     `{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"refusal","refusal":"I can't help with that."}]}]}`,
+			wantStop: provider.StopReasonRefusal,
+			wantText: "I can't help with that.",
+		},
+		{
+			name:     "empty refusal part",
+			body:     `{"status":"completed","output":[{"type":"message","content":[{"type":"refusal"}]}]}`,
+			wantStop: provider.StopReasonRefusal,
+		},
+		{
+			name:     "plain completed passes through",
+			body:     `{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`,
+			wantStop: "completed",
+			wantText: "ok",
+		},
+		{
+			name:     "missing status reads completed",
+			body:     `{"output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`,
+			wantStop: "completed",
+			wantText: "ok",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, tt.body)
+			}))
+			defer srv.Close()
+			p := NewResponses("openai", srv.URL+"/v1", func(context.Context) (string, error) { return "k", nil }, nil)
+			stream, err := p.Stream(context.Background(), provider.Request{
+				Model:    "gpt-5.5",
+				Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+			})
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+			var text, stop string
+			for ev := range stream {
+				switch ev.Type {
+				case provider.EventTextDelta:
+					text += ev.Text
+				case provider.EventDone:
+					stop = ev.StopReason
+				case provider.EventError:
+					t.Fatalf("stream error: %v", ev.Err)
+				}
+			}
+			if stop != tt.wantStop || text != tt.wantText {
+				t.Errorf("stop=%q text=%q, want stop=%q text=%q", stop, text, tt.wantStop, tt.wantText)
+			}
+		})
+	}
+}

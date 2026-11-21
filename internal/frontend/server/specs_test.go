@@ -9,10 +9,13 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/host/local"
 	"github.com/jonathanung/strike/internal/persist/plan"
+	"github.com/jonathanung/strike/internal/persist/spec"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 func specServer(t *testing.T) (*Server, string, *plan.Store) {
@@ -174,5 +177,148 @@ func TestSpecStoreSharedAcrossRequests(t *testing.T) {
 	c, _ := other.specStore()
 	if c == a {
 		t.Fatal("different work dirs must not share a store")
+	}
+}
+
+func TestSpecPlannerFindMatchesOwnerTitleAndTime(t *testing.T) {
+	ps, err := plan.Open(t.TempDir(), "proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ps.Close() })
+	plans := local.NewPlans(ps)
+	since := time.Now().Add(-time.Minute)
+	mine := specPlanner{plans: plans, owner: "root-a"}
+	want, err := mine.Create("Data export", []spec.PlanSection{{Title: "T1", Body: "b"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (specPlanner{plans: plans, owner: "root-b"}).Create("Data export", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mine.Create("Other", nil); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name  string
+		title string
+		since time.Time
+		want  string
+	}{
+		{"own plan after intent", "Data export", since, want},
+		{"plan older than intent", "Data export", time.Now().Add(time.Hour), ""},
+		{"no plan with title", "Missing", since, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := mine.Find(tc.title, tc.since)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("Find = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSpecDraftRequirementsFillsUnsavedDraft(t *testing.T) {
+	ops := make(chan protocol.Op, 4)
+	live := NewLive("sess-draft", "/work/repo", nil, ops)
+	defer live.Close()
+	model := &sharpenModel{}
+	srv, err := New(Options{SessionDir: t.TempDir(), WorkDir: t.TempDir(), Live: live, SideChat: model})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, created := specDo(t, srv, http.MethodPost, "/v1/specs", `{"name":"export","title":"Data export","description":"Users download their data."}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create = %d %v", code, created)
+	}
+	v := specVersion(t, created)
+
+	tests := []struct {
+		name      string
+		body      string
+		modelText string
+		wantCode  int
+		wantRows  int
+		wantInQ   string
+	}{
+		{
+			name:      "explicit description",
+			body:      `{"description":"Export CSV and JSON."}`,
+			modelText: "```json\n[{\"story\":\"As a user I export CSV\",\"criteria\":[\"WHEN I click export THE SYSTEM SHALL download a csv\"]},{\"story\":\"As a user I export JSON\",\"criteria\":[]}]\n```",
+			wantCode:  http.StatusOK,
+			wantRows:  2,
+			wantInQ:   "Export CSV and JSON.",
+		},
+		{
+			name:      "falls back to the spec description",
+			body:      `{}`,
+			modelText: `[{"story":"s","criteria":["THE SYSTEM SHALL x"]}]`,
+			wantCode:  http.StatusOK,
+			wantRows:  1,
+			wantInQ:   "Users download their data.",
+		},
+		{
+			name:      "unparseable model output",
+			body:      `{"description":"x"}`,
+			modelText: "Sorry, I can't.",
+			wantCode:  http.StatusBadGateway,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			model.out = SideChatCompletion{Text: tc.modelText}
+			code, out := specDo(t, srv, http.MethodPost, "/v1/specs/export/requirements/draft", tc.body)
+			if code != tc.wantCode {
+				t.Fatalf("draft = %d %v", code, out)
+			}
+			if tc.wantCode != http.StatusOK {
+				return
+			}
+			rows, _ := out["requirements"].([]any)
+			if len(rows) != tc.wantRows {
+				t.Fatalf("rows = %v", out)
+			}
+			if !strings.Contains(model.got.Question, tc.wantInQ) || !strings.Contains(model.got.Question, "Data export") {
+				t.Fatalf("question = %q", model.got.Question)
+			}
+			if !strings.Contains(model.got.System, "EARS") {
+				t.Fatalf("system prompt lacks EARS guidance")
+			}
+		})
+	}
+	// Drafting never saves or approves: the spec is untouched.
+	code, got := specDo(t, srv, http.MethodGet, "/v1/specs/export", "")
+	if code != http.StatusOK || specVersion(t, got) != v || len(got["requirements"].([]any)) != 0 {
+		t.Fatalf("draft mutated the spec: %d %v", code, got)
+	}
+	if st, _ := got["status"].(map[string]any); st["requirements"] != "draft" {
+		t.Fatalf("draft changed phase status: %v", st)
+	}
+}
+
+func TestSpecDraftRequirementsNeedsDescription(t *testing.T) {
+	ops := make(chan protocol.Op, 4)
+	live := NewLive("sess-draft", "/work/repo", nil, ops)
+	defer live.Close()
+	model := &sharpenModel{}
+	srv, err := New(Options{SessionDir: t.TempDir(), WorkDir: t.TempDir(), Live: live, SideChat: model})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := specDo(t, srv, http.MethodPost, "/v1/specs", `{"name":"bare"}`); code != http.StatusCreated {
+		t.Fatalf("create = %d", code)
+	}
+	if code, _ := specDo(t, srv, http.MethodPost, "/v1/specs/bare/requirements/draft", `{}`); code != http.StatusBadRequest {
+		t.Fatalf("no description = %d", code)
+	}
+	if code, _ := specDo(t, srv, http.MethodPost, "/v1/specs/missing/requirements/draft", `{"description":"x"}`); code != http.StatusNotFound {
+		t.Fatalf("missing spec = %d", code)
+	}
+	if model.called {
+		t.Fatal("model called without a usable description")
 	}
 }

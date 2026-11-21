@@ -42,7 +42,7 @@ func (s *Server) handlePowersList(w http.ResponseWriter, r *http.Request) {
 		out.LoadErrors = []string{}
 	}
 	if sid := strings.TrimSpace(r.URL.Query().Get("session")); sid != "" {
-		if act := p.Active(sid); act != nil {
+		if act := p.Active(s.powersSession(sid)); act != nil {
 			out.Active = act
 		}
 	}
@@ -64,7 +64,7 @@ func (s *Server) handlePowersSuggest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
-	names := p.Suggest(strings.TrimSpace(body.Session), body.Prompt)
+	names := p.Suggest(s.powersSession(strings.TrimSpace(body.Session)), body.Prompt)
 	if names == nil {
 		names = []string{}
 	}
@@ -96,6 +96,25 @@ func (s *Server) decodePowersPack(w http.ResponseWriter, r *http.Request) (power
 	return body, true
 }
 
+// powersSession maps a root id or session id to the durable session id the
+// root engine runs under, so an activation keys on the same id the engine's
+// per-session tool and skill scope checks (#1943). Unknown ids pass through.
+func (s *Server) powersSession(id string) string {
+	if s.opts.LiveHub == nil || id == "" {
+		return id
+	}
+	l := s.opts.LiveHub.LiveFor(id)
+	if l == nil {
+		l = s.opts.LiveHub.LiveForSession(id)
+	}
+	if l != nil {
+		if sid := l.SessionID(); sid != "" {
+			return sid
+		}
+	}
+	return id
+}
+
 // sessionIsLive reports whether id names a live root or session. Without a
 // LiveHub (single-root serve) every id is accepted.
 func (s *Server) sessionIsLive(id string) bool {
@@ -121,7 +140,7 @@ func (s *Server) handlePowersActivate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, opErrorResponse{Error: "session is not live"})
 		return
 	}
-	res, err := p.Activate(body.Session, body.Name)
+	res, err := p.Activate(s.powersSession(body.Session), body.Name)
 	if err != nil {
 		code := http.StatusBadRequest
 		if errors.Is(err, powers.ErrDenied) {
@@ -144,7 +163,7 @@ func (s *Server) handlePowersDeactivate(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	if err := p.Deactivate(body.Session, body.Name); err != nil {
+	if err := p.Deactivate(s.powersSession(body.Session), body.Name); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}

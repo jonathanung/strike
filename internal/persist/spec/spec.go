@@ -7,6 +7,7 @@
 //	requirements.md  rendered requirements (read-only mirror)
 //	design.md        the design phase's free text
 //	tasks.md         rendered tasks with their requirement citations
+//	handoff.json     transient hand-off journal (intent, then plan id)
 //
 // Phases are gated: requirements → design → tasks. A phase can be approved
 // only after the previous one is approved, and only by an explicit call

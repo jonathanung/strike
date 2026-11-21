@@ -47,6 +47,9 @@ type bestOfNEntry struct {
 	mu      sync.Mutex // serialises adopt / keep-none and guards fields below
 	patches map[string]string
 	note    string
+	// commentary is set once the parent session was asked to comment on
+	// how the results differ (#1962).
+	commentary bool
 }
 
 type bestOfNRegistry struct {
@@ -238,6 +241,14 @@ func bestOfNOutcome(cc protocol.ChildCompleted) bestofn.Outcome {
 		Added:        added,
 		Removed:      removed,
 		Worktree:     strings.TrimSpace(h.WorktreePath),
+	}
+	if u := cc.Usage; u != nil {
+		tokens := u.Tokens
+		out.Tokens = &tokens
+		if u.CostUSD != nil {
+			cost := *u.CostUSD
+			out.CostUSD = &cost
+		}
 	}
 	if v := cc.Verification; v != nil {
 		passed := v.Passed
@@ -474,8 +485,8 @@ type bestOfNCandidateDTO struct {
 	FilesChanged int       `json:"filesChanged"`
 	Added        int       `json:"added"`
 	Removed      int       `json:"removed"`
-	Tokens       int       `json:"tokens,omitempty"`
-	CostUSD      float64   `json:"costUsd,omitempty"`
+	Tokens       *int      `json:"tokens,omitempty"`
+	CostUSD      *float64  `json:"costUsd,omitempty"`
 	Verified     *bool     `json:"verified,omitempty"`
 	Error        string    `json:"error,omitempty"`
 	HasPatch     bool      `json:"hasPatch"`
@@ -498,6 +509,7 @@ type bestOfNRunDTO struct {
 	Complete       bool                  `json:"complete"`
 	Decision       *bestOfNDecisionDTO   `json:"decision,omitempty"`
 	Note           string                `json:"note,omitempty"`
+	Commentary     bool                  `json:"commentaryRequested,omitempty"`
 	CreatedAt      time.Time             `json:"createdAt"`
 }
 
@@ -506,6 +518,7 @@ func (s *Server) bestOfNDTO(e *bestOfNEntry) bestOfNRunDTO {
 	now := time.Now()
 	e.mu.Lock()
 	note := e.note
+	commentary := e.commentary
 	hasPatch := map[string]bool{}
 	for id, p := range e.patches {
 		hasPatch[id] = strings.TrimSpace(p) != ""
@@ -523,9 +536,10 @@ func (s *Server) bestOfNDTO(e *bestOfNEntry) bestOfNRunDTO {
 			MaxTokens:  req.Budget.MaxTokens,
 			TimeoutSec: int(req.Budget.Timeout / time.Second),
 		},
-		Complete:  e.run.Complete(),
-		Note:      note,
-		CreatedAt: e.created,
+		Complete:   e.run.Complete(),
+		Note:       note,
+		Commentary: commentary,
+		CreatedAt:  e.created,
 	}
 	for _, cr := range e.run.Candidates() {
 		end := cr.Ended
@@ -732,6 +746,114 @@ func (s *Server) handleBestOfNKeepNone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.keepNoneBestOfN(r.Context(), e); err != nil {
+		writeJSON(w, http.StatusConflict, opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.bestOfNDTO(e))
+}
+
+// ---- Parent-agent commentary (#1962) ----
+
+const (
+	bestOfNCommentPromptMax  = 600
+	bestOfNCommentSummaryMax = 1200
+)
+
+// bestOfNCommentaryText is the user turn that asks the owner session for a
+// short note on how the candidates differ. It is commentary only: the turn
+// tells the agent not to pick, rank or apply anything, and adopting stays
+// a separate confirmed call on the card.
+func bestOfNCommentaryText(id string, run *bestofn.Run) string {
+	req := run.Request()
+	cands := run.Candidates()
+	var b strings.Builder
+	fmt.Fprintf(&b, "[best-of-N %s] All %d runs of the same prompt have stopped. ", id, len(cands))
+	b.WriteString("In a few sentences, comment on how the results differ: approach, scope of changes, verification, and any failures. ")
+	b.WriteString("This is commentary only. Do not choose, rank or recommend a winner, and do not apply, merge or edit anything: the user compares the runs and adopts one (or none) from the comparison card.\n\n")
+	fmt.Fprintf(&b, "Prompt: %s\n\nRuns:\n", clipBestOfN(req.Prompt, bestOfNCommentPromptMax))
+	for i, cr := range cands {
+		fmt.Fprintf(&b, "%d. %s: %s", i+1, cr.Candidate.Label(), cr.Status)
+		if cr.ChildID != "" {
+			fmt.Fprintf(&b, " (session %s)", cr.ChildID)
+		}
+		if !cr.Ended.IsZero() && !cr.Started.IsZero() {
+			fmt.Fprintf(&b, ", %s", cr.Ended.Sub(cr.Started).Round(time.Second))
+		}
+		if req.Edits {
+			fmt.Fprintf(&b, ", %d file(s) +%d −%d", cr.Outcome.FilesChanged, cr.Outcome.Added, cr.Outcome.Removed)
+		}
+		if v := cr.Outcome.Verified; v != nil {
+			if *v {
+				b.WriteString(", verification passed")
+			} else {
+				b.WriteString(", verification failed")
+			}
+		}
+		if t := cr.Outcome.Tokens; t != nil {
+			fmt.Fprintf(&b, ", %d tokens", *t)
+		}
+		if c := cr.Outcome.CostUSD; c != nil {
+			fmt.Fprintf(&b, ", ~$%.4f", *c)
+		}
+		b.WriteString("\n")
+		if sum := strings.TrimSpace(cr.Outcome.Summary); sum != "" {
+			fmt.Fprintf(&b, "   Summary: %s\n", clipBestOfN(sum, bestOfNCommentSummaryMax))
+		}
+		if msg := strings.TrimSpace(cr.Outcome.Err); msg != "" {
+			fmt.Fprintf(&b, "   Error: %s\n", clipBestOfN(msg, bestOfNCommentSummaryMax))
+		}
+	}
+	return b.String()
+}
+
+// clipBestOfN trims s to at most n runes on one line.
+func clipBestOfN(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
+}
+
+// requestBestOfNCommentary submits the commentary turn to the owner's live
+// session once every candidate has stopped. It spends one parent turn, so
+// it only runs when the user asks (the card's Compare button) and once per
+// run.
+func (s *Server) requestBestOfNCommentary(ctx context.Context, e *bestOfNEntry) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	switch {
+	case !e.run.Complete():
+		return errors.New("bestofn: wait until every run has stopped")
+	case e.commentary:
+		return errors.New("bestofn: commentary was already requested; see the transcript")
+	}
+	if _, decided := e.run.Decision(); decided {
+		return errors.New("bestofn: this comparison is already decided")
+	}
+	live := s.liveForOwner(e.owner)
+	if live == nil {
+		return errors.New("owning session is not live")
+	}
+	if live.Status().Busy {
+		return errors.New("bestofn: the session is busy; ask again when the current turn finishes")
+	}
+	submitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := live.Submit(submitCtx, protocol.UserInput{Text: bestOfNCommentaryText(e.id, e.run)}); err != nil {
+		return err
+	}
+	e.commentary = true
+	return nil
+}
+
+func (s *Server) handleBestOfNCompare(w http.ResponseWriter, r *http.Request) {
+	e := s.bestOfNFor(w, r)
+	if e == nil || !s.admitBestOfN(w, r, "bestofn.compare") {
+		return
+	}
+	s.reconcileBestOfN(e)
+	if err := s.requestBestOfNCommentary(r.Context(), e); err != nil {
 		writeJSON(w, http.StatusConflict, opErrorResponse{Error: err.Error()})
 		return
 	}
