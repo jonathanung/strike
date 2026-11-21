@@ -15,7 +15,7 @@ use load_guard::{commit_load, Commit, ErrPolicy, LoadEpoch};
 
 use crate::load_epoch::begin;
 
-use crate::api::{self, get_json, patch_json, post_json_value};
+use crate::api::{self, get_json, get_text, patch_json, post_json_value};
 use crate::outcome;
 use crate::scheduler_presets::SchedulerPresetsSection;
 use crate::shell::Choice;
@@ -106,6 +106,16 @@ struct ScheduleItem {
     last_session_id: String,
     #[serde(default, rename = "lastError")]
     last_error: String,
+    // Script-only fields (#1777). The daemon never sends a script entry's
+    // payload for other sources.
+    #[serde(default)]
+    command: String,
+    #[serde(default)]
+    dir: String,
+    #[serde(default)]
+    timeout: String,
+    #[serde(default, rename = "secretRefs")]
+    secret_refs: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -126,6 +136,15 @@ struct RunItem {
     permission_mode: String,
     #[serde(default)]
     error: String,
+    // Script-run fields (#1777): no session; exit code and a scrubbed tail.
+    #[serde(default, rename = "exitCode")]
+    exit_code: Option<i64>,
+    #[serde(default, rename = "outputPreview")]
+    output_preview: String,
+    #[serde(default, rename = "outputRef")]
+    output_ref: String,
+    #[serde(default)]
+    decision: String,
 }
 
 #[derive(Deserialize)]
@@ -279,6 +298,8 @@ fn status_label(status: &str) -> &'static str {
         "error" => "Error",
         "interrupted" => "Interrupted",
         "queued" => "Waiting",
+        "failed" => "Failed",
+        "denied" => "Denied",
         _ => "New",
     }
 }
@@ -287,7 +308,7 @@ fn status_badge(status: &str) -> &'static str {
     match status {
         "started" | "queued" => "badge badge-running",
         "finished" | "quiet" => "badge badge-done",
-        "error" => "badge badge-failed",
+        "error" | "failed" | "denied" => "badge badge-failed",
         "skipped" | "missed" | "interrupted" => "badge badge-stalled",
         _ => "badge",
     }
@@ -300,6 +321,53 @@ fn kind_label(kind: &str) -> &'static str {
         "once" => "One-shot",
         "heartbeat" => "Heartbeat",
         _ => "Schedule",
+    }
+}
+
+/// Script schedules (#1777) are an explicit opt-in: the source value the
+/// daemon validates. Never the form default.
+const SOURCE_SCRIPT: &str = "script";
+
+/// The mode a script run will use, as the confirm step states it. The
+/// daemon resolves workspace mode first, then the schedule's, then plan.
+fn resolved_mode_label(permission_mode: &str) -> String {
+    let mode = match permission_mode.trim() {
+        "" | "plan" => "Plan",
+        "default" => "Default",
+        "soft-approve" => "Soft approve",
+        "accept-edits" => "Accept edits",
+        "yolo" => "Yolo",
+        other => other,
+    };
+    format!("{mode} (a workspace permission mode, when set, wins)")
+}
+
+/// The OS sandbox dial a script run will use, from GET /v1/sandbox.
+fn sandbox_dial_label(mode: &str) -> String {
+    match mode.trim() {
+        "off" => "Off: runs on the host".into(),
+        "read-only" => "Read-only".into(),
+        "workspace-write" => "Workspace write".into(),
+        "" => "Unknown (sandbox status unavailable)".into(),
+        other => other.to_string(),
+    }
+}
+
+/// Secret refs typed one per line (or comma-separated), trimmed, blanks
+/// dropped. The daemon validates each as secret://env/NAME.
+fn parse_secret_refs(text: &str) -> Vec<String> {
+    text.split(|c| c == '\n' || c == ',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Exit code column for a script run: blank dash when no process started.
+fn exit_label(code: Option<i64>) -> String {
+    match code {
+        Some(n) => format!("exit {n}"),
+        None => "—".into(),
     }
 }
 
@@ -356,6 +424,20 @@ pub fn SchedulePage(
     let overlap = RwSignal::new("skip".to_string());
     let missed = RwSignal::new("skip".to_string());
     let enabled = RwSignal::new(true);
+    // Script schedule fields (#1777). `confirming` is the arm step: the
+    // first submit of a script shows the full command, mode, and sandbox
+    // dial; only "Confirm and arm" sends it with confirm: true.
+    let command = RwSignal::new(String::new());
+    let dir = RwSignal::new(String::new());
+    let script_timeout = RwSignal::new(String::new());
+    let secret_refs = RwSignal::new(String::new());
+    let confirming = RwSignal::new(false);
+    let sandbox_mode = RwSignal::new(String::new());
+    // Saved source of the schedule being edited: the daemon refuses to
+    // change a schedule to or from script, so the picker locks that edge.
+    let saved_source = RwSignal::new(String::new());
+    // "Open output" for one script run: (run id, sidecar text or error).
+    let output_open = RwSignal::new((String::new(), String::new()));
     // List refresh and history write different signals, so each has its own
     // epoch. One counter would drop a list commit when history starts.
     let list_epoch = RwSignal::new(LoadEpoch::new());
@@ -464,6 +546,39 @@ pub fn SchedulePage(
 
     refresh();
 
+    {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            if let Ok(snap) = get_json::<crate::sandbox_explain::SandboxSnapshot>(&b, &t, "/v1/sandbox").await {
+                sandbox_mode.set(snap.mode);
+            }
+        });
+    }
+
+    let open_output = move |schedule_id: String, run_id: String| {
+        if output_open.get_untracked().0 == run_id {
+            output_open.set((String::new(), String::new()));
+            return;
+        }
+        output_open.set((run_id.clone(), "Loading output…".into()));
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = format!(
+                "/v1/schedules/{}/runs/{}/output",
+                api::js_encode(&schedule_id),
+                api::js_encode(&run_id)
+            );
+            let text = match get_text(&b, &t, &path).await {
+                Ok(text) if text.is_empty() => "No output was kept for this run.".to_string(),
+                Ok(text) => text,
+                Err(_) => "Output is not available for this run.".to_string(),
+            };
+            if output_open.get_untracked().0 == run_id {
+                output_open.set((run_id, text));
+            }
+        });
+    };
+
     let run_saved = {
         let base = base;
         let token = token;
@@ -571,6 +686,13 @@ pub fn SchedulePage(
         overlap.set("skip".into());
         missed.set("skip".into());
         enabled.set(true);
+        command.set(String::new());
+        dir.set(String::new());
+        script_timeout.set(String::new());
+        secret_refs.set(String::new());
+        confirming.set(false);
+        saved_source.set(String::new());
+        output_open.set((String::new(), String::new()));
         let _ = begin(history_epoch);
         runs.set(Vec::new());
         history_error.set(String::new());
@@ -595,7 +717,14 @@ pub fn SchedulePage(
         } else {
             item.timezone
         });
+        saved_source.set(item.source.clone());
         source.set(item.source);
+        command.set(item.command);
+        dir.set(item.dir);
+        script_timeout.set(item.timeout);
+        secret_refs.set(item.secret_refs.join("\n"));
+        confirming.set(false);
+        output_open.set((String::new(), String::new()));
         prompt.set(item.prompt);
         goal_id.set(item.goal_id);
         workflow.set(item.workflow);
@@ -619,6 +748,8 @@ pub fn SchedulePage(
         }
         name.set(duplicate_schedule_name(&name.get_untracked()));
         editing.set(String::new());
+        saved_source.set(String::new());
+        confirming.set(false);
         confirm_delete.set(String::new());
         enabled.set(false);
         let _ = begin(history_epoch);
@@ -633,7 +764,8 @@ pub fn SchedulePage(
     };
 
     let save = move || {
-        let body = json!({
+        let script = source.get_untracked() == SOURCE_SCRIPT;
+        let mut body = json!({
             "name": name.get_untracked(),
             "kind": kind.get_untracked(),
             "cron": cron.get_untracked(),
@@ -650,6 +782,21 @@ pub fn SchedulePage(
             "missed": missed.get_untracked(),
             "enabled": enabled.get_untracked(),
         });
+        if script {
+            // A script carries a command only, overlap is always skip, and
+            // the write is the arming: confirm is sent only from the
+            // confirm step.
+            body["prompt"] = json!("");
+            body["goalId"] = json!("");
+            body["workflow"] = json!("");
+            body["overlap"] = json!("skip");
+            body["command"] = json!(command.get_untracked());
+            body["dir"] = json!(dir.get_untracked());
+            body["timeout"] = json!(script_timeout.get_untracked());
+            body["secretRefs"] = json!(parse_secret_refs(&secret_refs.get_untracked()));
+            body["confirm"] = json!(true);
+        }
+        confirming.set(false);
         let (b, t, id) = (
             base.get_untracked(),
             token.get_untracked(),
@@ -675,9 +822,20 @@ pub fn SchedulePage(
                                 load_history(new_id);
                             }
                         }
-                        notice.set("Schedule saved. It stays quiet until the next fire.".into());
+                        notice.set(if script {
+                            "Script schedule armed. It runs at the next fire.".into()
+                        } else {
+                            "Schedule saved. It stays quiet until the next fire.".into()
+                        });
                     } else {
-                        notice.set("Schedule updated.".into());
+                        notice.set(if script {
+                            "Script schedule re-armed.".into()
+                        } else {
+                            "Schedule updated.".into()
+                        });
+                    }
+                    if script {
+                        saved_source.set(SOURCE_SCRIPT.into());
                     }
                     refresh();
                 }
@@ -789,12 +947,16 @@ pub fn SchedulePage(
                             let when = fmt_when(&item.next_fire, &item.timezone);
                             let when_title = fmt_when_title(&item.next_fire);
                             let meta_prefix = format!("{} · ", kind_label(&item.kind));
+                            let is_script = item.source == SOURCE_SCRIPT;
                             let badge = status_badge(&item.last_status).to_string();
                             let state = if !item.enabled { "Paused".to_string() } else { status_label(&item.last_status).to_string() };
                             let item_for_click = item.clone();
                             view! {
                                 <button type="button" class=if selected { "sched-row on" } else { "sched-row" } on:click=move |_| fill(item_for_click.clone())>
                                     <span class="name">{label}</span>
+                                    <Show when=move || is_script>
+                                        <span class="badge sched-script-badge">"script"</span>
+                                    </Show>
                                     <span class="meta">{meta_prefix}<span title=when_title>{when}</span>{err_bit}</span>
                                     <span class=badge>{state}</span>
                                 </button>
@@ -805,6 +967,12 @@ pub fn SchedulePage(
                 </div>
                 <form class="sched-form" on:submit=move |ev: web_sys::SubmitEvent| {
                     ev.prevent_default();
+                    // A script is armed only from the confirm step.
+                    if source.get_untracked() == SOURCE_SCRIPT && !confirming.get_untracked() {
+                        error.set(String::new());
+                        confirming.set(true);
+                        return;
+                    }
                     save();
                 }>
                     <label>"Name"
@@ -837,15 +1005,42 @@ pub fn SchedulePage(
                         <input prop:value=move || timezone.get() on:input=move |ev| timezone.set(event_target_value(&ev)) />
                     </label>
                     <label>"Starts from"
-                        <select prop:value=move || source.get() on:change=move |ev| source.set(event_target_value(&ev))>
-                            <option value="prompt">"Prompt"</option>
-                            <option value="goal">"Goal"</option>
-                            <option value="workflow">"Workflow"</option>
+                        <select id="schedule-source" prop:value=move || source.get() on:change={move |ev| {
+                            let next = event_target_value(&ev);
+                            if next == SOURCE_SCRIPT {
+                                overlap.set("skip".into());
+                            }
+                            confirming.set(false);
+                            source.set(next);
+                        }}>
+                            // A saved schedule cannot change to or from a
+                            // script (the daemon refuses); lock that edge.
+                            <option value="prompt" disabled={move || saved_source.get() == SOURCE_SCRIPT}>"Prompt"</option>
+                            <option value="goal" disabled={move || saved_source.get() == SOURCE_SCRIPT}>"Goal"</option>
+                            <option value="workflow" disabled={move || saved_source.get() == SOURCE_SCRIPT}>"Workflow"</option>
+                            <option value="script" disabled={move || !saved_source.get().is_empty() && saved_source.get() != SOURCE_SCRIPT}>"Script (shell command, no agent)"</option>
                         </select>
                     </label>
-                    <label class="span-2">"Prompt"
-                        <textarea prop:value=move || prompt.get() on:input=move |ev| prompt.set(event_target_value(&ev)) rows="4"></textarea>
-                    </label>
+                    <Show when={move || source.get() != SOURCE_SCRIPT}>
+                        <label class="span-2">"Prompt"
+                            <textarea prop:value=move || prompt.get() on:input=move |ev| prompt.set(event_target_value(&ev)) rows="4"></textarea>
+                        </label>
+                    </Show>
+                    <Show when={move || source.get() == SOURCE_SCRIPT}>
+                        <p class="hint span-2">"Runs bash -c with your permission rules, hooks, and sandbox dial. No agent session. You confirm the exact command before it is armed."</p>
+                        <label class="span-2">"Command"
+                            <textarea class="sched-command" id="schedule-command" required=true spellcheck="false" prop:value=move || command.get() on:input={move |ev| { confirming.set(false); command.set(event_target_value(&ev)) }} rows="3" placeholder="make test"></textarea>
+                        </label>
+                        <label>"Working directory"
+                            <input prop:value=move || dir.get() on:input={move |ev| { confirming.set(false); dir.set(event_target_value(&ev)) }} placeholder="Workspace path" />
+                        </label>
+                        <label>"Timeout"
+                            <input prop:value=move || script_timeout.get() on:input=move |ev| script_timeout.set(event_target_value(&ev)) placeholder="30m (10s to 6h)" />
+                        </label>
+                        <label class="span-2">"Secret refs (optional, one per line)"
+                            <textarea prop:value=move || secret_refs.get() on:input=move |ev| secret_refs.set(event_target_value(&ev)) rows="2" placeholder="secret://env/NAME"></textarea>
+                        </label>
+                    </Show>
                     <Show when=move || source.get() == "goal">
                         <label>"Goal"
                             <input list="sched-goals" prop:value=move || goal_id.get() on:input=move |ev| goal_id.set(event_target_value(&ev)) />
@@ -871,9 +1066,9 @@ pub fn SchedulePage(
                     </label>
                     <label>"Overlap"
                         <select prop:value=move || overlap.get() on:change=move |ev| overlap.set(event_target_value(&ev))>
-                            <option value="skip">"Skip if the last session is busy"</option>
-                            <option value="queue">"Wait, then run once"</option>
-                            <option value="allow">"Allow another session"</option>
+                            <option value="skip">"Skip if the last run is busy"</option>
+                            <option value="queue" disabled={move || source.get() == SOURCE_SCRIPT}>"Wait, then run once"</option>
+                            <option value="allow" disabled={move || source.get() == SOURCE_SCRIPT}>"Allow another session"</option>
                         </select>
                     </label>
                     <label>"Missed while down"
@@ -882,8 +1077,30 @@ pub fn SchedulePage(
                             <option value="once">"Run the latest once"</option>
                         </select>
                     </label>
+                    <Show when={move || confirming.get() && source.get() == SOURCE_SCRIPT}>
+                        <div class="sched-confirm span-2" role="group" aria-label="Confirm script schedule">
+                            <h3>"Confirm the command"</h3>
+                            <p class="hint">"This exact command runs unattended on every fire. Deny rules and hooks still apply; an ask is answered by this confirmation."</p>
+                            <pre class="sched-output" id="schedule-confirm-command">{move || command.get()}</pre>
+                            <p class="meta">"Mode: "{move || resolved_mode_label(&permission_mode.get())}</p>
+                            <p class="meta">"Sandbox: "{move || sandbox_dial_label(&sandbox_mode.get())}</p>
+                            <p class="meta">"Directory: "{move || if dir.get().trim().is_empty() { "workspace path".to_string() } else { dir.get() }}</p>
+                            <div class="sched-actions">
+                                <button type="submit" class="primary" id="schedule-confirm">"Confirm and arm"</button>
+                                <button type="button" class="secondary" on:click=move |_| confirming.set(false)>"Back"</button>
+                            </div>
+                        </div>
+                    </Show>
                     <div class="sched-actions">
-                        <button type="submit" class="primary">{move || if editing.get().is_empty() { "Create" } else { "Save" }}</button>
+                        <button type="submit" class="primary" hidden={move || confirming.get() && source.get() == SOURCE_SCRIPT}>{move || {
+                            if source.get() == SOURCE_SCRIPT {
+                                "Review command"
+                            } else if editing.get().is_empty() {
+                                "Create"
+                            } else {
+                                "Save"
+                            }
+                        }}</button>
                         <button type="button" class="secondary" id="schedule-duplicate" disabled=move || editing.get().is_empty() on:click=move |_| duplicate()>"Duplicate"</button>
                         <button type="button" class="secondary" on:click=move |_| remove()>
                             {move || if confirm_delete.get() == editing.get() && !editing.get().is_empty() { "Confirm delete" } else { "Delete" }}
@@ -923,12 +1140,9 @@ pub fn SchedulePage(
                             // edit field: an unsaved (or half-typed) zone must
                             // not re-label runs that fired under the saved one.
                             let sel = editing.get();
-                            let hist_tz = items
-                                .get()
-                                .into_iter()
-                                .find(|s| s.id == sel)
-                                .map(|s| s.timezone)
-                                .unwrap_or_default();
+                            let selected = items.get().into_iter().find(|s| s.id == sel);
+                            let hist_tz = selected.as_ref().map(|s| s.timezone.clone()).unwrap_or_default();
+                            let script_history = selected.map(|s| s.source == SOURCE_SCRIPT).unwrap_or(false);
                             let rows = rows.into_iter().map(|run| {
                                 let when = fmt_when(&run.fired_at, &hist_tz);
                                 let when_title = fmt_when_title(&run.fired_at);
@@ -945,6 +1159,49 @@ pub fn SchedulePage(
                                 } else {
                                     format!("{} · {}", run.permission_mode, run.error)
                                 };
+                                if script_history {
+                                    // Script runs have no session: exit code,
+                                    // scrubbed output tail, and the sidecar.
+                                    let exit = exit_label(run.exit_code);
+                                    let preview = run.output_preview.clone();
+                                    let has_preview = !preview.is_empty();
+                                    let run_id = run.id.clone();
+                                    let run_for_show = run.id.clone();
+                                    let has_output = !run.output_ref.is_empty();
+                                    let schedule_id = sel.clone();
+                                    let detail = if run.decision.is_empty() {
+                                        detail
+                                    } else if detail.is_empty() {
+                                        run.decision.clone()
+                                    } else {
+                                        format!("{} · {}", run.decision, detail)
+                                    };
+                                    return view! {
+                                        <div class="sched-run sched-run-script">
+                                            <span class="meta" title=when_title>{when}</span>
+                                            <span class=badge>{label}</span>
+                                            <span class="meta sched-exit">{exit}</span>
+                                            <span class="meta">{detail}</span>
+                                            <Show when=move || has_output>
+                                                <button type="button" class="linkish" on:click={
+                                                    let schedule_id = schedule_id.clone();
+                                                    let run_id = run_id.clone();
+                                                    move |_| open_output(schedule_id.clone(), run_id.clone())
+                                                }>{
+                                                    let run_id = run_id.clone();
+                                                    move || if output_open.get().0 == run_id { "Hide output" } else { "Open output" }
+                                                }</button>
+                                            </Show>
+                                            <Show when=move || has_preview>
+                                                <pre class="sched-output">{preview.clone()}</pre>
+                                            </Show>
+                                            {move || {
+                                                let (open, text) = output_open.get();
+                                                (open == run_for_show).then(|| view! { <pre class="sched-output sched-output-full">{text}</pre> })
+                                            }}
+                                        </div>
+                                    }.into_any();
+                                }
                                 view! {
                                     <div class="sched-run">
                                         <span class="meta" title=when_title>{when}</span>
@@ -952,7 +1209,7 @@ pub fn SchedulePage(
                                         <button type="button" class="linkish" disabled=empty on:click=move |_| open_session(sid_for_click.clone())>{sid_label}</button>
                                         <span class="meta">{detail}</span>
                                     </div>
-                                }
+                                }.into_any()
                             }).collect_view();
                             view! { <div>{rows}</div> }.into_any()
                         }}
@@ -1021,6 +1278,88 @@ mod tests {
         assert_eq!(duplicate_schedule_name("Morning (copy)"), "Morning (copy)");
         assert_eq!(duplicate_schedule_name(""), "(copy)");
         assert_eq!(duplicate_schedule_name("  Standup  "), "Standup (copy)");
+    }
+
+    #[test]
+    fn script_statuses_use_the_failure_styling() {
+        for (status, label) in [("failed", "Failed"), ("denied", "Denied"), ("error", "Error")] {
+            assert_eq!(status_label(status), label);
+            assert_eq!(status_badge(status), "badge badge-failed");
+        }
+        assert_eq!(status_badge("finished"), "badge badge-done");
+    }
+
+    #[test]
+    fn resolved_mode_names_plan_when_unset() {
+        assert_eq!(
+            resolved_mode_label(""),
+            "Plan (a workspace permission mode, when set, wins)"
+        );
+        assert_eq!(
+            resolved_mode_label("accept-edits"),
+            "Accept edits (a workspace permission mode, when set, wins)"
+        );
+        assert_eq!(
+            resolved_mode_label("yolo"),
+            "Yolo (a workspace permission mode, when set, wins)"
+        );
+    }
+
+    #[test]
+    fn sandbox_dial_label_states_host_runs() {
+        assert_eq!(sandbox_dial_label("off"), "Off: runs on the host");
+        assert_eq!(sandbox_dial_label("workspace-write"), "Workspace write");
+        assert_eq!(sandbox_dial_label("read-only"), "Read-only");
+        assert_eq!(sandbox_dial_label(""), "Unknown (sandbox status unavailable)");
+    }
+
+    #[test]
+    fn secret_refs_split_on_lines_and_commas() {
+        assert_eq!(
+            parse_secret_refs("secret://env/A\n  secret://env/B , secret://env/C\n\n"),
+            vec!["secret://env/A", "secret://env/B", "secret://env/C"]
+        );
+        assert!(parse_secret_refs("  \n , ").is_empty());
+    }
+
+    #[test]
+    fn exit_label_dashes_when_no_process_started() {
+        assert_eq!(exit_label(Some(0)), "exit 0");
+        assert_eq!(exit_label(Some(-1)), "exit -1");
+        assert_eq!(exit_label(None), "—");
+    }
+
+    #[test]
+    fn script_fields_deserialize_from_the_daemon_dto() {
+        let item: ScheduleItem = serde_json::from_value(json!({
+            "id": "sch_1", "name": "nightly", "enabled": true, "kind": "cron",
+            "source": "script", "overlap": "skip", "missed": "skip",
+            "command": "make test", "dir": "/srv/app", "timeout": "10m",
+            "secretRefs": ["secret://env/TOKEN"]
+        }))
+        .expect("script schedule");
+        assert_eq!(item.source, SOURCE_SCRIPT);
+        assert_eq!(item.command, "make test");
+        assert_eq!(item.dir, "/srv/app");
+        assert_eq!(item.timeout, "10m");
+        assert_eq!(item.secret_refs, vec!["secret://env/TOKEN".to_string()]);
+
+        let run: RunItem = serde_json::from_value(json!({
+            "id": "run_1", "status": "failed", "exitCode": 2,
+            "outputPreview": "FAIL", "outputRef": "run_1", "decision": "armed"
+        }))
+        .expect("script run");
+        assert_eq!(run.exit_code, Some(2));
+        assert_eq!(run.output_preview, "FAIL");
+        assert_eq!(run.output_ref, "run_1");
+        assert_eq!(run.decision, "armed");
+        assert!(run.session_id.is_empty());
+
+        // A prompt schedule from an older daemon has none of these fields.
+        let old: RunItem = serde_json::from_value(json!({"id": "run_2", "status": "finished", "sessionId": "s1"}))
+            .expect("session run");
+        assert_eq!(old.exit_code, None);
+        assert!(old.output_ref.is_empty());
     }
 
     #[test]
