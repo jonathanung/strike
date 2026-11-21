@@ -1734,6 +1734,10 @@ func TestUserInputImagesReachProviderAndUserMessage(t *testing.T) {
 				if um.Text != "look" || len(um.Images) != 1 || um.Images[0].MIME != "image/png" {
 					t.Fatalf("UserMessage = %#v", um)
 				}
+				// #1814: the durable user.message records the delivery decision.
+				if um.Images[0].Delivery != protocol.AttachmentDeliverySent || um.Images[0].DeliveryReason != "" {
+					t.Fatalf("delivery = %q / %q, want sent", um.Images[0].Delivery, um.Images[0].DeliveryReason)
+				}
 				sawUserMsg = true
 			}
 		case <-deadline:

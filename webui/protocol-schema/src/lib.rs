@@ -4,7 +4,7 @@
 // Unknown event type strings become Event::Unknown.
 // Unknown JSON fields are ignored. Missing fields are defaults.
 // Unknown op type strings return Err.
-// protocol.Version 1.25.0
+// protocol.Version 1.26.0
 
 use std::collections::HashMap;
 
@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "1.25.0";
+pub const PROTOCOL_VERSION: &str = "1.26.0";
 pub const LEGACY_VERSION: &str = "1.0.0";
 
 /// Open string. Known writer values live in the JSON Schema.
@@ -1068,6 +1068,10 @@ pub struct ImageAttachment {
     pub kind: String,
     #[serde(default, rename = "name")]
     pub name: String,
+    #[serde(default, rename = "delivery")]
+    pub delivery: String,
+    #[serde(default, rename = "deliveryReason")]
+    pub delivery_reason: String,
 }
 
 /// InputQueueCancel removes one pending user-input item.

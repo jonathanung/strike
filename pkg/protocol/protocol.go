@@ -334,6 +334,12 @@ const (
 	AttachmentKindBuild   = "build"
 )
 
+// Attachment delivery decisions on ImageAttachment.Delivery (wire 1.26+).
+const (
+	AttachmentDeliverySent    = "sent"
+	AttachmentDeliveryDropped = "dropped"
+)
+
 // ImageAttachment is one typed attachment on a user message (paste/drop).
 // Data is standard base64 (no data: URI prefix) and is omitted from persisted
 // history when Ref is set. MIME is a full media type such as image/png.
@@ -346,6 +352,12 @@ type ImageAttachment struct {
 	Bytes  int64  `json:"bytes,omitempty"`
 	Kind   string `json:"kind,omitempty"`
 	Name   string `json:"name,omitempty"`
+	// Delivery is the engine's per-turn decision for this attachment on
+	// user.message (wire 1.26+): AttachmentDeliverySent or
+	// AttachmentDeliveryDropped. Empty means not reported (older logs);
+	// readers must not infer it. DeliveryReason says why it was dropped.
+	Delivery       string `json:"delivery,omitempty"`
+	DeliveryReason string `json:"deliveryReason,omitempty"`
 }
 
 // UserInput submits a user message, starting a turn.
