@@ -93,6 +93,14 @@ func bashEnv(tc *Context) ([]string, error) {
 	return merged, nil
 }
 
+// BashEnv is the bash tool's process environment builder for callers with
+// no tool Context (script schedules): the minimal host key set plus the
+// resolved secret refs (destination env name → secret://env/NAME). onUse,
+// when set, receives each ref's class and name hash, never its value.
+func BashEnv(secrets map[string]string, onUse func(refClass, refHash, action string)) ([]string, error) {
+	return bashEnv(&Context{BashSecrets: secrets, OnSecretRefUse: onUse})
+}
+
 // minimalEnvFromHost copies selected keys from the host environment.
 func minimalEnvFromHost(keys []string) []string {
 	out := make([]string, 0, len(keys)+2)
