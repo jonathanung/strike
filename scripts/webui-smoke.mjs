@@ -3900,6 +3900,50 @@ try {
     if (reserved.status !== 400) {
       throw new Error(`suggestions create as reserved producer = ${reserved.status}`);
     }
+    // #1950: Settings mirrors the Inbox controls. Clearing a producer's
+    // toggle mutes that source daemon-side; ticking it again unmutes.
+    await evaluate(`document.querySelector('[data-action="open-settings"]')?.click()`);
+    await waitFor(
+      "settings Ideas inbox section lists every reserved producer",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const sec = document.querySelector("#settings-ideas [data-settings-ideas]");
+          const boxes = sec ? [...sec.querySelectorAll("input[data-producer]")] : [];
+          return JSON.stringify({
+            sec: !!sec,
+            producers: boxes.map((b) => b.getAttribute("data-producer") + ":" + b.checked),
+            quiet: !!(sec && sec.querySelector("[data-ideas-quiet]")),
+          });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        const want = ["child-agent:true", "goal-autopilot:true", "scheduler:true", "trigger:true"];
+        return { ok: !!(p.sec && p.quiet && JSON.stringify(p.producers) === JSON.stringify(want)), ...p };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await evaluate(`document.querySelector('#settings-ideas input[data-producer="child-agent"]').click()`);
+    await waitFor(
+      "settings producer toggle mutes the child-agent source",
+      async () => {
+        const got = await (await fetch(ideasUrl, { headers: ideaAuth })).json();
+        const muted = (got.prefs && got.prefs.mutedSources) || [];
+        return { ok: muted.includes("child-agent"), muted };
+      },
+      { timeout: WAIT_MS, interval: 300 },
+    );
+    await waitFor(
+      "settings producer toggle unmutes the child-agent source",
+      async () => {
+        await evaluate(`(() => {
+          const box = document.querySelector('#settings-ideas input[data-producer="child-agent"]');
+          if (box && !box.checked) box.click();
+        })()`);
+        const got = await (await fetch(ideasUrl, { headers: ideaAuth })).json();
+        const muted = (got.prefs && got.prefs.mutedSources) || [];
+        return { ok: !muted.includes("child-agent"), muted };
+      },
+      { timeout: WAIT_MS, interval: 400 },
+    );
   }
 
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle

@@ -233,6 +233,7 @@ func (s *Server) handleGoalRun(w http.ResponseWriter, r *http.Request) {
 		writeGoalErr(w, err)
 		return
 	}
+	s.SuggestGoalOutcome(g)
 	writeJSON(w, http.StatusOK, toGoalDTO(g))
 }
 
@@ -371,7 +372,9 @@ func (s *Server) handleGoalRunBackground(w http.ResponseWriter, api host.Goals, 
 	// its cancel func be silently reversed when the loop activated the
 	// goal, so the stop was lost.
 	go func() {
-		_, _ = api.Run(context.Background(), id)
+		if done, err := api.Run(context.Background(), id); err == nil {
+			s.SuggestGoalOutcome(done)
+		}
 	}()
 	if fresh, ok, err := api.Get(id); err == nil && ok {
 		g = fresh
