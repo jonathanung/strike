@@ -310,6 +310,10 @@ pub struct Transcript {
     /// `sessionId` of the turn in progress (from `turn.started`), so a
     /// child session's streams are not counted on the parent's turn.
     turn_session: String,
+    /// Live `tool.output` tails (#1374), keyed by the tool card's message
+    /// id. Removed when the call's `tool.end` arrives; a call that never
+    /// ends keeps its last tail as the only record of what it printed.
+    pub tool_tails: HashMap<u32, crate::tool_tail::ToolTail>,
 }
 
 impl Default for Transcript {
@@ -336,7 +340,13 @@ impl Transcript {
             turn_usage: HashMap::new(),
             usage_acc: crate::turn_usage::TurnUsage::default(),
             turn_session: String::new(),
+            tool_tails: HashMap::new(),
         }
+    }
+
+    /// The live output tail of tool card `id`, while it has one (#1374).
+    pub fn tail_for(&self, id: u32) -> Option<&crate::tool_tail::ToolTail> {
+        self.tool_tails.get(&id).filter(|t| !t.text.is_empty())
     }
 
     /// The turn elapsed label stamped on this message, if it is the
@@ -606,6 +616,24 @@ impl Transcript {
                     turn_id: field_str(&data, "turnId"),
                 });
             }
+            "tool.output" => {
+                // #1374: append to the card for this callId only. No
+                // name or newest-running fallback: a chunk without a
+                // matching card is dropped rather than shown on the
+                // wrong call.
+                let call_id = field_str(&data, "callId");
+                if call_id.is_empty() {
+                    return;
+                }
+                let Some(idx) = self.find_tool(&call_id, "") else {
+                    return;
+                };
+                let id = self.messages[idx].id;
+                self.tool_tails
+                    .entry(id)
+                    .or_default()
+                    .push(&field_str(&data, "data"));
+            }
             "tool.end" => {
                 let call_id = field_str(&data, "callId");
                 let name = field_str(&data, "name");
@@ -625,6 +653,8 @@ impl Transcript {
                     };
                     let subtitle = self.messages[idx].body.clone();
                     let face = finish_tool(&key, &subtitle, &output, &metadata, &engine_title);
+                    // The final model-facing output replaces the live tail.
+                    self.tool_tails.remove(&self.messages[idx].id);
                     let msg = &mut self.messages[idx];
                     msg.badge = if err { "failed" } else { "done" }.into();
                     if !face.body.is_empty() {

@@ -366,6 +366,45 @@ try {
     join(sessionsDir, "elapsed-session.meta.json"),
     JSON.stringify({ title: "Elapsed replay" }) + "\n",
   );
+  // Live tool tail (#1374) fixture: turn 1's call streams a chunk and
+  // then ends (the final output replaces the tail); turn 2's chatty call
+  // streams 250 lines and never ends, so it keeps a tail bounded to the
+  // last 200 lines with the truncation hint.
+  let tailSession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-27T06:00:00Z" }) +
+    "\n" +
+    envLine("user.message", "2026-10-27T06:00:00Z", { text: "quick command" }) +
+    envLine("turn.started", "2026-10-27T06:00:01Z", { turnId: "tt1" }) +
+    envLine("tool.begin", "2026-10-27T06:00:02Z", {
+      turnId: "tt1",
+      callId: "tc1",
+      name: "bash",
+      args: { command: "echo early" },
+    }) +
+    envLine("tool.output", "2026-10-27T06:00:03Z", { turnId: "tt1", callId: "tc1", data: "early tail chunk\n" }) +
+    envLine("tool.end", "2026-10-27T06:00:04Z", { turnId: "tt1", callId: "tc1", name: "bash", output: "final output" }) +
+    envLine("text.delta", "2026-10-27T06:00:05Z", { text: "quick done" }) +
+    envLine("turn.completed", "2026-10-27T06:00:06Z", { turnId: "tt1", stopReason: "end_turn" }) +
+    envLine("user.message", "2026-10-27T06:01:00Z", { text: "chatty command" }) +
+    envLine("turn.started", "2026-10-27T06:01:01Z", { turnId: "tt2" }) +
+    envLine("tool.begin", "2026-10-27T06:01:02Z", {
+      turnId: "tt2",
+      callId: "tc2",
+      name: "bash",
+      args: { command: "for i in $(seq 0 249); do echo tail line $i; sleep 1; done" },
+    });
+  for (let i = 0; i < 250; i++) {
+    tailSession += envLine("tool.output", "2026-10-27T06:01:03Z", {
+      turnId: "tt2",
+      callId: "tc2",
+      data: `tail line ${i}\n`,
+    });
+  }
+  await writeFile(join(sessionsDir, "tail-session.jsonl"), tailSession);
+  await writeFile(
+    join(sessionsDir, "tail-session.meta.json"),
+    JSON.stringify({ title: "Tool tail replay" }) + "\n",
+  );
   const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
     throw new Error(`content search ${found.status} ${found.text.slice(0, 300)}`);
@@ -3983,6 +4022,63 @@ try {
         };
       })()`);
       return { ok: v.n === 1 && v.text === "took 4:12" && v.onSlow && v.body, ...v };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // Live tool tail (#1374): resume the seeded tail session. The call that
+  // ended shows no tail (tool.end replaced it); the call that never ended
+  // keeps exactly the last 200 streamed lines plus the truncation hint.
+  let tailClicked = "missing";
+  try {
+    await waitFor(
+      "tool-tail resume row",
+      async () => {
+        tailClicked = await evaluate(`(() => {
+          const row = document.querySelector('[data-session-id="tail-session"]');
+          const btn = row && row.querySelector(".ss-main");
+          if (!btn) return "missing";
+          btn.click();
+          return "clicked";
+        })()`);
+        return { ok: tailClicked === "clicked", clicked: tailClicked };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  } catch {
+    // reported below with the last observed state
+  }
+  if (tailClicked !== "clicked") {
+    throw new Error(`tool-tail resume click -> ${tailClicked}`);
+  }
+  await waitFor(
+    "bounded live tool tail on the unfinished call only",
+    async () => {
+      const v = await evaluate(`(() => {
+        const tails = [...document.querySelectorAll("[data-tool-tail]")];
+        const t = tails[0];
+        const pre = t ? (t.querySelector("pre")?.textContent || "") : "";
+        return {
+          n: tails.length,
+          lines: t ? t.getAttribute("data-tool-tail") : "",
+          note: Boolean(t && t.querySelector("[data-tool-tail-truncated]")),
+          first: pre.split("\\n")[0],
+          last: pre.trimEnd().split("\\n").pop(),
+          early: document.body.innerText.includes("early tail chunk"),
+          quick: document.body.innerText.includes("quick done"),
+        };
+      })()`);
+      return {
+        ok:
+          v.n === 1 &&
+          v.lines === "200" &&
+          v.note &&
+          v.first === "tail line 50" &&
+          v.last === "tail line 249" &&
+          !v.early &&
+          v.quick,
+        ...v,
+      };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
