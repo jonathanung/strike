@@ -1110,6 +1110,13 @@ fn message_view(
     // no attribute.
     let turn_stop: Option<String> =
         crate::turn_failure::stop_reason_of(&msg.key).map(str::to_string);
+    // #1359: compaction / budget markers carry their kind as a hook for
+    // scoped styling and browser checks; other lines have no attribute.
+    let compaction: Option<String> = msg
+        .key
+        .strip_prefix(crate::compaction_marks::KEY_PREFIX)
+        .map(str::to_string);
+    let compaction_fold = compaction.is_some();
     let auth_retry = retry_text.trim().to_string();
     let stamp = line_stamp(msg.at_ms);
     let stamp_full = line_full_time(msg.at_ms);
@@ -1173,7 +1180,7 @@ fn message_view(
     // "Copy failed" instead of silence. Reverts after 2s.
     let copy_state = RwSignal::new(None::<bool>);
     view! {
-        <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role data-turn-stop=turn_stop>
+        <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role data-turn-stop=turn_stop data-compaction=compaction>
             <header>
                 {if find_title {
                     view! { <span class="sx-who"><crate::transcript_find::MarkedText text=title.clone() kind="inline" ranges=title_ranges current=cur_title /></span> }.into_any()
@@ -1298,6 +1305,8 @@ fn message_view(
                     "Diff"
                 } else if auth_notice {
                     "Details"
+                } else if compaction_fold {
+                    "Summary and residue"
                 } else {
                     "Output"
                 };
