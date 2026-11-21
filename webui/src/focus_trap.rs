@@ -6,8 +6,9 @@
 //! rest — gets the same behaviour without changing its component:
 //!
 //! - **Trap**: Tab and Shift+Tab cycle inside the newest open modal. A
-//!   dialog that already traps Tab itself (palette, confirm) calls
-//!   `preventDefault`, and this helper then stays out of the way.
+//!   dialog that already handles Tab itself (confirm) calls
+//!   `preventDefault` / `stopPropagation`, and this helper stays out of
+//!   the way.
 //! - **Initial focus**: if the dialog did not focus something inside
 //!   itself, its first focusable gets focus.
 //! - **Return**: when the modal leaves the page and focus was lost with it,
@@ -81,8 +82,16 @@ pub fn install() {
             }
         })
     };
-    let _ = doc.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
-    on_key.forget();
+    // Window, bubble phase, registered after the first render: the last
+    // listener a keydown reaches, after Leptos's delegated handlers and the
+    // shell's window shortcuts, so a dialog that handles Tab itself
+    // (preventDefault / stopPropagation) is never moved twice.
+    crate::clipboard::after_ms(0, move || {
+        if let Some(w) = web_sys::window() {
+            let _ = w.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
+        }
+        on_key.forget();
+    });
 
     let on_mutate = {
         let state = Rc::clone(&state);
@@ -132,7 +141,9 @@ fn sync(state: &Rc<RefCell<State>>) {
             opened.push(m);
         }
     }
-    if !openers.is_empty() && focus_lost(&doc) {
+    // A modal replaced by another (palette -> confirm) hands focus to the
+    // new one; its opener is returned when that one closes.
+    if !openers.is_empty() && opened.is_empty() && focus_lost(&doc) {
         if let Some(el) = openers.into_iter().find(|e| e.is_connected()) {
             focus(&el);
         }
