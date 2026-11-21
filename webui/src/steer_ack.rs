@@ -57,6 +57,9 @@ impl AckState {
     }
 }
 
+/// Placeholder in the ack FIFO for an applied steer with no marked line.
+const NO_LINE: u32 = u32::MAX;
+
 /// The agent's own words on a steer (`turn.steer_ack`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AgentAck {
@@ -133,6 +136,9 @@ impl SteerAcks {
             return;
         }
         let id = self.awaiting.remove(0);
+        if id == NO_LINE {
+            return;
+        }
         self.agent.insert(
             id,
             AgentAck {
@@ -150,17 +156,24 @@ impl SteerAcks {
 
     /// A `turn.steered` event. `messages` is the transcript so far.
     pub fn on_steered(&mut self, messages: &[Message], text: &str, mode: &str) {
-        if text.is_empty() {
-            return;
-        }
         let state = match mode {
             "queued_fallback" => {
-                self.fallback.push(text.to_string());
+                if !text.is_empty() {
+                    self.fallback.push(text.to_string());
+                }
                 return;
             }
             "cancel_restart" => AckState::Restarted,
             _ => AckState::Applied,
         };
+        // The engine queues every applied steer for an agent ack. Keep the
+        // FIFO aligned even when no line can carry the marker (image-only
+        // steer, unmatched text): its ack is then consumed and dropped
+        // instead of landing on a later steer.
+        if text.is_empty() {
+            self.awaiting.push(NO_LINE);
+            return;
+        }
         // The engine emits the steer's user.message right before this
         // event, so the newest matching line without a marker is it.
         if let Some(msg) = messages.iter().rev().find(|m| {
@@ -170,6 +183,8 @@ impl SteerAcks {
         }) {
             self.by_msg.insert(msg.id, state);
             self.awaiting.push(msg.id);
+        } else {
+            self.awaiting.push(NO_LINE);
         }
     }
 
@@ -347,7 +362,22 @@ mod tests {
         let mut acks = SteerAcks::default();
         acks.on_steered(&[], "", "boundary");
         acks.on_steered(&[], "nobody", "boundary");
-        assert_eq!(acks, SteerAcks::default());
+        assert_eq!(acks.mark(NO_LINE), None);
+        assert!(acks.by_msg.is_empty() && acks.agent.is_empty());
         assert!(AckState::MissedTurn.text().contains("next message"));
+    }
+
+    #[test]
+    fn image_only_steer_keeps_acks_aligned() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("turn.started", serde_json::json!({"turnId": "t1"})));
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "build it", "turnId": "t1"})));
+        // An image-only steer: no text to match a line.
+        t.apply_envelope(&env("turn.steered", serde_json::json!({"text": "", "mode": "boundary", "turnId": "t1"})));
+        let text_steer = steer(&mut t, "smaller", "boundary");
+        t.apply_envelope(&env("turn.steer_ack", serde_json::json!({"turnId": "t1", "summary": "looking at the screenshot"})));
+        assert_eq!(t.steer_acks.mark(text_steer).unwrap().agent, None, "first ack answers the image steer");
+        t.apply_envelope(&env("turn.steer_ack", serde_json::json!({"turnId": "t1", "summary": "shrinking it"})));
+        assert!(t.steer_acks.mark(text_steer).unwrap().text().ends_with("Now: shrinking it"));
     }
 }
