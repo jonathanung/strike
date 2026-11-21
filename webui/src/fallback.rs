@@ -171,8 +171,19 @@ pub const RETURN_ACTION: &str = "fallback.return_to_primary";
 /// Palette choice detail (#1963): marks the row matching the current
 /// fallback so the menu shows what is set before you change it.
 pub fn choice_detail(current: &FallbackState, choice_id: &str, base: &str) -> String {
+    // The daemon strips a matching "provider/" prefix from the model it
+    // confirms; compare bare ids so a prefixed catalog id still matches.
+    let bare = |p: &str, m: &str| {
+        let (p, m) = (p.trim(), m.trim());
+        let prefix = format!("{p}/");
+        m.strip_prefix(prefix.as_str()).unwrap_or(m).to_string()
+    };
     let is_current = match choice_id.split_once('\t') {
-        Some((p, m)) => current.is_set() && current.provider == p.trim() && current.model == m.trim(),
+        Some((p, m)) => {
+            current.is_set()
+                && current.provider == p.trim()
+                && bare(p, m) == bare(&current.provider, &current.model)
+        }
         None => !current.is_set(),
     };
     if is_current {
@@ -410,6 +421,7 @@ mod tests {
         assert_eq!(choice_detail(&set, "openai\tgpt", "d"), "Current · d");
         assert_eq!(choice_detail(&set, "openai\tother", "d"), "d");
         assert_eq!(choice_detail(&set, "none", "d"), "d");
+        assert_eq!(choice_detail(&set, "openai\topenai/gpt", "d"), "Current · d");
         let unset = fs("", "");
         assert_eq!(choice_detail(&unset, "none", "d"), "Current · d");
         assert_eq!(choice_detail(&unset, "openai\tgpt", "d"), "d");
