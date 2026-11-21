@@ -1945,13 +1945,11 @@ fn App() -> impl IntoView {
                         }
                         steer_queue::LiveNote::TurnFinished => {
                             live_busy.set(false);
-                            if doctor.open.get_untracked() {
-                                doctor.request(
-                                    base.get_untracked(),
-                                    token.get_untracked(),
-                                    active_root.get_untracked(),
-                                );
-                            }
+                            doctor.on_turn_finished(
+                                base.get_untracked(),
+                                token.get_untracked(),
+                                active_root.get_untracked(),
+                            );
                             confirm_stop.set(false);
                             if context_fit.get_untracked() == "critical" {
                                 context_fit.set(String::new());

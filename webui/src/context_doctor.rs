@@ -246,6 +246,10 @@ pub fn inspect_error_text(err: &str) -> String {
     }
 }
 
+pub fn should_refresh(open: bool, stale: bool, pending: bool) -> bool {
+    open && stale && !pending
+}
+
 pub const NO_REPLY: &str =
     "The daemon accepted the request but no breakdown arrived. Try Refresh.";
 
@@ -316,6 +320,19 @@ impl DoctorState {
     pub fn on_turn_started(self) {
         if self.snapshot.with_untracked(|s| s.is_some()) {
             self.stale.set(true);
+        }
+    }
+
+    /// Auto-refresh (issue Q3) only when the open dialog shows a snapshot
+    /// a turn has since outdated, and no request is in flight. Replayed
+    /// history on a stream reconnect therefore never fans out ops.
+    pub fn on_turn_finished(self, base: String, token: String, root: String) {
+        if should_refresh(
+            self.open.get_untracked(),
+            self.stale.get_untracked(),
+            self.pending.get_untracked(),
+        ) {
+            self.request(base, token, root);
         }
     }
 
@@ -566,6 +583,14 @@ mod tests {
             "Inspect is unavailable: ops are read-only"
         );
         assert_eq!(inspect_error_text("network down"), "Inspect is unavailable: network down");
+    }
+
+    #[test]
+    fn auto_refresh_only_for_an_open_stale_idle_dialog() {
+        assert!(should_refresh(true, true, false));
+        assert!(!should_refresh(false, true, false));
+        assert!(!should_refresh(true, false, false));
+        assert!(!should_refresh(true, true, true));
     }
 
     #[test]
