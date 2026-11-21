@@ -110,6 +110,7 @@ mod regenerate_title;
 mod rewind;
 mod session_delete;
 mod session_ref_chip;
+mod stale_resume;
 mod session_restore;
 mod share;
 mod shell;
@@ -1364,6 +1365,7 @@ fn App() -> impl IntoView {
     let boot_ms = now_ms();
     let focus = RwSignal::new(false);
     let back_stack = RwSignal::new(Vec::<String>::new());
+    let stale_warning = RwSignal::new(None::<stale_resume::StaleWarning>);
     // Open-file history and recents (#1395): in-memory, global across
     // sessions like the Files pane, mirroring the session stacks here.
     let file_history = RwSignal::new(file_history::FileHistory::default());
@@ -3395,6 +3397,22 @@ fn App() -> impl IntoView {
 
     let open_session = move |id: String, live: bool| {
         phone_pane.set(mobile::PANE_CHAT.into());
+        // Stale/large resume warning (#1502): decided from the list row
+        // before switching; any older card is cleared by the new open.
+        let viewing = active_root.get_untracked();
+        let limit = context_limit.get_untracked();
+        let warn = sessions.with_untracked(|list| {
+            list.iter().find(|s| s.id == id).and_then(|row| {
+                stale_resume::check(
+                    row,
+                    now_ms() as i64,
+                    limit,
+                    &viewing,
+                    stale_resume::dismissed_tokens(&row.id),
+                )
+            })
+        });
+        stale_warning.set(warn);
         remember(&id);
         if live {
             activate_root(id);
@@ -3683,6 +3701,22 @@ fn App() -> impl IntoView {
     // is filed separately; this PR only composes the two existing
     // endpoints, in delete-then-close order, after the user's force
     // confirmation when one was required.
+    // Stale/large resume card actions (#1502). Start fresh opens a new
+    // session and only pre-fills the composer with a reference to the old
+    // one; nothing is sent or copied. Cancel returns to the session open
+    // before (the resumed one sends nothing until a turn is started).
+    let on_stale_fresh = Callback::new(move |w: stale_resume::StaleWarning| {
+        new_session();
+        draft.set(stale_resume::fresh_prompt(&w.id, &w.title));
+        sync_composer_height_soon();
+    });
+    let on_stale_cancel = Callback::new(move |w: stale_resume::StaleWarning| {
+        if w.previous.is_empty() || w.previous == w.id {
+            return;
+        }
+        let live = roots.get_untracked().iter().any(|r| r.id == w.previous);
+        open_session(w.previous, live);
+    });
     // Rewind applied (#1336): after a conversation restore the picked
     // turn's prompt returns to the composer for edit-and-resend; it is
     // never sent automatically.
@@ -6083,6 +6117,11 @@ fn App() -> impl IntoView {
                     <Show when=move || !stream_note.get().is_empty()>
                         <p class="hint banner">{move || stream_note.get()}</p>
                     </Show>
+                    <stale_resume::StaleResumeCard
+                        warning=stale_warning
+                        on_fresh=on_stale_fresh
+                        on_cancel=on_stale_cancel
+                    />
                     <Show when=move || !load_notice.get().is_empty()>
                         <div class="notice" role="status" data-load-warning-notice="true">
                             <span>{move || load_notice.get()}</span>
