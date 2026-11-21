@@ -295,6 +295,13 @@ func bashPoolsForCommand(tc *Context, command string) []string {
 	return scheduler.PoolsForClass(scheduler.ClassGeneral)
 }
 
+// PoolsForCommand is the bash tool's admission classification for command
+// under policy (nil policy classifies as general). Script schedules use it
+// so a scheduled `make test` takes the same pools as an agent's.
+func PoolsForCommand(policy *scheduler.Effective, command string) []string {
+	return bashPoolsForCommand(&Context{SchedulerPolicy: policy}, command)
+}
+
 // bashSandboxMode resolves the OS sandbox dial from tool context.
 // Empty/unset defaults to workspace-write (product default).
 func bashSandboxMode(tc *Context) sandbox.Mode {
