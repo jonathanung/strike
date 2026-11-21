@@ -98,6 +98,26 @@ func (a artifactsAdapter) CreateSessionReport(sessionID, ownerRoot, title, conte
 	return toHostArtifact(art), nil
 }
 
+// CreateDashboard implements host.DashboardWriter.
+func (a artifactsAdapter) CreateDashboard(ownerSession, ownerRoot, title, content string) (host.Artifact, error) {
+	if ownerRoot == "" {
+		ownerRoot = ownerSession
+	}
+	art, err := a.store.Create(artifact.CreateInput{
+		Type:         artifact.TypeDashboard,
+		Title:        title,
+		Content:      content,
+		Scope:        artifact.ScopeProject,
+		Access:       artifact.AccessTeam,
+		OwnerSession: ownerSession,
+		OwnerRoot:    ownerRoot,
+	})
+	if err != nil {
+		return host.Artifact{}, err
+	}
+	return toHostArtifact(art), nil
+}
+
 func toHostArtifactMeta(m artifact.Meta) host.ArtifactMeta {
 	out := host.ArtifactMeta{
 		ID:           m.ID,

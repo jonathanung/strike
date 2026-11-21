@@ -620,6 +620,23 @@ try {
     join(sessionsDir, "invalidated-session.meta.json"),
     JSON.stringify({ title: "Invalidated replay" }) + "\n",
   );
+  // Diagnostics refresh on files.invalidated (#1894): a second replay
+  // with a burst of two invalidations, resumed while the diagnostics pane
+  // is shown; the cockpit must refetch /v1/diagnostics exactly once.
+  const invalidatedDiagSession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-26T07:10:00Z" }) +
+    "\n" +
+    envLine("user.message", "2026-10-26T07:10:00Z", { text: "touch the tree for lsp" }) +
+    envLine("turn.started", "2026-10-26T07:10:01Z", {}) +
+    envLine("files.invalidated", "2026-10-26T07:10:02Z", { paths: ["src/a.go"], reason: "external" }) +
+    envLine("files.invalidated", "2026-10-26T07:10:03Z", { paths: ["src/b.go"], reason: "external" }) +
+    envLine("text.delta", "2026-10-26T07:10:04Z", { text: "lsp tree touched" }) +
+    envLine("turn.completed", "2026-10-26T07:10:05Z", { stopReason: "end_turn" });
+  await writeFile(join(sessionsDir, "invalidated-diag-session.jsonl"), invalidatedDiagSession);
+  await writeFile(
+    join(sessionsDir, "invalidated-diag-session.meta.json"),
+    JSON.stringify({ title: "Invalidated diagnostics replay" }) + "\n",
+  );
   // Live tool tail (#1374) fixture: turn 1's call streams a chunk and
   // then ends (the final output replaces the tail); turn 2's chatty call
   // streams 250 lines and never ends, so it keeps a tail bounded to the
@@ -3443,6 +3460,74 @@ try {
     throw new Error(`daemon does not list issue ${smokeIssueId} as closed: ${JSON.stringify(persisted)}`);
   }
 
+  // Dashboards (#1628): a page started from a template renders a measured
+  // block with a daemon value, an unmeasured metric as a dash (never 0),
+  // and an agent-written block with its "agent wrote this" marker.
+  {
+    const dashAuth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const roots = await (await fetch(`http://127.0.0.1:${port}/v1/roots`, { headers: dashAuth })).json();
+    const dashRoot = roots.activeId || (roots.roots && roots.roots[0] && roots.roots[0].id) || "";
+    if (!dashRoot) {
+      throw new Error(`dashboards: no live root to own the page: ${JSON.stringify(roots).slice(0, 200)}`);
+    }
+    const dashNoAuth = await fetch(`http://127.0.0.1:${port}/v1/dashboards?root=${encodeURIComponent(dashRoot)}`);
+    if (dashNoAuth.status !== 401) {
+      throw new Error(`dashboards without token = ${dashNoAuth.status}`);
+    }
+    const made = await fetch(`http://127.0.0.1:${port}/v1/dashboards?root=${encodeURIComponent(dashRoot)}`, {
+      method: "POST",
+      headers: dashAuth,
+      body: JSON.stringify({ template: "project_report", title: "Smoke report" }),
+    });
+    if (made.status !== 201) {
+      throw new Error(`dashboard create = ${made.status} ${await made.text()}`);
+    }
+    const dashPage = await made.json();
+    const total = (dashPage.blocks || []).find((b) => b.metric === "sessions.total");
+    const cost = (dashPage.blocks || []).find((b) => b.metric === "cost.usd");
+    if (!total || !total.measured || typeof total.value !== "number" || !cost || cost.measured || "value" in cost) {
+      throw new Error(`dashboard measured blocks = ${JSON.stringify(dashPage.blocks).slice(0, 400)}`);
+    }
+    await runPalette("Dashboards");
+    await waitFor(
+      "dashboards index lists the new page",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const row = document.querySelector('[data-dashboard="${dashPage.id}"] button');
+          if (row && !document.querySelector('[data-dashboard-page="${dashPage.id}"]')) row.click();
+          return JSON.stringify({ root: !!document.querySelector("#dashboards-root"), row: !!row });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        return { ok: !!(p.root && p.row), ...p };
+      },
+      { timeout: WAIT_MS, interval: 300 },
+    );
+    await waitFor(
+      "dashboard page shows a measured value, a dash for unmeasured cost, and the agent marker",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const page = document.querySelector('[data-dashboard-page="${dashPage.id}"]');
+          if (!page) {
+            document.querySelector('[data-dashboard="${dashPage.id}"] button')?.click();
+            return JSON.stringify({ page: false });
+          }
+          const vals = [...page.querySelectorAll(".dash-value")].map((e) => ({ m: e.dataset.measured, t: e.textContent.trim(), k: e.title }));
+          const agent = page.querySelector('[data-provenance="agent"] .dash-mark');
+          return JSON.stringify({ page: true, vals, mark: agent ? agent.textContent.trim() : "" });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        const vals = p.vals || [];
+        const measured = vals.find((v) => v.k === "sessions.total");
+        const dash = vals.find((v) => v.k === "cost.usd");
+        return {
+          ok: !!(p.page && measured && measured.m === "true" && /^\d+$/.test(measured.t) && dash && dash.m === "false" && dash.t === "\u2014" && p.mark === "agent wrote this"),
+          ...p,
+        };
+      },
+      { timeout: WAIT_MS, interval: 300 },
+    );
+  }
+
   // Ideas inbox (#1323): a producer deposits a suggestion over the authed
   // API, the palette opens the Ideas page, the row renders with its why and
   // evidence, and Dismiss records it daemon-side so the list empties.
@@ -3477,15 +3562,19 @@ try {
       async () => {
         const raw = await evaluate(`(() => {
           const row = document.querySelector('[data-idea="${ideaId}"]');
+          const badge = document.querySelector('[data-nav="header"] [data-ideas-badge]');
           return JSON.stringify({
             root: !!document.querySelector("#ideas-root"),
             row: !!row,
             text: row ? row.innerText : "",
+            badge: badge ? badge.innerText : "",
+            quiet: !!document.querySelector("[data-ideas-quiet]"),
           });
         })()`);
         const p = JSON.parse(raw || "{}");
+        // #1926: the open-count badge lives in the shell header, not the rail.
         return {
-          ok: !!(p.root && p.row && p.text.includes("tidy the README") && p.text.includes("stale section") && p.text.includes("Smoke evidence")),
+          ok: !!(p.root && p.row && p.text.includes("tidy the README") && p.text.includes("stale section") && p.text.includes("Smoke evidence") && p.badge.includes("1") && p.quiet),
           ...p,
         };
       },
@@ -3497,10 +3586,13 @@ try {
         const raw = await evaluate(`(() => {
           const btn = document.querySelector('[data-idea="${ideaId}"] .ideas-dismiss');
           if (btn && !btn.disabled) btn.click();
-          return JSON.stringify({ empty: !!document.querySelector("[data-ideas-empty]") });
+          return JSON.stringify({
+            empty: !!document.querySelector("[data-ideas-empty]"),
+            badge: !!document.querySelector('[data-nav="header"] [data-ideas-badge]'),
+          });
         })()`);
         const p = JSON.parse(raw || "{}");
-        return { ok: !!p.empty, ...p };
+        return { ok: !!p.empty && !p.badge, ...p };
       },
       { timeout: WAIT_MS, interval: 400 },
     );
@@ -3508,6 +3600,25 @@ try {
     const stored = (ideasAfter.suggestions || []).find((x) => x.id === ideaId);
     if (!stored || stored.state !== "dismissed" || ideasAfter.open !== 0) {
       throw new Error(`dismissed idea state = ${JSON.stringify(ideasAfter).slice(0, 400)}`);
+    }
+    // #1926: quiet hours are store-enforced; reserved producer sources are
+    // refused over HTTP.
+    const prefsUrl = `${ideasUrl}/prefs`;
+    const allDay = { mutedSources: [], mutedKinds: [], quietHours: { enabled: true, start: "00:00", end: "00:00" } };
+    const quietSet = await fetch(prefsUrl, { method: "PUT", headers: ideaAuth, body: JSON.stringify(allDay) });
+    if (quietSet.status !== 200) {
+      throw new Error(`suggestions quiet hours = ${quietSet.status} ${await quietSet.text()}`);
+    }
+    const quietIdea = { ...idea, evidenceKey: "smoke:quiet" };
+    const held = await fetch(ideasUrl, { method: "POST", headers: ideaAuth, body: JSON.stringify(quietIdea) });
+    if (held.status !== 409) {
+      throw new Error(`suggestions create in quiet hours = ${held.status}`);
+    }
+    allDay.quietHours.enabled = false;
+    await fetch(prefsUrl, { method: "PUT", headers: ideaAuth, body: JSON.stringify(allDay) });
+    const reserved = await fetch(ideasUrl, { method: "POST", headers: ideaAuth, body: JSON.stringify({ ...idea, source: "scheduler" }) });
+    if (reserved.status !== 400) {
+      throw new Error(`suggestions create as reserved producer = ${reserved.status}`);
     }
   }
 
@@ -6273,6 +6384,66 @@ try {
     await rm(invalidatedPath, { force: true });
   }
 
+  // Diagnostics refresh on files.invalidated (#1894): with the
+  // diagnostics pane shown, resuming a replay with an invalidation burst
+  // refetches /v1/diagnostics once (the same 400 ms debounce as Files).
+  await runPalette("Code diagnostics");
+  await waitFor(
+    "files.invalidated diagnostics: pane shown",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-diagnostics-pane]")`)) === true }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  let diagFetches = 0;
+  const onDiagRequest = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.method === "Network.requestWillBeSent" && (msg.params?.request?.url || "").includes("/v1/diagnostics")) {
+      diagFetches += 1;
+    }
+  };
+  ws.addEventListener("message", onDiagRequest);
+  try {
+    // Let the palette-open fetch settle, then count only what follows.
+    await new Promise((r) => setTimeout(r, 1000));
+    diagFetches = 0;
+    let diagResume = "missing";
+    try {
+      await waitFor(
+        "files.invalidated diagnostics resume row",
+        async () => {
+          diagResume = await evaluate(`(() => {
+            const row = document.querySelector('[data-session-id="invalidated-diag-session"]');
+            const btn = row && row.querySelector(".ss-main");
+            if (!btn) return "missing";
+            btn.click();
+            return "clicked";
+          })()`);
+          return { ok: diagResume === "clicked", clicked: diagResume };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+    } catch {
+      // Reported by the throw below with the last observed state.
+    }
+    if (diagResume !== "clicked") {
+      throw new Error(`files.invalidated diagnostics resume click -> ${diagResume}`);
+    }
+    await waitFor(
+      "files.invalidated diagnostics: replay applied and diagnostics refetched",
+      async () => {
+        const replayed = (await evaluate(`(document.body.textContent || "").includes("lsp tree touched")`)) === true;
+        return { ok: replayed && diagFetches >= 1, replayed, diagFetches };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    // Past the debounce window the burst must still have cost one fetch.
+    await new Promise((r) => setTimeout(r, 1500));
+    if (diagFetches !== 1) {
+      throw new Error(`files.invalidated diagnostics: want 1 refetch for the burst, got ${diagFetches}\n${await diagnostics()}`);
+    }
+  } finally {
+    ws.removeEventListener("message", onDiagRequest);
+  }
+
   // Per-turn file summary (#1365): resume the seeded session; each turn
   // that changed files carries one collapsed summary on its own final
   // line, the no-change turn carries none, and expanding shows the paths
@@ -7100,6 +7271,47 @@ try {
     async () => {
       const chip = await evaluate(`document.querySelector('[data-fast-status]')?.textContent || "none"`);
       return { ok: chip === "none", chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+
+  // Response style (#1369): the chip starts at Default, changes only on
+  // the daemon's verbosity.selected, and says it is delivered as a
+  // session instruction while a non-default style is active.
+  await waitFor(
+    "style chip starts at default",
+    async () => {
+      const chip = await evaluate(`document.querySelector('[data-verbosity-status]')?.textContent || ""`);
+      return { ok: chip === "Style · Default", chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const pickStyle = async (id) => {
+    // The chip opens the palette at the style command; pick the choice.
+    await evaluate(`document.querySelector('[data-verbosity-status]')?.click()`);
+    await delay(250);
+    await evaluate(`document.querySelector('[data-choice-id="${id}"]')?.click()`);
+  };
+  await pickStyle("concise");
+  await waitFor(
+    "style chip shows concise via instruction after daemon confirmation",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        chip: document.querySelector('[data-verbosity-status]')?.textContent || "",
+        id: document.querySelector('[data-verbosity-status]')?.getAttribute("data-verbosity-status") || "",
+        title: document.querySelector('[data-verbosity-status]')?.getAttribute("title") || "",
+      })`);
+      const st = JSON.parse(raw || "{}");
+      return { ok: st.chip === "Style · Concise (instruction)" && st.id === "concise" && st.title.includes("session instruction"), ...st };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await pickStyle("default");
+  await waitFor(
+    "style chip back to default",
+    async () => {
+      const chip = await evaluate(`document.querySelector('[data-verbosity-status]')?.textContent || ""`);
+      return { ok: chip === "Style · Default", chip };
     },
     { timeout: STEP_MS, interval: 200 },
   );

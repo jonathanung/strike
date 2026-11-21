@@ -1,5 +1,5 @@
 /* feature:ideas-inbox begin (#1323) */
-/* Ideas inbox page and its rail badge. Existing tokens only. */
+/* Ideas inbox page and its header badge (#1926). Existing tokens only. */
 .ideas-shell {
   flex: 1;
   min-height: 0;
@@ -52,8 +52,19 @@
   color: var(--ground);
   font-variant-numeric: tabular-nums;
 }
+.nav-slot .ideas-badge { margin: 0; white-space: nowrap; }
+.ideas-quiet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+}
+.ideas-quiet .hint { flex-basis: 100%; margin: 0; }
 @media (max-width: 480px) {
   .ideas-shell { margin: 0; border-radius: 0; }
   .ideas-actions button { min-height: 44px; }
+  .nav-slot .ideas-badge { min-height: 44px; }
+  .nav-slot .ideas-badge-label { display: none; }
 }
 /* feature:ideas-inbox end */

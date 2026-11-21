@@ -104,6 +104,7 @@ jobs:
           cargo test --manifest-path webui/md-review/Cargo.toml --locked
           cargo test --manifest-path webui/transcript-window/Cargo.toml --locked
           cargo test --manifest-path webui/a11y-announce/Cargo.toml --locked
+          cargo test --manifest-path webui/dashboard-view/Cargo.toml --locked
           cargo test --manifest-path webui/edit-resend/Cargo.toml --locked
           cargo test --manifest-path webui/ideas-inbox/Cargo.toml --locked
           cargo test --manifest-path webui/status-card/Cargo.toml --locked
