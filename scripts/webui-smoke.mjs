@@ -2503,6 +2503,9 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitUntil(
     `(() => {
+      // Right after Page.navigate the new document may not have a body yet;
+      // keep polling instead of throwing out of evaluate.
+      if (!document.body) return "navigating";
       const t = document.body.innerText;
       const sent = [...document.querySelectorAll("[data-sent-attachments]")].some((el) => el.innerText.includes("annotate-shot-annotated.png"));
       if (sent && t.includes("annotate smoke 1545") && t.includes("Annotations on annotate-shot.png") && t.includes('[pin x=50%, y=50%] "move this button"')) return true;
