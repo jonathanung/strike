@@ -12,7 +12,8 @@ import (
 
 // composerPrepare expands user.input / steer text for every root engine.
 // dir is the session working directory. skills are the admitted catalog.
-func composerPrepare(text, dir string, skills []config.Skill) engine.InputPrep {
+// sessions expands @session references (#1550); nil leaves them as text.
+func composerPrepare(text, dir string, skills []config.Skill, sessions *triggers.Sessions) engine.InputPrep {
 	var files host.Files
 	if strings.TrimSpace(dir) != "" {
 		files = local.NewFiles(dir)
@@ -26,7 +27,7 @@ func composerPrepare(text, dir string, skills []config.Skill) engine.InputPrep {
 			Render:      sk.Render,
 		}
 	}
-	out := triggers.Prepare(text, files, views)
+	out := triggers.PrepareWith(text, files, views, sessions)
 	return engine.InputPrep{
 		Action:    engine.InputAction(out.Action),
 		ModelText: out.ModelText,

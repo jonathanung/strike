@@ -1,6 +1,6 @@
 // Browser check for the document viewer. Called from webui-smoke after the
 // shell text check. Uses the same DevTools session and the auth'd daemon.
-import { rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -29,6 +29,11 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
   const long = join(repoDir, "editor-long.txt");
   const outlineMd = join(repoDir, "editor-outline.md");
   const md = join(repoDir, "editor-md.md");
+  // Quick-open (#1396) target: several directories deep.
+  const qoDir = join(repoDir, "qo-deep");
+  const qoRel = "qo-deep/inner/most/quickopen-target.txt";
+  await mkdir(join(qoDir, "inner", "most"), { recursive: true });
+  await writeFile(join(repoDir, qoRel), "quick open target\n");
   await writeFile(sample, "alpha beta\nsecond line\nthird line\nfourth line\nfifth line\n");
   await writeFile(
     md,
@@ -1280,8 +1285,125 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "blame off restores the viewer",
     );
+    // Open-file history (#1395): open A (smoke, already open), open B
+    // (other), Back returns to A, Forward to B, Recent lists both and
+    // reopens A; Back is disabled at the start of the stack.
+    const viewerPath = (want, label) =>
+      waitFor(
+        send,
+        `(() => {
+          const root = document.querySelector("[data-ev-root]");
+          const p = root ? root.getAttribute("data-ev-path") : "";
+          return p === ${JSON.stringify(want)} ? "ok" : "path = " + p;
+        })()`,
+        label,
+      );
+    await viewerPath("editor-smoke.txt", "history: A open");
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector('[data-ev-open="editor-other.txt"]'); if (!b) return "no other row"; b.click(); return "ok"; })()`,
+    );
+    await viewerPath("editor-other.txt", "history: B open");
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-hist-back]"); if (!b || b.disabled) return "back disabled"; b.click(); return "ok"; })()`,
+    );
+    await viewerPath("editor-smoke.txt", "history: Back returns to A");
+    await waitFor(
+      send,
+      `(() => { const f = document.querySelector("[data-ev-hist-forward]"); return f && !f.disabled ? "ok" : "forward disabled after Back"; })()`,
+      "history: Forward enabled after Back",
+    );
+    // Keyboard path: Alt+] steps forward from inside the pane.
+    await evalValue(
+      send,
+      `(() => {
+        const pane = document.querySelector(".ev-doc");
+        pane.dispatchEvent(new KeyboardEvent("keydown", { key: "]", code: "BracketRight", altKey: true, bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await viewerPath("editor-other.txt", "history: Alt+] returns to B");
+    await waitFor(
+      send,
+      `(() => {
+        const r = document.querySelector("[data-ev-recent]");
+        if (!r) return "no Recent section";
+        const a = r.querySelector('[data-ev-recent-open="editor-smoke.txt"]');
+        const b = r.querySelector('[data-ev-recent-open="editor-other.txt"]');
+        if (!a || !b) return "Recent = " + r.innerText.slice(0, 160);
+        const rows = [...r.querySelectorAll("[data-ev-recent-open]")].map((el) => el.getAttribute("data-ev-recent-open"));
+        return rows[0] === "editor-other.txt" ? "ok" : "order = " + rows.join(",");
+      })()`,
+      "history: Recent lists both, most recent first",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-recent-open="editor-smoke.txt"]').click(); return "ok"; })()`,
+    );
+    await viewerPath("editor-smoke.txt", "history: Recent reopens A");
+    // Quick-open (#1396): Ctrl+P opens the palette on Open file…; a
+    // query with no match shows the empty state, a partial name lists
+    // the nested file, and Enter (keyboard only) opens it in the viewer.
+    const qoType = async (text) => {
+      await evalValue(
+        send,
+        `(() => {
+          const input = document.querySelector('[data-nav="palette-dialog"] input');
+          if (!input) return "no palette input";
+          input.value = ${JSON.stringify(text)};
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          return "ok";
+        })()`,
+      );
+    };
+    await evalValue(
+      send,
+      `(() => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "p", ctrlKey: true, bubbles: true, cancelable: true })); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const input = document.querySelector('[data-nav="palette-dialog"] input');
+        return input && input.placeholder === "Type part of a file name" ? "ok" : (input ? "placeholder = " + input.placeholder : "no palette");
+      })()`,
+      "Ctrl+P opens Open file…",
+    );
+    await qoType("zzzz-no-such-file-qq");
+    await waitFor(
+      send,
+      `(() => {
+        const d = document.querySelector('[data-nav="palette-dialog"]');
+        return d && d.innerText.includes("Nothing matches.") ? "ok" : (d ? d.innerText.slice(0, 160) : "no palette");
+      })()`,
+      "quick-open empty state",
+    );
+    await qoType("quickopen-targ");
+    await waitFor(
+      send,
+      `(() => document.querySelector('[data-nav="palette-dialog"] [data-choice-id=${JSON.stringify(qoRel)}]') ? "ok" : ((document.querySelector('[data-nav="palette-dialog"]') || {}).innerText || "no palette").slice(0, 200))()`,
+      "quick-open lists the nested file",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const input = document.querySelector('[data-nav="palette-dialog"] input');
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        if (document.querySelector('[data-nav="palette-dialog"]')) return "palette still open";
+        const root = document.querySelector("[data-ev-root]");
+        return root && root.getAttribute("data-ev-path") === ${JSON.stringify(qoRel)} ? "ok" : (root ? "path = " + root.getAttribute("data-ev-path") : "no viewer");
+      })()`,
+      "quick-open opens the file in the viewer",
+    );
     console.log("webui-editor-check ok");
   } finally {
+    await rm(qoDir, { recursive: true, force: true });
     await rm(sample, { force: true });
     await rm(other, { force: true });
     await rm(long, { force: true });
