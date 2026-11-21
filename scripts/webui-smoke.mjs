@@ -398,6 +398,45 @@ try {
     join(sessionsDir, "elapsed-session.meta.json"),
     JSON.stringify({ title: "Elapsed replay" }) + "\n",
   );
+  // Live tool tail (#1374) fixture: turn 1's call streams a chunk and
+  // then ends (the final output replaces the tail); turn 2's chatty call
+  // streams 250 lines and never ends, so it keeps a tail bounded to the
+  // last 200 lines with the truncation hint.
+  let tailSession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-27T06:00:00Z" }) +
+    "\n" +
+    envLine("user.message", "2026-10-27T06:00:00Z", { text: "quick command" }) +
+    envLine("turn.started", "2026-10-27T06:00:01Z", { turnId: "tt1" }) +
+    envLine("tool.begin", "2026-10-27T06:00:02Z", {
+      turnId: "tt1",
+      callId: "tc1",
+      name: "bash",
+      args: { command: "echo early" },
+    }) +
+    envLine("tool.output", "2026-10-27T06:00:03Z", { turnId: "tt1", callId: "tc1", data: "early tail chunk\n" }) +
+    envLine("tool.end", "2026-10-27T06:00:04Z", { turnId: "tt1", callId: "tc1", name: "bash", output: "final output" }) +
+    envLine("text.delta", "2026-10-27T06:00:05Z", { text: "quick done" }) +
+    envLine("turn.completed", "2026-10-27T06:00:06Z", { turnId: "tt1", stopReason: "end_turn" }) +
+    envLine("user.message", "2026-10-27T06:01:00Z", { text: "chatty command" }) +
+    envLine("turn.started", "2026-10-27T06:01:01Z", { turnId: "tt2" }) +
+    envLine("tool.begin", "2026-10-27T06:01:02Z", {
+      turnId: "tt2",
+      callId: "tc2",
+      name: "bash",
+      args: { command: "for i in $(seq 0 249); do echo tail line $i; sleep 1; done" },
+    });
+  for (let i = 0; i < 250; i++) {
+    tailSession += envLine("tool.output", "2026-10-27T06:01:03Z", {
+      turnId: "tt2",
+      callId: "tc2",
+      data: `tail line ${i}\n`,
+    });
+  }
+  await writeFile(join(sessionsDir, "tail-session.jsonl"), tailSession);
+  await writeFile(
+    join(sessionsDir, "tail-session.meta.json"),
+    JSON.stringify({ title: "Tool tail replay" }) + "\n",
+  );
   const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
     throw new Error(`content search ${found.status} ${found.text.slice(0, 300)}`);
@@ -1941,6 +1980,24 @@ try {
   if (rejected.status !== 400) {
     throw new Error(`empty attachment status ${rejected.status}`);
   }
+  // Attachment honesty (#1561): on the echo provider the engine drops
+  // every attachment, so the composer must say so before send (warn,
+  // not block). Removing the file clears the warning.
+  await evaluate(`(() => {
+    const input = document.querySelector('input[data-chat-attach="true"]');
+    const bytes = Uint8Array.from(atob(${JSON.stringify(png)}), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], "honesty-shot.png", { type: "image/png" }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  await waitUntil(
+    `(() => { const w = document.querySelector("[data-attach-warning]"); return !!w && w.offsetParent !== null && w.innerText.includes("honesty-shot.png") && w.innerText.includes("echo provider does not accept attachments"); })()`,
+    "composer warns that echo drops the attachment",
+  );
+  await evaluate(`(() => { const b = [...document.querySelectorAll(".attach-chip button")].find((x) => x.closest(".attach-chip")?.innerText.includes("honesty-shot.png")); b?.click(); return !!b; })()`);
+  await waitUntil(`!document.querySelector("[data-attach-warning]")`, "attachment warning clears with the file");
   await send("Runtime.evaluate", {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
   });
@@ -3807,6 +3864,84 @@ try {
     }),
     { timeout: STEP_MS, interval: 250 },
   );
+  // Per-session drafts (#1367): a draft typed in session A is absent in
+  // session B, back on return to A, persisted under strike.draft.<A>,
+  // and still there after a reload. Clearing it removes the stored key
+  // so later composer checks start from an empty draft.
+  const openRow = async (id) => {
+    await evaluate(
+      `(() => { const row = document.querySelector(${JSON.stringify(rowSel(id))}); const btn = row && row.querySelector(".ss-main"); if (btn) btn.click(); return !!btn; })()`,
+    );
+    await waitFor(`session ${id} selected`, async () => ({ ok: (await selectedID()) === id }), {
+      timeout: STEP_MS,
+      interval: 200,
+    });
+  };
+  const composerValue = async () =>
+    evaluate(`(() => { const el = document.querySelector("#composer-input"); return el ? el.value : null; })()`);
+  const typeComposer = async (value) => {
+    const ok = await evaluate(`(() => {
+      const el = document.querySelector("#composer-input");
+      if (!el) return false;
+      el.focus();
+      const proto = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+      proto.set.call(el, ${JSON.stringify(value)});
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: ${JSON.stringify(value)} }));
+      return el.value === ${JSON.stringify(value)};
+    })()`);
+    if (ok !== true) throw new Error(`draft check: composer did not accept ${JSON.stringify(value)}`);
+  };
+  const storedDraft = async (id) =>
+    evaluate(`localStorage.getItem(${JSON.stringify("strike.draft." + id)})`);
+  const draftA = "half-written prompt for session A (#1367)";
+  await waitFor(
+    "draft check: session A row",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector(${JSON.stringify(rowSel(restoreFallback))})`)) === true,
+    }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await openRow(restoreFallback);
+  await typeComposer(draftA);
+  await waitFor(
+    "draft check: A's draft persisted",
+    async () => ({ ok: (await storedDraft(restoreFallback)) === draftA, stored: await storedDraft(restoreFallback) }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await openRow(restoreTarget);
+  await waitFor(
+    "draft check: session B composer is empty",
+    async () => {
+      const value = await composerValue();
+      return { ok: value === "", value };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await openRow(restoreFallback);
+  await waitFor(
+    "draft check: A's draft restored on return",
+    async () => {
+      const value = await composerValue();
+      return { ok: value === draftA, value };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await reloadCockpit("cockpit reload for draft persistence");
+  await waitFor(
+    "draft check: A's draft restored after reload",
+    async () => {
+      const selected = await selectedID();
+      const value = await composerValue();
+      return { ok: selected === restoreFallback && value === draftA, selected, value };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await typeComposer("");
+  await waitFor(
+    "draft check: cleared draft removes its stored key",
+    async () => ({ ok: (await storedDraft(restoreFallback)) === null }),
+    { timeout: STEP_MS, interval: 200 },
+  );
   // Open session B (the target) through its row, like a user switch.
   await evaluate(
     `(() => { const row = document.querySelector(${JSON.stringify(rowSel(restoreTarget))}); const btn = row && row.querySelector(".ss-main"); if (btn) btn.click(); return !!btn; })()`,
@@ -4042,6 +4177,63 @@ try {
         };
       })()`);
       return { ok: v.n === 1 && v.text === "took 4:12" && v.onSlow && v.body, ...v };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // Live tool tail (#1374): resume the seeded tail session. The call that
+  // ended shows no tail (tool.end replaced it); the call that never ended
+  // keeps exactly the last 200 streamed lines plus the truncation hint.
+  let tailClicked = "missing";
+  try {
+    await waitFor(
+      "tool-tail resume row",
+      async () => {
+        tailClicked = await evaluate(`(() => {
+          const row = document.querySelector('[data-session-id="tail-session"]');
+          const btn = row && row.querySelector(".ss-main");
+          if (!btn) return "missing";
+          btn.click();
+          return "clicked";
+        })()`);
+        return { ok: tailClicked === "clicked", clicked: tailClicked };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  } catch {
+    // reported below with the last observed state
+  }
+  if (tailClicked !== "clicked") {
+    throw new Error(`tool-tail resume click -> ${tailClicked}`);
+  }
+  await waitFor(
+    "bounded live tool tail on the unfinished call only",
+    async () => {
+      const v = await evaluate(`(() => {
+        const tails = [...document.querySelectorAll("[data-tool-tail]")];
+        const t = tails[0];
+        const pre = t ? (t.querySelector("pre")?.textContent || "") : "";
+        return {
+          n: tails.length,
+          lines: t ? t.getAttribute("data-tool-tail") : "",
+          note: Boolean(t && t.querySelector("[data-tool-tail-truncated]")),
+          first: pre.split("\\n")[0],
+          last: pre.trimEnd().split("\\n").pop(),
+          early: document.body.innerText.includes("early tail chunk"),
+          quick: document.body.innerText.includes("quick done"),
+        };
+      })()`);
+      return {
+        ok:
+          v.n === 1 &&
+          v.lines === "200" &&
+          v.note &&
+          v.first === "tail line 50" &&
+          v.last === "tail line 249" &&
+          !v.early &&
+          v.quick,
+        ...v,
+      };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
