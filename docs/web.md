@@ -123,6 +123,8 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/sessions` | **yes** | Session list + `liveId` |
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
 | `GET` | `/v1/sessions/{id}/children` | **yes** | Child/subagent sessions under a root |
+| `GET` | `/v1/sessions/{id}/pr` | **yes** | PR watch (#1356): linked PR state, review decision and CI checks (queued/running/pass/fail/skipped) via the host's `gh`; `poll`/`pollAfterSec` tell the client when to ask again. Cached 30s (`?refresh=1` floor 5s). Never returns tokens or gh stderr; unavailable states carry an actionable `reason` |
+| `POST` | `/v1/sessions/{id}/pr/fix-draft` | **yes** | PR watch: redacted "fix these checks" draft (failing check names + last 100 log lines per failed Actions job). No side effects; the cockpit posts it as `user.input` only after the user confirms. **409** when nothing needs fixing or tracking is unavailable |
 | `POST` | `/v1/sessions/{id}/fork` | **yes** | Fork durable session → new id |
 | `POST` | `/v1/sessions/{id}/report` | **yes** | Generate a `session_report` artifact from the session record (#1444) → **201** artifact. Facts only (turns, asks, tool counts, files, approvals, children, tokens, errors); tool args/output never copied; redacted. **404** unknown session; **501** without sessions or artifact store |
 | `PATCH` | `/v1/sessions/{id}` | **yes** | Rename (`{ "title" }`) |

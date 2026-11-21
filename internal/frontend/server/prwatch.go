@@ -16,7 +16,6 @@ package server
 //     any typed prompt).
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -45,6 +44,8 @@ const (
 	prFixMaxChecks      = 5
 	prFixTailLines      = 100
 	prFixMaxBytesCheck  = 12 * 1024
+	prWatchRefreshFloor = 5 * time.Second
+	prGHStdoutMax       = 2 << 20
 )
 
 // Check states the cockpit renders.
@@ -63,9 +64,10 @@ var (
 	errGHFailed          = errors.New("gh failed")
 )
 
-// ghRunner runs `gh args...` and returns stdout. Errors must be one of the
-// errGH*/errPRNotFound sentinels (wrapped is fine); stderr never escapes.
-type ghRunner func(ctx context.Context, args ...string) ([]byte, error)
+// ghRunner runs `gh args...` in dir ("" = daemon cwd) and returns stdout.
+// Errors must be one of the errGH*/errPRNotFound sentinels (wrapped is
+// fine); stderr never escapes.
+type ghRunner func(ctx context.Context, dir string, args ...string) ([]byte, error)
 
 type prWatchCacheEntry struct {
 	status prWatchStatus
@@ -197,18 +199,28 @@ func (s *Server) prWatchStatusFor(ctx context.Context, id string, refresh bool) 
 		return base, nil
 	}
 
-	key := id + "\n" + base.URL + "\n" + strconv.Itoa(base.Number)
-	p := &s.prWatch
-	if !refresh {
-		p.mu.Lock()
-		if ent, ok := p.cache[key]; ok && now.Sub(ent.at) < prWatchCacheTTL {
-			p.mu.Unlock()
-			return ent.status, nil
-		}
-		p.mu.Unlock()
+	// A bare number resolves against gh's working directory, so it must
+	// run in the session's own repo, never the daemon's cwd.
+	dir := strings.TrimSpace(meta.ProjectKey)
+	if base.URL == "" && dir == "" {
+		base.Reason = "PR tracking unavailable: this session recorded a PR number without a link or project directory."
+		return base, nil
 	}
 
-	st := fetchPRWatch(ctx, p.runner(), base)
+	key := id + "\n" + base.URL + "\n" + strconv.Itoa(base.Number)
+	p := &s.prWatch
+	ttl := prWatchCacheTTL
+	if refresh {
+		ttl = prWatchRefreshFloor
+	}
+	p.mu.Lock()
+	if ent, ok := p.cache[key]; ok && now.Sub(ent.at) < ttl {
+		p.mu.Unlock()
+		return ent.status, nil
+	}
+	p.mu.Unlock()
+
+	st := fetchPRWatch(ctx, p.runner(), dir, base)
 	if st.Available && st.State != "" && st.State != session.NormalizePRState(meta.PRState) {
 		_, _ = session.UpdateMeta(s.opts.SessionDir, id, func(m *session.Meta) {
 			m.PRState = st.State
@@ -253,14 +265,14 @@ type ghPRWatchJSON struct {
 	StatusCheckRollup []ghRollupItem `json:"statusCheckRollup"`
 }
 
-func fetchPRWatch(ctx context.Context, run ghRunner, base prWatchStatus) prWatchStatus {
+func fetchPRWatch(ctx context.Context, run ghRunner, dir string, base prWatchStatus) prWatchStatus {
 	ctx, cancel := context.WithTimeout(ctx, prWatchGHTimeout)
 	defer cancel()
 	ident := base.URL
 	if ident == "" {
 		ident = strconv.Itoa(base.Number)
 	}
-	out, err := run(ctx, "pr", "view", ident, "--json", "number,url,state,reviewDecision,statusCheckRollup")
+	out, err := run(ctx, dir, "pr", "view", ident, "--json", "number,url,state,reviewDecision,statusCheckRollup")
 	if err != nil {
 		base.Reason, base.Poll = prWatchErrorReason(err)
 		if base.Poll {
@@ -460,7 +472,7 @@ func (s *Server) buildPRFixDraft(ctx context.Context, st prWatchStatus) prFixDra
 			continue
 		}
 		cctx, cancel := context.WithTimeout(ctx, prWatchGHTimeout)
-		out, err := run(cctx, "run", "view", "--repo", repo, "--job", job, "--log-failed")
+		out, err := run(cctx, "", "run", "view", "--repo", repo, "--job", job, "--log-failed")
 		cancel()
 		if err != nil {
 			b.WriteString("(log unavailable: gh run view failed)\n")
@@ -554,20 +566,60 @@ func (n *notifyLog) add(item Notification) bool {
 	return true
 }
 
-func defaultGHRunner(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "gh", args...)
-	// Never prompt (no TTY) and never page.
-	cmd.Env = append(cmd.Environ(), "GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1", "GH_PAGER=cat")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+func defaultGHRunner(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	if _, err := exec.LookPath(ghBin); err != nil {
+		return nil, errGHMissing
+	}
+	cmd := exec.CommandContext(ctx, ghBin, args...)
+	cmd.Dir = dir
+	// Never prompt (no TTY) and never page; same child env as the GitHub app.
+	cmd.Env = append(ghChildEnv(), "NO_COLOR=1", "GH_PAGER=cat")
+	// Logs keep their tail (that is what a fix draft quotes); anything else
+	// over the cap is refused rather than parsed truncated.
+	stdout := &capBuffer{max: prGHStdoutMax, keepTail: len(args) > 0 && args[0] == "run"}
+	stderr := &capBuffer{max: 64 << 10, keepTail: true}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return nil, errGHMissing
 		}
-		return nil, classifyGHStderr(stderr.String())
+		return nil, classifyGHStderr(string(stderr.buf))
 	}
-	return stdout.Bytes(), nil
+	if stdout.over && !stdout.keepTail {
+		return nil, errGHFailed
+	}
+	return stdout.buf, nil
+}
+
+// capBuffer is an io.Writer that holds at most max bytes: the newest bytes
+// when keepTail, else the first max bytes (over records the overflow).
+type capBuffer struct {
+	max      int
+	keepTail bool
+	over     bool
+	buf      []byte
+}
+
+func (c *capBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	if c.keepTail {
+		c.buf = append(c.buf, p...)
+		if len(c.buf) > c.max {
+			c.over = true
+			c.buf = append(c.buf[:0], c.buf[len(c.buf)-c.max:]...)
+		}
+		return n, nil
+	}
+	if room := c.max - len(c.buf); room < len(p) {
+		c.over = true
+		if room > 0 {
+			c.buf = append(c.buf, p[:room]...)
+		}
+		return n, nil
+	}
+	c.buf = append(c.buf, p...)
+	return n, nil
 }
 
 // classifyGHStderr maps gh's stderr onto a sentinel. The text itself is

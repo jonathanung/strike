@@ -20,16 +20,18 @@ import (
 type fakeGH struct {
 	mu    sync.Mutex
 	calls [][]string
+	dirs  []string
 	pr    string
 	prErr error
 	log   string
 	logEr error
 }
 
-func (f *fakeGH) run(_ context.Context, args ...string) ([]byte, error) {
+func (f *fakeGH) run(_ context.Context, dir string, args ...string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, append([]string(nil), args...))
+	f.dirs = append(f.dirs, dir)
 	if len(args) >= 2 && args[0] == "run" && args[1] == "view" {
 		if f.logEr != nil {
 			return nil, f.logEr
@@ -212,6 +214,8 @@ func TestRollupPRChecks(t *testing.T) {
 func TestSessionPRStatusFailingOpenPR(t *testing.T) {
 	gh := &fakeGH{pr: prJSON("OPEN", "", strings.Join([]string{checkPass, checkFail, checkCtx}, ","))}
 	srv, dir := newPRServer(t, gh)
+	clock := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	srv.prWatch.now = func() time.Time { return clock }
 	seedPRSession(t, dir, "s1", session.Meta{PRURL: prURL, PRNumber: 42, PRState: "open"})
 
 	code, body := prGet(t, srv, "/v1/sessions/s1/pr")
@@ -239,10 +243,20 @@ func TestSessionPRStatusFailingOpenPR(t *testing.T) {
 	if n := gh.count("pr view"); n != 1 {
 		t.Fatalf("cached poll ran gh %d times", n)
 	}
-	// refresh=1 bypasses the cache.
+	// refresh=1 inside the 5s floor still serves the cache...
+	prGet(t, srv, "/v1/sessions/s1/pr?refresh=1")
+	if n := gh.count("pr view"); n != 1 {
+		t.Fatalf("refresh inside the floor ran gh %d times total, want 1", n)
+	}
+	// ...and past the floor (but inside the 30s TTL) asks gh again.
+	clock = clock.Add(prWatchRefreshFloor + time.Second)
 	prGet(t, srv, "/v1/sessions/s1/pr?refresh=1")
 	if n := gh.count("pr view"); n != 2 {
 		t.Fatalf("refresh ran gh %d times total, want 2", n)
+	}
+	prGet(t, srv, "/v1/sessions/s1/pr")
+	if n := gh.count("pr view"); n != 2 {
+		t.Fatalf("plain poll after refresh ran gh %d times total, want 2", n)
 	}
 	// Attention raised one notification, deduped across polls.
 	items, _, _ := srv.notifications().snapshot(0)
@@ -311,7 +325,8 @@ func TestSessionPRStatusUnavailableStopsPolling(t *testing.T) {
 	}{
 		{"unauthenticated", session.Meta{PRURL: prURL}, errGHUnauthenticated, "gh auth login", false, true},
 		{"gh missing", session.Meta{PRURL: prURL}, errGHMissing, "not installed", false, true},
-		{"no remote", session.Meta{PRNumber: 7}, errPRNotFound, "no GitHub remote", false, true},
+		{"no remote", session.Meta{PRNumber: 7, ProjectKey: "/work/repo"}, errPRNotFound, "no GitHub remote", false, true},
+		{"number without project", session.Meta{PRNumber: 7}, nil, "without a link or project directory", false, false},
 		{"transient", session.Meta{PRURL: prURL}, errGHFailed, "Retrying later", true, true},
 		{"non-github", session.Meta{PRURL: "https://gitlab.example.com/a/b/-/merge_requests/3"}, nil, "GitHub pull requests only", false, false},
 	}
@@ -524,5 +539,69 @@ func TestPRAttentionNoteDedupesBySet(t *testing.T) {
 	}
 	if prAttentionNote(a, now).Href != "/#session=s" {
 		t.Fatalf("href = %q", prAttentionNote(a, now).Href)
+	}
+}
+
+func TestSessionPRNumberOnlyRunsInSessionRepo(t *testing.T) {
+	gh := &fakeGH{pr: prJSON("OPEN", "", checkPass)}
+	srv, dir := newPRServer(t, gh)
+	seedPRSession(t, dir, "s1", session.Meta{PRNumber: 42, ProjectKey: "/work/session-repo"})
+	_, body := prGet(t, srv, "/v1/sessions/s1/pr")
+	var st prWatchStatus
+	_ = json.Unmarshal([]byte(body), &st)
+	if !st.Available || st.URL != prURL {
+		t.Fatalf("status = %+v", st)
+	}
+	if len(gh.calls) != 1 || gh.calls[0][2] != "42" || gh.dirs[0] != "/work/session-repo" {
+		t.Fatalf("gh calls = %v dirs = %v", gh.calls, gh.dirs)
+	}
+}
+
+func TestCapBuffer(t *testing.T) {
+	head := &capBuffer{max: 4}
+	_, _ = head.Write([]byte("abc"))
+	_, _ = head.Write([]byte("def"))
+	if string(head.buf) != "abcd" || !head.over {
+		t.Fatalf("head = %q over=%v", head.buf, head.over)
+	}
+	tail := &capBuffer{max: 4, keepTail: true}
+	_, _ = tail.Write([]byte("abc"))
+	_, _ = tail.Write([]byte("def"))
+	if string(tail.buf) != "cdef" || !tail.over {
+		t.Fatalf("tail = %q over=%v", tail.buf, tail.over)
+	}
+	small := &capBuffer{max: 10}
+	if n, err := small.Write([]byte("hi")); n != 2 || err != nil || small.over {
+		t.Fatalf("small write = %d %v over=%v", n, err, small.over)
+	}
+}
+
+func TestDefaultGHRunnerUsesFakeGH(t *testing.T) {
+	bin := t.TempDir()
+	script := filepath.Join(bin, "gh")
+	body := "#!/bin/sh\nif [ \"$1\" = fail ]; then echo 'To get started with GitHub CLI, please run:  gh auth login' >&2; exit 4; fi\nprintf '%s' \"$GH_PROMPT_DISABLED:$(pwd -P)\"\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := ghBin
+	ghBin = script
+	t.Cleanup(func() { ghBin = old })
+	work, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := defaultGHRunner(context.Background(), work, "pr", "view")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(out); got != "1:"+work {
+		t.Fatalf("stdout = %q", got)
+	}
+	if _, err := defaultGHRunner(context.Background(), "", "fail"); !errors.Is(err, errGHUnauthenticated) {
+		t.Fatalf("err = %v, want errGHUnauthenticated", err)
+	}
+	ghBin = filepath.Join(bin, "missing-gh")
+	if _, err := defaultGHRunner(context.Background(), "", "pr"); !errors.Is(err, errGHMissing) {
+		t.Fatalf("err = %v, want errGHMissing", err)
 	}
 }
