@@ -27,7 +27,7 @@ pub const IDLE_RECAP_MS: i64 = 6 * 60 * 60 * 1000;
 pub const AGENT_REPORTED: &str = "agent-reported";
 /// Text for a figure nobody measured.
 pub const DASH: &str = "\u{2014}";
-/// Recent child sessions listed in the idle recap.
+/// Child sessions listed in the idle recap (tail of the daemon's list).
 pub const RECAP_RECENT_MAX: usize = 5;
 
 /// Where a value comes from.
@@ -221,8 +221,8 @@ pub struct SessionCard {
 pub struct Recap {
     /// `name (state)` for every child that did not finish cleanly.
     pub open: Vec<String>,
-    /// Recent child session titles, newest last, at most
-    /// [`RECAP_RECENT_MAX`].
+    /// The last [`RECAP_RECENT_MAX`] child session titles in the order the
+    /// daemon listed them (no recency claim: the list is not time-sorted).
     pub recent: Vec<String>,
     /// Quiet time in ms.
     pub idle_ms: i64,

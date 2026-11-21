@@ -148,7 +148,7 @@ fn recap_view(recap: Recap) -> AnyView {
             </header>
             <p class="sc-label">"Left open"</p>
             {list_view(recap.open, "Nothing left open.")}
-            <p class="sc-label">"Recent child sessions"</p>
+            <p class="sc-label">"Child sessions (last 5 listed)"</p>
             {list_view(recap.recent, "No child sessions recorded.")}
         </section>
     }
