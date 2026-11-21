@@ -915,6 +915,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 			Verification: verification,
 			BudgetKind:   budgetKind,
 			Finalization: finalization,
+			Usage:        h.usageSnapshot(),
 		}
 		// Prefer verification summary on blocked terminal Summary field.
 		if status == protocol.ChildStatusBlocked && verification != nil && verification.Summary != "" {
@@ -1242,6 +1243,9 @@ func (h *childHandle) noteEvent(ev protocol.Event) {
 			if ev.CacheCreation.Known {
 				tokens += ev.CacheCreation.N
 			}
+		}
+		if h.budget != nil && (ev.Used.Known || ev.Input.Known || ev.Output.Known || ev.CacheRead.Known || ev.CacheCreation.Known) {
+			h.budget.usageReported = true
 		}
 		if h.budget != nil && tokens > 0 {
 			h.budget.noteUsage(tokens, now)

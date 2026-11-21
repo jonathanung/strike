@@ -91,6 +91,11 @@ type childBudget struct {
 	toolCalls      int
 	dangerousTools int
 	costUSD        float64 // estimated USD when session pricing is wired (#577)
+	// usageReported / costReported record that a stream reported usage and
+	// that pricing produced a cost, so ChildCompleted.Usage can tell "not
+	// reported" from a measured zero (#1962).
+	usageReported bool
+	costReported  bool
 
 	lastProgressAt time.Time
 	recentTools    []string // newest at end
@@ -174,7 +179,22 @@ func (b *childBudget) noteCost(usd float64, now time.Time) {
 		return
 	}
 	b.costUSD += usd
+	b.costReported = true
 	b.noteProgress(now, b.lastAction)
+}
+
+// usage is the accumulated provider usage for ChildCompleted.Usage (#1962):
+// nil when no stream reported usage; CostUSD nil when nothing was priced.
+func (b *childBudget) usage() *protocol.ChildUsage {
+	if b == nil || !b.usageReported {
+		return nil
+	}
+	u := &protocol.ChildUsage{Tokens: b.tokensUsed}
+	if b.costReported {
+		cost := b.costUSD
+		u.CostUSD = &cost
+	}
+	return u
 }
 
 func (b *childBudget) setObjective(text string) {
@@ -723,6 +743,16 @@ func (h *childHandle) budgetTerminal() (protocol.ChildStatus, string) {
 }
 
 // budgetTerminalMeta returns budget kind + finalization outcome for ChildCompleted.
+// usageSnapshot reads the child's accumulated usage under h.mu (#1962).
+func (h *childHandle) usageSnapshot() *protocol.ChildUsage {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.budget.usage()
+}
+
 func (h *childHandle) budgetTerminalMeta() (kind, finalization string) {
 	if h == nil {
 		return "", ""

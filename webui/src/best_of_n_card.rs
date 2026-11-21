@@ -5,7 +5,8 @@
 //! opens from the command palette (`best-of-n.open`), shows the N× cost and
 //! per-run budget before anything starts, and the card offers cancel-all,
 //! adopt (confirmed) and keep none (confirmed). Nothing is applied without
-//! that separate, confirmed step.
+//! that separate, confirmed step. Compare (#1962) asks the parent session
+//! for commentary on how the runs differ; it never picks or applies one.
 
 use std::rc::Rc;
 
@@ -47,6 +48,11 @@ pub struct Candidate {
     pub verified: Option<bool>,
     #[serde(default)]
     pub error: String,
+    /// Absent when the provider reported no usage (never shown as zero).
+    #[serde(default)]
+    pub tokens: Option<i64>,
+    #[serde(default, rename = "costUsd")]
+    pub cost_usd: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -75,6 +81,8 @@ pub struct Run {
     pub decision: Option<Decision>,
     #[serde(default)]
     pub note: String,
+    #[serde(default, rename = "commentaryRequested")]
+    pub commentary_requested: bool,
 }
 
 #[derive(Clone, Deserialize)]
@@ -311,6 +319,8 @@ pub fn BestOfNCard(
                 let mode = if run.edits { "worktree per model" } else { "answers only" };
                 let multiplier = format!("{}× cost · {}", run.cost_multiplier, mode);
                 let run_note = run.note.clone();
+                let comparable = bon::can_compare(complete, decided, run.commentary_requested);
+                let commentary = run.commentary_requested && !decided;
                 let rows = run.candidates.clone().into_iter().map(|c| {
                     let adoptable = bon::can_adopt(&c.status, complete, decided);
                     let kept = keep.as_deref() == Some(c.child_id.as_str()) && !c.child_id.is_empty();
@@ -319,6 +329,7 @@ pub fn BestOfNCard(
                     let verified = bon::verified_label(c.verified);
                     let diff = bon::diffstat_label(c.files_changed, c.added, c.removed);
                     let elapsed = bon::elapsed_label(c.elapsed_ms);
+                    let usage = bon::usage_label(c.tokens, c.cost_usd);
                     let summary = c.summary.clone();
                     let error = c.error.clone();
                     let child = c.child_id.clone();
@@ -334,6 +345,7 @@ pub fn BestOfNCard(
                             <div class="bon-cand-meta">
                                 <span class="bon-diff">{diff}</span>
                                 {(!verified.is_empty()).then(|| view! { <span class="bon-verify">{verified}</span> })}
+                                {(!usage.is_empty()).then(|| view! { <span class="bon-usage" data-bon-usage="true">{usage}</span> })}
                             </div>
                             {(!summary.is_empty()).then(|| view! { <p class="bon-summary">{summary}</p> })}
                             {(!error.is_empty()).then(|| view! { <p class="bon-cand-error">{error}</p> })}
@@ -355,6 +367,7 @@ pub fn BestOfNCard(
                     }
                 }).collect_view();
                 let cancel_id = id.clone();
+                let compare_id = id.clone();
                 let none_id = id.clone();
                 view! {
                     <section class="best-of-n-card" data-bon-run=id.clone() data-state=state aria-label="Best-of-N comparison" aria-live="polite">
@@ -365,11 +378,20 @@ pub fn BestOfNCard(
                         <p class="bon-prompt">{prompt_line}</p>
                         <ul class="bon-cands">{rows}</ul>
                         {(!run_note.is_empty()).then(|| view! { <p class="bon-note">{run_note}</p> })}
+                        {commentary.then(|| view! {
+                            <p class="bon-note" data-bon-commentary="requested">"Commentary requested: this session's reply in the transcript compares the runs. It does not pick a winner."</p>
+                        })}
                         <div class="bon-actions">
                             {(!complete).then(|| view! {
                                 <button type="button" class="secondary" data-bon-action="cancel"
                                     prop:disabled=move || busy.get()
                                     on:click=move |_| act(cancel_id.clone(), "cancel", json!({}))>"Cancel all"</button>
+                            })}
+                            {comparable.then(|| view! {
+                                <button type="button" class="secondary" data-bon-action="compare"
+                                    title="Ask this session to comment on how the runs differ (one turn). It never picks or applies a winner."
+                                    prop:disabled=move || busy.get()
+                                    on:click=move |_| act(compare_id.clone(), "compare", json!({}))>"Compare"</button>
                             })}
                             {(complete && !decided).then(|| view! {
                                 <button type="button" class="secondary" data-bon-action="keep-none"

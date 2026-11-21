@@ -6,8 +6,9 @@
 // refused before anything runs; two models show the 2× cost and per-run
 // budget; Run posts /v1/bestofn and a comparison card appears with one row
 // per model; every row reaches a stopped state (the echo provider may run
-// or refuse a made-up model, both are honest outcomes); Keep none goes
-// through the confirm dialog and the card reports it.
+// or refuse a made-up model, both are honest outcomes); Compare (#1962)
+// asks the parent session for commentary without deciding anything; Keep
+// none goes through the confirm dialog and the card reports it.
 import { setTimeout as delay } from "node:timers/promises";
 
 async function evalValue(send, expression) {
@@ -127,6 +128,27 @@ export async function bestOfNCheck({ send }) {
     })()`,
     "every run stops",
     480,
+  );
+
+  // Compare asks the parent for commentary once. A refusal while the parent
+  // is still busy (e.g. reacting to child.completed) leaves the button, so
+  // retry until the request lands.
+  await waitFor(
+    send,
+    `(() => {
+      const card = document.querySelector("[data-bon-run]");
+      if (card.querySelector('[data-bon-commentary="requested"]')) {
+        if (card.querySelector('[data-bon-action="compare"]')) return "compare still offered after request";
+        return card.getAttribute("data-state") === "complete" ? "ok" : "compare changed state to " + card.getAttribute("data-state");
+      }
+      const b = card.querySelector('[data-bon-action="compare"]');
+      if (!b) return "no compare button";
+      if (!b.disabled) b.click();
+      const e = document.querySelector(".best-of-n-error");
+      return "waiting " + (e ? e.textContent : "");
+    })()`,
+    "compare requests commentary",
+    240,
   );
 
   // Keep none is a confirmed step.

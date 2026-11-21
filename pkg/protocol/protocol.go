@@ -1127,6 +1127,18 @@ type ChildCompleted struct {
 	// Finalization records whether a soft-budget reserved handoff turn ran
 	// (none|succeeded|failed|skipped_hard). See Finalization* constants (#879).
 	Finalization string `json:"finalization,omitempty"`
+	// Usage is the provider usage the child accumulated across its streams
+	// (#1962). Nil when the child's provider reported no usage, so readers can
+	// tell "not reported" from a measured zero.
+	Usage *ChildUsage `json:"usage,omitempty"`
+}
+
+// ChildUsage is the provider usage a delegated child accumulated before its
+// terminal status. Tokens sums every stream's reported tokens; CostUSD is nil
+// when no pricing was available for the child's model.
+type ChildUsage struct {
+	Tokens  int      `json:"tokens"`
+	CostUSD *float64 `json:"costUsd,omitempty"`
 }
 
 // ChildEscalated reports a per-child budget/stall/loop trip (#774 / #879).

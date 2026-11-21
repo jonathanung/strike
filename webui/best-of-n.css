@@ -65,6 +65,7 @@
 .best-of-n-card .bon-cands li[data-kept="true"] { outline: var(--border-width) solid var(--success); }
 .best-of-n-card .bon-cand-head,
 .best-of-n-card .bon-cand-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.best-of-n-card .bon-usage { color: var(--muted); font-variant-numeric: tabular-nums; }
 .best-of-n-card .bon-model { font-family: var(--font-display); font-weight: 700; overflow-wrap: anywhere; }
 .best-of-n-card .bon-summary,
 .best-of-n-card .bon-cand-error,

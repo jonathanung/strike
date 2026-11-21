@@ -1,0 +1,77 @@
+/* #1881 best-of-N picker and comparison card. Scoped to .best-of-n-card;
+   theme tokens only (style.css), no new palette. */
+.best-of-n-card {
+  margin: 8px 12px;
+  padding: 10px 12px;
+  border: var(--border-width) solid var(--border-muted);
+  border-left-width: 6px;
+  border-left-color: var(--accent-alt);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--type-md);
+  box-shadow: var(--shadow);
+  flex: none;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.best-of-n-card[data-state="complete"] { border-left-color: var(--warning); }
+.best-of-n-card[data-state="decided"] { border-left-color: var(--success); }
+.best-of-n-card .bon-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.best-of-n-card .bon-badge {
+  font-family: var(--font-display);
+  font-size: var(--type-lg);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.best-of-n-card .bon-cost-tag,
+.best-of-n-card .bon-hint,
+.best-of-n-card .bon-elapsed { color: var(--muted); font-size: var(--type-sm); }
+.best-of-n-card .bon-prompt { margin: 6px 0 0; overflow-wrap: anywhere; }
+.best-of-n-card .bon-field { display: grid; gap: 4px; margin-top: 8px; }
+.best-of-n-card .bon-field textarea,
+.best-of-n-card .bon-field input { width: 100%; box-sizing: border-box; }
+.best-of-n-card .bon-row { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.best-of-n-card .bon-small { max-width: 10rem; }
+.best-of-n-card .bon-check { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.best-of-n-card .bon-cost { margin: 8px 0 0; font-weight: 600; }
+.best-of-n-card .bon-cands {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+.best-of-n-card .bon-cands li {
+  display: grid;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--surface-muted);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--border-muted);
+}
+.best-of-n-card .bon-cands li[data-status="running"] { border-left-color: var(--accent-alt); }
+.best-of-n-card .bon-cands li[data-status="done"] { border-left-color: var(--success); }
+.best-of-n-card .bon-cands li[data-status="failed"] { border-left-color: var(--danger); }
+.best-of-n-card .bon-cands li[data-status="cancelled"] { border-left-color: var(--warning); }
+.best-of-n-card .bon-cands li[data-kept="true"] { outline: var(--border-width) solid var(--success); }
+.best-of-n-card .bon-cand-head,
+.best-of-n-card .bon-cand-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.best-of-n-card .bon-model { font-family: var(--font-display); font-weight: 700; overflow-wrap: anywhere; }
+.best-of-n-card .bon-summary,
+.best-of-n-card .bon-cand-error,
+.best-of-n-card .bon-note,
+.best-of-n-card .bon-error { margin: 0; overflow-wrap: anywhere; }
+.best-of-n-card .bon-cand-error,
+.best-of-n-card .bon-error { color: var(--danger); }
+.best-of-n-card .bon-note { margin-top: 6px; color: var(--muted); }
+.best-of-n-card .bon-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.best-of-n-error { margin: 4px 12px; color: var(--danger); }
