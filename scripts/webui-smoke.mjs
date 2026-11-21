@@ -5828,6 +5828,35 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+  await waitFor(
+    "yolo confirm from the palette",
+    async () => {
+      const open = await evaluate(`!!document.querySelector(".approvals-dialog")`);
+      if (open) return { ok: true };
+      const clicked = await evaluate(`(() => {
+        const cmd = document.querySelector('[data-command-id="mode-yolo"]');
+        if (cmd) { cmd.click(); return "clicked"; }
+        document.querySelector('[data-nav="palette"]')?.click();
+        return "opening";
+      })()`);
+      return { ok: false, clicked };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`(() => {
+    const btn = [...document.querySelectorAll(".approvals-dialog button")].find((b) => (b.innerText || "").trim() === "Use Yolo");
+    if (btn) btn.click();
+    return "ok";
+  })()`);
+  await waitFor(
+    "yolo approval",
+    async () => {
+      const body = (await evaluate(`document.body ? document.body.innerText : ""`)) || "";
+      return { ok: body.includes("Approval · Yolo"), body: body.slice(0, 240) };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+
   // Prompt sharpen (#1385): Alt+P sends the draft to the daemon's
   // one-shot rewrite (echo stands in for the model), shows the
   // original-vs-sharpened preview, and changes nothing until Accept.
@@ -5896,34 +5925,6 @@ try {
     { timeout: STEP_MS, interval: 200 },
   );
   await setDraft("");
-  await waitFor(
-    "yolo confirm from the palette",
-    async () => {
-      const open = await evaluate(`!!document.querySelector(".approvals-dialog")`);
-      if (open) return { ok: true };
-      const clicked = await evaluate(`(() => {
-        const cmd = document.querySelector('[data-command-id="mode-yolo"]');
-        if (cmd) { cmd.click(); return "clicked"; }
-        document.querySelector('[data-nav="palette"]')?.click();
-        return "opening";
-      })()`);
-      return { ok: false, clicked };
-    },
-    { timeout: STEP_MS, interval: 200 },
-  );
-  await evaluate(`(() => {
-    const btn = [...document.querySelectorAll(".approvals-dialog button")].find((b) => (b.innerText || "").trim() === "Use Yolo");
-    if (btn) btn.click();
-    return "ok";
-  })()`);
-  await waitFor(
-    "yolo approval",
-    async () => {
-      const body = (await evaluate(`document.body ? document.body.innerText : ""`)) || "";
-      return { ok: body.includes("Approval · Yolo"), body: body.slice(0, 240) };
-    },
-    { timeout: STEP_MS, interval: 200 },
-  );
 
   // Session dials (#1572 autonomy, #1569 Fast): both start at the
   // daemon-reported default, flip only after the daemon confirms the
