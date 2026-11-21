@@ -13,6 +13,7 @@
 // what the page actually looked like.
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
 import { mdReviewBrowserCheck } from "./webui-md-review-check.mjs";
 import { seedSkillUsage, skillUsageCheck } from "./webui-skill-usage-check.mjs";
@@ -2156,6 +2157,7 @@ try {
     token,
     repoDir: process.cwd(),
   });
+  await agentPickerCheck({ send });
   await mdReviewBrowserCheck({
     send,
     port,

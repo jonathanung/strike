@@ -7,6 +7,7 @@
 //! `task_runner`. Customize (skills, agents, MCP, hooks, rules) lives
 //! in `customize`.
 
+mod agent_picker;
 mod annotate;
 mod api;
 mod appearance;
@@ -1262,6 +1263,13 @@ fn App() -> impl IntoView {
     let model_name = RwSignal::new(String::new());
     let model_note = RwSignal::new(String::new());
     let model_note_after = RwSignal::new(0i64);
+    // Agent picker (#1563): the selectable agents from bootstrap and the
+    // daemon-confirmed running agent. `agent_name` changes only from the
+    // bootstrap status or an `agent.selected` event, never on click.
+    let agent_list = RwSignal::new(Vec::<crate::model::AgentInfo>::new());
+    let agent_name = RwSignal::new(String::new());
+    let agent_note = RwSignal::new(String::new());
+    let agent_note_after = RwSignal::new(0i64);
     let effort_level = RwSignal::new(String::new());
     let context_used = RwSignal::new(0i64);
     let context_limit = RwSignal::new(0i64);
@@ -1833,6 +1841,7 @@ fn App() -> impl IntoView {
                                 if let Some(st) = boot.status {
                                     provider_name.set(st.provider);
                                     model_name.set(st.model);
+                                    agent_name.set(st.agent);
                                     effort_level.set(st.effort);
                                     context_used.set(st.context_used);
                                     context_limit.set(st.context_limit);
@@ -1883,6 +1892,7 @@ fn App() -> impl IntoView {
                                 config_files_capable.set(boot.capabilities.config_files);
                                 crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
                                 skills.set(boot.skills);
+                                agent_list.set(boot.agents);
                                 loops_capable.set(boot.capabilities.loops);
                                 commands.set(if boot.capabilities.loops {
                                     session_loops::with_loop_commands(boot.composer_commands)
@@ -2193,6 +2203,17 @@ fn App() -> impl IntoView {
                         note: model_note.get_untracked(),
                         note_after: model_note_after.get_untracked(),
                     };
+                    let agent_next = crate::agent_picker::reduce_envelope(
+                        crate::agent_picker::AgentState {
+                            current: agent_name.get_untracked(),
+                            note: agent_note.get_untracked(),
+                            note_after: agent_note_after.get_untracked(),
+                        },
+                        &data,
+                    );
+                    agent_name.set(agent_next.current);
+                    agent_note.set(agent_next.note);
+                    agent_note_after.set(agent_next.note_after);
                     let wf_next = workflow_run::reduce(wf_run.get_untracked(), &data);
                     if wf_next != wf_run.get_untracked() {
                         wf_run.set(wf_next);
@@ -3516,6 +3537,22 @@ fn App() -> impl IntoView {
             }
         });
     });
+    let on_select_agent = Callback::new(move |name: String| {
+        agent_note_after.set(now_ms() as i64);
+        agent_note.set(String::new());
+        let (b, t, root) = (base.get_untracked(), token.get_untracked(), active_root.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(&b, &t, &root, "select.agent", serde_json::json!({"name": name})).await {
+                agent_note.set(format!("agent change failed: {e}"));
+                agent_note_after.set(0);
+            }
+        });
+    });
+    crate::agent_picker::set_picker(Rc::new(move |name: &str| {
+        on_select_agent.run(name.to_string());
+    }));
+    Effect::new(move |_| crate::agent_picker::set_agents(agent_list.get()));
+    Effect::new(move |_| crate::agent_picker::set_current(&agent_name.get()));
     {
         let pick = on_select_model.clone();
         shell::set_model_picker(Rc::new(move |provider, id| {
@@ -6102,6 +6139,23 @@ fn App() -> impl IntoView {
                                     let name = if model.is_empty() { provider_name.get() } else { model };
                                     if name.is_empty() { "Model · none".into() } else { format!("Model · {name}") }
                                 }}</button>
+                                // #1563: the agent chip sits beside the model
+                                // chip — agent and model are the two session
+                                // identity controls. Hidden when the daemon
+                                // reported no selectable agents. It opens
+                                // Switch agent, which only accepts listed
+                                // agents; the label follows agent.selected.
+                                <Show when=move || !agent_list.get().is_empty()>
+                                    <button type="button" class="composer-glance agent-glance" data-agent-status="true" data-agent-current=move || agent_name.get() title="Change the agent this session runs" aria-label=move || crate::agent_picker::chip_aria(&agent_name.get()) on:click=move |_| {
+                                        mode_menu.set(false);
+                                        model_menu.set(false);
+                                        autonomy_menu.set(false);
+                                        plus_open.set(false);
+                                        ac_open.set(false);
+                                        ac_force.set(String::new());
+                                        shell::show_palette_at("switch-agent");
+                                    }>{move || crate::agent_picker::chip_label(&agent_name.get())}</button>
+                                </Show>
                                 <span class=move || {
                                     if approvals::is_dangerous(&perm_mode.get()) {
                                         "composer-glance approvals-mode-chip danger"
@@ -6160,6 +6214,9 @@ fn App() -> impl IntoView {
                         <annotate::AnnotateOverlay target=annotate_target store=annotate_marks />
                         <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
                             <p class="hint" data-model-note="true">{move || model_note.get()}</p>
+                        </Show>
+                        <Show when=move || !agent_note.get().is_empty()>
+                            <p class="hint" data-agent-note="true">{move || agent_note.get()}</p>
                         </Show>
                         <p class="hint composer-statusline" data-composer-triggers="status">{
                             let memory_mode = memory_mode;
