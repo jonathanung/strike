@@ -467,3 +467,38 @@ func TestBestOfNWatcher(t *testing.T) {
 		}
 	})
 }
+
+func TestBestOfNAdoptRefusesUncapturedWinnerChanges(t *testing.T) {
+	repo := newBestOfNRepo(t)
+	srv := bestOfNServer(t, &fakeBestOfNSpawner{}, false)
+	wt2 := repo.addChildWorktree("child-2")
+	e := editsRun(t, srv, repo.root, "", map[string]string{"child-2": wt2})
+	// child-1 reported edits but carried no patch (export failed / too big).
+	e2, err := srv.startBestOfN(context.Background(), "root-a", repo.root, &fakeBestOfNSpawner{}, bestofn.Request{
+		Prompt:     "fix it",
+		Candidates: []bestofn.Candidate{{Model: "a"}, {Model: "b"}},
+		Edits:      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.applyBestOfNChild(e2, protocol.ChildCompleted{
+		Correlation: protocol.Correlation{SessionID: "child-1"},
+		Status:      protocol.ChildStatusCompleted,
+		Handoff:     protocol.CompletionHandoff{FilesChanged: []string{"alpha.txt"}},
+	})
+	_ = e2.run.Cancel("child-2")
+	if err := srv.adoptBestOfN(context.Background(), e2, "child-1"); err == nil || !strings.Contains(err.Error(), "not captured") {
+		t.Fatalf("adopt err = %v, want refusal", err)
+	}
+	if _, ok := e2.run.Decision(); ok {
+		t.Fatal("refused adopt must not record a decision")
+	}
+	// A winner with no file changes adopts fine (answer-only result).
+	if err := srv.adoptBestOfN(context.Background(), e, "child-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(wt2); !os.IsNotExist(err) {
+		t.Fatalf("loser worktree should be removed (%v)", err)
+	}
+}

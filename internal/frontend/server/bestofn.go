@@ -331,7 +331,14 @@ func (s *Server) adoptBestOfN(ctx context.Context, e *bestOfNEntry, childID stri
 		return err
 	}
 	note := "Adopted " + childID + "."
-	if patch := e.patches[childID]; strings.TrimSpace(patch) != "" {
+	patch := e.patches[childID]
+	if strings.TrimSpace(patch) == "" && e.run.Request().Edits && winnerChangedFiles(e.run, childID) {
+		// The child edited files in its worktree but no patch was captured
+		// (export failed or it was too large). Adopting would claim success
+		// and then delete the only copy, so refuse instead.
+		return errors.New("bestofn: the winner's changes were not captured, so they cannot be applied; nothing was changed")
+	}
+	if strings.TrimSpace(patch) != "" {
 		if strings.TrimSpace(e.cwd) == "" {
 			return errors.New("bestofn: no working directory to apply the winner's changes to")
 		}
@@ -347,6 +354,15 @@ func (s *Server) adoptBestOfN(ctx context.Context, e *bestOfNEntry, childID stri
 	}
 	e.note = note + s.cleanupBestOfNWorktrees(ctx, e, d)
 	return nil
+}
+
+func winnerChangedFiles(run *bestofn.Run, childID string) bool {
+	for _, cr := range run.Candidates() {
+		if cr.ChildID == childID {
+			return cr.Outcome.FilesChanged > 0
+		}
+	}
+	return false
 }
 
 func (s *Server) keepNoneBestOfN(ctx context.Context, e *bestOfNEntry) error {
