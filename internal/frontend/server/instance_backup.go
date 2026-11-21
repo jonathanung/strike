@@ -25,7 +25,6 @@ import (
 	"github.com/jonathanung/strike/internal/persist/backup"
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/product/version"
-	"github.com/jonathanung/strike/internal/schedule"
 	"github.com/jonathanung/strike/internal/trust/secret"
 )
 
@@ -39,26 +38,6 @@ type backupMemory struct {
 	Value  string   `json:"value"`
 	Tags   []string `json:"tags,omitempty"`
 	Author string   `json:"author,omitempty"`
-}
-
-// backupSchedule is the portable part of a schedule: its definition, not
-// its run history, next fire, or per-schedule permission mode.
-type backupSchedule struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Enabled     bool      `json:"enabled"`
-	Kind        string    `json:"kind"`
-	Cron        string    `json:"cron,omitempty"`
-	Every       string    `json:"every,omitempty"`
-	At          time.Time `json:"at,omitempty"`
-	Timezone    string    `json:"timezone,omitempty"`
-	Source      string    `json:"source"`
-	Prompt      string    `json:"prompt,omitempty"`
-	GoalID      string    `json:"goalId,omitempty"`
-	Workflow    string    `json:"workflow,omitempty"`
-	WorkspaceID string    `json:"workspaceId,omitempty"`
-	Overlap     string    `json:"overlap,omitempty"`
-	Missed      string    `json:"missed,omitempty"`
 }
 
 // backupSettings is the non-secret, non-trust slice of user defaults.
@@ -236,34 +215,6 @@ func exportBackupMemory(mem host.Memory) ([]backupMemory, error) {
 		out = []backupMemory{}
 	}
 	return out, nil
-}
-
-func exportBackupSchedules(list []schedule.Schedule) []backupSchedule {
-	out := []backupSchedule{}
-	for _, sch := range list {
-		if sch.Source == schedule.SourceScript {
-			continue
-		}
-		out = append(out, backupSchedule{
-			ID:          sch.ID,
-			Name:        secret.Redact(sch.Name),
-			Enabled:     sch.Enabled,
-			Kind:        sch.Kind,
-			Cron:        sch.Cron,
-			Every:       sch.Every,
-			At:          sch.At,
-			Timezone:    sch.Timezone,
-			Source:      sch.Source,
-			Prompt:      secret.Redact(sch.Prompt),
-			GoalID:      sch.GoalID,
-			Workflow:    sch.Workflow,
-			WorkspaceID: sch.WorkspaceID,
-			Overlap:     sch.Overlap,
-			Missed:      sch.Missed,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
 }
 
 // exportBackupSessions packages every session log on disk, redacted the
@@ -455,95 +406,6 @@ func (s *Server) restoreBackupMemory(rep *backup.Report, recs []backupMemory, ap
 		cur[key] = host.MemoryEntry{Key: key, Value: rec.Value}
 		rep.Add(it)
 	}
-}
-
-func (s *Server) restoreBackupSchedules(rep *backup.Report, recs []backupSchedule, apply bool) {
-	svc := s.opts.Schedules
-	var current []schedule.Schedule
-	if svc != nil {
-		current = svc.List()
-	}
-	names := map[string]bool{}
-	for _, sch := range current {
-		names[sch.Name] = true
-	}
-	for _, rec := range recs {
-		it := backup.Item{Section: backup.SectionSchedules, ID: rec.ID, Label: rec.Name}
-		if svc == nil {
-			it.Action, it.Detail = backup.ActionFail, "this gateway runs no schedule clock"
-			rep.Add(it)
-			continue
-		}
-		if rec.Source == schedule.SourceScript {
-			it.Action, it.Detail = backup.ActionFail, "script schedules are never restored from a backup"
-			rep.Add(it)
-			continue
-		}
-		if sameScheduleExists(current, rec) {
-			it.Action, it.Detail = backup.ActionSkip, "identical"
-			rep.Add(it)
-			continue
-		}
-		name := rec.Name
-		notes := []string{"restored paused; enable it on this gateway"}
-		if names[name] {
-			name = backup.CopyName(rec.Name, func(n string) bool { return names[n] })
-			it.Action, it.Target = backup.ActionCopy, name
-		} else {
-			it.Action = backup.ActionCreate
-		}
-		workspaceID := strings.TrimSpace(rec.WorkspaceID)
-		if workspaceID != "" && (s.opts.Workspaces == nil || !workspaceKnown(s, workspaceID)) {
-			notes = append(notes, "workspace "+workspaceID+" is not on this gateway; runs in the default directory")
-			workspaceID = ""
-		}
-		it.Detail = strings.Join(notes, "; ")
-		if apply {
-			off := false
-			_, err := svc.Create(schedule.Spec{
-				Name:        name,
-				Kind:        rec.Kind,
-				Cron:        rec.Cron,
-				Every:       rec.Every,
-				At:          rec.At,
-				Timezone:    rec.Timezone,
-				Source:      rec.Source,
-				Prompt:      rec.Prompt,
-				GoalID:      rec.GoalID,
-				Workflow:    rec.Workflow,
-				WorkspaceID: workspaceID,
-				Overlap:     rec.Overlap,
-				Missed:      rec.Missed,
-				Enabled:     &off,
-			})
-			if err != nil {
-				it.Action, it.Target, it.Detail = backup.ActionFail, "", err.Error()
-				rep.Add(it)
-				continue
-			}
-		}
-		names[name] = true
-		rep.Add(it)
-	}
-}
-
-func workspaceKnown(s *Server, id string) bool {
-	_, ok := s.opts.Workspaces.Get(id)
-	return ok
-}
-
-// sameScheduleExists reports a target schedule with the same definition
-// (name, clock and source). Enabled state and run history do not count.
-func sameScheduleExists(current []schedule.Schedule, rec backupSchedule) bool {
-	for _, sch := range current {
-		if sch.Name == rec.Name && sch.Kind == rec.Kind && sch.Cron == rec.Cron &&
-			sch.Every == rec.Every && sch.At.Equal(rec.At) && sch.Source == rec.Source &&
-			sch.Prompt == rec.Prompt && sch.GoalID == rec.GoalID && sch.Workflow == rec.Workflow &&
-			(rec.Timezone == "" || sch.Timezone == rec.Timezone) {
-			return true
-		}
-	}
-	return false
 }
 
 func restoreBackupSessions(rep *backup.Report, dir string, pkgs []session.Package, apply bool) {
