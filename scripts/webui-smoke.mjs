@@ -2870,6 +2870,50 @@ try {
     throw new Error("main composer lost its approval chip");
   }
 
+  // #1384: read replies aloud. The speech engine is mocked at the browser
+  // boundary (CI Chrome has no reliable voices): an on-device voice reads
+  // the cleaned reply and marks the line playing until the engine ends;
+  // with no voices the control explains instead of pretending to play.
+  await evaluate(`(() => {
+    const spoken = [];
+    window.__ttsSpoken = spoken;
+    window.__ttsVoices = [{ name: "Smoke Voice", lang: "en-US", localService: true, default: true, voiceURI: "smoke-voice" }];
+    window.SpeechSynthesisUtterance = function (text) { this.text = text; };
+    const fake = {
+      current: null,
+      getVoices() { return window.__ttsVoices; },
+      speak(u) { spoken.push(u.text); this.current = u; },
+      cancel() { const u = this.current; this.current = null; if (u && u.onerror) u.onerror({ error: "canceled" }); },
+      pause() {}, resume() {},
+    };
+    Object.defineProperty(window, "speechSynthesis", { configurable: true, value: fake });
+    return true;
+  })()`);
+  await waitUntil(
+    `!!document.querySelector('article[data-role="strike"] [data-action="read-aloud"]')`,
+    "read-aloud control on an assistant reply",
+  );
+  const ttsRoles = await evaluate(`JSON.stringify([...document.querySelectorAll('[data-action="read-aloud"]')].map((b) => b.closest("article")?.getAttribute("data-role")))`);
+  if (JSON.parse(ttsRoles).some((r) => r !== "strike")) {
+    throw new Error(`read-aloud on non-assistant lines: ${ttsRoles}`);
+  }
+  await evaluate(`document.querySelector('article[data-role="strike"] [data-action="read-aloud"]').focus()`);
+  await evaluate(`document.activeElement.click()`);
+  await waitUntil(
+    `window.__ttsSpoken.length === 1 && window.__ttsSpoken[0].length > 0 && !window.__ttsSpoken[0].includes("\u0060\u0060\u0060") && !!document.querySelector('article[data-role="strike"] .sx-tts[data-tts-playing="true"]') && document.activeElement.textContent.includes("Stop")`,
+    "read-aloud plays and marks the line",
+  );
+  await evaluate(`(() => { const u = window.speechSynthesis.current; window.speechSynthesis.current = null; u.onend({}); return true; })()`);
+  await waitUntil(
+    `!document.querySelector('.sx-tts[data-tts-playing="true"]') && document.querySelector('article[data-role="strike"] [data-action="read-aloud"]').textContent.includes("Read aloud")`,
+    "read-aloud clears when the engine finishes",
+  );
+  await evaluate(`window.__ttsVoices = []; document.querySelector('article[data-role="strike"] [data-action="read-aloud"]').click()`);
+  await waitUntil(
+    `!!document.querySelector('[data-tts-note]') && document.querySelector('[data-tts-note]').textContent.includes("no speech voice") && window.__ttsSpoken.length === 1`,
+    "read-aloud explains when no voice is available",
+  );
+
   // Find in transcript (#1342). The seed above sent "read the makefile"
   // to the open session, so the transcript holds that word in the user
   // bubble and in the echo reply. Keyboard path only: Ctrl+F opens,

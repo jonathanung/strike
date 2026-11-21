@@ -63,6 +63,7 @@ mod tool_tail;
 mod terminal;
 mod transcript;
 mod transcript_view;
+mod tts;
 mod triggers;
 mod turn_elapsed;
 mod turn_usage;

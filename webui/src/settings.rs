@@ -176,6 +176,10 @@ pub fn SettingsPage(
                     capable=project_init_capable
                 />
             </section>
+            <section class="card settings-section" id="settings-voice">
+                <h2 class="panel-title">"Voice"</h2>
+                <crate::tts::VoiceSettings />
+            </section>
             <section class="card settings-section">
                 <h2 class="panel-title">"Diagnostics"</h2>
                 <crate::diag::DiagDownload

@@ -444,3 +444,11 @@ Stall is already a real badge when the team roster sets `budget.stall`.
 Retry is `team.spawn` of the same objective, which starts a new child; it
 does not resume the old session. Stop is `team.child_interrupt`. None of
 these need a new panel.
+
+## Read replies aloud
+
+Assistant replies have a **Read aloud** control (#1384) that uses the
+browser's own `speechSynthesis` (on-device voices when available). Voice and
+speed are in Settings → Voice and stored in the browser. Not in slice 1: a
+gateway-hosted Piper endpoint, auto-play, reading tool output, and stopping
+playback on a gateway disconnect (a page unload stops it).

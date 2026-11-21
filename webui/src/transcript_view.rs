@@ -1131,6 +1131,9 @@ fn message_view(
         format!("sx-msg sx-{role}{}", if on { " sx-on" } else { "" })
     };
     let copy_btn = copy_text.clone();
+    // #1384: assistant replies get a read-aloud control beside Copy.
+    // Tool, child, and system lines are not read.
+    let speak = (msg.role == Role::Strike && !copy_text.trim().is_empty()).then(|| copy_text.clone());
     // Per-button copy feedback (#1582): the label only reads "Copied"
     // once the awaited clipboard write resolves; a rejection reads
     // "Copy failed" instead of silence. Reverts after 2s.
@@ -1172,6 +1175,7 @@ fn message_view(
                             crate::clipboard::after_ms(2_000, move || copy_state.set(None));
                         });
                     }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
+                    {speak.map(|text| view! { <crate::tts::ReadAloud id=id text=text /> })}
                 </span>
             </header>
             {if find_body {
