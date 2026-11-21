@@ -85,6 +85,7 @@ mod turn_elapsed;
 mod turn_failure;
 mod turn_usage;
 mod turn_verify;
+mod workspace_image;
 mod workspaces;
 mod workflow_run;
 use crate::shell::icon;
