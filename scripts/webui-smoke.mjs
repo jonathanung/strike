@@ -1719,7 +1719,28 @@ try {
     return false;
   })()`, "bad gateway command");
   await evaluate(`[...document.querySelectorAll("[data-command-id]")].find((el) => (el.textContent || "").includes("Switch to gateway: bad"))?.click()`);
+  // #1523: switching to an unreachable gateway is probe-first — the
+  // switch is refused, the form shows the error, and the working
+  // gateway stays Connected instead of being stranded as Unreachable.
+  await waitUntil(`(() => {
+    const pop = document.querySelector(".gw-pop");
+    if (!pop) return false;
+    const note = pop.querySelector(".gw-form-note");
+    // The panel detail line is the working gateway's live describe
+    // (host · loopback · auth on · host token · grants); the header
+    // gateway chip is gone (#1590 A6), so connected-ness is read here:
+    // the working gateway's detail never flips to "Could not reach
+    // this daemon".
+    const txt = pop.innerText || "";
+    return !!note && (note.textContent || "").includes("Could not reach")
+      && txt.includes("loopback") && !txt.includes("Could not reach this daemon");
+  })()`, "guarded switch keeps the working gateway connected with a form error");
+  await evaluate(`document.querySelector(".gw-back")?.click()`);
   await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
+  // The settings error path below still needs a genuinely unreachable
+  // base: persist one directly (the pre-#1523 stranded state a user
+  // could be left in) and reload into it.
+  await evaluate(`(() => { localStorage.setItem("strike.base", "http://127.0.0.1:1"); location.reload(); return true; })()`);
   // The gateway status chip is no longer rendered in the header (#1590 A6):
   // gateway health lives in the Gateways panel, so read "Unreachable" there.
   await waitUntil(`(() => {
