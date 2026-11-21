@@ -79,7 +79,27 @@ func (a *auditBoundStore) Path() string {
 	return ""
 }
 
+// serveAuditConfig is the config strike serve's own sink is opened with:
+// the assembled root's when there is one, else the global config (attach-
+// only), so the configured retention applies either way.
+func serveAuditConfig(a *assembled) config.Config {
+	if a != nil {
+		return a.cfg
+	}
+	cfg, err := config.Load("")
+	if err != nil {
+		return config.Config{}
+	}
+	return cfg
+}
+
 func openAuditSink(cfg config.Config) (*audit.Sink, error) {
+	return audit.Open(auditOptions(cfg))
+}
+
+// auditOptions is the retention-bounded sink options for cfg: the
+// configured caps, else the last 10k events / 90 days. Never unbounded.
+func auditOptions(cfg config.Config) audit.Options {
 	dir := audit.DefaultDir()
 	ret := audit.Retention{}
 	if cfg.Session.AuditRetentionMaxEvents > 0 {
@@ -93,7 +113,7 @@ func openAuditSink(cfg config.Config) (*audit.Sink, error) {
 		ret.MaxEvents = 10000
 		ret.MaxAge = 90 * 24 * time.Hour
 	}
-	return audit.Open(audit.Options{Dir: dir, Retention: ret})
+	return audit.Options{Dir: dir, Retention: ret}
 }
 
 // bindAudit wraps store so runSession tees security events into the audit sink.
