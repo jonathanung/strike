@@ -16,6 +16,7 @@ mod apps;
 mod approval_outcome;
 mod approvals;
 mod approvals_ui;
+mod away_briefing_view;
 mod chat_mode;
 mod child_signals;
 mod clipboard;
@@ -30,6 +31,7 @@ mod diagnostics;
 mod draft_size;
 mod drafts;
 mod editor;
+mod files_invalidated;
 mod lessons;
 mod elicitation;
 mod elicitation_ui;
@@ -40,13 +42,17 @@ mod local_issues;
 mod mermaid;
 mod localfiles;
 mod customize;
+mod dashboards;
+mod delegation_board;
 mod deploy_watch;
 mod gateway;
 mod gateway_peek;
 mod gateway_qr;
 mod git;
+mod global_search;
 mod goals;
 mod ideas;
+mod identity;
 mod instance_backup;
 mod mobile;
 mod provider_signin;
@@ -54,6 +60,8 @@ mod providers;
 mod review_queue;
 mod push;
 mod reasoning;
+mod questions;
+mod questions_ui;
 mod review_branch;
 mod rule_author;
 mod sandbox_explain;
@@ -114,12 +122,16 @@ mod turn_files;
 mod turn_failure;
 mod turn_usage;
 mod turn_verify;
+mod verbosity;
 mod workspace_image;
 mod workspace_trust;
 mod workspaces;
+mod spec_authoring;
 mod workflows;
 mod workflow_run;
 use crate::shell::icon;
+use crate::identity::IdentityDisc;
+use crate::delegation_board::DelegationBoard;
 use crate::child_signals::TeamMessagesFeed;
 
 
@@ -160,6 +172,7 @@ use crate::approvals_ui::{
     apply_perm_notes, commit_autonomy, commit_session_mode, ApprovalCards, ApprovalHost,
     ApprovalMenu, AutonomyMenu,
 };
+use crate::away_briefing_view::AwayBriefing;
 use crate::status_card_view::{ChildStatusCard, SessionStatusCard};
 use crate::transcript::Transcript;
 use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
@@ -1212,6 +1225,8 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // #1381: delegation board rows from the /v1/team poll.
+    let delegation_rows = RwSignal::new(Vec::<delegation_board::BoardRow>::new());
     // Bootstrap capability `plugins` (#1570): gates plugin lifecycle.
     let plugins_capable = RwSignal::new(false);
     // Typed config-source list (#1493), from bootstrap `configFiles`.
@@ -1335,6 +1350,7 @@ fn App() -> impl IntoView {
     let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
     let elicitations = RwSignal::new(Vec::<elicitation::Pending>::new());
+    let questions = RwSignal::new(Vec::<questions::Pending>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
     let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
     let panel_open = RwSignal::new(false);
@@ -1492,6 +1508,11 @@ fn App() -> impl IntoView {
     let memory_mode_known = RwSignal::new(false);
     let memory_menu = RwSignal::new(false);
     let storage_rev = RwSignal::new(0u32);
+    // files.invalidated (#1380): bumped (debounced) when the daemon says
+    // files changed underneath the session; the Files/Changes load Effect
+    // observes it so the open panel refetches.
+    let files_rev = RwSignal::new(0u32);
+    let files_debounce: Rc<Cell<files_invalidated::Debounce>> = Rc::new(Cell::new(Default::default()));
     // Lessons capture (#1376): rows show "Remember this" only while the
     // confirmed memory mode allows storing; the draft is page-owned.
     let lesson_gate = Signal::derive(move || {
@@ -1509,6 +1530,12 @@ fn App() -> impl IntoView {
     let tf_match_case = RwSignal::new(false);
     let tf_whole_word = RwSignal::new(false);
     let tf_idx = RwSignal::new(0usize);
+    // Global transcript search (#1355): overlay state and the pending
+    // jump (session id, query) handed to find-in-transcript once that
+    // session's lines have loaded.
+    let gs_open = RwSignal::new(false);
+    let gs_query = RwSignal::new(String::new());
+    let gs_jump = RwSignal::new(None::<(String, String)>);
     let tf_saved_scroll = RwSignal::new(0.0f64);
     let doc_path = RwSignal::new(String::new());
     let doc_line = RwSignal::new(0u32);
@@ -1641,6 +1668,10 @@ fn App() -> impl IntoView {
                     let now = now_ms();
                     let prev = activity.get_untracked();
                     let rows = rows_from_team(&prev, &team, now);
+                    let board = delegation_board::board_rows(&team);
+                    if delegation_rows.get_untracked() != board {
+                        delegation_rows.set(board);
+                    }
                     let (names, escalations) = team_signal_maps(&team);
                     if team_names.get_untracked() != names {
                         team_names.set(names);
@@ -1954,6 +1985,7 @@ fn App() -> impl IntoView {
                                                 .to_string(),
                                         );
                                     }
+                                    crate::verbosity::seed(&st.verbosity, &st.verbosity_delivery);
                                     wf_run.set(workflow_run::WorkflowRun::from_status(
                                         &st.workflow,
                                         &st.phase,
@@ -2113,6 +2145,7 @@ fn App() -> impl IntoView {
     let wipe_on_replay = RwSignal::new(false);
     let tail_fx = tail.clone();
     let cursor_fx = live_cursor.clone();
+    let debounce_fx = files_debounce.clone();
     Effect::new(move |_| {
         let root = active_root.get();
         let b = base.get();
@@ -2137,6 +2170,7 @@ fn App() -> impl IntoView {
             children_note.set(String::new());
             asks.set(Vec::new());
             elicitations.set(Vec::new());
+            questions.set(Vec::new());
             live_audit.set(Vec::new());
             confirm.set(None);
             wipe_on_replay.set(false);
@@ -2168,6 +2202,7 @@ fn App() -> impl IntoView {
         // session's Fast/autonomy across the switch.
         fast_on.set(false);
         autonomy.set("supervised".to_string());
+        crate::verbosity::reset();
         autonomy_menu.set(false);
         wf_run.set(workflow_run::WorkflowRun::default());
         context_used.set(0);
@@ -2217,6 +2252,7 @@ fn App() -> impl IntoView {
         let epoch_msg = epoch;
         let epochs_msg = stream_epoch;
         let cursor_msg = cursor_fx.clone();
+        let debounce_msg = debounce_fx.clone();
         let on_msg =
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
                 if epochs_msg.get_untracked() != epoch_msg {
@@ -2300,12 +2336,16 @@ fn App() -> impl IntoView {
                     note_steer(transcript_cb, &data, &on_note);
                     apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
                     elicitation_ui::apply_elicitation_notes(&data, elicitations);
+                    questions_ui::apply_question_notes(&data, questions);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
                     lines_cb.set(transcript_cb.with_untracked(|t| t.chat_lines()));
                     let artifact_rev = transcript_cb.with_untracked(|t| t.artifact_updates);
                     if artifact_rev != storage_rev.get_untracked() {
                         storage_rev.set(artifact_rev);
+                    }
+                    if files_invalidated::is_event(&data) {
+                        files_invalidated::refresh_soon(debounce_msg.clone(), files_rev);
                     }
                     let prev = LiveModelState {
                         provider: provider_name.get_untracked(),
@@ -2335,6 +2375,7 @@ fn App() -> impl IntoView {
                         wf_run.set(wf_next);
                     }
                     let next = reduce_envelope(prev, &data);
+                    crate::verbosity::observe(&data);
                     provider_name.set(next.provider);
                     model_name.set(next.model);
                     effort_level.set(next.effort);
@@ -3566,6 +3607,12 @@ fn App() -> impl IntoView {
     // is filed separately; this PR only composes the two existing
     // endpoints, in delete-then-close order, after the user's force
     // confirmation when one was required.
+    // Global search pick (#1355): open the session through the shared
+    // live/resume path and queue the find-in-transcript handoff.
+    let on_gs_pick = Callback::new(move |(id, q): (String, String)| {
+        gs_jump.set(Some((id.clone(), q)));
+        open_session_page(id);
+    });
     let on_deleted = Callback::new(move |id: String| {
         let was_live = roots.get_untracked().iter().any(|row| row.id == id);
         // Drop the deleted session's draft (#1367) before the fallback
@@ -3669,9 +3716,11 @@ fn App() -> impl IntoView {
 
     // Diagnostics (#1404) load while the pane is shown or a document is
     // open (for the editor badge), and again on every Refresh / palette
-    // open (diag_rev). The previous result stays visible while reloading.
+    // open (diag_rev) and every debounced files.invalidated burst
+    // (files_rev, #1894). The previous result stays visible while reloading.
     Effect::new(move |_| {
         let _ = diag_rev.get();
+        let _ = files_rev.get();
         let shown = side_tab.get() == "diagnostics";
         let doc_open = !doc_path.get().is_empty();
         if !shown && !doc_open {
@@ -3695,6 +3744,7 @@ fn App() -> impl IntoView {
     Effect::new(move |_| {
         let tab = side_tab.get();
         let _ = files_path.get();
+        let _ = files_rev.get();
         if tab == "files" {
             load_files();
         } else if tab == "changes" {
@@ -4075,6 +4125,8 @@ fn App() -> impl IntoView {
         on_focus: on_notify,
     });
     notify::set_unread_host(notify_unread);
+    // #1926: the Ideas badge is a header slot; give it the daemon address.
+    ideas::set_host(base, token);
 
     shell::boot();
     shell::set_host(shell::HostBridge {
@@ -4843,6 +4895,43 @@ fn App() -> impl IntoView {
         }
     });
 
+    // Global search handoff (#1355): once the picked session is open and
+    // its lines contain the query, open the find bar on it; the scroll
+    // effect above then brings the first match into view. A session whose
+    // loaded lines do not contain the query (e.g. the match is only in an
+    // older page) leaves the jump pending until the next pick.
+    Effect::new(move |_| {
+        let list = lines.get();
+        let active = active_root.get();
+        let Some((id, q)) = gs_jump.get() else {
+            return;
+        };
+        if active != id || list.is_empty() {
+            return;
+        }
+        let hits = transcript_matches(&list, &q, crate::editor::FindOptions::new(false, false));
+        if hits.is_empty() {
+            return;
+        }
+        gs_jump.set(None);
+        if !tf_open.get_untracked() {
+            tf_saved_scroll.set(transcript_find::transcript_scroll());
+        }
+        tf_match_case.set(false);
+        tf_whole_word.set(false);
+        tf_query.set(q);
+        tf_idx.set(0);
+        tf_open.set(true);
+    });
+    shell::bind(
+        "search.global",
+        Rc::new(move |args: &str| {
+            gs_query.set(args.trim().to_string());
+            gs_open.set(true);
+            Ok(())
+        }),
+    );
+
     // Find-in-transcript view state for the readable pane (#1310 union):
     // the matches over the ChatLine mirror — which is transcript.chat_lines(),
     // index-aligned with Transcript::messages — plus the current match,
@@ -5507,6 +5596,14 @@ fn App() -> impl IntoView {
             token=token
             on_deleted=on_deleted
         />
+        <global_search::GlobalSearch
+            open=gs_open
+            query=gs_query
+            base=base
+            token=token
+            workspaces=workspaces
+            on_pick=on_gs_pick
+        />
         <Show when=move || mode.get() == "providers" fallback=move || ()>
             <providers::ProvidersPage base=base token=token />
         </Show>
@@ -5561,6 +5658,9 @@ fn App() -> impl IntoView {
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
         </Show>
+        <Show when=move || mode.get() == "dashboards" fallback=move || ()>
+            <dashboards::DashboardsPane base=base token=token active_root=active_root />
+        </Show>
         <Show when=move || mode.get() == "ideas" fallback=move || ()>
             <ideas::IdeasPage base=base token=token draft=draft active_root=active_root mode=mode />
         </Show>
@@ -5581,6 +5681,9 @@ fn App() -> impl IntoView {
                 active_root=active_root
                 status=status
             />
+        </Show>
+        <Show when=move || mode.get() == "specs" fallback=move || ()>
+            <spec_authoring::SpecAuthoringPage base=base token=token status=status active_root=active_root mode=mode />
         </Show>
         <Show when=move || mode.get() == "workflows" fallback=move || ()>
             <workflows::WorkflowsPage base=base token=token status=status />
@@ -5687,7 +5790,6 @@ fn App() -> impl IntoView {
                     panel_drawer.set(false);
                 }></button>
                 <aside class="rail">
-                    <ideas::IdeasBadge base=base token=token mode=mode />
 <SessionPanel
                         base=base
                         token=token
@@ -5769,6 +5871,7 @@ fn App() -> impl IntoView {
                     // to the conversation. Visually hidden; the status tabs
                     // and chat-mode bar already show the session name.
                     <h1 id="chat-heading" class="sr-only">{move || chat_title.get()}</h1>
+                    <AwayBriefing base=base token=token roots=roots on_focus=on_notify />
                     // #1781: persistent untrusted-workspace badge + trust card.
                     <workspace_trust::WorkspaceTrust
                         base=base
@@ -5929,6 +6032,7 @@ fn App() -> impl IntoView {
                     />
                     </Show>
                     <elicitation_ui::ElicitationCards base=base token=token root=active_root elicitations=elicitations />
+                    <questions_ui::QuestionCards base=base token=token root=active_root questions=questions />
                     <ApprovalCards
                         asks=asks
                         perm_mode=perm_mode
@@ -6575,6 +6679,7 @@ fn App() -> impl IntoView {
                                     model_menu.set(false);
                                     autonomy_menu.update(|v| *v = !*v);
                                 }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
+                                <crate::verbosity::VerbosityChip base=base token=token active_root=active_root status=status busy=Signal::derive(move || session_busy_now.get()) />
                                 // #1574: the live workflow run, only while the
                                 // daemon reports one. Stop asks first.
                                 <Show when=move || wf_run.with(|w| w.is_active())>
@@ -6676,6 +6781,7 @@ fn App() -> impl IntoView {
                     <Show when=move || !children_note.get().is_empty()>
                         <p class="hint" data-children-note="true">{move || children_note.get()}</p>
                     </Show>
+                    <DelegationBoard rows=delegation_rows />
                     <Show when=move || activity.get().is_empty()>
                         {move || {
                             let failed = !children_note.get().is_empty();
@@ -6724,6 +6830,8 @@ fn App() -> impl IntoView {
                                 let sid_chat = sid.clone();
                                 let escalation = team_escalations.with(|m| m.get(&sid).cloned());
                                 let who = name.clone();
+                                let disc_key = identity::child_key(&name, &sid);
+                                let disc_name = name.clone();
                                 let agent = row.agent.clone();
                                 let agent_label = agent.clone();
                                 let primary = if show_task { headline } else { name.clone() };
@@ -6748,6 +6856,7 @@ fn App() -> impl IntoView {
                                         }>
                                             <span class="task-line">
                                                 <StatusMark kind=mark_kind place=StatusSlot::Dot />
+                                                <IdentityDisc ident=disc_key name=disc_name />
                                                 <span class="name">{primary}</span>
                                                 <StatusMark kind=mark_kind place=StatusSlot::Badge label=status_label />
                                             </span>

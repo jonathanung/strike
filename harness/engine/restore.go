@@ -22,6 +22,8 @@ type Restored struct {
 	// Autonomy is the last AutonomySelected mode; empty means unset (caller
 	// keeps the engine default of supervised).
 	Autonomy protocol.Autonomy
+	// Verbosity is the last VerbositySelected style; empty means default.
+	Verbosity protocol.Verbosity
 	// PermissionMode is the last PermissionModeSelected posture; empty means
 	// unset (caller keeps default).
 	PermissionMode protocol.PermissionMode
@@ -210,6 +212,8 @@ func restoreEvents(events []protocol.Event, keep func(protocol.Event) bool) Rest
 			r.Priority = e.Enabled
 		case protocol.AutonomySelected:
 			r.Autonomy = e.Mode.Normalize()
+		case protocol.VerbositySelected:
+			r.Verbosity = e.Level
 		case protocol.PermissionModeSelected:
 			r.PermissionMode = e.Mode.Normalize()
 		case protocol.PhaseChanged:
@@ -358,6 +362,8 @@ func restoreCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.FastSelected:
 		return e.Correlation, true
 	case protocol.AutonomySelected:
+		return e.Correlation, true
+	case protocol.VerbositySelected:
 		return e.Correlation, true
 	case protocol.PermissionModeSelected:
 		return e.Correlation, true

@@ -155,6 +155,10 @@ struct Prefs {
     quiet: Quiet,
     #[serde(rename = "mutedSessions")]
     muted: Vec<String>,
+    /// Web Push for finished/failed runs (#1917). Daemon default off;
+    /// older daemons omit it.
+    #[serde(default, rename = "pushFinished")]
+    push_finished: bool,
 }
 
 #[derive(Deserialize)]
@@ -236,6 +240,7 @@ fn default_prefs() -> Prefs {
             end: "07:00".into(),
         },
         muted: Vec::new(),
+        push_finished: false,
     }
 }
 
@@ -890,6 +895,7 @@ pub fn NotificationBell(
     });
     let draft_enabled = RwSignal::new(true);
     let draft_quiet = RwSignal::new(false);
+    let draft_push_finished = RwSignal::new(false);
     let draft_start = RwSignal::new("22:00".to_string());
     let draft_end = RwSignal::new("07:00".to_string());
     OPEN_CENTRE.with(|slot| slot.set(Some(open)));
@@ -1280,6 +1286,7 @@ pub fn NotificationBell(
         let p = prefs.get_untracked();
         draft_enabled.set(p.enabled);
         draft_quiet.set(p.quiet.enabled);
+        draft_push_finished.set(p.push_finished);
         draft_start.set(if p.quiet.start.is_empty() {
             "22:00".into()
         } else {
@@ -1524,6 +1531,11 @@ pub fn NotificationBell(
                                 <p class="notify-hint">"Banners use this browser only. The centre still keeps the record."</p>
                                 <h3>"Push notifications"</h3>
                                 <crate::push::PushToggle base=base token=token />
+                                <label class="notify-check">
+                                    <input type="checkbox" data-push-finished="true" prop:checked=move || draft_push_finished.get() on:change=move |_| draft_push_finished.update(|v| *v = !*v) />
+                                    <span>"Also push finished and failed runs"</span>
+                                </label>
+                                <p class="notify-hint">"Off by default: only approvals and blocked subagents push. Applies to every subscribed browser."</p>
                                 <div class="notify-perm">
                                     <button class="secondary" on:click=move |_| {
                                         request_notification_permission();
@@ -1567,6 +1579,7 @@ pub fn NotificationBell(
                                     next.quiet.enabled = draft_quiet.get_untracked();
                                     next.quiet.start = draft_start.get_untracked();
                                     next.quiet.end = draft_end.get_untracked();
+                                    next.push_finished = draft_push_finished.get_untracked();
                                     save.run(next);
                                 }>"Save"</button>
                             </div>
@@ -2037,6 +2050,22 @@ mod tests {
         .unwrap();
         assert_eq!(new.seen.up_to, 5);
         assert_eq!(new.seen.ids, vec!["x".to_string()]);
+    }
+
+    #[test]
+    fn push_finished_pref_defaults_off_and_round_trips() {
+        let old: NotesResponse = serde_json::from_str(
+            r#"{"notifications":[],"prefs":{"enabled":true,"quiet":{"enabled":false,"start":"22:00","end":"07:00"},"mutedSessions":[]},"latest":0}"#,
+        )
+        .unwrap();
+        assert!(!old.prefs.push_finished);
+        assert!(!default_prefs().push_finished);
+        let mut prefs = default_prefs();
+        prefs.push_finished = true;
+        let wire = serde_json::to_string(&prefs).unwrap();
+        assert!(wire.contains(r#""pushFinished":true"#), "{wire}");
+        let back: Prefs = serde_json::from_str(&wire).unwrap();
+        assert_eq!(back, prefs);
     }
 
     #[test]

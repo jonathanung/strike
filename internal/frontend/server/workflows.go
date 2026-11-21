@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/internal/frontend/host"
+	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/protocol"
 )
 
@@ -373,13 +374,49 @@ func (s *Server) handleWorkflowDraftSave(w http.ResponseWriter, r *http.Request)
 }
 
 // documentFromCanonicalJSON decodes canonical workflow JSON into a host document.
+// Canonical JSON is the on-disk schema (each phase gate is `exit: {type,
+// command}`), not the host document shape (`gate` / `gateCommand`), so it is
+// decoded through config.Workflow and mapped field by field. Decoding it
+// straight into host.WorkflowDocument would drop every gate and the catalog
+// re-save would reset them all to agent (#1857).
 func documentFromCanonicalJSON(wf host.Workflows, canonical string) (host.WorkflowDocument, bool) {
-	var doc host.WorkflowDocument
-	if err := json.Unmarshal([]byte(canonical), &doc); err != nil {
+	var cw config.Workflow
+	if err := json.Unmarshal([]byte(canonical), &cw); err != nil {
 		return host.WorkflowDocument{}, false
 	}
+	doc := canonicalWorkflowToDocument(cw)
 	if err := wf.Validate(doc); err != nil {
 		return host.WorkflowDocument{}, false
 	}
 	return doc, true
+}
+
+// canonicalWorkflowToDocument maps the on-disk workflow schema to the host
+// document shape, carrying each phase's exit gate into Gate / GateCommand.
+func canonicalWorkflowToDocument(cw config.Workflow) host.WorkflowDocument {
+	doc := host.WorkflowDocument{
+		SchemaVersion: cw.SchemaVersion,
+		Name:          cw.Name,
+		Description:   cw.Description,
+		Phases:        make([]host.WorkflowPhaseDocument, 0, len(cw.Phases)),
+	}
+	for _, p := range cw.Phases {
+		pd := host.WorkflowPhaseDocument{
+			Name:        p.Name,
+			Description: p.Description,
+			Agent:       p.Agent,
+			Context:     p.Context,
+			Gate:        string(p.Exit.Type),
+			GateCommand: p.Exit.Command,
+		}
+		for _, r := range p.Permissions {
+			pd.Permissions = append(pd.Permissions, host.WorkflowPermission{
+				Permission: r.Permission,
+				Pattern:    r.Pattern,
+				Action:     string(r.Action),
+			})
+		}
+		doc.Phases = append(doc.Phases, pd)
+	}
+	return doc
 }

@@ -1,0 +1,29 @@
+/* feature:agent-identity begin */
+/* #1379: decorative per-agent initial disc. Tones derive from the Strike
+   purple (--acid) mixed toward existing palette tokens; status colour
+   stays on the status dot/badge. Text uses --on-accent like other filled
+   accent controls. */
+.identity-disc {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--acid);
+  color: var(--on-accent);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  user-select: none;
+}
+.identity-disc[data-tone="1"] { background: color-mix(in srgb, var(--acid) 65%, var(--accent-alt)); }
+.identity-disc[data-tone="2"] { background: color-mix(in srgb, var(--acid) 65%, var(--signal)); }
+.identity-disc[data-tone="3"] { background: color-mix(in srgb, var(--acid) 65%, var(--danger)); }
+.identity-disc[data-tone="4"] { background: color-mix(in srgb, var(--acid) 65%, var(--success)); }
+.identity-disc[data-tone="5"] { background: color-mix(in srgb, var(--acid) 65%, var(--warning)); }
+.sx-msg header .identity-disc { margin-right: var(--space-1); }
+.ss-top .identity-disc { width: 18px; height: 18px; font-size: 10px; }
+/* feature:agent-identity end */

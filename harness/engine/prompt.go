@@ -376,6 +376,9 @@ func (e *Engine) composeSystemLayers() []promptLayer {
 			Text:   inst,
 		})
 	}
+	if layer, ok := e.verbosityLayer(); ok {
+		layers = append(layers, layer)
+	}
 	// Dynamic tail (#1200): environment (date), memory, and ledger churn between
 	// turns, so they follow every stable layer and ride outside the cached
 	// system block. Keep new layers above this line unless they churn too.
