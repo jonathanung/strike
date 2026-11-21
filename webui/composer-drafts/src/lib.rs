@@ -74,11 +74,20 @@ impl<S: DraftStore> DraftBook<S> {
             self.record(root, text);
             return None;
         }
-        if let Some(prev) = self.owner.take() {
-            self.record(&prev, text);
-        }
+        let prev = self.owner.take();
         self.owner = Some(root.to_string());
         let restored = self.recall(root);
+        // Text typed before any session was open belongs to whichever
+        // session opens first, unless that session has its own draft:
+        // creating or opening a session must not swallow the prompt.
+        if prev.as_deref() == Some("") && !text.is_empty() && restored.is_empty() {
+            self.record("", "");
+            self.record(root, text);
+            return None;
+        }
+        if let Some(prev) = prev {
+            self.record(&prev, text);
+        }
         if restored == text {
             None
         } else {
@@ -337,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn no_session_draft_is_memory_only() {
+    fn no_session_draft_is_memory_only_and_carries_into_the_first_session() {
         let mut book = DraftBook::new(MemStore::default());
         let mut composer = String::new();
         drive(&mut book, "", &mut composer);
@@ -345,7 +354,26 @@ mod tests {
         drive(&mut book, "", &mut composer);
         assert!(book.store().items.is_empty());
         drive(&mut book, "a", &mut composer);
-        assert_eq!(composer, "");
+        assert_eq!(composer, "before any session");
         assert_eq!(book.owner(), Some("a"));
+        assert_eq!(stored(&book, "a").as_deref(), Some("before any session"));
+        assert_eq!(book.recall(""), "", "the text moved, it was not copied");
+    }
+
+    #[test]
+    fn no_session_draft_does_not_overwrite_a_sessions_own_draft() {
+        let mut book = DraftBook::new(MemStore::default());
+        let mut composer = String::new();
+        drive(&mut book, "a", &mut composer);
+        composer = "A's own".into();
+        drive(&mut book, "a", &mut composer);
+        drive(&mut book, "", &mut composer);
+        assert_eq!(composer, "");
+        composer = "typed with no session".into();
+        drive(&mut book, "", &mut composer);
+        drive(&mut book, "a", &mut composer);
+        assert_eq!(composer, "A's own");
+        drive(&mut book, "", &mut composer);
+        assert_eq!(composer, "typed with no session");
     }
 }
