@@ -28,6 +28,7 @@ mod gateway;
 mod gateway_qr;
 mod git;
 mod goals;
+mod identity;
 mod mobile;
 mod providers;
 mod rule_author;
@@ -67,6 +68,7 @@ mod turn_elapsed;
 mod turn_usage;
 mod workspaces;
 use crate::shell::icon;
+use crate::identity::IdentityDisc;
 
 
 use std::cell::{Cell, RefCell};
@@ -5731,6 +5733,8 @@ fn App() -> impl IntoView {
                                 let name_chat = name.clone();
                                 let sid_chat = sid.clone();
                                 let who = name.clone();
+                                let disc_key = identity::child_key(&name, &sid);
+                                let disc_name = name.clone();
                                 let agent = row.agent.clone();
                                 let agent_label = agent.clone();
                                 let primary = if show_task { headline } else { name.clone() };
@@ -5755,6 +5759,7 @@ fn App() -> impl IntoView {
                                         }>
                                             <span class="task-line">
                                                 <StatusMark kind=mark_kind place=StatusSlot::Dot />
+                                                <IdentityDisc ident=disc_key name=disc_name />
                                                 <span class="name">{primary}</span>
                                                 <StatusMark kind=mark_kind place=StatusSlot::Badge label=status_label />
                                             </span>
