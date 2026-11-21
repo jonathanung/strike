@@ -686,6 +686,23 @@ func projectLine(logSession, fileParent string, line []byte, now time.Time) (Not
 			RequestID: req,
 			At:        at.UTC(),
 		}, true
+	case "question.asked":
+		// An agent question blocks the run like an approval does (#1338).
+		// Only the fact is copied: question text and options may quote
+		// user data, so they never reach the centre or the banner.
+		req, _ := safeID(data.RequestID)
+		subject := firstSafe(data.SessionID, focus)
+		return Notification{
+			ID:        noteID(noteApproval, subject, req),
+			Kind:      noteApproval,
+			SessionID: focus,
+			SubjectID: subject,
+			Title:     "Question from the agent",
+			Body:      "The agent is waiting on your answer",
+			Href:      noteHref(focus, ""),
+			RequestID: req,
+			At:        at.UTC(),
+		}, true
 	case "child.completed":
 		return childNote(data.Status, data.Name, firstSummary(data.Summary, data.Handoff.Summary), data.SessionID, focus, at)
 	case "delegation.changed":
@@ -837,6 +854,10 @@ func ScriptRunNote(scheduleID, runID, name string, exitCode *int, failed bool, a
 func (s *Server) NotifyScriptRun(scheduleID, runID, name string, exitCode *int, failed bool) {
 	if s == nil {
 		return
+	}
+	if failed {
+		// The scheduler producer (#1926): one Ideas row per failing schedule.
+		s.SuggestScriptRunFailure(scheduleID, runID, name, exitCode)
 	}
 	log := s.notifications()
 	note, ok := ScriptRunNote(scheduleID, runID, name, exitCode, failed, log.clock())

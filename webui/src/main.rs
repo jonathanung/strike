@@ -42,6 +42,7 @@ mod local_issues;
 mod mermaid;
 mod localfiles;
 mod customize;
+mod dashboards;
 mod delegation_board;
 mod deploy_watch;
 mod gateway;
@@ -51,6 +52,7 @@ mod git;
 mod global_search;
 mod goals;
 mod ideas;
+mod identity;
 mod instance_backup;
 mod mobile;
 mod provider_signin;
@@ -58,6 +60,8 @@ mod providers;
 mod review_queue;
 mod push;
 mod reasoning;
+mod questions;
+mod questions_ui;
 mod review_branch;
 mod rule_author;
 mod sandbox_explain;
@@ -118,12 +122,15 @@ mod turn_files;
 mod turn_failure;
 mod turn_usage;
 mod turn_verify;
+mod verbosity;
 mod workspace_image;
 mod workspace_trust;
 mod workspaces;
+mod spec_authoring;
 mod workflows;
 mod workflow_run;
 use crate::shell::icon;
+use crate::identity::IdentityDisc;
 use crate::delegation_board::DelegationBoard;
 use crate::child_signals::TeamMessagesFeed;
 
@@ -1343,6 +1350,7 @@ fn App() -> impl IntoView {
     let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
     let elicitations = RwSignal::new(Vec::<elicitation::Pending>::new());
+    let questions = RwSignal::new(Vec::<questions::Pending>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
     let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
     let panel_open = RwSignal::new(false);
@@ -1977,6 +1985,7 @@ fn App() -> impl IntoView {
                                                 .to_string(),
                                         );
                                     }
+                                    crate::verbosity::seed(&st.verbosity, &st.verbosity_delivery);
                                     wf_run.set(workflow_run::WorkflowRun::from_status(
                                         &st.workflow,
                                         &st.phase,
@@ -2161,6 +2170,7 @@ fn App() -> impl IntoView {
             children_note.set(String::new());
             asks.set(Vec::new());
             elicitations.set(Vec::new());
+            questions.set(Vec::new());
             live_audit.set(Vec::new());
             confirm.set(None);
             wipe_on_replay.set(false);
@@ -2192,6 +2202,7 @@ fn App() -> impl IntoView {
         // session's Fast/autonomy across the switch.
         fast_on.set(false);
         autonomy.set("supervised".to_string());
+        crate::verbosity::reset();
         autonomy_menu.set(false);
         wf_run.set(workflow_run::WorkflowRun::default());
         context_used.set(0);
@@ -2325,6 +2336,7 @@ fn App() -> impl IntoView {
                     note_steer(transcript_cb, &data, &on_note);
                     apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
                     elicitation_ui::apply_elicitation_notes(&data, elicitations);
+                    questions_ui::apply_question_notes(&data, questions);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
                     lines_cb.set(transcript_cb.with_untracked(|t| t.chat_lines()));
@@ -2363,6 +2375,7 @@ fn App() -> impl IntoView {
                         wf_run.set(wf_next);
                     }
                     let next = reduce_envelope(prev, &data);
+                    crate::verbosity::observe(&data);
                     provider_name.set(next.provider);
                     model_name.set(next.model);
                     effort_level.set(next.effort);
@@ -3703,9 +3716,11 @@ fn App() -> impl IntoView {
 
     // Diagnostics (#1404) load while the pane is shown or a document is
     // open (for the editor badge), and again on every Refresh / palette
-    // open (diag_rev). The previous result stays visible while reloading.
+    // open (diag_rev) and every debounced files.invalidated burst
+    // (files_rev, #1894). The previous result stays visible while reloading.
     Effect::new(move |_| {
         let _ = diag_rev.get();
+        let _ = files_rev.get();
         let shown = side_tab.get() == "diagnostics";
         let doc_open = !doc_path.get().is_empty();
         if !shown && !doc_open {
@@ -4110,6 +4125,8 @@ fn App() -> impl IntoView {
         on_focus: on_notify,
     });
     notify::set_unread_host(notify_unread);
+    // #1926: the Ideas badge is a header slot; give it the daemon address.
+    ideas::set_host(base, token);
 
     shell::boot();
     shell::set_host(shell::HostBridge {
@@ -5641,6 +5658,9 @@ fn App() -> impl IntoView {
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
         </Show>
+        <Show when=move || mode.get() == "dashboards" fallback=move || ()>
+            <dashboards::DashboardsPane base=base token=token active_root=active_root />
+        </Show>
         <Show when=move || mode.get() == "ideas" fallback=move || ()>
             <ideas::IdeasPage base=base token=token draft=draft active_root=active_root mode=mode />
         </Show>
@@ -5661,6 +5681,9 @@ fn App() -> impl IntoView {
                 active_root=active_root
                 status=status
             />
+        </Show>
+        <Show when=move || mode.get() == "specs" fallback=move || ()>
+            <spec_authoring::SpecAuthoringPage base=base token=token status=status active_root=active_root mode=mode />
         </Show>
         <Show when=move || mode.get() == "workflows" fallback=move || ()>
             <workflows::WorkflowsPage base=base token=token status=status />
@@ -5767,7 +5790,6 @@ fn App() -> impl IntoView {
                     panel_drawer.set(false);
                 }></button>
                 <aside class="rail">
-                    <ideas::IdeasBadge base=base token=token mode=mode />
 <SessionPanel
                         base=base
                         token=token
@@ -6010,6 +6032,7 @@ fn App() -> impl IntoView {
                     />
                     </Show>
                     <elicitation_ui::ElicitationCards base=base token=token root=active_root elicitations=elicitations />
+                    <questions_ui::QuestionCards base=base token=token root=active_root questions=questions />
                     <ApprovalCards
                         asks=asks
                         perm_mode=perm_mode
@@ -6656,6 +6679,7 @@ fn App() -> impl IntoView {
                                     model_menu.set(false);
                                     autonomy_menu.update(|v| *v = !*v);
                                 }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
+                                <crate::verbosity::VerbosityChip base=base token=token active_root=active_root status=status busy=Signal::derive(move || session_busy_now.get()) />
                                 // #1574: the live workflow run, only while the
                                 // daemon reports one. Stop asks first.
                                 <Show when=move || wf_run.with(|w| w.is_active())>
@@ -6806,6 +6830,8 @@ fn App() -> impl IntoView {
                                 let sid_chat = sid.clone();
                                 let escalation = team_escalations.with(|m| m.get(&sid).cloned());
                                 let who = name.clone();
+                                let disc_key = identity::child_key(&name, &sid);
+                                let disc_name = name.clone();
                                 let agent = row.agent.clone();
                                 let agent_label = agent.clone();
                                 let primary = if show_task { headline } else { name.clone() };
@@ -6830,6 +6856,7 @@ fn App() -> impl IntoView {
                                         }>
                                             <span class="task-line">
                                                 <StatusMark kind=mark_kind place=StatusSlot::Dot />
+                                                <IdentityDisc ident=disc_key name=disc_name />
                                                 <span class="name">{primary}</span>
                                                 <StatusMark kind=mark_kind place=StatusSlot::Badge label=status_label />
                                             </span>

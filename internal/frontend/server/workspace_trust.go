@@ -31,10 +31,16 @@ type workspaceTrustResponse struct {
 	// Mutable reports whether POST is accepted (live root, not --read-only).
 	Mutable bool `json:"mutable"`
 	// RestartRequired is true when the decision differs from what the running
-	// sessions were assembled with: trust takes effect on the next strike
-	// start (live re-assembly is a follow-up).
-	RestartRequired bool   `json:"restartRequired,omitempty"`
-	Error           string `json:"error,omitempty"`
+	// sessions were assembled with. It goes false once the daemon reloads
+	// (POST {"action":"apply"}) or is restarted (#1834).
+	RestartRequired bool `json:"restartRequired,omitempty"`
+	// CanReload reports that this daemon can apply a changed decision itself
+	// (POST {"action":"apply"}): stop every root and project process, then
+	// re-exec with the same flags so it re-assembles under the new decision.
+	CanReload bool `json:"canReload,omitempty"`
+	// Reloading is set on the apply reply: the daemon is about to restart.
+	Reloading bool   `json:"reloading,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 // WorkspaceTrustAssembly records the workspace a daemon assembled its
@@ -65,6 +71,12 @@ func (s *Server) workspaceTrustCapable() bool {
 // workspaceTrustMutable reports whether POST /v1/workspace/trust is allowed.
 func (s *Server) workspaceTrustMutable() bool {
 	return s.workspaceTrustCapable() && s.hasLive() && !s.opts.ReadOnly
+}
+
+// workspaceTrustReloadable reports whether POST {"action":"apply"} can
+// restart this daemon under the current decision (#1834).
+func (s *Server) workspaceTrustReloadable() bool {
+	return s.workspaceTrustMutable() && s.opts.WorkspaceTrustReload != nil && s.opts.WorkspaceTrustAssembled != nil
 }
 
 // workspaceTrustRoot resolves the workspace the request is about: the
@@ -124,6 +136,7 @@ func (s *Server) workspaceTrustStatus(store *workspacetrust.Store, workDir, root
 	resp.Untrustable = workspacetrust.Untrustable(root)
 	if a := s.opts.WorkspaceTrustAssembled; a != nil && a.Root == root && a.Trusted != resp.Trusted {
 		resp.RestartRequired = true
+		resp.CanReload = s.workspaceTrustReloadable()
 	}
 	return resp
 }
@@ -143,8 +156,8 @@ func (s *Server) handleWorkspaceTrustGet(w http.ResponseWriter, r *http.Request)
 }
 
 // handleWorkspaceTrustPost grants or revokes trust for the live root's
-// workspace. Trust only lets repo config load on the next start; it never
-// widens a permission.
+// workspace, or applies a changed decision by reloading the daemon (#1834).
+// Trust only lets repo config load; it never widens a permission.
 func (s *Server) handleWorkspaceTrustPost(w http.ResponseWriter, r *http.Request) {
 	if !s.workspaceTrustCapable() {
 		capabilityUnavailable(w, "workspaceTrust")
@@ -163,12 +176,16 @@ func (s *Server) handleWorkspaceTrustPost(w http.ResponseWriter, r *http.Request
 		return
 	}
 	action := strings.TrimSpace(body.Action)
-	if action != "grant" && action != "revoke" {
-		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: `action must be "grant" or "revoke"`})
+	if action != "grant" && action != "revoke" && action != "apply" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: `action must be "grant", "revoke" or "apply"`})
 		return
 	}
 	workDir, root, ok := s.workspaceTrustRoot(w, r)
 	if !ok {
+		return
+	}
+	if action == "apply" {
+		s.applyWorkspaceTrust(w, workDir, root)
 		return
 	}
 	workspaceTrustMu.Lock()
@@ -194,4 +211,42 @@ func (s *Server) handleWorkspaceTrustPost(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, s.workspaceTrustStatus(store, workDir, root))
+}
+
+// applyWorkspaceTrust asks the daemon to reload so the stored decision takes
+// effect for every root (#1834). The hook only signals the daemon; the
+// daemon then shuts the HTTP server down gracefully, which waits for this
+// handler to finish writing the 202, stops every root and project
+// MCP/LSP/harness process, and re-execs. Refused when nothing changed, so a
+// browser cannot bounce the daemon at will.
+func (s *Server) applyWorkspaceTrust(w http.ResponseWriter, workDir, root string) {
+	if !s.workspaceTrustReloadable() {
+		writeJSON(w, http.StatusConflict, opErrorResponse{Error: "this daemon cannot reload itself; restart strike serve to apply workspace trust"})
+		return
+	}
+	workspaceTrustMu.Lock()
+	defer workspaceTrustMu.Unlock()
+	store, err := workspacetrust.Open(s.opts.WorkspaceTrustPath)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
+		return
+	}
+	resp := s.workspaceTrustStatus(store, workDir, root)
+	if !resp.RestartRequired {
+		resp.Error = "workspace trust is already active; nothing to reload"
+		writeJSON(w, http.StatusConflict, resp)
+		return
+	}
+	// workspaceTrustMu (held) also guards workspaceTrustReloading: a second
+	// apply while the first is draining does not signal twice.
+	if !s.workspaceTrustReloading {
+		if err := s.opts.WorkspaceTrustReload(); err != nil {
+			resp.Error = err.Error()
+			writeJSON(w, http.StatusInternalServerError, resp)
+			return
+		}
+		s.workspaceTrustReloading = true
+	}
+	resp.Reloading = true
+	writeJSON(w, http.StatusAccepted, resp)
 }
