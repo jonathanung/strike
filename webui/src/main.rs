@@ -103,6 +103,7 @@ mod file_history;
 mod quick_open;
 mod transcript_find;
 mod usage_audit;
+mod regenerate_title;
 mod rewind;
 mod session_delete;
 mod session_restore;
