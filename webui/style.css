@@ -3567,3 +3567,13 @@ button.context-doctor-open { background: transparent; border: 0; padding: 0; fon
   cursor: pointer;
 }
 /* feature:diagnostics end */
+/* feature:files-invalidated begin */
+/* #1380: a freshness signal, not a warning — muted system line. */
+.sx-notice[data-kind="files.invalidated"] {
+  border-left-color: var(--border-muted);
+  color: var(--muted);
+}
+.sx-notice[data-kind="files.invalidated"] .sx-who {
+  color: var(--muted);
+}
+/* feature:files-invalidated end */
