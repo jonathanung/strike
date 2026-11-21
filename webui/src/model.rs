@@ -241,10 +241,18 @@ pub struct BootstrapCapabilities {
     /// (`GET /v1/ledger`, #1485); gates the Decisions storage tab.
     #[serde(default)]
     pub ledger: bool,
+    /// True when the daemon serves the project-local issues tracker
+    /// (`/v1/issues*`, #1500); gates the Issues storage tab.
+    #[serde(default)]
+    pub issues: bool,
     /// True when `/v1/init` can write AGENTS.md (#1581): host init service
     /// present, live engine, and not `--read-only`.
     #[serde(default, rename = "projectInit")]
     pub project_init: bool,
+    /// True when `/v1/sessions/{id}/loops` can start and stop session
+    /// loops (#1588): live engine and not `--read-only`.
+    #[serde(default)]
+    pub loops: bool,
 }
 
 /// One `/v1/init` reply (#1581). `exists` with a non-empty `error` is the
@@ -511,10 +519,15 @@ pub struct ActivityRow {
     pub agent: String,
     pub task: String,
     pub state: String,
-    pub output: String,
     pub elapsed_s: i64,
     pub started_ms: f64,
     pub expanded: bool,
+    /// Agent-written terminal summary, kept apart for the status card (#1397).
+    pub summary: String,
+    /// Agent-written block reason, kept apart for the status card (#1397).
+    pub block_reason: String,
+    /// Engine budget counters; `None` when the daemon sent no budget.
+    pub budget: Option<status_card::Budget>,
 }
 
 pub fn display_state(m: &TeamMember) -> String {
@@ -538,6 +551,24 @@ fn budget_flag(m: &TeamMember, key: &str) -> bool {
         .and_then(|b| b.get(key))
         .and_then(|v| v.as_bool())
         .unwrap_or(false)
+}
+
+fn budget_i64(b: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<i64> {
+    let v = b.get(key)?;
+    v.as_i64().or_else(|| v.as_f64().filter(|f| f.is_finite()).map(|f| f as i64))
+}
+
+/// Engine counters for the status card (#1397). Keys match the daemon's
+/// `TeamMemberSnapshot.Budget` map (`internal/frontend/server/live.go`).
+/// A missing key stays `None` so the card shows a dash, never `0`.
+pub fn card_budget(m: &TeamMember) -> Option<status_card::Budget> {
+    let b = m.budget.as_ref()?;
+    Some(status_card::Budget {
+        elapsed_s: budget_i64(b, "elapsedS"),
+        tokens: budget_i64(b, "tokensUsed"),
+        tool_calls: budget_i64(b, "toolCalls"),
+        cost_usd: b.get("costUsdUsed").and_then(|v| v.as_f64()),
+    })
 }
 
 pub fn budget_elapsed(m: &TeamMember) -> i64 {
@@ -1239,10 +1270,12 @@ pub fn activity_panel(
             agent: String::new(),
             task: card.map(|line| line.body.clone()).unwrap_or_default(),
             state: card.map(|line| line.badge.clone()).unwrap_or_default(),
-            output: card.map(|line| line.detail.clone()).unwrap_or_default(),
             elapsed_s: 0,
             started_ms: 0.0,
             expanded: false,
+            summary: card.map(|line| line.detail.clone()).unwrap_or_default(),
+            block_reason: String::new(),
+            budget: None,
         });
     }
     rows
@@ -1282,6 +1315,21 @@ fn one_line(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn card_budget_keeps_missing_counters_unmeasured() {
+        let mk = |v: serde_json::Value| -> TeamMember { serde_json::from_value(v).unwrap() };
+        assert_eq!(card_budget(&mk(serde_json::json!({"sessionId": "a"}))), None);
+        let b = card_budget(&mk(serde_json::json!({
+            "sessionId": "a",
+            "budget": {"elapsedS": 90, "tokensUsed": 1200.0, "costUsdUsed": 0.0}
+        })))
+        .expect("budget sent");
+        assert_eq!(b.elapsed_s, Some(90));
+        assert_eq!(b.tokens, Some(1200));
+        assert_eq!(b.tool_calls, None, "key not sent stays unmeasured");
+        assert_eq!(b.cost_usd, Some(0.0));
+    }
 
     #[test]
     fn root_reported_idle_needs_a_daemon_status() {
@@ -1534,6 +1582,8 @@ mod tests {
         assert_eq!(rows[0].name, "scribe");
         assert_eq!(rows[0].state, "blocked");
         assert_eq!(rows[0].task, "schema: handoff missing");
+        assert_eq!(rows[0].summary, "handoff json", "transcript detail feeds the card as agent text");
+        assert!(rows[0].budget.is_none(), "saved children carry no engine counters");
 
         let siblings = vec![
             ChildSession {

@@ -214,6 +214,16 @@
 }
 /* feature:chat-mode end */
 
+/* feature:office-media-attachments begin */
+.attach-chip .attach-media {
+  display: block;
+  max-width: min(240px, 60vw);
+  max-height: 120px;
+  border-radius: 4px;
+  background: var(--surface-muted);
+}
+.attach-chip audio.attach-media { height: 32px; }
+/* feature:office-media-attachments end */
 /* feature:attachment-honesty begin */
 .attach-warning {
   flex-basis: 100%;
