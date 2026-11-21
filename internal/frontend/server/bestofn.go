@@ -759,9 +759,6 @@ const (
 	bestOfNCommentSummaryMax = 1200
 )
 
-// errBestOfNCommentary marks a refusal the caller can fix by waiting.
-var errBestOfNCommentary = errors.New("bestofn commentary")
-
 // bestOfNCommentaryText is the user turn that asks the owner session for a
 // short note on how the candidates differ. It is commentary only: the turn
 // tells the agent not to pick, rank or apply anything, and adopting stays
@@ -827,19 +824,19 @@ func (s *Server) requestBestOfNCommentary(ctx context.Context, e *bestOfNEntry) 
 	defer e.mu.Unlock()
 	switch {
 	case !e.run.Complete():
-		return fmt.Errorf("%w: wait until every run has stopped", errBestOfNCommentary)
+		return errors.New("bestofn: wait until every run has stopped")
 	case e.commentary:
-		return fmt.Errorf("%w: commentary was already requested; see the transcript", errBestOfNCommentary)
+		return errors.New("bestofn: commentary was already requested; see the transcript")
 	}
 	if _, decided := e.run.Decision(); decided {
-		return fmt.Errorf("%w: this comparison is already decided", errBestOfNCommentary)
+		return errors.New("bestofn: this comparison is already decided")
 	}
 	live := s.liveForOwner(e.owner)
 	if live == nil {
 		return errors.New("owning session is not live")
 	}
 	if live.Status().Busy {
-		return fmt.Errorf("%w: the session is busy; ask again when the current turn finishes", errBestOfNCommentary)
+		return errors.New("bestofn: the session is busy; ask again when the current turn finishes")
 	}
 	submitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()

@@ -742,7 +742,6 @@ func (h *childHandle) budgetTerminal() (protocol.ChildStatus, string) {
 	return h.budget.terminal, h.budget.reason
 }
 
-// budgetTerminalMeta returns budget kind + finalization outcome for ChildCompleted.
 // usageSnapshot reads the child's accumulated usage under h.mu (#1962).
 func (h *childHandle) usageSnapshot() *protocol.ChildUsage {
 	if h == nil {
@@ -753,6 +752,7 @@ func (h *childHandle) usageSnapshot() *protocol.ChildUsage {
 	return h.budget.usage()
 }
 
+// budgetTerminalMeta returns budget kind + finalization outcome for ChildCompleted.
 func (h *childHandle) budgetTerminalMeta() (kind, finalization string) {
 	if h == nil {
 		return "", ""
