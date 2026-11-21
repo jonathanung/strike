@@ -70,6 +70,7 @@ service/theme token).
 | `internal/integrate/mcp` | MCP client (stdio + streamable HTTP); bridges external tools onto the registry |
 | `internal/integrate/lsp` | LSP client (JSON-RPC over stdio); extension registry; diagnostics collection |
 | `harness/question` | user-question ask service (suspend tool until QuestionReply) |
+| `harness/elicit` | MCP elicitation ask service (suspend an MCP tool call until ElicitationReply) |
 | `harness/actionfacts` | semantic bash/tool fact projection for permissions (#888) |
 | `harness/permission` | last-match-wins allow/ask/deny + ask service (+ action facts) |
 | `internal/trust/secret` | secret-ref env indirection + protocol event redaction on top of pkg/redact (see docs/secrets.md) |
