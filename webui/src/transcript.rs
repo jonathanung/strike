@@ -1008,7 +1008,8 @@ impl Transcript {
                     body,
                     badge: "fallback".into(),
                     detail: field_str(&data, "error"),
-                    key: String::new(),
+                    // #1963: a root sticky notice offers Return to primary.
+                    key: crate::fallback::notice_key(&data),
                     call_id: String::new(),
                     diff: None,
                     chips: Vec::new(),

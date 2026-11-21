@@ -134,6 +134,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		initialEffort = e.effort
 	}
 
+	fbProvider, fbModel := e.fallbackPair()
 	child := New(Options{
 		debugFrom:                  e,
 		SessionID:                  childID,
@@ -171,6 +172,8 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		InitialAgent:               agentName,
 		InitialProvider:            initialProvider,
 		InitialModel:               initialModel,
+		InitialFallbackProvider:    fbProvider, // #1963
+		InitialFallbackModel:       fbModel,
 		InitialEffort:              initialEffort,
 		InitialMessages:            restored.Messages,
 		InitialPriority:            restored.Priority,
@@ -371,6 +374,9 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 			case protocol.AgentContractTimeout:
 				e.emit(ev)
 			case protocol.TeamRoster:
+				e.emit(ev)
+			case protocol.ModelFallback:
+				// Child fallback turn (#1963): mark it in the parent.
 				e.emit(ev)
 			case protocol.PathOverlap:
 				e.emit(ev)

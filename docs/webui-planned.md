@@ -533,11 +533,19 @@ cap); a pattern that matches empty text, a non-http(s) template, a
 template whose host comes from `{match}`, and more than 50 rules are
 refused inline in Settings and never applied.
 
-Persistence choice: rules live in this browser's localStorage
-(`strike.linkPatterns`), like the other cockpit view prefs, so a phone
-and a desktop keep separate lists for now. Sharing them through the
-gateway needs a settings field on the host contract and a config key; that is
-a follow-up issue, not part of this slice.
+Persistence (#1879): rules live on the gateway as `webui.linkPatterns`
+in the global `~/.strike/config`, read and written through
+`GET`/`PATCH /v1/settings`, so every device paired to one gateway shares
+one list (a rule saved on the desktop links on the phone after reload).
+The gateway validates the whole list with the same rules (Go RE2, ≤512-byte
+patterns under a compiled-program size cap) and refuses an invalid one with
+400; nothing is stored. On first load the cockpit moves a list it kept in
+this browser's localStorage (`strike.linkPatterns`, slice 1) to the gateway,
+appending only rules the gateway does not already have, then deletes the
+local key; if the move fails the key stays and the move is retried on the
+next load. A gateway too old to report `linkPatterns` keeps the per-browser
+list, and Settings says so.
+
 ## Review queue
 
 The Review side tab (`webui/src/review_queue.rs`, daemon routes in
@@ -616,9 +624,20 @@ unlock (naming any override reason), mark fixed and the summary are also
 transcript notices. At phone width the panel collapses to a status chip
 that opens a bottom sheet.
 
-Not drawn yet: the agent cannot write hypotheses or attach evidence
-itself (no model-facing tool; the user does it in the panel). Bash is not
-inspected by the gate; the permission layer still governs it.
+Agent side (#1961): while a session is active the deferred
+`debug_session` tool is activated and a system note (prompt layer
+`debug:<phase>`) states the phase, the marker convention and the gate.
+The tool sets 2–5 ranked hypotheses, attaches evidence and marks verdicts
+through the same `debugmode.Session`, emitting `debug.updated` so the
+cards appear in the panel. Start, unlock / override, mark fixed and end
+stay user-only: the engine refuses them with a reason. Fix still unlocks
+only through the explicit Unlock button, not automatically on a confirmed
+hypothesis.
+
+Not drawn yet: bash is not inspected by the gate; the permission layer
+still governs it. UAT screenshots / video for #1345 are owed (no local
+serve in the agent lanes that shipped this).
+
 ## Steer acknowledgement
 
 Shipped (#1343): a steered message carries a marker driven only by the

@@ -9,6 +9,12 @@
 //! (`model.fallback` with `sticky`, `fallback.selected` with `active`). The
 //! chip then reads "On fallback" and offers Return to primary, which posts
 //! `fallback.return`.
+//!
+//! #1963: the sticky notice in the transcript carries Return to primary
+//! too (the chip binds `RETURN_ACTION`, the notice dispatches it); a
+//! delegated child's fallback turn is marked in the parent's transcript
+//! with child wording; the palette's fallback choices mark the current
+//! pick.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -40,6 +46,11 @@ thread_local! {
 
 pub fn state() -> ArcRwSignal<FallbackState> {
     STATE.with(|s| s.clone())
+}
+
+/// Untracked snapshot for non-reactive callers (palette choices).
+pub fn current() -> FallbackState {
+    STATE.with(|s| s.get_untracked())
 }
 
 fn set(next: FallbackState) {
@@ -117,24 +128,74 @@ pub fn model_label(provider: &str, model: &str) -> String {
     }
 }
 
-/// Transcript notice for a `model.fallback` event: title and body.
+/// Transcript notice for a `model.fallback` event: title and body. A
+/// delegated child's notice (depth > 0, #1963) says so; only the root's
+/// own sticky notice points at Return to primary.
 pub fn notice_text(data: &Value) -> (String, String) {
     let text = |k: &str| data.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let fallback = model_label(&text("fallbackProvider"), &text("fallbackModel"));
     let primary = model_label(&text("primaryProvider"), &text("primaryModel"));
-    let why = match text("reason").as_str() {
-        "unavailable" | "" => "unavailable",
-        "refused" => {
-            return (
-                "Model fallback".into(),
-                format!(
-                    "Answered by {fallback} — {primary} refused. The session stays on {fallback} until you use Return to primary on the composer chip."
-                ),
-            )
-        }
-        other => return ("Model fallback".into(), format!("Answered by {fallback} — {primary} {other}")),
+    let child = is_child(data);
+    let title = if child { "Model fallback · delegated agent" } else { "Model fallback" };
+    let lead = if child { "A delegated agent was answered by" } else { "Answered by" };
+    let body = match text("reason").as_str() {
+        "unavailable" | "" => format!("{lead} {fallback} — {primary} unavailable"),
+        "refused" if child => format!(
+            "{lead} {fallback} — {primary} refused. That agent stays on {fallback} for the rest of its task."
+        ),
+        "refused" => format!(
+            "{lead} {fallback} — {primary} refused. The session stays on {fallback} until you use Return to primary."
+        ),
+        other => format!("{lead} {fallback} — {primary} {other}"),
     };
-    ("Model fallback".into(), format!("Answered by {fallback} — {primary} {why}"))
+    (title.into(), body)
+}
+
+fn is_child(data: &Value) -> bool {
+    data.get("depth").and_then(Value::as_i64).unwrap_or(0) > 0
+}
+
+/// Transcript key for a root sticky `model.fallback` notice (#1963): the
+/// notice offers Return to primary while the session is still on the
+/// fallback. Every other fallback notice has no key.
+pub const STICKY_KEY: &str = "fallback.sticky";
+
+pub fn notice_key(data: &Value) -> String {
+    let sticky = data.get("sticky").and_then(Value::as_bool).unwrap_or(false);
+    if sticky && !is_child(data) {
+        STICKY_KEY.into()
+    } else {
+        String::new()
+    }
+}
+
+/// Page binding behind the notice's Return to primary (#1963). The chip
+/// binds it, because only the page knows the session.
+pub const RETURN_ACTION: &str = "fallback.return_to_primary";
+
+/// Palette choice detail (#1963): marks the row matching the current
+/// fallback so the menu shows what is set before you change it.
+pub fn choice_detail(current: &FallbackState, choice_id: &str, base: &str) -> String {
+    // The daemon strips a matching "provider/" prefix from the model it
+    // confirms; compare bare ids so a prefixed catalog id still matches.
+    let bare = |p: &str, m: &str| {
+        let (p, m) = (p.trim(), m.trim());
+        let prefix = format!("{p}/");
+        m.strip_prefix(prefix.as_str()).unwrap_or(m).to_string()
+    };
+    let is_current = match choice_id.split_once('\t') {
+        Some((p, m)) => {
+            current.is_set()
+                && current.provider == p.trim()
+                && bare(p, m) == bare(&current.provider, &current.model)
+        }
+        None => !current.is_set(),
+    };
+    if is_current {
+        format!("Current · {base}")
+    } else {
+        base.to_string()
+    }
 }
 
 /// Palette command id; the chip opens the palette at it.
@@ -240,7 +301,7 @@ pub fn FallbackChip(
         move || if st.get().active { "true" } else { "false" }
     };
     let title = move || chip_title(&st.get());
-    let return_to_primary = move |_: web_sys::MouseEvent| {
+    let go_back = move || {
         let root = active_root.get_untracked();
         if root.is_empty() {
             return;
@@ -256,6 +317,16 @@ pub fn FallbackChip(
             }
         });
     };
+    // The transcript's sticky notice dispatches this (#1963).
+    crate::shell::bind(
+        RETURN_ACTION,
+        std::rc::Rc::new(move |_: &str| {
+            go_back();
+            Ok(())
+        }),
+    );
+    on_cleanup(|| crate::shell::unbind(RETURN_ACTION));
+    let return_to_primary = move |_: web_sys::MouseEvent| go_back();
     view! {
         <Show when=shown>
             <button
@@ -315,6 +386,50 @@ mod tests {
         let (_, body) = notice_text(&data);
         assert!(body.starts_with("Answered by openai/g1 — anthropic/a1 refused."), "{body}");
         assert!(body.contains("Return to primary"), "{body}");
+    }
+
+    #[test]
+    fn child_notice_says_delegated_agent() {
+        let data = serde_json::json!({
+            "primaryProvider": "anthropic", "primaryModel": "a1",
+            "fallbackProvider": "openai", "fallbackModel": "g1",
+            "reason": "unavailable", "depth": 1
+        });
+        let (title, body) = notice_text(&data);
+        assert_eq!(title, "Model fallback · delegated agent");
+        assert_eq!(body, "A delegated agent was answered by openai/g1 — anthropic/a1 unavailable");
+        let refused = serde_json::json!({
+            "primaryProvider": "anthropic", "fallbackProvider": "openai",
+            "reason": "refused", "sticky": true, "depth": 2
+        });
+        let (_, body) = notice_text(&refused);
+        assert!(body.contains("That agent stays on openai"), "{body}");
+        assert!(!body.contains("Return to primary"), "{body}");
+    }
+
+    #[test]
+    fn only_root_sticky_notices_get_the_return_key() {
+        let cases = [
+            (serde_json::json!({"reason": "refused", "sticky": true}), STICKY_KEY),
+            (serde_json::json!({"reason": "refused", "sticky": true, "depth": 1}), ""),
+            (serde_json::json!({"reason": "unavailable"}), ""),
+            (serde_json::json!({}), ""),
+        ];
+        for (data, want) in cases {
+            assert_eq!(notice_key(&data), want, "{data}");
+        }
+    }
+
+    #[test]
+    fn choice_detail_marks_the_current_fallback() {
+        let set = fs("openai", "gpt");
+        assert_eq!(choice_detail(&set, "openai\tgpt", "d"), "Current · d");
+        assert_eq!(choice_detail(&set, "openai\tother", "d"), "d");
+        assert_eq!(choice_detail(&set, "none", "d"), "d");
+        assert_eq!(choice_detail(&set, "openai\topenai/gpt", "d"), "Current · d");
+        let unset = fs("", "");
+        assert_eq!(choice_detail(&unset, "none", "d"), "Current · d");
+        assert_eq!(choice_detail(&unset, "openai\tgpt", "d"), "d");
     }
 
     #[test]

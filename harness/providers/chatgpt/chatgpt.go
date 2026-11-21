@@ -125,6 +125,9 @@ type sseEvent struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
 		CallID    string `json:"call_id"`
+		Content   []struct {
+			Type string `json:"type"`
+		} `json:"content"`
 	} `json:"item"`
 	Response *struct {
 		Status string `json:"status"`
@@ -169,6 +172,7 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 func (p *Provider) readStream(body io.Reader, ch chan<- provider.StreamEvent) error {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 8<<20)
+	refused := false
 	for scanner.Scan() {
 		line := scanner.Text()
 		if !strings.HasPrefix(line, "data:") {
@@ -189,7 +193,22 @@ func (p *Provider) readStream(body io.Reader, ch chan<- provider.StreamEvent) er
 			if ev.Delta != "" {
 				ch <- provider.StreamEvent{Type: provider.EventReasoning, Text: ev.Delta}
 			}
+		case "response.refusal.delta":
+			// The refusal prose still reaches the transcript (#1963).
+			refused = true
+			if ev.Delta != "" {
+				ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: ev.Delta}
+			}
+		case "response.refusal.done":
+			refused = true
 		case "response.output_item.done":
+			if ev.Item != nil && ev.Item.Type == "message" {
+				for _, c := range ev.Item.Content {
+					if c.Type == "refusal" {
+						refused = true
+					}
+				}
+			}
 			if ev.Item != nil && ev.Item.Type == "function_call" {
 				args := json.RawMessage(ev.Item.Arguments)
 				if len(args) == 0 {
@@ -203,6 +222,9 @@ func (p *Provider) readStream(body io.Reader, ch chan<- provider.StreamEvent) er
 			}
 		case "response.completed":
 			done := provider.StreamEvent{Type: provider.EventDone, StopReason: "completed"}
+			if refused {
+				done.StopReason = provider.StopReasonRefusal
+			}
 			if ev.Response != nil && ev.Response.Usage != nil {
 				done.Usage = streamUsageToProvider(ev.Response.Usage)
 			}

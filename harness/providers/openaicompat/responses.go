@@ -93,6 +93,8 @@ type responsesContentBlock struct {
 	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
 	ImageURL string `json:"image_url,omitempty"`
+	// Refusal is the model's refusal text on a "refusal" output part.
+	Refusal string `json:"refusal,omitempty"`
 }
 
 type responsesTool struct {
@@ -151,10 +153,18 @@ func (p *ResponsesProvider) Stream(ctx context.Context, req provider.Request) (<
 			base.Fail(ch, fmt.Errorf("%s: %s", p.Name(), resp.Error.Message))
 			return
 		}
+		refused := false
 		for _, item := range resp.Output {
 			switch item.Type {
 			case "message":
 				for _, c := range item.Content {
+					if c.Type == "refusal" {
+						refused = true
+						if c.Refusal != "" {
+							ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: c.Refusal}
+						}
+						continue
+					}
 					if (c.Type == "output_text" || c.Type == "text") && c.Text != "" {
 						ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: c.Text}
 					}
@@ -182,15 +192,25 @@ func (p *ResponsesProvider) Stream(ctx context.Context, req provider.Request) (<
 				}
 			}
 		}
-		done := provider.StreamEvent{Type: provider.EventDone, StopReason: resp.Status}
-		if done.StopReason == "" {
-			done.StopReason = "completed"
-		}
+		done := provider.StreamEvent{Type: provider.EventDone, StopReason: responsesStopReason(resp.Status, refused)}
 		if resp.Usage != nil {
 			done.Usage = responsesUsageToProvider(resp.Usage)
 		}
 		ch <- done
 	}), nil
+}
+
+// responsesStopReason normalizes the Responses API status. A "refusal"
+// output part is the typed provider.StopReasonRefusal (#1963); an empty
+// status reads as "completed".
+func responsesStopReason(status string, refused bool) string {
+	if refused {
+		return provider.StopReasonRefusal
+	}
+	if status == "" {
+		return "completed"
+	}
+	return status
 }
 
 // responsesUsageToProvider maps Responses API usage onto provider.Usage with

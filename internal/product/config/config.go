@@ -82,6 +82,11 @@ type Config struct {
 	// while the daemon runs: "on" or "off" (default). Default-off because it
 	// changes host power behaviour (#1496). Unknown values are ignored at load.
 	KeepAwake string `json:"keepAwake,omitempty"`
+	// WebUI holds cockpit display preferences shared by every device paired
+	// to this gateway (Text Link Patterns, #1879). Host-scoped: read and
+	// written in the global file only, through GET/PATCH /v1/settings; it is
+	// never merged from project layers.
+	WebUI WebUIConfig `json:"webui,omitzero"`
 	// PermissionAutoApproveSeconds enables permission-modal auto-allow once
 	// after N seconds (yolo-lite). Zero disables (default). Clamped to 1–60
 	// when positive.

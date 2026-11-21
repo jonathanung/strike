@@ -701,3 +701,73 @@ func TestUserMessageIncludesInputImage(t *testing.T) {
 		t.Errorf("image = %+v", blocks[1])
 	}
 }
+
+// TestStreamClassifiesRefusals pins #1963: streamed refusal events, or a
+// message item carrying a refusal part, end the stream with the typed
+// refusal stop reason; the refusal prose still reaches the transcript.
+func TestStreamClassifiesRefusals(t *testing.T) {
+	const completed = `data: {"type":"response.completed","response":{"status":"completed"}}` + "\n"
+	tests := []struct {
+		name     string
+		sse      string
+		wantStop string
+		wantText string
+	}{
+		{
+			name: "refusal deltas",
+			sse: `data: {"type":"response.refusal.delta","delta":"I can't "}` + "\n" +
+				`data: {"type":"response.refusal.delta","delta":"help."}` + "\n" +
+				`data: {"type":"response.refusal.done"}` + "\n" + completed,
+			wantStop: provider.StopReasonRefusal,
+			wantText: "I can't help.",
+		},
+		{
+			name:     "refusal done only",
+			sse:      `data: {"type":"response.refusal.done"}` + "\n" + completed,
+			wantStop: provider.StopReasonRefusal,
+		},
+		{
+			name:     "message item with refusal part",
+			sse:      `data: {"type":"response.output_item.done","item":{"type":"message","content":[{"type":"refusal"}]}}` + "\n" + completed,
+			wantStop: provider.StopReasonRefusal,
+		},
+		{
+			name:     "plain text completes",
+			sse:      `data: {"type":"response.output_text.delta","delta":"ok"}` + "\n" + `data: {"type":"response.output_item.done","item":{"type":"message","content":[{"type":"output_text"}]}}` + "\n" + completed,
+			wantStop: "completed",
+			wantText: "ok",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w, tt.sse)
+			}))
+			defer srv.Close()
+			p := New(func(context.Context) (string, string, error) { return "t", "a", nil })
+			p.endpoint = srv.URL
+			stream, err := p.Stream(context.Background(), provider.Request{
+				Model:    "gpt-5.5",
+				Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+			})
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+			var text, stop string
+			for ev := range stream {
+				switch ev.Type {
+				case provider.EventTextDelta:
+					text += ev.Text
+				case provider.EventDone:
+					stop = ev.StopReason
+				case provider.EventError:
+					t.Fatalf("stream error: %v", ev.Err)
+				}
+			}
+			if stop != tt.wantStop || text != tt.wantText {
+				t.Errorf("stop=%q text=%q, want stop=%q text=%q", stop, text, tt.wantStop, tt.wantText)
+			}
+		})
+	}
+}

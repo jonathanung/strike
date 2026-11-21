@@ -206,6 +206,11 @@ write this file. Manual `/ftue` remains available after acknowledgement.
   "notify": "unfocused-only",
   "autoupdate": "notify",
   "keepAwake": "off",
+  "webui": {
+    "linkPatterns": [
+      {"name": "Tracker", "pattern": "\\b[A-Z]{2,}-\\d+\\b", "template": "https://tracker.example.com/browse/{match}"}
+    ]
+  },
   "permissionMode": "default",
   "sandbox": "workspace-write",
   "network": {
@@ -671,8 +676,9 @@ plan mode / plan agent / active workflow / active plan handoff → plan tools
 `phase_done`); any live or historical child → roster/messaging/ownership plus
 advanced `task`; two or more live children → team tools (`agent_broadcast`,
 `team_task`, `patch_collab`); a steer applied this turn and not yet
-acknowledged → `steer_ack`. Hard-denied tools stay omitted. Guidance source
-tags include `+activate:<families>`.
+acknowledged → `steer_ack`; an active debug session → `debug_session`.
+Hard-denied tools stay omitted. Guidance source tags include
+`+activate:<families>`.
 
 **Rollback / permanent default:** progressive disclosure (`deferTools` on) is
 the shipped default. Offline comparison lives in
@@ -843,6 +849,32 @@ means no primitive is usable on this host (wrong OS or binary not in PATH);
 `blocked` means the preference is on but the primitive refused or exited —
 `reason` carries the OS error. Verify at the OS level with
 `systemd-inhibit --list` or `pmset -g assertions`.
+
+## Web UI Text Link Patterns (`webui.linkPatterns`)
+
+Rules the web cockpit applies to transcript text at display time, turning
+mentions such as tracker keys or build ids into links
+([#1383](https://github.com/jonathanung/strike/issues/1383),
+[#1879](https://github.com/jonathanung/strike/issues/1879)). Stored on the
+gateway so every device paired to it shares one list. Host-scoped like
+`keepAwake`: only the **global** `~/.strike/config` is read and written;
+project and managed layers are ignored. Edit them in the cockpit under
+**Settings → Text Link Patterns**, which saves through `PATCH /v1/settings`
+`{"linkPatterns":[…]}` (the whole list; `[]` clears it).
+
+Each rule is `{name, pattern, template}`; the first matching rule wins. The
+gateway refuses the whole list with **400** (and stores nothing) unless:
+
+| Field | Rule |
+|---|---|
+| list | at most 50 rules |
+| `name` | non-empty after trimming, at most 80 characters |
+| `pattern` | RE2 syntax (linear-time matching; no backreferences or lookaround), at most 512 bytes, under a compiled-program size cap, and must not match empty text |
+| `template` | absolute `https://` or `http://` URL, at most 2048 bytes, containing `{match}` outside the host; no userinfo (`@`), whitespace, control characters or `"` `<` `>` `` ` `` |
+
+The matched text is percent-encoded into `{match}`, so it cannot change the
+URL's scheme, host or structure. Stored transcripts never change. A rule
+edited by hand into an invalid state is ignored by the cockpit.
 
 ## Container (native containerization, E12)
 

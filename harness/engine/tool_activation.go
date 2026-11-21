@@ -78,6 +78,13 @@ func (e *Engine) applyWorkflowToolActivation() []string {
 		families = append(families, activationFamilySteer)
 	}
 
+	// A debug session is active: the agent sets hypotheses and evidence
+	// through debug_session (#1961).
+	if e.hasOwnDebugSession() {
+		reg.Discover(debugSessionTool)
+		families = append(families, activationFamilyDebug)
+	}
+
 	return uniqueStrings(families)
 }
 

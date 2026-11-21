@@ -429,6 +429,19 @@ try {
   ) {
     throw new Error(`backup export check failed status=${backupRes.status} body=${backupText.slice(0, 400)}`);
   }
+  // #1940: the estimate names every exported section without record data.
+  const backupEst = await fetch(`http://127.0.0.1:${port}/v1/backup/estimate`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const backupEstBody = await backupEst.json().catch(() => ({}));
+  if (
+    !backupEst.ok ||
+    !(backupEstBody.totalBytes > 0) ||
+    !(backupEstBody.sections || []).some((s) => s.name === "memory") ||
+    JSON.stringify(backupEstBody).includes("smoke likes plain files")
+  ) {
+    throw new Error(`backup estimate check failed status=${backupEst.status} body=${JSON.stringify(backupEstBody).slice(0, 400)}`);
+  }
   const backupPlan = await fetch(`http://127.0.0.1:${port}/v1/backup/restore?dryRun=1`, {
     method: "POST",
     headers: auth,
@@ -2111,6 +2124,11 @@ try {
   await waitUntil(
     `!!document.querySelector('[data-action="backup-export"]') && !document.querySelector('[data-action="backup-export"]').disabled`,
     "backup export control",
+  );
+  // #1940: the size estimate is shown before export.
+  await waitUntil(
+    `(document.querySelector("[data-backup-estimate]")?.innerText || "").includes("to download.")`,
+    "backup size estimate",
   );
   await evaluate(`document.querySelector('[data-action="backup-export"]').click()`);
   await waitUntil(
@@ -3900,6 +3918,50 @@ try {
     if (reserved.status !== 400) {
       throw new Error(`suggestions create as reserved producer = ${reserved.status}`);
     }
+    // #1950: Settings mirrors the Inbox controls. Clearing a producer's
+    // toggle mutes that source daemon-side; ticking it again unmutes.
+    await evaluate(`document.querySelector('[data-action="open-settings"]')?.click()`);
+    await waitFor(
+      "settings Ideas inbox section lists every reserved producer",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const sec = document.querySelector("#settings-ideas [data-settings-ideas]");
+          const boxes = sec ? [...sec.querySelectorAll("input[data-producer]")] : [];
+          return JSON.stringify({
+            sec: !!sec,
+            producers: boxes.map((b) => b.getAttribute("data-producer") + ":" + b.checked),
+            quiet: !!(sec && sec.querySelector("[data-ideas-quiet]")),
+          });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        const want = ["child-agent:true", "goal-autopilot:true", "scheduler:true", "trigger:true"];
+        return { ok: !!(p.sec && p.quiet && JSON.stringify(p.producers) === JSON.stringify(want)), ...p };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await evaluate(`document.querySelector('#settings-ideas input[data-producer="child-agent"]').click()`);
+    await waitFor(
+      "settings producer toggle mutes the child-agent source",
+      async () => {
+        const got = await (await fetch(ideasUrl, { headers: ideaAuth })).json();
+        const muted = (got.prefs && got.prefs.mutedSources) || [];
+        return { ok: muted.includes("child-agent"), muted };
+      },
+      { timeout: WAIT_MS, interval: 300 },
+    );
+    await waitFor(
+      "settings producer toggle unmutes the child-agent source",
+      async () => {
+        await evaluate(`(() => {
+          const box = document.querySelector('#settings-ideas input[data-producer="child-agent"]');
+          if (box && !box.checked) box.click();
+        })()`);
+        const got = await (await fetch(ideasUrl, { headers: ideaAuth })).json();
+        const muted = (got.prefs && got.prefs.mutedSources) || [];
+        return { ok: !muted.includes("child-agent"), muted };
+      },
+      { timeout: WAIT_MS, interval: 400 },
+    );
   }
 
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
@@ -4637,6 +4699,8 @@ try {
   // then a valid rule linkifies a seeded ticket key (LPS-1383) in the
   // transcript at display time. Removing the rule and saving restores
   // plain text. Inputs are set the way a keyboard user's typing lands.
+  // Rules are stored on the gateway (#1879): "stored" is the daemon's
+  // GET /v1/settings linkPatterns, and nothing is left in localStorage.
   const lpOpen = async () => {
     await evaluate(`document.querySelector('[data-action="open-settings"]')?.click()`);
     await waitFor(
@@ -4662,9 +4726,14 @@ try {
       note: (document.querySelector("[data-lp-note]") || {}).textContent || "",
       error: [...document.querySelectorAll("[data-lp-error]")].map((e) => e.textContent).join(" | "),
       rules: document.querySelectorAll("[data-link-patterns] [data-lp-rule]").length,
-      stored: localStorage.getItem("strike.linkPatterns"),
+      local: localStorage.getItem("strike.linkPatterns"),
     }))()`);
-    return JSON.parse(raw || "{}");
+    const settingsRes = await fetch(`http://127.0.0.1:${port}/v1/settings`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const settings = settingsRes.ok ? await settingsRes.json() : {};
+    const stored = Array.isArray(settings.linkPatterns) ? JSON.stringify(settings.linkPatterns) : `missing (${settingsRes.status})`;
+    return { ...JSON.parse(raw || "{}"), stored };
   };
   const lpSave = () => evaluate(`document.querySelector("[data-lp-save]").click()`);
   const userLinks = () => evaluate(
@@ -4697,7 +4766,7 @@ try {
     async () => {
       const p = await lpProbe();
       return {
-        ok: p.error.includes("Invalid regular expression") && p.note.includes("Nothing was saved") && !p.stored,
+        ok: p.error.includes("Invalid regular expression") && p.note.includes("Nothing was saved") && p.stored === "[]",
         ...p,
       };
     },
@@ -4710,7 +4779,7 @@ try {
     "javascript: template refused inline in Settings",
     async () => {
       const p = await lpProbe();
-      return { ok: p.error.includes("https://") && p.note.includes("Nothing was saved") && !p.stored, ...p };
+      return { ok: p.error.includes("https://") && p.note.includes("Nothing was saved") && p.stored === "[]", ...p };
     },
     { timeout: STEP_MS, interval: 200 },
   );
@@ -4720,7 +4789,10 @@ try {
     "valid link pattern saved",
     async () => {
       const p = await lpProbe();
-      return { ok: p.note.includes("Saved 1 rule") && (p.stored || "").includes("Smoke tracker"), ...p };
+      return {
+        ok: p.note.includes("Saved 1 rule") && (p.stored || "").includes("Smoke tracker") && p.local === null,
+        ...p,
+      };
     },
     { timeout: STEP_MS, interval: 200 },
   );
@@ -5816,6 +5888,38 @@ try {
     return false;
   })()`, "worktrees panel via palette");
 
+  // Terminal empty state (#1946): with no active workspace the Terminal
+  // pane must offer a control that opens the workspace picker, not a
+  // dead-end sentence. Only provable while the daemon has no active
+  // workspace, so read that from the API first.
+  const termWs = await (await fetch(`http://127.0.0.1:${port}/v1/workspaces`, { headers: apprAuth })).json();
+  const termNoWorkspace = !termWs.activeId;
+  if (termNoWorkspace) {
+    await clickSideTab("Terminal", "No workspace");
+    const termPick = await evaluate(`(() => {
+      const b = document.querySelector('[data-term-pick-workspace]');
+      if (!b) return "missing";
+      b.click();
+      return "clicked";
+    })()`);
+    if (termPick !== "clicked") {
+      throw new Error(`terminal empty state has no Choose workspace control (${termPick})\n${await diagnostics()}`);
+    }
+    await waitFor(
+      "terminal Choose workspace opens the workspace picker",
+      textProbe((t) => t.includes("A workspace is a directory")),
+      { timeout: STEP_MS, interval: 150 },
+    );
+    await evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+    await waitFor(
+      "workspace picker closes after the terminal check",
+      textProbe((t) => !t.includes("A workspace is a directory")),
+      { timeout: STEP_MS, interval: 150 },
+    );
+  } else {
+    console.log(`terminal empty-state check skipped: workspace ${termWs.activeId} is active`);
+  }
+
   // Single ask surface (#1424 review, #1319 Q3): ONE pending permission
   // ask must render EXACTLY ONE decision UI across both ask containers
   // — the ApprovalCards stream (.approvals-card) and the composer
@@ -5850,6 +5954,57 @@ try {
   if (singleAsk.cards !== 1 || singleAsk.composerAsks !== 0) {
     throw new Error(`single-ask count wrong: ${JSON.stringify(singleAsk)}`);
   }
+  // Keyboard-only hints on touch (#1946): at 390x844 with touch
+  // emulation (pointer: coarse) the approval card hides its number/Escape
+  // hint and key labels and shows touch wording instead; the Terminal
+  // hint drops "Click the screen". Back on desktop the key hints return.
+  // Checked by computed style, since innerText of an unrendered node
+  // falls back to textContent.
+  const touchHintState = async () => JSON.parse((await evaluate(`(() => {
+    const vis = (el) => !!el && getComputedStyle(el).display !== "none";
+    const card = document.querySelector(".approvals-card");
+    return JSON.stringify({
+      coarse: matchMedia("(pointer: coarse)").matches,
+      card: !!card,
+      keysHint: vis(card?.querySelector(".hint.keys")),
+      keysText: card?.querySelector(".hint.keys")?.textContent || "",
+      touchHint: vis(card?.querySelector(".hint.touch-only")),
+      touchText: card?.querySelector(".hint.touch-only")?.textContent || "",
+      kbdLabels: [...document.querySelectorAll(".approvals-card .kbd-only, .term .kbd-only")].filter(vis).length,
+      termPick: !!document.querySelector("[data-term-pick-workspace]"),
+    });
+  })()`)) || "{}");
+  await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  // Belt and braces: an unsupported feature just gets a CDP error reply.
+  await send("Emulation.setEmulatedMedia", {
+    features: [{ name: "pointer", value: "coarse" }, { name: "hover", value: "none" }],
+  });
+  await waitFor(
+    "touch: approval card shows tap wording, no Escape / number-key hints",
+    async () => {
+      const st = await touchHintState();
+      const ok = st.coarse && st.card && !st.keysHint && st.touchHint &&
+        st.kbdLabels === 0 && !/Escape|Alt\+|j and k/.test(st.touchText) &&
+        (!termNoWorkspace || st.termPick);
+      return { ok, ...st };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await send("Emulation.setEmulatedMedia", { features: [] });
+  await send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+  await waitFor(
+    "desktop: approval card keeps its key hint and hides the touch line",
+    async () => {
+      const st = await touchHintState();
+      return {
+        ok: !st.coarse && st.card && st.keysHint && !st.touchHint && st.keysText.includes("Escape"),
+        ...st,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
   const singleAskDenied = await evaluate(`(() => {
     const b = [...document.querySelectorAll(".approvals-card button")].find((x) => (x.textContent || "").includes("Deny"));
     if (!b) return "no-deny";
@@ -8259,8 +8414,21 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+  // #1963: the fallback menu shows what is set: the confirmed pick's row
+  // is marked Current, and "No fallback" is not.
   await palettePick("model.fallback");
   await delay(250);
+  await waitFor(
+    "fallback menu marks the current fallback",
+    async () => {
+      const raw = await evaluate(`JSON.stringify([...document.querySelectorAll('[data-choice-id]')]
+        .filter((el) => (el.querySelector('.path')?.textContent || "").startsWith("Current · "))
+        .map((el) => el.getAttribute("data-choice-id")))`);
+      const current = JSON.parse(raw || "[]");
+      return { ok: current.length === 1 && current[0].includes("\t"), current };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
   await evaluate(`document.querySelector('[data-choice-id="none"]')?.click()`);
   await waitFor(
     "fallback chip clears on daemon confirmation",
@@ -8270,6 +8438,19 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+  await palettePick("model.fallback");
+  await delay(250);
+  await waitFor(
+    "fallback menu marks No fallback as current once cleared",
+    async () => {
+      const detail = await evaluate(`document.querySelector('[data-choice-id="none"] .path')?.textContent || ""`);
+      return { ok: detail.startsWith("Current · "), detail };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  // Close the palette by re-picking "No fallback" (a no-op clear).
+  await evaluate(`document.querySelector('[data-choice-id="none"]')?.click()`);
+  await delay(250);
   await palettePick("model.fast");
   await delay(250);
   await evaluate(`document.querySelector('[data-choice-id="on"]')?.click()`);
