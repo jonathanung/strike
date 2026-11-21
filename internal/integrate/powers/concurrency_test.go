@@ -102,7 +102,7 @@ func TestSlowDialDoesNotStallOtherSessions(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("s2 activation stalled behind s1's dial")
 	}
-	if got := m.Active("s1"); got != nil {
+	if got := m.Active("s1"); len(got) != 0 {
 		t.Fatalf("pending pack must not show as active yet: %+v", got)
 	}
 	if _, err := m.Activate("s1", Power{Name: "slow-pack"}); err == nil {
