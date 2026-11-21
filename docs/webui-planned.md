@@ -500,6 +500,26 @@ transcript folds away) are not searched and find does not expand
 collapsed cards to reveal a match; a case-sensitive toggle is likewise
 deferred until someone asks for it.
 
+## Markdown Review
+
+The document pane's rendered Markdown view takes anchored comments
+(#1366, `webui/src/markdown_review.rs`; anchor logic in the
+`webui/md-review` crate). Select a passage and the composer quotes it.
+The comment is stored with its anchor: the quoted text (whitespace
+normalised), the nearest heading, and an offset hint. Line numbers are not
+used because they go wrong on the first edit. Comments list under their headings in
+document order, can be edited or deleted, and live in browser storage per
+session + file (`strike.mdReview.v1:<session>:<path>`), so a reload keeps
+them. **Send N to agent** sends every unsent comment for the file as one
+`user.input` turn (path, section, quoted passage, comment). Sent comments
+clear on success and stay with the error shown on failure. Sending is
+refused while a turn runs. When the file changes and a quoted passage no
+longer appears, that comment is marked "Anchor moved/lost" and is sent
+flagged as such. It is never re-attached to another passage.
+
+Not in this slice: comments on code files or diffs (see the review queue),
+daemon-side storage for cross-device review, multi-user comments (#1056).
+
 ## Debug mode
 
 Engine state shipped, panel not drawn (#1345). `harness/debugmode` holds

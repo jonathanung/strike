@@ -25,6 +25,7 @@ mod drafts;
 mod editor;
 mod lessons;
 mod load_epoch;
+mod markdown_review;
 mod local_issues;
 mod localfiles;
 mod customize;
@@ -5328,6 +5329,8 @@ fn App() -> impl IntoView {
                             jump_line=doc_line
                             want_diff=doc_diff
                             editing=doc_editing
+                            root=active_root
+                            busy=session_busy_now
                             history=file_history
                         />
                     </Show>

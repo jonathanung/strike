@@ -14,6 +14,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
+import { mdReviewBrowserCheck } from "./webui-md-review-check.mjs";
 import { seedSkillUsage, skillUsageCheck } from "./webui-skill-usage-check.mjs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -2001,6 +2002,12 @@ try {
     "settings recovered",
   );
   await editorBrowserCheck({
+    send,
+    port,
+    token,
+    repoDir: process.cwd(),
+  });
+  await mdReviewBrowserCheck({
     send,
     port,
     token,
