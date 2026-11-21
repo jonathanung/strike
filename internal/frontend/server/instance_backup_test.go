@@ -62,6 +62,7 @@ type backupGateway struct {
 	srv      *Server
 	dir      string
 	mem      *testMemory
+	know     *backupTestKnowledge
 	settings *backupTestSettings
 	sched    *schedule.Service
 }
@@ -76,13 +77,14 @@ func newBackupGateway(t *testing.T, live bool) *backupGateway {
 	g := &backupGateway{
 		dir:      t.TempDir(),
 		mem:      newTestMemory(),
+		know:     newBackupTestKnowledge(),
 		settings: &backupTestSettings{},
 		sched:    sched,
 	}
 	opts := Options{
 		SessionDir: g.dir,
 		Schedules:  sched,
-		Services:   &host.Services{Memory: g.mem, Settings: g.settings},
+		Services:   &host.Services{Memory: g.mem, Knowledge: g.know, Settings: g.settings},
 	}
 	if live {
 		opts.Live = NewLive("live", t.TempDir(), nil, make(chan protocol.Op))

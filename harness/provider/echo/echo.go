@@ -1,7 +1,10 @@
 // Package echo is an offline development provider that exercises the full
 // engine loop without an API key. Plain input is echoed back word-by-word
 // (simulating streaming); input starting with "run " triggers a bash tool
-// call, which exercises tool dispatch and the permission ask flow end-to-end.
+// call, which exercises tool dispatch and the permission ask flow end-to-end;
+// input starting with "ask " triggers a question tool call (one choice
+// question plus one free-form question) so frontends can exercise the
+// question card end-to-end.
 package echo
 
 import (
@@ -55,6 +58,18 @@ func (Provider) Stream(ctx context.Context, req provider.Request) (<-chan provid
 				Usage:      estimateUsage(req, ""),
 			}
 			return
+		case strings.HasPrefix(last.Text, "ask "):
+			ch <- provider.StreamEvent{Type: provider.EventToolCall, ToolCall: &provider.ToolCall{
+				ID:   fmt.Sprintf("call_%d", time.Now().UnixNano()),
+				Name: "question",
+				Args: questionArgs(strings.TrimPrefix(last.Text, "ask ")),
+			}}
+			ch <- provider.StreamEvent{
+				Type:       provider.EventDone,
+				StopReason: "tool_use",
+				Usage:      estimateUsage(req, ""),
+			}
+			return
 		default:
 			emitted = "You said: " + last.Text + "\n\nTip: start a message with `run <command>` to exercise the bash tool and the permission prompt."
 			emitText(ctx, ch, emitted)
@@ -66,6 +81,29 @@ func (Provider) Stream(ctx context.Context, req provider.Request) (<-chan provid
 		}
 	}()
 	return ch, nil
+}
+
+// questionArgs builds the question tool arguments for an "ask " message:
+// a two-option question carrying the user's text, then a free-form one.
+func questionArgs(text string) json.RawMessage {
+	type option struct {
+		Label       string `json:"label"`
+		Description string `json:"description,omitempty"`
+	}
+	type item struct {
+		ID       string   `json:"id"`
+		Header   string   `json:"header,omitempty"`
+		Question string   `json:"question"`
+		Options  []option `json:"options,omitempty"`
+	}
+	args, _ := json.Marshal(map[string][]item{"questions": {
+		{ID: "choice", Header: "Choice", Question: text, Options: []option{
+			{Label: "Yes (Recommended)", Description: "Go ahead as described"},
+			{Label: "No", Description: "Do not do this"},
+		}},
+		{ID: "note", Header: "Note", Question: "Anything else the agent should know?"},
+	}})
+	return args
 }
 
 // estimateUsage is a deterministic offline stand-in: ~4 runes per token.

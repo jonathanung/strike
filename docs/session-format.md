@@ -903,6 +903,21 @@ Go `FastSelected`.
 | `depth` | number | yes |
 | `enabled` | bool |  |
 
+#### `verbosity.selected`
+
+Go `VerbositySelected`.
+
+| Field | Type | omitempty |
+|---|---|---|
+| `sessionId` | string | yes |
+| `turnId` | string | yes |
+| `providerRequestId` | string | yes |
+| `attempt` | number | yes |
+| `parentSessionId` | string | yes |
+| `depth` | number | yes |
+| `level` | string |  |
+| `delivery` | string |  |
+
 #### `files.invalidated`
 
 Go `FilesInvalidated`.

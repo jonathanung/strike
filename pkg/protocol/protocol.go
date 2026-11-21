@@ -185,6 +185,46 @@ func (a Autonomy) Short() string {
 	}
 }
 
+// Verbosity is the per-session response style (#1369): how much the agent
+// says, a separate axis from Effort (how hard it thinks). The zero value is
+// unset and changes nothing about the request.
+type Verbosity string
+
+const (
+	VerbosityDefault  Verbosity = ""
+	VerbosityConcise  Verbosity = "concise"
+	VerbosityDetailed Verbosity = "detailed"
+)
+
+// Verbosities lists the selectable styles, excluding the unset sentinel.
+func Verbosities() []Verbosity {
+	return []Verbosity{VerbosityConcise, VerbosityDetailed}
+}
+
+// ParseVerbosity resolves a user-typed style, case- and space-insensitively.
+// Empty input and "default" yield VerbosityDefault; anything unrecognized
+// reports false.
+func ParseVerbosity(value string) (Verbosity, bool) {
+	normalized := Verbosity(strings.ToLower(strings.TrimSpace(value)))
+	if normalized == VerbosityDefault || normalized == "default" {
+		return VerbosityDefault, true
+	}
+	for _, level := range Verbosities() {
+		if normalized == level {
+			return level, true
+		}
+	}
+	return "", false
+}
+
+// Verbosity delivery modes reported on VerbositySelected: how the style
+// reaches the model. "none" means the default style sends nothing;
+// "instruction" means a session instruction layer carries it.
+const (
+	VerbosityDeliveryNone        = "none"
+	VerbosityDeliveryInstruction = "instruction"
+)
+
 // PermissionMode is the per-session tool-permission posture dial (distinct from
 // Autonomy exit gates). Zero value normalizes to PermissionModeDefault.
 type PermissionMode string
@@ -484,6 +524,12 @@ type SetFast struct {
 	Enabled bool `json:"enabled"`
 }
 
+// SetVerbosity changes the session response style for subsequent turns.
+// Rejected while a turn is running; past turns are untouched.
+type SetVerbosity struct {
+	Level Verbosity `json:"level"`
+}
+
 // StartWorkflow activates a loaded workflow at phase index 0. Exactly one
 // workflow may be active per root session; starting replaces any prior active
 // workflow after the target is validated. Rejected while a turn is running.
@@ -564,6 +610,7 @@ func (SetEffort) isOp()               {}
 func (SetAutonomy) isOp()             {}
 func (SetPermissionMode) isOp()       {}
 func (SetFast) isOp()                 {}
+func (SetVerbosity) isOp()            {}
 func (StartWorkflow) isOp()           {}
 func (StopWorkflow) isOp()            {}
 func (FilesChanged) isOp()            {}
@@ -1689,6 +1736,16 @@ type FastSelected struct {
 	Enabled bool `json:"enabled"`
 }
 
+// VerbositySelected confirms the session response style, at startup and
+// after each SetVerbosity. Delivery says how it reaches the model (none or
+// instruction) so a frontend never shows a style as active while it does
+// nothing.
+type VerbositySelected struct {
+	Correlation
+	Level    Verbosity `json:"level"`
+	Delivery string    `json:"delivery"`
+}
+
 // FilesInvalidated confirms the engine dropped read snapshots for paths
 // reported by a FilesChanged op (external editor, post-edit review, …).
 type FilesInvalidated struct {
@@ -2238,6 +2295,7 @@ func (EffortSelected) isEvent()          {}
 func (AutonomySelected) isEvent()        {}
 func (PermissionModeSelected) isEvent()  {}
 func (FastSelected) isEvent()            {}
+func (VerbositySelected) isEvent()       {}
 func (FilesInvalidated) isEvent()        {}
 func (PathOverlap) isEvent()             {}
 func (EngineError) isEvent()             {}

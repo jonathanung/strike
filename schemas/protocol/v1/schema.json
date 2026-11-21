@@ -3487,6 +3487,30 @@
           "additionalProperties": true,
           "properties": {
             "data": {
+              "$ref": "#/$defs/VerbositySelected"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "verbosity.selected"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
               "$ref": "#/$defs/VerificationCompleted"
             },
             "time": {
@@ -3934,6 +3958,24 @@
             },
             "type": {
               "const": "set.permission_mode"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/SetVerbosity"
+            },
+            "type": {
+              "const": "set.verbosity"
             },
             "v": {
               "type": "string"
@@ -5864,6 +5906,19 @@
       ],
       "type": "object"
     },
+    "SetVerbosity": {
+      "additionalProperties": true,
+      "description": "SetVerbosity changes the session response style for subsequent turns. Rejected while a turn is running; past turns are untouched.",
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/Verbosity"
+        }
+      },
+      "required": [
+        "level"
+      ],
+      "type": "object"
+    },
     "StartWorkflow": {
       "additionalProperties": true,
       "description": "StartWorkflow activates a loaded workflow at phase index 0. Exactly one workflow may be active per root session; starting replaces any prior active workflow after the target is validated. Rejected while a turn is running.",
@@ -6845,6 +6900,51 @@
       ],
       "type": "object"
     },
+    "Verbosity": {
+      "description": "Open string. Writers use x-strike-known-values. Readers must accept other strings.",
+      "type": "string",
+      "x-strike-enum-open": true,
+      "x-strike-known-values": [
+        "",
+        "concise",
+        "detailed"
+      ]
+    },
+    "VerbositySelected": {
+      "additionalProperties": true,
+      "description": "VerbositySelected confirms the session response style, at startup and after each SetVerbosity. Delivery says how it reaches the model (none or instruction) so a frontend never shows a style as active while it does nothing.",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "delivery": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "level": {
+          "$ref": "#/$defs/Verbosity"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "level",
+        "delivery"
+      ],
+      "type": "object"
+    },
     "VerificationAttempt": {
       "additionalProperties": true,
       "description": "VerificationAttempt is one focused rerun in a gate's triage history.",
@@ -7207,9 +7307,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Forward-compatible Op/Event wire schema generated from pkg/protocol. The root schema is one event envelope: unknown type strings and unknown fields are valid. $defs/KnownEvent lists types this version writes. $defs/KnownOp is fail-closed: unknown op type strings are not valid. required is the writer contract; readers treat missing fields as zero values. See schemas/protocol/v1/COMPAT.md.",
   "title": "Strike event envelope",
-  "x-strike-event-count": 65,
+  "x-strike-event-count": 66,
   "x-strike-legacy-version": "1.0.0",
-  "x-strike-op-count": 32,
+  "x-strike-op-count": 33,
   "x-strike-protocol-version": "1.26.0",
   "x-strike-unknown-event": "valid",
   "x-strike-unknown-field": "ignore",

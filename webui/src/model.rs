@@ -159,6 +159,12 @@ pub struct LiveStatus {
     /// empty to the `supervised` default rather than inventing a mode.
     #[serde(default)]
     pub autonomy: String,
+    /// Session response style (#1369): "" default | concise | detailed,
+    /// and how it reaches the model (none | instruction).
+    #[serde(default)]
+    pub verbosity: String,
+    #[serde(default, rename = "verbosityDelivery")]
+    pub verbosity_delivery: String,
     /// Active workflow and phase the daemon reports on every status
     /// (#1574; `StatusSnapshot.Workflow` / `.Phase`). Both empty when no
     /// workflow is active. Later changes arrive as `phase.changed`.
@@ -570,11 +576,24 @@ pub struct WorkspaceTrustReply {
     pub mutable: bool,
     #[serde(default, rename = "restartRequired")]
     pub restart_required: bool,
+    /// The daemon can apply the changed decision itself (#1834).
+    #[serde(default, rename = "canReload")]
+    pub can_reload: bool,
+    /// Set on the apply reply: the daemon is restarting.
+    #[serde(default)]
+    pub reloading: bool,
     #[serde(default)]
     pub error: String,
 }
 
 impl WorkspaceTrustReply {
+    /// A saved decision differs from what the running daemon was assembled
+    /// with and the daemon can reload to apply it (#1834): existing roots
+    /// show "Reload to apply" until it does.
+    pub fn reload_offered(&self) -> bool {
+        self.restart_required && self.can_reload && !self.reloading
+    }
+
     /// The persistent "Untrusted workspace" badge shows only when the repo
     /// actually ships config that trust would enable.
     pub fn badge_visible(&self) -> bool {
@@ -1034,10 +1053,39 @@ pub struct TeamSnapshot {
     pub lead_id: String,
     #[serde(default)]
     pub members: HashMap<String, TeamMember>,
+    /// Delegations by id (#1381), the daemon's `DelegationSnapshot` map.
+    /// Go marshals an empty map as `null`, which reads as empty here.
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub delegations: HashMap<String, Delegation>,
     /// Recent inter-agent mail, oldest first (#1375). The daemon sends
     /// `null` for an empty list, which reads as empty here.
     #[serde(default, deserialize_with = "null_as_empty")]
     pub messages: Vec<TeamMessage>,
+}
+
+/// One delegation (DTO mirror of the daemon's `DelegationSnapshot`):
+/// queued | working | blocked | review | done | failed | canceled.
+/// `session_id` is empty until a child session exists.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct Delegation {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub state: String,
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub reason: String,
+}
+
+fn null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
 }
 
 fn null_as_empty<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
@@ -2321,6 +2369,32 @@ mod tests {
         assert!(!trusted.badge_visible());
         let empty = workspace_trust_outcome(200, r#"{"root":"/r","surfaces":{}}"#).unwrap();
         assert!(!empty.badge_visible());
+    }
+
+    #[test]
+    fn workspace_trust_reload_offered_only_when_daemon_can_apply() {
+        let pending = workspace_trust_outcome(
+            200,
+            r#"{"root":"/r","trusted":true,"restartRequired":true,"canReload":true}"#,
+        )
+        .unwrap();
+        assert!(pending.reload_offered());
+        let manual = workspace_trust_outcome(
+            200,
+            r#"{"root":"/r","trusted":true,"restartRequired":true}"#,
+        )
+        .unwrap();
+        assert!(!manual.reload_offered());
+        let active = workspace_trust_outcome(200, r#"{"root":"/r","trusted":true,"canReload":true}"#)
+            .unwrap();
+        assert!(!active.reload_offered());
+        let reloading = workspace_trust_outcome(
+            202,
+            r#"{"root":"/r","trusted":true,"restartRequired":true,"canReload":true,"reloading":true}"#,
+        )
+        .unwrap();
+        assert!(reloading.reloading);
+        assert!(!reloading.reload_offered());
     }
 
     #[test]
