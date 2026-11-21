@@ -7,6 +7,7 @@
 //! `/init` confirm.
 
 use leptos::prelude::*;
+use crate::error_notice::humanize;
 use leptos::task::spawn_local;
 
 use crate::api::{api, auth_header};
@@ -157,7 +158,7 @@ pub fn ProjectInit(
                 </button>
             </Show>
             <Show when=move || !error.get().is_empty()>
-                <p class="banner" role="alert">{move || error.get()}</p>
+                <p class="banner" role="alert">{move || humanize(&error.get())}</p>
             </Show>
         </div>
     }

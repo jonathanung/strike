@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use leptos::prelude::*;
+use crate::error_notice::humanize;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use serde_json::Value;
@@ -855,13 +856,13 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
                 <p class="hint">"Loading providers from the daemon."</p>
             </Show>
             <Show when=move || !load_error.get().is_empty()>
-                <p class="notice" role="alert">{move || load_error.get()}</p>
+                <p class="notice" role="alert">{move || humanize(&load_error.get())}</p>
             </Show>
             <Show when=move || !stale_note.get().is_empty()>
                 <p class="hint" data-providers-stale="true">{move || stale_note.get()}</p>
             </Show>
             <Show when=move || !custom_error.get().is_empty()>
-                <p class="notice" role="alert" data-custom-load-error="true">{move || custom_error.get()}</p>
+                <p class="notice" role="alert" data-custom-load-error="true">{move || humanize(&custom_error.get())}</p>
             </Show>
             <ul class="providers-list plain">
                 {move || rows.get().into_iter().map(|row| {

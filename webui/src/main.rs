@@ -19,6 +19,7 @@ mod composer_triggers;
 mod diag;
 mod draft_size;
 mod editor;
+mod error_notice;
 mod load_epoch;
 mod localfiles;
 mod customize;
@@ -76,6 +77,8 @@ use composer_triggers::{
     slash_suggestions, splice_draft, trigger_at, trigger_status, Kind, Suggestion,
 };
 use leptos::prelude::*;
+use leptos::callback::UnsyncCallback;
+use crate::error_notice::{humanize, ErrorNotice};
 use leptos::task::spawn_local;
 use model::{
     activity_panel, display_state, fmt_elapsed, is_running, merge_sessions, mode_label,
@@ -4979,12 +4982,7 @@ fn App() -> impl IntoView {
                             panel_drawer.update(|v| *v = !*v);
                         }>"Panel"</button>
                     </div>
-                    <Show when=move || !load_error.get().is_empty()>
-                        <div class="notice" role="alert">
-                            <span>{move || load_error.get()}</span>
-                            <button class="secondary" on:click=move |_| refresh_meta()>"Retry"</button>
-                        </div>
-                    </Show>
+                    <ErrorNotice message=load_error on_retry=UnsyncCallback::new(move |_: ()| refresh_meta()) />
                     <Show when=move || !stream_note.get().is_empty()>
                         <p class="hint banner">{move || stream_note.get()}</p>
                     </Show>
@@ -5590,7 +5588,7 @@ fn App() -> impl IntoView {
                             </div>
                         </form>
                         <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
-                            <p class="hint" data-model-note="true">{move || model_note.get()}</p>
+                            <p class="hint" data-model-note="true">{move || humanize(&model_note.get())}</p>
                         </Show>
                         <p class="hint composer-statusline" data-composer-triggers="status">{
                             let memory_mode = memory_mode;
@@ -5775,12 +5773,7 @@ fn App() -> impl IntoView {
                                 <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
                             </div>
                             <p class="hint">"Click a file to open it. @ mentions it in chat; drag also inserts @path."</p>
-                            <Show when=move || !files_error.get().is_empty()>
-                                <div class="notice" role="alert">
-                                    <span>{move || files_error.get()}</span>
-                                    <button class="secondary" on:click=move |_| load_files()>"Retry"</button>
-                                </div>
-                            </Show>
+                            <ErrorNotice message=files_error on_retry=UnsyncCallback::new(move |_: ()| load_files()) />
                             <Show when=move || !files_path.get().is_empty()>
                                 <button class="secondary" on:click=move |_| files_path.set(parent_path(&files_path.get()))>"Up"</button>
                             </Show>
@@ -5835,12 +5828,7 @@ fn App() -> impl IntoView {
                                 <button class="secondary" on:click=move |_| load_changes()>"Refresh"</button>
                             </div>
                             <p class="hint">"Click a change to open its diff. @ mentions it in chat; drag also inserts @path."</p>
-                            <Show when=move || !changes_error.get().is_empty()>
-                                <div class="notice" role="alert">
-                                    <span>{move || changes_error.get()}</span>
-                                    <button class="secondary" on:click=move |_| load_changes()>"Retry"</button>
-                                </div>
-                            </Show>
+                            <ErrorNotice message=changes_error on_retry=UnsyncCallback::new(move |_: ()| load_changes()) />
                             <Show when=move || changes.get().is_empty() && changes_error.get().is_empty()>
                                 <EmptyState title="No changes".into() body="Git diffs for the daemon working directory show up here.".into() />
                             </Show>

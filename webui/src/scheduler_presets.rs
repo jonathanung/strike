@@ -5,6 +5,7 @@
 //! what renders as applied is always the daemon's returned `global`.
 
 use leptos::prelude::*;
+use crate::error_notice::humanize;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use serde_json::json;
@@ -304,7 +305,7 @@ pub fn SchedulerPresetsSection(base: RwSignal<String>, token: RwSignal<String>) 
                 <p class="hint">{READ_ONLY}</p>
             </Show>
             <Show when=move || !error.get().is_empty()>
-                <p class="sched-error" role="alert">{move || error.get()}</p>
+                <p class="sched-error" role="alert">{move || humanize(&error.get())}</p>
             </Show>
             <Show when=move || !note.get().is_empty()>
                 <p class="sched-note" role="status">{move || note.get()}</p>

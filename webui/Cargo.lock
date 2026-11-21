@@ -306,6 +306,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1731451909bde27714eacba19c2566362a7f35224f52b153d3f42cf60f72472"
 
 [[package]]
+name = "error-copy"
+version = "0.1.0"
+
+[[package]]
 name = "event-listener"
 version = "5.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1339,6 +1343,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 name = "strike-webui"
 version = "0.1.0"
 dependencies = [
+ "error-copy",
  "gloo-net",
  "js-sys",
  "leptos",

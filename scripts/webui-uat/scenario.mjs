@@ -717,7 +717,7 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       await controls.stop();
       const down = await waitUntil(
         `(() => {
-          const retry = [...document.querySelectorAll(".notice button")].some((b) => (b.innerText || "").includes("Retry"));
+          const retry = [...document.querySelectorAll(".error-block button, .notice button")].some((b) => (b.innerText || "").includes("Retry"));
           const text = document.body ? document.body.innerText : "";
           const dead = text.includes("Unreachable") || text.includes("Could not reach the daemon");
           return retry && dead;
@@ -726,6 +726,17 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
         "unreachable notice with Retry",
       );
       check(Boolean(down), "stopping the daemon did not show Unreachable and Retry");
+      // #1535: the daemon-down state is the designed error block, and no
+      // browser/serde internals are rendered as user-facing text.
+      const designed = await page.evaluate(`(() => {
+        const text = document.body ? document.body.innerText : "";
+        return {
+          block: Boolean(document.querySelector('.error-block[data-error-class="unreachable"]')),
+          leaked: ["TypeError", "Failed to fetch", "NetworkError", "invalid type:", "expected a sequence"].filter((s) => text.includes(s)),
+        };
+      })()`);
+      check(designed && designed.block, "daemon-down did not render the designed error block");
+      check(designed && designed.leaked.length === 0, `internal error strings rendered: ${designed && designed.leaked.join(", ")}`);
       await shoot("shell-reconnect-error", ["desk1024", "desk1440"]);
       await capturePhoneFrame(page, phone, outDir, shots, "phone-reconnect-error-390");
       // The cockpit polls refresh_meta every 2s. Once the daemon is back that
@@ -737,7 +748,7 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       })()`);
       await controls.start();
       const retried = await page.evaluate(`(() => {
-        const btn = [...document.querySelectorAll(".notice button")].find((b) => (b.innerText || "").includes("Retry"));
+        const btn = [...document.querySelectorAll(".error-block button, .notice button")].find((b) => (b.innerText || "").includes("Retry"));
         if (!btn) return false;
         btn.click();
         return true;

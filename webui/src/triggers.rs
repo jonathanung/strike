@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use leptos::prelude::*;
+use crate::error_notice::humanize;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -906,7 +907,7 @@ pub fn TriggersPage(
                 }>
                     <h2 class="panel-title">{move || if form.selected.get().is_empty() { "New trigger".to_string() } else { "Edit trigger".to_string() }}</h2>
                     <Show when=move || !form.notice.get().is_empty()>
-                        <p class="notice" role="alert">{move || form.notice.get()}</p>
+                        <p class="notice" role="alert">{move || humanize(&form.notice.get())}</p>
                     </Show>
                     <Show when=move || shown_secret(form.secret_once.get().as_ref(), &form.selected.get()).is_some()>
                         <div class="secret-once" role="status">
@@ -1023,7 +1024,7 @@ pub fn TriggersPage(
                         <p class="hint">"Loading deliveries…"</p>
                     </Show>
                     <Show when=move || !delivery_error.get().is_empty()>
-                        <p class="hint" role="alert">{move || delivery_error.get()}</p>
+                        <p class="hint" role="alert">{move || humanize(&delivery_error.get())}</p>
                     </Show>
                     <Show when=move || deliveries.get().is_empty() && delivery_error.get().is_empty() && !delivery_loading.get()>
                         <p class="hint">"Accepted, rejected, duplicate, and rate-limited deliveries show up here. The log does not store the signing secret."</p>

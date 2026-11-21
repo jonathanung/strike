@@ -8,6 +8,8 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use leptos::prelude::*;
+use leptos::callback::UnsyncCallback;
+use crate::error_notice::ErrorNotice;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use wasm_bindgen::JsCast;
@@ -1620,12 +1622,7 @@ pub fn GitPanel(
                     </Show>
                 </section>
             </Show>
-            <Show when=move || !error.get().is_empty()>
-                <div class="notice" role="alert">
-                    <span>{move || error.get()}</span>
-                    <button type="button" class="secondary" on:click=move |_| load()>"Retry"</button>
-                </div>
-            </Show>
+            <ErrorNotice message=error on_retry=UnsyncCallback::new(move |_: ()| load()) />
             <Show when=move || show_log.get()>
                 <ul class="plain">
                     {move || commits.get().into_iter().map(|c| {
@@ -2064,12 +2061,7 @@ pub fn WorktreePanel(
 
     view! {
         <div id="worktree-panel" class="worktree-panel" tabindex="0" role="tabpanel" aria-label="Worktrees" on:keydown=on_key>
-            <Show when=move || !error.get().is_empty()>
-                <div class="notice" role="alert">
-                    <span>{move || error.get()}</span>
-                    <button type="button" class="secondary" on:click=move |_| load()>"Retry"</button>
-                </div>
-            </Show>
+            <ErrorNotice message=error on_retry=UnsyncCallback::new(move |_: ()| load()) />
             <Show when=move || !kids_note.get().is_empty()>
                 <p class="hint" role="status">{move || kids_note.get()}</p>
             </Show>
