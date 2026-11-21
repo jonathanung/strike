@@ -2181,6 +2181,11 @@ mod tests {
         // `removed` as a string fails the generated schema.
         t.apply_envelope(&env("compaction.completed", serde_json::json!({"removed": "lots"})));
         t.apply_envelope(&env("session.budget_warning", serde_json::json!("not an object")));
+        // `null` counts pass the daemon's Go decoder but not the schema.
+        t.apply_envelope(&env(
+            "compaction.completed",
+            serde_json::json!({"reason": "manual", "removed": null}),
+        ));
         // Legacy payload: no counts, no strategy — still a marker.
         t.apply_envelope(&env("compaction.completed", serde_json::json!({"reason": "manual"})));
         // A malformed event this module does not own stays dropped.
@@ -2193,11 +2198,13 @@ mod tests {
                 ("Context compacted".to_string(), "compaction:completed".to_string()),
                 ("Budget warning".to_string(), "compaction:budget".to_string()),
                 ("Context compacted".to_string(), "compaction:completed".to_string()),
+                ("Context compacted".to_string(), "compaction:completed".to_string()),
             ]
         );
         assert_eq!(t.messages[1].body, "");
-        assert_eq!(t.messages[3].body, "Requested manually");
-        assert_eq!(t.messages.len(), 4);
+        assert_eq!(t.messages[3].body, "");
+        assert_eq!(t.messages[4].body, "Requested manually");
+        assert_eq!(t.messages.len(), 5);
     }
 
     #[test]

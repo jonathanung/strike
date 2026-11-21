@@ -357,7 +357,7 @@ try {
     envLine("text.delta", "2026-10-26T06:10:10Z", { text: "fast answer" }) +
     envLine("turn.completed", "2026-10-26T06:10:20Z", { stopReason: "end_turn" }) +
     // Compaction visibility (#1359): markers between turns (outside any
-    // turn, so the elapsed check is unchanged), plus one malformed
+    // turn, so the elapsed check is unchanged), plus one schema-rejected
     // compaction.completed that must degrade to a title-only marker.
     envLine("context.fit_warning", "2026-10-26T06:15:00Z", {
       estimatedTokens: 180000,
@@ -382,7 +382,10 @@ try {
       ratio: 0.8,
       message: "80% of session budget",
     }) +
-    envLine("compaction.completed", "2026-10-26T06:15:04Z", { removed: "lots" }) +
+    // `removed: null` is valid for the daemon's Go decoder (resume must
+    // still work) but rejected by the cockpit's generated schema, so it
+    // exercises the minimal-marker degradation path.
+    envLine("compaction.completed", "2026-10-26T06:15:04Z", { reason: "manual", removed: null }) +
     envLine("user.message", "2026-10-26T06:20:00Z", { text: "old log turn" }) +
     envLine("tool.begin", null, { callId: "c9", name: "bash", args: { command: "sleep 240" } }) +
     envLine("tool.end", "2026-10-26T06:24:00Z", { callId: "c9", name: "bash", output: "done" }) +
