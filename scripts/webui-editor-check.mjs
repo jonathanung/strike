@@ -29,6 +29,16 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
   const long = join(repoDir, "editor-long.txt");
   const outlineMd = join(repoDir, "editor-outline.md");
   const md = join(repoDir, "editor-md.md");
+  // Workspace image/binary viewer (#1393): a real 1x1 PNG and a
+  // non-image binary in the fixture workspace.
+  const imagePng = join(repoDir, "editor-image.png");
+  const blobBin = join(repoDir, "editor-blob.bin");
+  const pngBytes = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  await writeFile(imagePng, pngBytes);
+  await writeFile(blobBin, Buffer.from([0, 1, 2, 3, 0, 255]));
   // Quick-open (#1396) target: several directories deep.
   const qoDir = join(repoDir, "qo-deep");
   const qoRel = "qo-deep/inner/most/quickopen-target.txt";
@@ -1401,9 +1411,88 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "quick-open opens the file in the viewer",
     );
+    // Workspace image/binary viewer (#1393). The raw route serves the
+    // PNG with its MIME under normal auth and refuses traversal.
+    const raw = await fetch(`http://127.0.0.1:${port}/v1/file/raw?path=editor-image.png`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const rawBytes = Buffer.from(await raw.arrayBuffer());
+    if (raw.status !== 200 || raw.headers.get("content-type") !== "image/png" || !rawBytes.equals(pngBytes)) {
+      throw new Error(`raw png: ${raw.status} ${raw.headers.get("content-type")} ${rawBytes.length} bytes`);
+    }
+    if (!(raw.headers.get("content-security-policy") || "").includes("sandbox")) {
+      throw new Error(`raw png CSP: ${raw.headers.get("content-security-policy")}`);
+    }
+    const rawTrav = await fetch(
+      `http://127.0.0.1:${port}/v1/file/raw?path=${encodeURIComponent("../secret.png")}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (rawTrav.status === 200) {
+      throw new Error("raw traversal returned 200");
+    }
+    const rawAnon = await fetch(`http://127.0.0.1:${port}/v1/file/raw?path=editor-image.png`);
+    if (rawAnon.status !== 401) {
+      throw new Error(`raw without auth: ${rawAnon.status}`);
+    }
+    // The viewer renders the PNG instead of the old binary hint.
+    await evalValue(
+      send,
+      `(() => { const b = [...document.querySelectorAll("button")].find(el => el.textContent.trim() === "Refresh" && el.closest(".files")); if (b) b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector('[data-ev-open="editor-image.png"]') ? "ok" : "no image row")()`,
+      "open button for editor-image.png",
+    );
+    await evalValue(
+      send,
+      `(() => { document.querySelector('[data-ev-open="editor-image.png"]').click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const img = document.querySelector("[data-ev-image]");
+        if (!img) {
+          const note = document.querySelector("[data-ev-image-note]");
+          return note ? "note: " + note.textContent : "no image";
+        }
+        if (document.body.innerText.includes("Nothing to show")) return "old binary hint still shown";
+        return img.complete && img.naturalWidth === 1 ? "ok" : "image not decoded (" + img.naturalWidth + ")";
+      })()`,
+      "workspace PNG renders in the viewer",
+    );
+    // Keyboard/click toggle: fit ↔ full size.
+    await evalValue(
+      send,
+      `(() => { document.querySelector("[data-ev-image-toggle]").click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-image-toggle]"); return b && b.getAttribute("aria-pressed") === "true" ? "ok" : "not full size"; })()`,
+      "image full-size toggle",
+    );
+    // A non-image binary keeps a hint plus name/size/sha and a download.
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector('[data-ev-open="editor-blob.bin"]'); if (!b) return "no blob row"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const meta = document.querySelector("[data-ev-binary-meta]");
+        const dl = document.querySelector("[data-ev-binary-download]");
+        if (!meta || !dl) return "no binary meta/download";
+        if (document.querySelector("[data-ev-image]")) return "image shown for a .bin";
+        const t = meta.textContent;
+        return t.includes("editor-blob.bin") && t.includes("6 B") && t.includes("sha256 ") ? "ok" : "meta = " + t;
+      })()`,
+      "non-image binary shows meta and download",
+    );
     console.log("webui-editor-check ok");
   } finally {
     await rm(qoDir, { recursive: true, force: true });
+    await rm(imagePng, { force: true });
+    await rm(blobBin, { force: true });
     await rm(sample, { force: true });
     await rm(other, { force: true });
     await rm(long, { force: true });
