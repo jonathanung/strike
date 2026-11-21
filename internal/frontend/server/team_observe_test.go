@@ -77,6 +77,55 @@ func TestLiveTeamObservationProjection(t *testing.T) {
 	}
 }
 
+func TestLiveTeamKeepsChildEscalation(t *testing.T) {
+	tests := []struct {
+		name       string
+		started    bool
+		completed  bool
+		wantState  string
+		wantName   string
+		wantAction string
+	}{
+		{name: "escalated then blocked", started: true, completed: true, wantState: "blocked", wantName: "scout", wantAction: "finalizing"},
+		{name: "escalated while running", started: true, wantState: "running", wantName: "scout", wantAction: "finalizing"},
+		{name: "escalation before start", wantState: "running", wantName: "late", wantAction: "finalizing"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			live := NewLive("lead-1", t.TempDir(), nil, make(chan protocol.Op, 1))
+			if tc.started {
+				live.Publish(protocol.ChildStarted{
+					Correlation: protocol.Correlation{SessionID: "c1"},
+					Name:        "scout",
+				})
+			}
+			live.Publish(protocol.ChildEscalated{
+				Correlation:    protocol.Correlation{SessionID: "c1"},
+				Name:           "late",
+				Kind:           "stall",
+				Reason:         "no progress for 300s",
+				Action:         "finalizing",
+				TerminalStatus: protocol.ChildStatusBlocked,
+			})
+			if tc.completed {
+				live.Publish(protocol.ChildCompleted{
+					Correlation: protocol.Correlation{SessionID: "c1"},
+					Status:      protocol.ChildStatusBlocked,
+				})
+			}
+			m := live.Team().Members["c1"]
+			if m.State != tc.wantState || m.Name != tc.wantName {
+				t.Fatalf("member=%+v", m)
+			}
+			esc := m.Escalation
+			if esc == nil || esc.Kind != "stall" || esc.Action != tc.wantAction ||
+				esc.Reason != "no progress for 300s" || esc.TerminalStatus != "blocked" {
+				t.Fatalf("escalation=%+v", esc)
+			}
+		})
+	}
+}
+
 func TestHandleTeamEndpoint(t *testing.T) {
 	ops := make(chan protocol.Op, 1)
 	live := NewLive("root-a", t.TempDir(), nil, ops)
