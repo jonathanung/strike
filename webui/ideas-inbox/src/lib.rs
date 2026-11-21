@@ -106,6 +106,36 @@ pub fn meta(idea: &Idea) -> String {
     parts.join(" \u{b7} ")
 }
 
+/// The daemon's reserved in-process producers (#1950), sorted by source
+/// token, with the label Settings shows. Mirrors
+/// `suggestion.Producers()` in `internal/persist/suggestion/producer.go`.
+pub const PRODUCERS: [(&str, &str); 4] = [
+    ("child-agent", "Finished child agents"),
+    ("goal-autopilot", "Goal autopilot"),
+    ("scheduler", "Scheduled runs"),
+    ("trigger", "Triggers"),
+];
+
+/// `list` with `item` muted or unmuted: no duplicates, other entries kept
+/// in their order, a new mute appended.
+pub fn set_muted(list: &[String], item: &str, muted: bool) -> Vec<String> {
+    let mut out: Vec<String> = list.iter().filter(|x| x.as_str() != item).cloned().collect();
+    if muted {
+        out.push(item.to_string());
+    }
+    out
+}
+
+/// Muted sources that are not reserved producers (tooling that posts over
+/// HTTP), so Settings can still list and unmute them.
+pub fn other_muted(sources: &[String]) -> Vec<String> {
+    sources
+        .iter()
+        .filter(|s| !PRODUCERS.iter().any(|(p, _)| p == s))
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,5 +215,34 @@ mod tests {
             assert!(!label.is_empty());
             assert!(hours >= 1 && hours <= 30 * 24, "{label}");
         }
+    }
+
+    #[test]
+    fn producers_are_sorted_tokens() {
+        let tokens: Vec<&str> = PRODUCERS.iter().map(|(t, _)| *t).collect();
+        let mut sorted = tokens.clone();
+        sorted.sort();
+        assert_eq!(tokens, sorted);
+        for (token, label) in PRODUCERS {
+            assert!(!label.is_empty());
+            assert!(token.chars().all(|c| c.is_ascii_lowercase() || c == '-'), "{token}");
+        }
+    }
+
+    #[test]
+    fn set_muted_toggles_without_duplicates() {
+        let list = vec!["a".to_string(), "scheduler".to_string()];
+        assert_eq!(set_muted(&list, "trigger", true), vec!["a", "scheduler", "trigger"]);
+        assert_eq!(set_muted(&list, "scheduler", true), vec!["a", "scheduler"]);
+        assert_eq!(set_muted(&list, "scheduler", false), vec!["a"]);
+        assert_eq!(set_muted(&list, "missing", false), vec!["a", "scheduler"]);
+        assert_eq!(set_muted(&[], "x", true), vec!["x"]);
+    }
+
+    #[test]
+    fn other_muted_drops_reserved_producers() {
+        let list = vec!["scheduler".to_string(), "smoke.producer".to_string(), "goal-autopilot".to_string()];
+        assert_eq!(other_muted(&list), vec!["smoke.producer"]);
+        assert!(other_muted(&[]).is_empty());
     }
 }

@@ -1,5 +1,5 @@
-//! Settings page. Appearance and the session Guardrails group (#1577) live
-//! here. Everything else is a palette command.
+//! Settings page. Appearance, the session Guardrails group (#1577) and the
+//! Ideas inbox controls (#1950) live here. Everything else is a palette command.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -208,6 +208,12 @@ pub fn SettingsPage(
                     root=root
                     capable=config_files_capable
                 />
+            </section>
+            // #1950: Ideas inbox producer mutes and quiet hours, mirroring
+            // the Ideas page's Inbox controls.
+            <section class="card settings-section" id="settings-ideas">
+                <h2 class="panel-title">"Ideas inbox"</h2>
+                <crate::ideas::IdeasSettings base=base token=token />
             </section>
             <section class="card settings-section" id="settings-voice">
                 <h2 class="panel-title">"Voice"</h2>

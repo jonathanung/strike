@@ -405,6 +405,10 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) (result error) {
 		wsStore.ConfigureBrowse(browse)
 	}
 
+	// notifySrv is the server once it is built. Root drains, the scheduler
+	// and triggers reach its notification centre and Ideas inbox through it;
+	// anything earlier than the server posts nothing.
+	var notifySrv atomic.Pointer[server.Server]
 	if !opts.attachOnly {
 		assembled = true
 		cliOpts := cliOptions{
@@ -523,6 +527,12 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) (result error) {
 								return nil
 							}
 							live.Publish(ev)
+							// Ideas inbox child-agent producer (#1950).
+							if cc, ok := ev.(protocol.ChildCompleted); ok {
+								if srv := notifySrv.Load(); srv != nil {
+									srv.SuggestChildFollowUp(slot.id, cc)
+								}
+							}
 						}
 					}
 				})
@@ -790,7 +800,6 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) (result error) {
 	}
 	// The server is built after the clock; script-run notices reach its
 	// notification centre once it exists (a run finishing earlier posts none).
-	var notifySrv atomic.Pointer[server.Server]
 	schedules, err := openScheduleService(workspace.DefaultDir(), liveHub, services, wsStore, cwd, scheduleScripts{
 		runner: newScriptRunner(served, auditSink, opts.tokenFile, serveCwd()),
 		sink:   auditSink,

@@ -61,9 +61,21 @@
   margin: 8px 0;
 }
 .ideas-quiet .hint { flex-basis: 100%; margin: 0; }
+.ideas-producers {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+.ideas-producers legend { padding: 0 4px; font-size: var(--type-sm); color: var(--muted); }
+.ideas-producer { display: flex; align-items: center; gap: 6px; }
+.ideas-producers .hint { margin: 4px 0 0; }
 @media (max-width: 480px) {
   .ideas-shell { margin: 0; border-radius: 0; }
   .ideas-actions button { min-height: 44px; }
+  .ideas-producer { min-height: 44px; }
   .nav-slot .ideas-badge { min-height: 44px; }
   .nav-slot .ideas-badge-label { display: none; }
 }
