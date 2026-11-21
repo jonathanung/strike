@@ -7,6 +7,7 @@
 //! `task_runner`. Customize (skills, agents, MCP, hooks, rules) lives
 //! in `customize`.
 
+mod annotate;
 mod api;
 mod appearance;
 mod attachment_honesty;
@@ -33,6 +34,7 @@ mod markdown_review;
 mod local_issues;
 mod localfiles;
 mod customize;
+mod deploy_watch;
 mod gateway;
 mod gateway_peek;
 mod gateway_qr;
@@ -44,6 +46,7 @@ mod provider_signin;
 mod providers;
 mod review_queue;
 mod push;
+mod reasoning;
 mod rule_author;
 mod sandbox_explain;
 mod schedule;
@@ -57,6 +60,8 @@ mod onboarding;
 mod outbox;
 mod park;
 mod permissions_explain;
+mod plugin_flow;
+mod plugin_lifecycle;
 mod plan_card;
 mod steer_queue;
 mod steer_ack;
@@ -1122,6 +1127,8 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // Bootstrap capability `plugins` (#1570): gates plugin lifecycle.
+    let plugins_capable = RwSignal::new(false);
     // Typed config-source list (#1493), from bootstrap `configFiles`.
     let config_files_capable = RwSignal::new(false);
     // #1375: daemon-aggregated team signals from the /v1/team poll — the
@@ -1423,6 +1430,10 @@ fn App() -> impl IntoView {
     // Quote a message (#1362): the line attached to the next send. One
     // at a time; quoting another line replaces it.
     let quote_draft = RwSignal::new(None::<quote_message::Quote>);
+    // Visual annotate (#1545): marks per pending image id, and the image
+    // open in the overlay. Marks live and die with the composer session.
+    let annotate_marks: annotate::MarkStore = RwSignal::new(HashMap::new());
+    let annotate_target = RwSignal::new(None::<annotate::Target>);
     let sending = RwSignal::new(false);
     let listening = RwSignal::new(false);
     let speech_ok = chat_mode::dictation_available();
@@ -1866,6 +1877,7 @@ fn App() -> impl IntoView {
                                 crate::local_issues::set_issues_capable(boot.capabilities.issues);
                                 issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                plugins_capable.set(boot.capabilities.plugins);
                                 config_files_capable.set(boot.capabilities.config_files);
                                 crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
                                 skills.set(boot.skills);
@@ -2656,6 +2668,20 @@ fn App() -> impl IntoView {
         // draft is cleared, deduping consecutive repeats. Attachments-only
         // sends have no text and record nothing.
         prompt_history.update(|h| h.push(&text));
+        // #1545: snapshot marks for the files being sent. The composite
+        // replaces the original image in the turn; the text block rides
+        // in the same message. Marks are cleared only after success.
+        let marks_now = annotate_marks.get_untracked();
+        let annotated: HashMap<u32, Vec<annotate::Mark>> = files
+            .iter()
+            .filter(|f| f.error.is_empty())
+            .filter_map(|f| marks_now.get(&f.id).filter(|m| !m.is_empty()).map(|m| (f.id, m.clone())))
+            .collect();
+        let blocks: Vec<String> = files
+            .iter()
+            .filter_map(|f| annotated.get(&f.id).map(|m| annotate::text_block(&f.name, m)))
+            .collect();
+        let text_out = annotate::compose_message(&text, &blocks);
         // Take the composer before the first await so a repeated Enter or a
         // second click cannot post the same attachments again.
         sending.set(true);
@@ -2684,6 +2710,39 @@ fn App() -> impl IntoView {
             let mut images = Vec::new();
             for file in updated.iter_mut() {
                 if !file.error.is_empty() {
+                    continue;
+                }
+                if let Some(marks) = annotated.get(&file.id) {
+                    // Composite from the real attached image; the original
+                    // pending file is left untouched for a failed-send restore.
+                    let composed = match annotate::composite_png(&file.preview, marks).await {
+                        Ok(b64) => b64,
+                        Err(err) => {
+                            status.set(format!("annotate failed: {err}"));
+                            restore(updated, text);
+                            return;
+                        }
+                    };
+                    let name = annotate::annotated_name(&file.name);
+                    match chat_mode::upload_attachment(&b, &t, &root, &name, "image/png", &composed).await {
+                        Ok(up) => {
+                            let mime = if up.mime.is_empty() { "image/png".to_string() } else { up.mime };
+                            let shown = if up.name.is_empty() { name } else { up.name };
+                            images.push(serde_json::json!({
+                                "ref": up.reference,
+                                "mime": mime,
+                                "kind": up.kind,
+                                "name": shown,
+                                "bytes": up.bytes,
+                                "sha256": up.sha256,
+                            }));
+                        }
+                        Err(err) => {
+                            status.set(format!("attachment failed: {err}"));
+                            restore(updated, text);
+                            return;
+                        }
+                    }
                     continue;
                 }
                 if file.uploaded_ref.is_empty() {
@@ -2721,11 +2780,11 @@ fn App() -> impl IntoView {
             }
             // #1362: the quote travels as a delimited block ahead of the
             // user's text, so the agent gets the exact quoted text and the
-            // stored log keeps the reference. `text` stays the user's own
-            // words for the failed-send restore.
+            // stored log keeps the reference. It wraps the annotated text
+            // (#1545); `text` stays the user's own words for the restore.
             let wire = match &quoted {
-                Some(q) => quote_message::compose(&q.role, q.anchor, &q.text, &text),
-                None => text.clone(),
+                Some(q) => quote_message::compose(&q.role, q.anchor, &q.text, &text_out),
+                None => text_out.clone(),
             };
             let body = if images.is_empty() {
                 serde_json::json!({"text": wire})
@@ -2740,6 +2799,11 @@ fn App() -> impl IntoView {
                     for file in &updated {
                         chat_mode::revoke_preview(&file.preview);
                     }
+                    annotate_marks.update(|m| {
+                        for id in annotated.keys() {
+                            m.remove(id);
+                        }
+                    });
                     sending.set(false);
                 }
                 Err(err) => {
@@ -5208,7 +5272,7 @@ fn App() -> impl IntoView {
             />
         </Show>
         <Show when=move || mode.get() == "customize" fallback=move || ()>
-            <CustomizePane base=base token=token status=status />
+            <CustomizePane base=base token=token status=status plugins_capable=plugins_capable />
         </Show>
         <Show when=move || mode.get() == "chat">
             <div
@@ -5415,6 +5479,8 @@ fn App() -> impl IntoView {
                     <Show when=move || !stream_note.get().is_empty()>
                         <p class="hint banner">{move || stream_note.get()}</p>
                     </Show>
+                    // #1785: a deploy watch session shows its verdict card.
+                    <deploy_watch::DeployWatchCard base=base token=token active=active_root tick=tick />
                     <Show when=move || !doc_path.get().is_empty()>
                         <DocumentPane
                             base=base
@@ -5797,6 +5863,23 @@ fn App() -> impl IntoView {
                                             (false, chat_mode::PreviewKind::Video) => view! { <video class="attach-media" controls=true preload="metadata" playsinline=true src=preview.clone()></video> }.into_any(),
                                             _ => view! { <span></span> }.into_any(),
                                         };
+                                        let show_img = !preview.is_empty();
+                                        // #1545: raster images can be annotated; the overlay
+                                        // reads the same blob URL as the thumbnail.
+                                        let can_annotate = show_img && !show_err && annotate::can_annotate(&file.mime);
+                                        let annotate_for = annotate::Target { id, name: name.clone(), preview: preview.clone() };
+                                        let mark_count = move || annotate_marks.with(|m| m.get(&id).map(|v| v.len()).unwrap_or(0));
+                                        let remove_now = move || {
+                                            pending_files.update(|rows| {
+                                                if let Some(i) = rows.iter().position(|row| row.id == id) {
+                                                    chat_mode::revoke_preview(&rows[i].preview);
+                                                    rows.remove(i);
+                                                }
+                                            });
+                                            annotate_marks.update(|m| {
+                                                m.remove(&id);
+                                            });
+                                        };
                                         view! {
                                             <span class="attach-chip">
                                                 {preview_view}
@@ -5805,14 +5888,37 @@ fn App() -> impl IntoView {
                                                     <Show when=move || show_err>
                                                         <span class="path">{error.clone()}</span>
                                                     </Show>
+                                                    <Show when=move || { mark_count() > 0 }>
+                                                        <span class="attach-marks" data-attach-marks="true">{move || {
+                                                            let n = mark_count();
+                                                            if n == 1 { "1 mark".to_string() } else { format!("{n} marks") }
+                                                        }}</span>
+                                                    </Show>
                                                 </span>
+                                                {can_annotate.then(|| view! {
+                                                    <button type="button" data-annotate-open="true" aria-label="Annotate image" on:click=move |_| {
+                                                        annotate_target.set(Some(annotate_for.clone()));
+                                                    }>"Annotate"</button>
+                                                })}
                                                 <button type="button" aria-label="Remove attachment" on:click=move |_| {
-                                                    pending_files.update(|rows| {
-                                                        if let Some(i) = rows.iter().position(|row| row.id == id) {
-                                                            chat_mode::revoke_preview(&rows[i].preview);
-                                                            rows.remove(i);
+                                                    // Unsent marks are listed before they go: removing
+                                                    // the image discards them only on an explicit yes.
+                                                    match annotate::discard_body(mark_count()) {
+                                                        None => remove_now(),
+                                                        Some(body) => {
+                                                            let opened = crate::confirm::ask(
+                                                                crate::confirm::ConfirmRequest {
+                                                                    title: "Remove image and its marks?".into(),
+                                                                    body,
+                                                                    confirm_label: "Remove".into(),
+                                                                },
+                                                                Rc::new(remove_now),
+                                                            );
+                                                            if !opened {
+                                                                status.set(crate::confirm::BUSY.into());
+                                                            }
                                                         }
-                                                    });
+                                                    }
                                                 }>"Remove"</button>
                                             </span>
                                         }
@@ -6076,6 +6182,7 @@ fn App() -> impl IntoView {
                                 </div>
                             </div>
                         </form>
+                        <annotate::AnnotateOverlay target=annotate_target store=annotate_marks />
                         <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
                             <p class="hint" data-model-note="true">{move || model_note.get()}</p>
                         </Show>
