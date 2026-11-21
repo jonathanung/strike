@@ -178,6 +178,21 @@
 }
 /* feature:decision-ledger end */
 
+/* feature:lessons begin (#1376) */
+.lesson-draft { display: flex; flex-direction: column; gap: var(--space-2); width: min(520px, calc(100vw - 32px)); }
+.lesson-draft .lesson-field { display: flex; flex-direction: column; gap: 4px; color: var(--muted); }
+.lesson-draft textarea,
+.lesson-draft input {
+  background: var(--ground);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font: inherit;
+}
+.lesson-draft textarea { min-height: 80px; resize: vertical; }
+/* feature:lessons end */
+
 /* feature:local-issues begin (#1500) */
 .local-issues .local-issue-row[data-issue-status="closed"] .name { color: var(--muted); }
 .local-issues .local-issue-body { list-style: none; padding: 0 0 var(--space-2); border-bottom: 1px solid var(--rule); }
