@@ -10,8 +10,10 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/jonathanung/strike/harness/debugmode"
 	"github.com/jonathanung/strike/harness/elicit"
 	"github.com/jonathanung/strike/harness/fn"
 	"github.com/jonathanung/strike/harness/permission"
@@ -401,6 +403,13 @@ type Options struct {
 	PlanStore PlanStore
 	// InitialPlanHandoff restores a prior plan.handoff after session resume.
 	InitialPlanHandoff PlanHandoffState
+	// InitialDebug restores the debug session recorded by the last
+	// successful debug.updated event (#1345). nil or a closed phase resumes
+	// nothing.
+	InitialDebug *protocol.DebugUpdated
+	// debugFrom is the parent engine whose debug session also gates this
+	// child's tool calls (set by spawnChild).
+	debugFrom *Engine
 	// OpenChildSession, when set, opens a durable log for a spawned child.
 	// parentID and a suggested childID/title are provided; the returned id is
 	// used as the child SessionID when non-empty.
@@ -647,6 +656,10 @@ type Engine struct {
 	// planHandoff is the last successful unified plan approval + handoff.
 	// Active after exit_plan_mode succeeds; restored from protocol.PlanHandoff.
 	planHandoff PlanHandoffState
+
+	// debug is the active hypothesis-first debug session (#1345), or nil.
+	// Written by Run (ops) and read by turn workers (phase gate).
+	debug atomic.Pointer[debugmode.Session]
 
 	// files tracks tool read snapshots so external edits (FilesChanged / /vim)
 	// force the model to re-read before edit/write.
@@ -1186,6 +1199,7 @@ func (e *Engine) Run(ctx context.Context) {
 		e.opts.InitialPlanHandoff.LegacyText != "" || e.opts.InitialPlanHandoff.ApprovalSource != "" {
 		e.restorePlanHandoff(e.opts.InitialPlanHandoff)
 	}
+	e.restoreDebug(e.opts.InitialDebug)
 	if len(e.opts.InitialAlwaysGrants) > 0 {
 		e.perms.SeedAlwaysGrants(e.opts.InitialAlwaysGrants)
 	}

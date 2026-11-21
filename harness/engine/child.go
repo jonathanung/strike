@@ -486,6 +486,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 	}
 
 	child := New(Options{
+		debugFrom:                  e,
 		SessionID:                  childID,
 		ParentSessionID:            e.opts.SessionID,
 		RootSessionID:              e.rootSessionID(),

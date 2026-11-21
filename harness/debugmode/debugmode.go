@@ -79,6 +79,21 @@ func New() *Session {
 	return &Session{phase: PhaseHypothesis}
 }
 
+// Restore rebuilds a session from a snapshot (session resume). Only the
+// hypothesis and fix phases are resumable; any other phase returns nil
+// because no debug session is active.
+func Restore(snap Snapshot) *Session {
+	if snap.Phase != PhaseHypothesis && snap.Phase != PhaseFix {
+		return nil
+	}
+	return &Session{
+		phase:      snap.Phase,
+		hypotheses: cloneHypotheses(snap.Hypotheses),
+		override:   snap.Override,
+		fixed:      snap.Fixed && snap.Phase == PhaseFix,
+	}
+}
+
 // Snapshot is an immutable copy of session state for rendering/persistence.
 type Snapshot struct {
 	Phase      Phase

@@ -84,6 +84,10 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		// Allowed mid-turn: posture applies to subsequent tool asks in the
 		// same turn (pending asks are rejected by the permission service).
 		e.setPermissionMode(op.Mode)
+	case protocol.DebugControl:
+		// Allowed mid-turn: the gate applies to the next tool call and the
+		// session is safe for concurrent use.
+		e.handleDebugControl(op)
 	case protocol.SetFast:
 		if e.turnActive() {
 			e.emit(protocol.EngineError{

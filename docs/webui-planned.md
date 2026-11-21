@@ -566,22 +566,39 @@ daemon-side storage for cross-device review, multi-user comments (#1056).
 
 ## Debug mode
 
-Engine state shipped, panel not drawn (#1345). `harness/debugmode` holds
-one debug session: 2–5 ranked hypotheses with attached evidence, each
-open / confirmed / refuted (confirming requires evidence). In the
-`hypothesis` phase the gate allows reads and only edits whose every
-changed line carries the `debugmode.Marker` tag; untagged edits, whole-file
-writes, deletes and moves are denied with a reason (`*GateError`). Fix edits unlock when a
-hypothesis is confirmed or the user gives an override reason, which the
-session keeps for the transcript. Ending the session requires the user to
-mark the bug fixed; it then sweeps every whole line containing the marker
-under the workspace (skipping `.git`, binaries and files over 4 MiB) and
-closes only when a rescan finds zero.
+Shipped (#1345, #1820). `harness/debugmode` holds one debug session: 2–5
+ranked hypotheses with attached evidence, each open / confirmed / refuted
+(confirming requires evidence). In the `hypothesis` phase the gate allows
+reads and only edits whose every changed line carries the
+`debugmode.Marker` tag; untagged edits, whole-file writes, deletes and
+moves are denied with a reason. Fix edits unlock when a hypothesis is
+confirmed or the user gives an override reason. Ending the session
+requires the user to mark the bug fixed; it then sweeps every whole line
+containing the marker under the workspace (skipping `.git`,
+`node_modules`, `target`, binaries and files over 4 MiB) and closes only
+when a rescan finds zero.
 
-Not drawn yet: the session flag in the engine turn loop, the protocol
-events, and the cockpit Debug panel (hypothesis card, instrumentation
-list, reproduce checklist, mobile chip). Bash is not inspected by the
-gate; the permission layer still governs it.
+Engine: the session lives on the engine; `execToolCall` runs the gate
+before hooks and Execute, so a denied call settles as blocked tool
+feedback with the reason in the transcript. Delegated children are gated
+by the parent's session. Wire: the `debug.control` op (start, hypotheses,
+evidence, mark, unlock, fixed, end, scan) and the `debug.updated` event
+(phase, hypotheses, override, live instrumentation, sweep report, error).
+Resume restores the last successful `debug.updated`.
+
+Cockpit: palette Debug → Start debug session. The Debug panel above the
+composer (`webui/src/debug_mode_ui.rs`, rules in `webui/debug-mode`) has
+the hypothesis input and cards (confirm / refute, evidence), the
+reproduce checklist with an evidence form, the live instrumentation list
+with Rescan, Unlock fix / Override and unlock / Mark bug fixed / End, and
+a closing summary (root cause, evidence, cleanup verified). Start, fix
+unlock (naming any override reason), mark fixed and the summary are also
+transcript notices. At phone width the panel collapses to a status chip
+that opens a bottom sheet.
+
+Not drawn yet: the agent cannot write hypotheses or attach evidence
+itself (no model-facing tool; the user does it in the panel). Bash is not
+inspected by the gate; the permission layer still governs it.
 ## Steer acknowledgement
 
 Shipped (#1343): a steered message carries a marker driven only by the

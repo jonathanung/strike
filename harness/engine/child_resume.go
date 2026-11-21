@@ -135,6 +135,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 	}
 
 	child := New(Options{
+		debugFrom:                  e,
 		SessionID:                  childID,
 		ParentSessionID:            e.opts.SessionID,
 		RootSessionID:              e.rootSessionID(),

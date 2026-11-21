@@ -2681,6 +2681,159 @@
       ]
     },
     {
+      "type": "debug.updated",
+      "go": "DebugUpdated",
+      "fields": [
+        {
+          "name": "sessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "turnId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "providerRequestId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "attempt",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "parentSessionId",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "depth",
+          "type": "number",
+          "omitEmpty": true
+        },
+        {
+          "name": "action",
+          "type": "string"
+        },
+        {
+          "name": "phase",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "hypotheses",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "object",
+          "fields": [
+            {
+              "name": "id",
+              "type": "string"
+            },
+            {
+              "name": "rank",
+              "type": "number",
+              "omitEmpty": true
+            },
+            {
+              "name": "statement",
+              "type": "string"
+            },
+            {
+              "name": "confirms",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "refutes",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "status",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "evidence",
+              "type": "array",
+              "omitEmpty": true,
+              "elem": "object",
+              "fields": [
+                {
+                  "name": "source",
+                  "type": "string",
+                  "omitEmpty": true
+                },
+                {
+                  "name": "text",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "override",
+          "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "fixed",
+          "type": "bool",
+          "omitEmpty": true
+        },
+        {
+          "name": "instrumentation",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "object",
+          "fields": [
+            {
+              "name": "path",
+              "type": "string"
+            },
+            {
+              "name": "line",
+              "type": "number"
+            },
+            {
+              "name": "text",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "name": "removed",
+          "type": "array",
+          "omitEmpty": true,
+          "elem": "object",
+          "fields": [
+            {
+              "name": "path",
+              "type": "string"
+            },
+            {
+              "name": "line",
+              "type": "number"
+            },
+            {
+              "name": "text",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "name": "error",
+          "type": "string",
+          "omitEmpty": true
+        }
+      ]
+    },
+    {
       "type": "files.invalidated",
       "go": "FilesInvalidated",
       "fields": [

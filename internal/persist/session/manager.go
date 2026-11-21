@@ -1017,6 +1017,8 @@ func eventSessionID(ev protocol.Event) (string, bool) {
 		return e.SessionID, true
 	case protocol.FastSelected:
 		return e.SessionID, true
+	case protocol.DebugUpdated:
+		return e.SessionID, true
 	case protocol.FilesInvalidated:
 		return e.SessionID, true
 	case protocol.UsageReported:

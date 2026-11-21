@@ -1,0 +1,141 @@
+/* feature:debug-mode begin */
+/* Debug mode panel (#1345): hypothesis-first debugging. Desktop shows an
+   inline card above the composer; phone width shows a status chip that
+   opens the same content as a bottom sheet. Tokens only. */
+.debug-panel {
+  margin: 0 0 var(--space-2);
+}
+.debug-chip {
+  display: none;
+  font-size: var(--type-sm);
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--rule));
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  padding: var(--space-1) var(--space-2);
+}
+.debug-panel[data-debug-phase="fix"] .debug-chip,
+.debug-panel[data-debug-phase="fix"] .debug-sheet {
+  border-color: color-mix(in srgb, var(--accent-alt) 55%, var(--rule));
+}
+.debug-panel[data-debug-phase="closed"] .debug-chip,
+.debug-panel[data-debug-phase="closed"] .debug-sheet {
+  border-color: color-mix(in srgb, var(--success) 55%, var(--rule));
+}
+.debug-sheet {
+  display: none;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--rule));
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  max-height: 60vh;
+  overflow: auto;
+}
+.debug-sheet.open { display: flex; }
+.debug-panel:not(:has(.debug-sheet.open)) .debug-chip { display: inline-block; }
+.debug-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.debug-title { font-weight: 600; color: var(--ink); }
+.debug-close { margin-left: auto; }
+.debug-subtitle {
+  margin: 0;
+  font-size: var(--type-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+.debug-error {
+  margin: 0;
+  color: var(--signal);
+  font-size: var(--type-sm);
+  overflow-wrap: anywhere;
+}
+.debug-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--type-sm);
+}
+.debug-block textarea,
+.debug-override input { width: 100%; box-sizing: border-box; }
+.debug-hyps,
+.debug-checklist,
+.debug-hits,
+.debug-evidence {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.debug-hyp {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+}
+.debug-hyp[data-status="confirmed"] { border-color: color-mix(in srgb, var(--success) 45%, var(--rule)); }
+.debug-hyp[data-status="refuted"] { opacity: 0.75; }
+.debug-hyp-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.debug-rank { color: var(--muted); font-size: var(--type-sm); }
+.debug-statement { flex: 1; color: var(--ink); overflow-wrap: anywhere; }
+.debug-hyp .hint { margin: var(--space-1) 0 0; }
+.debug-evidence pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--type-sm);
+  max-height: 10rem;
+  overflow: auto;
+}
+.debug-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+.debug-override {
+  display: flex;
+  gap: var(--space-2);
+  flex: 1 1 100%;
+}
+.debug-checklist li { color: var(--muted); }
+.debug-checklist li.done { color: var(--ink); }
+.debug-check { display: inline-block; width: 1.25em; }
+.debug-hits code { font-size: var(--type-sm); }
+.debug-summary {
+  border-top: 1px solid var(--rule);
+  padding-top: var(--space-2);
+}
+.debug-summary dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-2);
+  margin: var(--space-1) 0 0;
+  font-size: var(--type-sm);
+}
+.debug-summary dt { color: var(--muted); }
+.debug-summary dd { margin: 0; overflow-wrap: anywhere; }
+
+@media (max-width: 720px), (max-height: 500px) and (max-width: 1024px) {
+  .debug-chip { display: inline-block; }
+  .debug-sheet.open {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    max-height: 75vh;
+    border-radius: var(--radius) var(--radius) 0 0;
+    box-shadow: 0 -4px 16px color-mix(in srgb, var(--ink) 20%, transparent);
+  }
+}
+/* feature:debug-mode end */

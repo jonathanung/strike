@@ -17,7 +17,7 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - **Minor** `protocol.Version` bumps add types or optional fields. **Major** bumps rename, remove, or change meaning. **Patch** bumps do not change encoded JSON.
 - Nil Go slices and maps encode as JSON `null`. Readers treat `null` like an empty list or map.
 
-## Event types (69)
+## Event types (70)
 
 - `admission.decided` → `AdmissionDecided`
 - `agent.contract.timeout` → `AgentContractTimeout`
@@ -32,6 +32,7 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `compaction.started` → `CompactionStarted`
 - `context.controls` → `ContextControlsSelected`
 - `context.fit_warning` → `ContextFitWarning`
+- `debug.updated` → `DebugUpdated`
 - `delegation.changed` → `DelegationChanged`
 - `diagnostic.bundle` → `DiagnosticBundle`
 - `effort.selected` → `EffortSelected`
@@ -89,10 +90,11 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `wait.resolved` → `WaitResolved`
 - `wait.started` → `WaitStarted`
 
-## Op types (34)
+## Op types (35)
 
 - `compact` → `Compact`
 - `context.controls` → `SetContextControls`
+- `debug.control` → `DebugControl`
 - `elicitation.reply` → `ElicitationReply`
 - `files.changed` → `FilesChanged`
 - `input.queue_cancel` → `InputQueueCancel`
