@@ -12,6 +12,7 @@ protocol-schema = { path = "protocol-schema" }
 load-guard = { path = "load-guard" }
 status-card = { path = "status-card" }
 composer-drafts = { path = "composer-drafts" }
+signin-flow = { path = "signin-flow" }
 transcript-window = { path = "transcript-window" }
 theme-catalog = { path = "theme-catalog" }
 js-sys = "0.3"
