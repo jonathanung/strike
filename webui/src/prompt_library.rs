@@ -38,6 +38,11 @@ struct Stored {
 }
 
 fn storage() -> Option<web_sys::Storage> {
+    // Host unit tests rank the palette (which lists these choices) without
+    // a JS runtime; web_sys::window() panics off wasm.
+    if !cfg!(target_arch = "wasm32") {
+        return None;
+    }
     web_sys::window()?.local_storage().ok().flatten()
 }
 
