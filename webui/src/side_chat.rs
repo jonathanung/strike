@@ -11,7 +11,8 @@ use serde_json::{json, Value};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-use crate::api::{get_json, post_json_value};
+use crate::api::get_json;
+use crate::side_chat_promote;
 use crate::model::{strip_echo_tip, ChatLine};
 
 #[derive(Clone, Debug, Deserialize)]
@@ -26,6 +27,9 @@ struct SideChatTurn {
     provider: String,
     #[serde(default)]
     model: String,
+    /// Local only: the user stopped this turn (#1363). Never from the daemon.
+    #[serde(skip)]
+    stopped: bool,
 }
 
 #[derive(Deserialize)]
@@ -296,8 +300,14 @@ pub fn SideChatPanel(
     focus_name: RwSignal<String>,
     live_provider: RwSignal<String>,
     live_model: RwSignal<String>,
+    /// Inserts a settled answer into the main composer as an unsent draft
+    /// (#1363). The panel never posts to the main session.
+    on_promote: Callback<(String,)>,
 ) -> impl IntoView {
     let draft = RwSignal::new(String::new());
+    // The question in flight, shown with its Stop control (#1363).
+    let asking = RwSignal::new(String::new());
+    let side_note = RwSignal::new(String::new());
     let turns = RwSignal::new(Vec::<SideChatTurn>::new());
     let error = RwSignal::new(String::new());
     let pending = RwSignal::new(false);
@@ -371,6 +381,9 @@ pub fn SideChatPanel(
         if plan == SideLoadPlan::Switch {
             mirror_show_all.set(false);
             mirror_expanded.set(HashSet::new());
+            side_chat_promote::stop();
+            asking.set(String::new());
+            side_note.set(String::new());
         }
         turns.set(Vec::new());
         if session.is_empty() {
@@ -423,8 +436,15 @@ pub fn SideChatPanel(
             error.set("No live session yet.".into());
             return;
         }
-        last_ask.set(body["text"].as_str().unwrap_or_default().to_string());
+        let Some((gen, signal)) = side_chat_promote::begin() else {
+            error.set("Could not start the side question.".into());
+            return;
+        };
+        let question = body["text"].as_str().unwrap_or_default().to_string();
+        last_ask.set(question.clone());
         last_ask_root.set(session.clone());
+        asking.set(question.clone());
+        side_note.set(String::new());
         draft.set(String::new());
         pending.set(true);
         error.set(String::new());
@@ -433,12 +453,28 @@ pub fn SideChatPanel(
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             let path = format!("/v1/sidechat/ask?root={}", crate::api::js_encode(&expected));
-            let result = post_json_value(&b, &t, &path, body).await;
+            let result = side_chat_promote::post_abortable(&b, &t, &path, body, &signal).await;
+            side_chat_promote::finish(gen);
             pending.set(false);
+            asking.set(String::new());
             if root.get_untracked() != expected {
                 return;
             }
             match result {
+                Err(e) if e == side_chat_promote::ABORTED => {
+                    turns.update(|list| {
+                        list.push(SideChatTurn {
+                            id: String::new(),
+                            question,
+                            answer: String::new(),
+                            focus_name: String::new(),
+                            provider: String::new(),
+                            model: String::new(),
+                            stopped: true,
+                        });
+                    });
+                    side_note.set(side_chat_promote::STOPPED.into());
+                }
                 Ok(value) => match serde_json::from_value::<SideChatAnswer>(value) {
                     Ok(answer) if answer.read_only => {
                         turns.update(|list| {
@@ -449,6 +485,7 @@ pub fn SideChatPanel(
                                 focus_name: answer.focus_name,
                                 provider: answer.provider,
                                 model: answer.model,
+                                stopped: false,
                             });
                         });
                     }
@@ -580,19 +617,57 @@ pub fn SideChatPanel(
                         let about = turn.focus_name.clone();
                         let answered_by = answered_by_other(&turn.provider, &turn.model, &live_p, &live_m);
                         let _ = turn.id.clone();
+                        let stopped = turn.stopped;
+                        let promote_text = answer.clone();
+                        let can_promote = !stopped && !promote_text.trim().is_empty();
                         view! {
-                            <article class="side-chat-turn" data-side-chat-turn="true">
+                            <article class="side-chat-turn" data-side-chat-turn="true" data-side-chat-stopped=stopped.to_string()>
                                 <p class="side-chat-you">{question}</p>
                                 {(!about.is_empty()).then(|| {
                                     let label = about.clone();
                                     view! { <p class="hint">{label}</p> }
                                 })}
-                                <p class="side-chat-answer" data-side-chat-answer="true">{answer}</p>
+                                {if stopped {
+                                    view! { <p class="side-chat-stopped hint" data-side-chat-stopped-note="true">"Stopped before an answer."</p> }.into_any()
+                                } else {
+                                    view! { <p class="side-chat-answer" data-side-chat-answer="true">{answer}</p> }.into_any()
+                                }}
                                 {answered_by.map(|label| view! { <p class="hint">{label}</p> })}
+                                {can_promote.then(|| view! {
+                                    <div class="side-chat-turn-actions">
+                                        <button
+                                            type="button"
+                                            class="secondary"
+                                            data-side-chat-promote="true"
+                                            title="Put this answer in the main composer as a quoted draft. Nothing is sent."
+                                            on:click=move |_| {
+                                                on_promote.run((promote_text.clone(),));
+                                                side_note.set(side_chat_promote::PROMOTED.into());
+                                            }
+                                        >"Add to main chat"</button>
+                                    </div>
+                                })}
                             </article>
                         }
                     }).collect_view()
                     }}
+                    <Show when=move || !asking.get().is_empty()>
+                        <article class="side-chat-turn side-chat-pending" data-side-chat-pending="true" aria-busy="true">
+                            <p class="side-chat-you">{move || asking.get()}</p>
+                            <div class="side-chat-turn-actions">
+                                <span class="hint">"Answering…"</span>
+                                <button
+                                    type="button"
+                                    class="secondary"
+                                    data-side-chat-stop="true"
+                                    on:click=move |_| { side_chat_promote::stop(); }
+                                >"Stop"</button>
+                            </div>
+                        </article>
+                    </Show>
+                    <Show when=move || !side_note.get().is_empty()>
+                        <p class="hint side-chat-note" role="status" data-side-chat-note="true">{move || side_note.get()}</p>
+                    </Show>
                 </div>
                 <Show when=move || !error.get().is_empty()>
                     <div class="notice" role="alert" data-side-chat-error="true">

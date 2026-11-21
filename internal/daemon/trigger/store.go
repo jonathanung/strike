@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jonathanung/strike/internal/daemon/deploywatch"
 	"github.com/jonathanung/strike/internal/daemon/rootstart"
 )
 
@@ -34,6 +35,9 @@ const (
 	KindWebhook = "webhook"
 	KindGitHub  = "github"
 	KindChannel = "channel"
+	// KindDeployWatch is the "Deploy watch" preset (#1783): a signed deploy
+	// event creates a deploywatch.Watch and spawns its watch session.
+	KindDeployWatch = "deploy_watch"
 )
 
 const (
@@ -65,6 +69,8 @@ type View struct {
 	Adapter                string   `json:"adapter"`
 	Channel                string   `json:"channel"`
 	HookPath               string   `json:"hookPath"`
+	// DeployWatch is the preset of a deploy_watch trigger.
+	DeployWatch *deploywatch.Preset `json:"deployWatch,omitempty"`
 }
 
 // Input is a create or full-form update. An empty Secret keeps the stored
@@ -83,6 +89,8 @@ type Input struct {
 	Adapter           string   `json:"adapter"`
 	Channel           string   `json:"channel"`
 	Enabled           *bool    `json:"enabled"`
+	// DeployWatch is required for kind deploy_watch and refused otherwise.
+	DeployWatch *deploywatch.Preset `json:"deployWatch,omitempty"`
 }
 
 // Delivery is one logged attempt. Prompt and Fingerprint stay on disk for
@@ -98,6 +106,7 @@ type Delivery struct {
 	Reason      string    `json:"reason,omitempty"`
 	Fingerprint string    `json:"fingerprint,omitempty"`
 	Prompt      string    `json:"prompt,omitempty"`
+	WatchID     string    `json:"watchId,omitempty"`
 }
 
 // DeliveryView is a delivery log row without the stored prompt.
@@ -110,24 +119,26 @@ type DeliveryView struct {
 	Action    string    `json:"action,omitempty"`
 	Repo      string    `json:"repo,omitempty"`
 	Reason    string    `json:"reason,omitempty"`
+	WatchID   string    `json:"watchId,omitempty"`
 }
 
 type record struct {
-	ID                string    `json:"id"`
-	Name              string    `json:"name"`
-	Kind              string    `json:"kind"`
-	Enabled           bool      `json:"enabled"`
-	Secret            string    `json:"secret,omitempty"`
-	Prompt            string    `json:"prompt,omitempty"`
-	PermissionMode    string    `json:"permissionMode,omitempty"`
-	ContinueSessionID string    `json:"continueSessionId,omitempty"`
-	RatePerMinute     int       `json:"ratePerMinute"`
-	DedupeSeconds     int       `json:"dedupeSeconds"`
-	Events            []string  `json:"events,omitempty"`
-	Adapter           string    `json:"adapter,omitempty"`
-	Channel           string    `json:"channel,omitempty"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ID                string              `json:"id"`
+	Name              string              `json:"name"`
+	Kind              string              `json:"kind"`
+	Enabled           bool                `json:"enabled"`
+	Secret            string              `json:"secret,omitempty"`
+	Prompt            string              `json:"prompt,omitempty"`
+	PermissionMode    string              `json:"permissionMode,omitempty"`
+	ContinueSessionID string              `json:"continueSessionId,omitempty"`
+	RatePerMinute     int                 `json:"ratePerMinute"`
+	DedupeSeconds     int                 `json:"dedupeSeconds"`
+	Events            []string            `json:"events,omitempty"`
+	Adapter           string              `json:"adapter,omitempty"`
+	Channel           string              `json:"channel,omitempty"`
+	DeployWatch       *deploywatch.Preset `json:"deployWatch,omitempty"`
+	CreatedAt         time.Time           `json:"createdAt"`
+	UpdatedAt         time.Time           `json:"updatedAt"`
 }
 
 type fileState struct {
@@ -340,9 +351,25 @@ func (s *Store) normalize(prev record, in Input, create bool) (record, string, e
 	}
 	kind := strings.TrimSpace(in.Kind)
 	switch kind {
-	case KindWebhook, KindGitHub, KindChannel:
+	case KindWebhook, KindGitHub, KindChannel, KindDeployWatch:
 	default:
-		return record{}, "", fmt.Errorf("kind must be webhook, github, or channel")
+		return record{}, "", fmt.Errorf("kind must be webhook, github, channel, or deploy_watch")
+	}
+	var preset *deploywatch.Preset
+	if kind == KindDeployWatch {
+		if in.DeployWatch == nil {
+			return record{}, "", fmt.Errorf("deploy_watch triggers need a deployWatch preset")
+		}
+		p, err := in.DeployWatch.Normalize()
+		if err != nil {
+			return record{}, "", err
+		}
+		if strings.TrimSpace(in.ContinueSessionID) != "" {
+			return record{}, "", fmt.Errorf("deploy_watch triggers start one session per watch; continueSessionId is not allowed")
+		}
+		preset = &p
+	} else if in.DeployWatch != nil {
+		return record{}, "", fmt.Errorf("deployWatch is only valid for kind deploy_watch")
 	}
 	if _, err := rootstart.ResolveMode(in.PermissionMode); err != nil {
 		return record{}, "", err
@@ -412,7 +439,7 @@ func (s *Store) normalize(prev record, in Input, create bool) (record, string, e
 		once = minted
 	}
 	if kind != KindChannel && secret == "" {
-		return record{}, "", fmt.Errorf("webhook and github triggers need a secret")
+		return record{}, "", fmt.Errorf("webhook, github, and deploy_watch triggers need a secret")
 	}
 	rec := record{
 		Name:              name,
@@ -427,6 +454,7 @@ func (s *Store) normalize(prev record, in Input, create bool) (record, string, e
 		Events:            events,
 		Adapter:           adapter,
 		Channel:           channel,
+		DeployWatch:       preset,
 	}
 	return rec, once, nil
 }
@@ -453,6 +481,7 @@ func (rec record) view() View {
 		Adapter:                rec.Adapter,
 		Channel:                rec.Channel,
 		HookPath:               "/hooks/" + rec.ID,
+		DeployWatch:            rec.DeployWatch,
 	}
 }
 
@@ -557,6 +586,7 @@ func (d Delivery) view() DeliveryView {
 		Action:    d.Action,
 		Repo:      d.Repo,
 		Reason:    d.Reason,
+		WatchID:   d.WatchID,
 	}
 }
 
