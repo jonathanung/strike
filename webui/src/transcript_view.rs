@@ -670,7 +670,7 @@ pub fn TranscriptPane(
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, pins, r.pin, r.hits, r.current, r.elapsed, r.usage, r.tail, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, pins, r.pin, r.hits, r.current, r.elapsed, r.usage, r.verify, r.tail, fold_open, folds)}
                                 }
                             })
                         }
@@ -816,6 +816,7 @@ struct RowData {
     current: Option<crate::transcript_find::TMatch>,
     elapsed: Option<String>,
     usage: Option<(String, String)>,
+    verify: Option<crate::turn_verify::TurnVerify>,
     tail: Option<crate::tool_tail::ToolTail>,
     /// Anchor, excerpt and time when the message can be pinned (#1528).
     pin: Option<(message_pins::Anchor, String, f64)>,
@@ -846,6 +847,7 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
         usage: t
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
+        verify: t.verify_for(msg.id).cloned(),
         tail: t.tail_for(msg.id).cloned(),
         pin: t.pin_anchor_at(idx),
     })
@@ -1060,6 +1062,7 @@ fn message_view(
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
     turn_usage: Option<(String, String)>,
+    turn_verify: Option<crate::turn_verify::TurnVerify>,
     tail: Option<crate::tool_tail::ToolTail>,
     fold_open: bool,
     folds: FoldState,
@@ -1144,6 +1147,10 @@ fn message_view(
         format!("sx-msg sx-{role}{}", if on { " sx-on" } else { "" })
     };
     let copy_btn = copy_text.clone();
+    // Lessons capture (#1376): "Remember this" on the user's own messages,
+    // shown only while the page's capture gate (memory mode) allows it.
+    let lesson_gate = use_context::<crate::lessons::CaptureGate>();
+    let lesson_text = (msg.role == Role::You && !copy_text.trim().is_empty()).then(|| copy_text.clone());
     // Per-button copy feedback (#1582): the label only reads "Copied"
     // once the awaited clipboard write resolves; a rejection reads
     // "Copy failed" instead of silence. Reverts after 2s.
@@ -1170,6 +1177,9 @@ fn message_view(
                 {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
                 {turn_elapsed.clone().map(|label| view! { <span class="turn-elapsed" title="Turn elapsed time">{label}</span> })}
                 {turn_usage.clone().map(|(label, detail)| view! { <span class="turn-usage" title=detail>{label}</span> })}
+                {turn_verify.clone().map(|v| view! {
+                    <span class="turn-verify" data-verify=v.state.label() title=v.detail.clone() aria-label=v.detail>{v.state.label()}</span>
+                })}
                 {diff.clone().map(|d| view! {
                     <span class="sx-diff" aria-label=format!("+{} -{}", d.added, d.deleted)>
                         <span class="sx-add">{format!("+{}", d.added)}</span>
@@ -1197,6 +1207,16 @@ fn message_view(
                                 on:click=move |_| pins.toggle(anchor.clone(), excerpt.clone(), at_ms)
                             >{move || if pins.is_pinned(&label_anchor) { "Unpin" } else { "Pin message" }}</button>
                         }
+                    })}
+                    {lesson_text.zip(lesson_gate).map(|(text, gate)| view! {
+                        <Show when=move || gate.0.get()>
+                            <button type="button" class="sx-quiet" data-action="lesson-remember"
+                                title="Save this message as a lesson future sessions load"
+                                on:click={
+                                    let text = text.clone();
+                                    move |_| { let _ = crate::shell::dispatch("lesson-remember", &text); }
+                                }>"Remember this"</button>
+                        </Show>
                     })}
                 </span>
             </header>

@@ -124,7 +124,12 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     Artifacts.
     Clicking or dragging a file inserts `@path`. The daemon expands
     `@file`, `$skill`, `/command`, and `!shell` on `user.input` and `steer`
-    before a turn starts. `!` asks through the bash permission model and
+    before a turn starts. `@session:<id>` (#1550) attaches another
+    same-gateway session's compacted summary and last 10 turns as a quoted,
+    attributed block (`--- session: <id> ---`), never the raw log; a
+    self-reference or a missing/pruned session attaches nothing and posts a
+    notice. `GET /v1/sessions/{id}/reference` reports that block's size
+    (chars, ~tokens) for display before send. `!` asks through the bash permission model and
     does not start a model turn. The composer `+` menu and the suggestion
     popup only list those real actions (`composerCommands` and `skills` on
     bootstrap, files from `/v1/files/search`). A shell ask shows Allow once /
@@ -230,6 +235,13 @@ static files. To rebuild main's bundle by hand, run
 
 `GET /v1/customize` is the catalog the agent already loads (skills, agents,
 MCP, plugins, hooks, rules, roster). `GET /v1/customize/doc` opens one item.
+`GET /v1/customize/skill-usage` counts how often each catalog skill ran
+(#1442), as `{ "skills": { "<name>": { "count", "lastUsed" } }, "sessions" }`.
+It reads the recorded session logs, all-time, and nothing leaves the gateway.
+A run is a `user.message` that starts with `/name` or `$name`, or a `skill`
+tool call (resource-only loads excluded). Child-agent runs count once.
+Runs typed in the TUI count too, because the TUI writes the same logs.
+Sessions deleted from the sessions directory no longer count.
 `POST /v1/customize/preview` returns a redacted diff and does not write.
 `POST /v1/customize/apply` writes only when `confirm` is true and `diffHash`
 matches that preview. Env, header, and URL secrets are masked; sending `••••`
