@@ -1161,6 +1161,8 @@ fn message_view(
     let auth_notice =
         msg.role == Role::Notice && msg.badge == crate::transcript::PROVIDER_AUTH_CODE;
     let reconnect = msg.reconnect.clone();
+    // Notice subtype hook for scoped CSS (#1380 mutes files.invalidated).
+    let notice_kind = (msg.role == Role::Notice && !msg.key.is_empty()).then(|| msg.key.clone());
     // #1371: end-of-turn failure markers carry their stop reason as a
     // hook for scoped styling and browser checks; every other line has
     // no attribute.
@@ -1229,6 +1231,10 @@ fn message_view(
         let on = cursor.get() == Some(id);
         format!("sx-msg sx-{role}{}", if on { " sx-on" } else { "" })
     };
+    // #1379: child cards carry the child's identity disc; Strike's own
+    // lines keep the plain presentation.
+    let child_disc = (msg.role == Role::Child)
+        .then(|| (crate::identity::child_key(&title, ""), title.clone()));
     let copy_btn = copy_text.clone();
     // Lessons capture (#1376): "Remember this" on the user's own messages,
     // shown only while the page's capture gate (memory mode) allows it.
@@ -1242,8 +1248,9 @@ fn message_view(
     // "Copy failed" instead of silence. Reverts after 2s.
     let copy_state = RwSignal::new(None::<bool>);
     view! {
-        <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role data-turn-stop=turn_stop data-compaction=compaction>
+        <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role data-kind=notice_kind data-turn-stop=turn_stop data-compaction=compaction>
             <header>
+                {child_disc.clone().map(|(ident, name)| view! { <crate::identity::IdentityDisc ident=ident name=name /> })}
                 {if find_title {
                     view! { <span class="sx-who"><crate::transcript_find::MarkedText text=title.clone() kind="inline" ranges=title_ranges current=cur_title /></span> }.into_any()
                 } else {

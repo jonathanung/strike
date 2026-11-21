@@ -55,6 +55,11 @@ pub struct ProcessStatus(pub String);
 #[serde(transparent)]
 pub struct TeamMemberState(pub String);
 
+/// Open string. Known writer values live in the JSON Schema.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(transparent)]
+pub struct Verbosity(pub String);
+
 /// AdmissionDecided is a non-blocking audit event when MCP/skill/plugin admission finishes for one subject (allow|warn|block|quarantine). Emitted at register/load time before tools bind. Reasons and evidence are redacted by timeline export.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct AdmissionDecided {
@@ -2106,6 +2111,13 @@ pub struct SetPermissionMode {
     pub mode: PermissionMode,
 }
 
+/// SetVerbosity changes the session response style for subsequent turns. Rejected while a turn is running; past turns are untouched.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct SetVerbosity {
+    #[serde(default, rename = "level")]
+    pub level: Verbosity,
+}
+
 /// StartWorkflow activates a loaded workflow at phase index 0. Exactly one workflow may be active per root session; starting replaces any prior active workflow after the target is validated. Rejected while a turn is running.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct StartWorkflow {
@@ -2661,6 +2673,27 @@ pub struct UserMessage {
     pub images: Vec<ImageAttachment>,
 }
 
+/// VerbositySelected confirms the session response style, at startup and after each SetVerbosity. Delivery says how it reaches the model (none or instruction) so a frontend never shows a style as active while it does nothing.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct VerbositySelected {
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default, rename = "turnId")]
+    pub turn_id: String,
+    #[serde(default, rename = "providerRequestId")]
+    pub provider_request_id: String,
+    #[serde(default, rename = "attempt")]
+    pub attempt: i64,
+    #[serde(default, rename = "parentSessionId")]
+    pub parent_session_id: String,
+    #[serde(default, rename = "depth")]
+    pub depth: i64,
+    #[serde(default, rename = "level")]
+    pub level: Verbosity,
+    #[serde(default, rename = "delivery")]
+    pub delivery: String,
+}
+
 /// VerificationAttempt is one focused rerun in a gate's triage history.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct VerificationAttempt {
@@ -2930,6 +2963,7 @@ pub enum Event {
     TurnSteered(TurnSteered),
     UsageReported(UsageReported),
     UserMessage(UserMessage),
+    VerbositySelected(VerbositySelected),
     VerificationCompleted(VerificationCompleted),
     VerificationStarted(VerificationStarted),
     WaitResolved(WaitResolved),
@@ -2959,6 +2993,7 @@ pub enum Op {
     SetEffort(SetEffort),
     SetFast(SetFast),
     SetPermissionMode(SetPermissionMode),
+    SetVerbosity(SetVerbosity),
     Steer(Steer),
     TeamBoardClaim(TeamBoardClaim),
     TeamBoardComplete(TeamBoardComplete),
@@ -3071,6 +3106,7 @@ pub fn decode_event(raw: &str) -> Result<Event, DecodeError> {
         "turn.steered" => map_event::<TurnSteered>("turn.steered", &env.data, Event::TurnSteered),
         "usage.reported" => map_event::<UsageReported>("usage.reported", &env.data, Event::UsageReported),
         "user.message" => map_event::<UserMessage>("user.message", &env.data, Event::UserMessage),
+        "verbosity.selected" => map_event::<VerbositySelected>("verbosity.selected", &env.data, Event::VerbositySelected),
         "verification.completed" => map_event::<VerificationCompleted>("verification.completed", &env.data, Event::VerificationCompleted),
         "verification.started" => map_event::<VerificationStarted>("verification.started", &env.data, Event::VerificationStarted),
         "wait.resolved" => map_event::<WaitResolved>("wait.resolved", &env.data, Event::WaitResolved),
@@ -3131,6 +3167,7 @@ pub fn decode_op(raw: &str) -> Result<Op, DecodeError> {
         "set.effort" => map_op::<SetEffort>("set.effort", data.clone(), Op::SetEffort),
         "set.fast" => map_op::<SetFast>("set.fast", data.clone(), Op::SetFast),
         "set.permission_mode" => map_op::<SetPermissionMode>("set.permission_mode", data.clone(), Op::SetPermissionMode),
+        "set.verbosity" => map_op::<SetVerbosity>("set.verbosity", data.clone(), Op::SetVerbosity),
         "steer" => map_op::<Steer>("steer", data.clone(), Op::Steer),
         "team.board_claim" => map_op::<TeamBoardClaim>("team.board_claim", data.clone(), Op::TeamBoardClaim),
         "team.board_complete" => map_op::<TeamBoardComplete>("team.board_complete", data.clone(), Op::TeamBoardComplete),

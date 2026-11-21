@@ -1,0 +1,51 @@
+/* feature:delegation-board begin */
+/* #1381: read-only delegation board in the Activity tab. */
+.delegation-board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.delegation-board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.delegation-board-head .hint { margin: 0; }
+.delegation-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.delegation-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--ground);
+  min-width: 0;
+}
+.delegation-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.delegation-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.delegation-meta,
+.delegation-reason {
+  color: var(--muted);
+  font-size: var(--type-sm);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.delegation-session.none { font-style: italic; }
+/* feature:delegation-board end */
