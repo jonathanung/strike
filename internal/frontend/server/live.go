@@ -631,10 +631,13 @@ type Live struct {
 	// sandboxExplain is the compiled profile text for GET /v1/sandbox.
 	sandboxExplain string
 	// team is the observe-only multi-agent projection (WEBUI.13).
-	team    TeamSnapshot
-	subs    map[chan protocol.Event]struct{}
-	closed  bool
-	closeCh chan struct{}
+	team TeamSnapshot
+	subs map[chan protocol.Event]struct{}
+	// ephemeral holds subscribers to stream-only events (loops.changed,
+	// #1944): never persisted, so the log-tailing SSE cannot replay them.
+	ephemeral map[chan protocol.Event]struct{}
+	closed    bool
+	closeCh   chan struct{}
 
 	memoryModeGet func() string
 	memoryModeSet func(string) error
@@ -652,6 +655,7 @@ func NewLive(sessionID, cwd string, agents []AgentInfo, ops chan<- protocol.Op) 
 		agents:    append([]AgentInfo(nil), agents...),
 		ops:       ops,
 		subs:      make(map[chan protocol.Event]struct{}),
+		ephemeral: make(map[chan protocol.Event]struct{}),
 		closeCh:   make(chan struct{}),
 		status: StatusSnapshot{
 			SessionID: sessionID,
@@ -665,7 +669,36 @@ func NewLive(sessionID, cwd string, agents []AgentInfo, ops chan<- protocol.Op) 
 	l.loops = sessionloop.New(func(ctx context.Context, id, job string) error {
 		return l.Submit(ctx, protocol.UserInput{Text: job, LoopID: id})
 	})
+	// Loop state rides the live stream so the cockpit need not poll the
+	// list route (#1944). Not persisted: loops never outlive the session.
+	l.loops.SetOnChange(func(c sessionloop.Change) {
+		l.PublishEphemeral(loopsChangedEvent(sessionID, c))
+	})
 	return l
+}
+
+// loopsChangedEvent is the wire form of one registry change.
+func loopsChangedEvent(sessionID string, c sessionloop.Change) protocol.LoopsChanged {
+	loops := make([]protocol.LoopState, 0, len(c.Loops))
+	for _, l := range c.Loops {
+		loops = append(loops, protocol.LoopState{
+			ID:         l.ID,
+			Interval:   l.Interval,
+			IntervalMs: l.IntervalMs,
+			Job:        l.Job,
+			Runs:       l.Runs,
+			CreatedAt:  l.CreatedAt,
+			NextAt:     l.NextAt,
+			LastRunAt:  l.LastRunAt,
+			LastError:  l.LastError,
+		})
+	}
+	return protocol.LoopsChanged{
+		Correlation: protocol.Correlation{SessionID: sessionID},
+		Reason:      c.Reason,
+		LoopID:      c.LoopID,
+		Loops:       loops,
+	}
 }
 
 // Loops returns the session's /loop registry, or nil for a zero-value Live.
@@ -953,6 +986,60 @@ func (l *Live) Publish(ev protocol.Event) {
 	l.mu.Unlock()
 }
 
+// PublishEphemeral fans a stream-only event out to SubscribeEphemeral
+// readers. It is not persisted and does not touch status. A reader that
+// cannot keep up is dropped, as in Publish.
+func (l *Live) PublishEphemeral(ev protocol.Event) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed {
+		return
+	}
+	for ch := range l.ephemeral {
+		select {
+		case ch <- ev:
+		default:
+			delete(l.ephemeral, ch)
+			close(ch)
+		}
+	}
+}
+
+// SubscribeEphemeral receives PublishEphemeral events until ctx is done or
+// Live is closed. The returned channel is closed when unsubscribed.
+func (l *Live) SubscribeEphemeral(ctx context.Context) <-chan protocol.Event {
+	ch := make(chan protocol.Event, 64)
+	if l == nil || l.ephemeral == nil {
+		close(ch)
+		return ch
+	}
+	l.mu.Lock()
+	if l.closed {
+		l.mu.Unlock()
+		close(ch)
+		return ch
+	}
+	l.ephemeral[ch] = struct{}{}
+	l.mu.Unlock()
+
+	go func() {
+		select {
+		case <-ctx.Done():
+		case <-l.closeCh:
+		}
+		l.mu.Lock()
+		if _, ok := l.ephemeral[ch]; ok {
+			delete(l.ephemeral, ch)
+			close(ch)
+		}
+		l.mu.Unlock()
+	}()
+	return ch
+}
+
 // Subscribe receives live events until ctx is done or Live is closed.
 // The returned channel is closed when unsubscribed.
 func (l *Live) Subscribe(ctx context.Context) <-chan protocol.Event {
@@ -1021,6 +1108,10 @@ func (l *Live) Close() {
 	close(l.closeCh)
 	for ch := range l.subs {
 		delete(l.subs, ch)
+		close(ch)
+	}
+	for ch := range l.ephemeral {
+		delete(l.ephemeral, ch)
 		close(ch)
 	}
 }

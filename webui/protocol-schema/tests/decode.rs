@@ -115,3 +115,30 @@ fn loop_id_decodes_and_defaults_empty() {
         other => panic!("{other:?}"),
     }
 }
+
+// #1944: loops.changed carries a live session's whole /loop list on the
+// stream. A null list (Go nil slice) is empty, unknown fields are ignored,
+// and an older reader sees it as Event::Unknown rather than an error.
+#[test]
+fn loops_changed_decodes() {
+    let raw = r#"{"type":"loops.changed","time":"2026-11-21T10:00:00Z","v":"1.27.0","data":{"sessionId":"s1","reason":"error","loopId":"l2","futureField":1,"loops":[{"id":"l2","interval":"30s","intervalMs":30000,"job":"ping","runs":0,"createdAt":"2026-11-21T09:59:00Z","nextAt":"2026-11-21T10:00:30Z","lastRunAt":"2026-11-21T10:00:00Z","lastError":"input queue full"}]}}"#;
+    match decode_event(raw).expect("loops.changed") {
+        Event::LoopsChanged(ev) => {
+            assert_eq!((ev.session_id.as_str(), ev.reason.as_str(), ev.loop_id.as_str()), ("s1", "error", "l2"));
+            assert_eq!(ev.loops.len(), 1);
+            let l = &ev.loops[0];
+            assert_eq!((l.id.as_str(), l.interval_ms, l.runs), ("l2", 30000, 0));
+            assert_eq!(l.last_error, "input queue full");
+            assert_eq!(l.next_at, "2026-11-21T10:00:30Z");
+        }
+        other => panic!("loops.changed decoded as {other:?}"),
+    }
+    let stop_all = r#"{"type":"loops.changed","time":"2026-11-21T10:00:00Z","data":{"sessionId":"s1","reason":"stop","loops":null}}"#;
+    match decode_event(stop_all).expect("stop all") {
+        Event::LoopsChanged(ev) => {
+            assert!(ev.loops.is_empty());
+            assert!(ev.loop_id.is_empty());
+        }
+        other => panic!("{other:?}"),
+    }
+}

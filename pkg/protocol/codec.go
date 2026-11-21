@@ -162,6 +162,8 @@ func eventType(ev Event) string {
 		return "session.budget_warning"
 	case ContextControlsSelected:
 		return "context.controls"
+	case LoopsChanged:
+		return "loops.changed"
 	default:
 		return ""
 	}
@@ -343,6 +345,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &SessionBudgetWarning{}
 	case "context.controls":
 		ev = &ContextControlsSelected{}
+	case "loops.changed":
+		ev = &LoopsChanged{}
 	default:
 		// Forward-compat: newer writers may emit type strings this build does
 		// not know. Preserve wire form so session round-trips and consumers
@@ -507,6 +511,8 @@ func deref(ev Event) Event {
 	case *SessionBudgetWarning:
 		return *v
 	case *ContextControlsSelected:
+		return *v
+	case *LoopsChanged:
 		return *v
 	default:
 		return ev

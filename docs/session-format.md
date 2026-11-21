@@ -1872,4 +1872,29 @@ Go `ContextControlsSelected`.
 | `excludedKinds` | array of string | yes |
 | `pinnedKinds` | array of string | yes |
 
+#### `loops.changed`
+
+Go `LoopsChanged`.
+
+| Field | Type | omitempty |
+|---|---|---|
+| `sessionId` | string | yes |
+| `turnId` | string | yes |
+| `providerRequestId` | string | yes |
+| `attempt` | number | yes |
+| `parentSessionId` | string | yes |
+| `depth` | number | yes |
+| `reason` | string |  |
+| `loopId` | string | yes |
+| `loops` | array of object |  |
+| `loops[].id` | string |  |
+| `loops[].interval` | string |  |
+| `loops[].intervalMs` | number |  |
+| `loops[].job` | string |  |
+| `loops[].runs` | number |  |
+| `loops[].createdAt` | time |  |
+| `loops[].nextAt` | time |  |
+| `loops[].lastRunAt` | time |  |
+| `loops[].lastError` | string | yes |
+
 <!-- session-format:catalog:end -->

@@ -2,7 +2,7 @@
 
 Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protocol-schema`.
 
-- Protocol version: `1.26.0`
+- Protocol version: `1.27.0`
 - Legacy version when an envelope omits `v`: `1.0.0`
 - JSON Schema: [`schema.json`](schema.json) (`https://raw.githubusercontent.com/jonathanung/strike/main/schemas/protocol/v1/schema.json`)
 - Rust types: `webui/protocol-schema` (crate `protocol-schema`)
@@ -17,7 +17,7 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - **Minor** `protocol.Version` bumps add types or optional fields. **Major** bumps rename, remove, or change meaning. **Patch** bumps do not change encoded JSON.
 - Nil Go slices and maps encode as JSON `null`. Readers treat `null` like an empty list or map.
 
-## Event types (70)
+## Event types (71)
 
 - `admission.decided` → `AdmissionDecided`
 - `agent.contract.timeout` → `AgentContractTimeout`
@@ -46,6 +46,7 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `hook.matched` → `HookMatched`
 - `input.queued` → `InputQueued`
 - `ledger.updated` → `LedgerUpdated`
+- `loops.changed` → `LoopsChanged`
 - `model.fallback` → `ModelFallback`
 - `model.selected` → `ModelSelected`
 - `path.overlap` → `PathOverlap`

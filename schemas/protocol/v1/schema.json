@@ -2879,6 +2879,30 @@
           "additionalProperties": true,
           "properties": {
             "data": {
+              "$ref": "#/$defs/LoopsChanged"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "loops.changed"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
               "$ref": "#/$defs/ModelFallback"
             },
             "time": {
@@ -4681,6 +4705,93 @@
       "required": [
         "code",
         "message"
+      ],
+      "type": "object"
+    },
+    "LoopState": {
+      "additionalProperties": true,
+      "description": "LoopState is one active session /loop on LoopsChanged, the same JSON as a row of GET /v1/sessions/{id}/loops.",
+      "properties": {
+        "createdAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "interval": {
+          "type": "string"
+        },
+        "intervalMs": {
+          "type": "integer"
+        },
+        "job": {
+          "type": "string"
+        },
+        "lastError": {
+          "type": "string"
+        },
+        "lastRunAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "nextAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "runs": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "interval",
+        "intervalMs",
+        "job",
+        "runs",
+        "createdAt",
+        "nextAt"
+      ],
+      "type": "object"
+    },
+    "LoopsChanged": {
+      "additionalProperties": true,
+      "description": "LoopsChanged is the full list of a live session's /loop jobs after one change (start, stop, a firing, a failed firing, session close). It rides the live event stream only and is never persisted as a turn (#1944).",
+      "properties": {
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "loopId": {
+          "type": "string"
+        },
+        "loops": {
+          "items": {
+            "$ref": "#/$defs/LoopState"
+          },
+          "type": "array"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "loops"
       ],
       "type": "object"
     },
@@ -7783,10 +7894,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Forward-compatible Op/Event wire schema generated from pkg/protocol. The root schema is one event envelope: unknown type strings and unknown fields are valid. $defs/KnownEvent lists types this version writes. $defs/KnownOp is fail-closed: unknown op type strings are not valid. required is the writer contract; readers treat missing fields as zero values. See schemas/protocol/v1/COMPAT.md.",
   "title": "Strike event envelope",
-  "x-strike-event-count": 70,
+  "x-strike-event-count": 71,
   "x-strike-legacy-version": "1.0.0",
   "x-strike-op-count": 36,
-  "x-strike-protocol-version": "1.26.0",
+  "x-strike-protocol-version": "1.27.0",
   "x-strike-unknown-event": "valid",
   "x-strike-unknown-field": "ignore",
   "x-strike-unknown-op": "reject"

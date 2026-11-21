@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/pkg/loopspec"
 )
 
@@ -51,6 +52,16 @@ type Loop struct {
 	LastError  string    `json:"lastError,omitempty"`
 }
 
+// Change is one registry change as SetOnChange reports it (#1944).
+type Change struct {
+	// Reason is protocol.LoopsChangedStart, Stop, Fire, Error, or Close.
+	Reason string
+	// LoopID names the loop that changed; empty for StopAll and Close.
+	LoopID string
+	// Loops is the whole active set, read after the change.
+	Loops []Loop
+}
+
 type timer interface{ Stop() bool }
 
 type entry struct {
@@ -66,10 +77,16 @@ type Registry struct {
 	now    func() time.Time
 	after  func(time.Duration, func()) timer
 
-	mu     sync.Mutex
-	seq    int
-	loops  map[string]*entry
-	closed bool
+	mu       sync.Mutex
+	seq      int
+	loops    map[string]*entry
+	closed   bool
+	onChange func(Change)
+
+	// notifyMu serializes onChange calls. Each call reads the list after
+	// taking it, so the last report always carries the newest state even
+	// when two changes race.
+	notifyMu sync.Mutex
 }
 
 // New returns an empty registry that fires through submit.
@@ -82,9 +99,42 @@ func New(submit SubmitFunc) *Registry {
 	}
 }
 
+// SetOnChange installs fn to hear every start, stop, firing, failed firing,
+// and close. fn runs outside the registry lock, one call at a time, so it
+// may call List or block briefly; it must not call Start, Stop, StopAll, or
+// Close.
+func (r *Registry) SetOnChange(fn func(Change)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onChange = fn
+}
+
+// notify reports one change with the list as it stands now. Callers must
+// not hold r.mu.
+func (r *Registry) notify(reason, id string) {
+	r.notifyMu.Lock()
+	defer r.notifyMu.Unlock()
+	r.mu.Lock()
+	fn := r.onChange
+	r.mu.Unlock()
+	if fn == nil {
+		return
+	}
+	fn(Change{Reason: reason, LoopID: id, Loops: r.List()})
+}
+
 // Start parses interval and job with the shared /loop grammar and arms a
 // new loop. Ids are l1, l2, … per registry, never reused.
 func (r *Registry) Start(interval, job string) (Loop, error) {
+	l, err := r.start(interval, job)
+	if err != nil {
+		return Loop{}, err
+	}
+	r.notify(protocol.LoopsChangedStart, l.ID)
+	return l, nil
+}
+
+func (r *Registry) start(interval, job string) (Loop, error) {
 	d, err := loopspec.ParseInterval(interval)
 	if err != nil {
 		return Loop{}, fmt.Errorf("%w: %v", ErrInvalid, err)
@@ -145,22 +195,27 @@ func (r *Registry) Len() int {
 // recalled; no further firings happen.
 func (r *Registry) Stop(id string) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	e, ok := r.loops[id]
 	if !ok {
+		r.mu.Unlock()
 		return ErrNotFound
 	}
 	r.dropLocked(e)
+	r.mu.Unlock()
+	r.notify(protocol.LoopsChangedStop, id)
 	return nil
 }
 
 // StopAll cancels every loop and returns how many were active.
 func (r *Registry) StopAll() int {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	n := len(r.loops)
 	for _, e := range r.loops {
 		r.dropLocked(e)
+	}
+	r.mu.Unlock()
+	if n > 0 {
+		r.notify(protocol.LoopsChangedStop, "")
 	}
 	return n
 }
@@ -172,10 +227,14 @@ func (r *Registry) Close() {
 		return
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	n := len(r.loops)
 	r.closed = true
 	for _, e := range r.loops {
 		r.dropLocked(e)
+	}
+	r.mu.Unlock()
+	if n > 0 {
+		r.notify(protocol.LoopsChangedClose, "")
 	}
 }
 
@@ -210,20 +269,24 @@ func (r *Registry) fire(id string, gen int) {
 	cancel()
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	e, ok = r.loops[id]
 	if !ok || e.gen != gen || r.closed {
+		r.mu.Unlock()
 		return
 	}
 	now := r.now()
 	e.LastRunAt = now
+	reason := protocol.LoopsChangedFire
 	if err != nil {
 		e.LastError = err.Error()
+		reason = protocol.LoopsChangedError
 	} else {
 		e.Runs++
 		e.LastError = ""
 	}
 	r.armLocked(e, now)
+	r.mu.Unlock()
+	r.notify(reason, id)
 }
 
 func idSeq(id string) int {

@@ -76,6 +76,7 @@ func eventPrototypes() []Event {
 		ContextFitWarning{},
 		SessionBudgetWarning{},
 		ContextControlsSelected{},
+		LoopsChanged{},
 	}
 }
 
