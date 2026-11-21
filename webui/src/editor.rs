@@ -4231,7 +4231,7 @@ mod tests {
     }
 
     #[test]
-    fn markdown_fence_keeps_its_language() {
+    fn markdown_fence_language_and_plain_fence() {
         let blocks = markdown_blocks("```rust\nfn main() {}\n```\n\n```\nplain\n```\n");
         match &blocks[0] {
             MdBlock::Code { lang, text } => {
