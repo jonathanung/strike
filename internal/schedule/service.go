@@ -22,6 +22,13 @@ type Hooks struct {
 	Goal          func(id string) (GoalRef, bool, error)
 	Workflow      func(name string) (found, valid bool)
 	Starter       rootstart.Starter
+	// Script runs a script schedule's command with no session (see
+	// docs/design/script-schedules.md). Nil records "script runs
+	// unavailable" on a due script schedule and RunNow returns ErrUnavailable.
+	Script ScriptRunner
+	// Audit receives one record per script run outcome (started, finished,
+	// failed, denied, skipped, missed, error). Nil writes none.
+	Audit func(ScriptAudit)
 }
 
 // Service is the clock. Open reconciles runs that were in flight when the
@@ -34,6 +41,12 @@ type Service struct {
 	mu      sync.Mutex
 	firing  map[string]bool
 	ticking bool
+	// running is the script in-flight set, held for the process lifetime:
+	// an id stays in it from the started record until the outcome is
+	// written. It is what makes a script schedule busy (overlap skip).
+	running   map[string]bool
+	daemonCtx context.Context
+	scripts   sync.WaitGroup
 }
 
 // Open loads the registry in dir. defaultDir is the fingerprint root when
@@ -46,7 +59,7 @@ func Open(dir string, hooks Hooks, defaultDir string) (*Service, error) {
 	if hooks.Fingerprint == nil {
 		hooks.Fingerprint = Fingerprint
 	}
-	return &Service{store: st, hooks: hooks, defaultDir: defaultDir, firing: map[string]bool{}}, nil
+	return &Service{store: st, hooks: hooks, defaultDir: defaultDir, firing: map[string]bool{}, running: map[string]bool{}}, nil
 }
 
 func (s *Service) now() time.Time {
@@ -190,11 +203,16 @@ func (s *Service) SetEnabled(id string, enabled bool) (Schedule, error) {
 }
 
 // RunNow starts one root immediately. Overlap skip while the previous
-// session is still busy returns ErrBusy. The calendar is not moved.
+// session is still busy returns ErrBusy. The calendar is not moved. A
+// script schedule detaches into the daemon context and returns the started
+// run; ErrBusy while its previous run is in flight.
 func (s *Service) RunNow(ctx context.Context, id string) (Run, error) {
 	sch, ok := s.store.Get(id)
 	if !ok {
 		return Run{}, ErrNotFound
+	}
+	if sch.Source == SourceScript {
+		return s.runScriptNow(ctx, sch)
 	}
 	if s.hooks.Starter == nil {
 		return Run{}, ErrUnavailable
@@ -250,6 +268,25 @@ func (s *Service) RunNow(ctx context.Context, id string) (Run, error) {
 	return saved.Runs[0], nil
 }
 
+func (s *Service) runScriptNow(ctx context.Context, sch Schedule) (Run, error) {
+	if s.hooks.Script == nil {
+		return Run{}, ErrUnavailable
+	}
+	in := s.observe(sch)
+	if in.Busy {
+		return Run{}, ErrBusy
+	}
+	res := planRunNow(sch, in)
+	if res.Action != "start" || res.Script == nil {
+		run, err := s.recordScript(sch, res, in.Now)
+		if err != nil {
+			return Run{}, err
+		}
+		return run, fmt.Errorf("%w: %s", ErrInvalid, res.LastError)
+	}
+	return s.startScript(s.scriptContext(ctx), sch, res, in.Now)
+}
+
 // Tick evaluates every schedule once. startup applies the missed-run policy
 // to fires that came due while this process was down.
 func (s *Service) Tick(ctx context.Context, startup bool) {
@@ -270,12 +307,16 @@ func (s *Service) Tick(ctx context.Context, startup bool) {
 	}
 }
 
-// Run is the daemon loop. It returns when ctx is cancelled. A nil starter
-// does not tick: attach-only can still edit the registry.
+// Run is the daemon loop. It returns when ctx is cancelled. With neither a
+// starter nor a script runner it does not tick: attach-only can still edit
+// the registry. Script runs detach into ctx, so cancelling it kills them.
 func (s *Service) Run(ctx context.Context) {
-	if s == nil || s.hooks.Starter == nil {
+	if s == nil || (s.hooks.Starter == nil && s.hooks.Script == nil) {
 		return
 	}
+	s.mu.Lock()
+	s.daemonCtx = ctx
+	s.mu.Unlock()
 	s.Tick(ctx, true)
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
@@ -299,6 +340,15 @@ func (s *Service) tickOne(ctx context.Context, id string, startup bool) {
 	idle := !in.Busy && startedRun(sch)
 	res := planTick(sch, in)
 	if res.Action == "none" && !idle {
+		return
+	}
+	if sch.Source == SourceScript {
+		// Scripts never take the session path; idle is always false here.
+		if res.Action == "start" && res.Script != nil {
+			_, _ = s.startScript(ctx, sch, res, in.Now)
+			return
+		}
+		_, _ = s.recordScript(sch, res, in.Now)
 		return
 	}
 	if res.Action == "start" {
@@ -342,7 +392,10 @@ func (s *Service) tickOne(ctx context.Context, id string, startup bool) {
 
 func (s *Service) observe(sch Schedule) tickInput {
 	in := tickInput{Now: s.now()}
-	if sch.LastSessionID != "" && s.hooks.Busy != nil {
+	if sch.Source == SourceScript {
+		// A script has no session; busy is the in-flight set only.
+		in.Busy = s.scriptRunning(sch.ID)
+	} else if sch.LastSessionID != "" && s.hooks.Busy != nil {
 		in.Busy = s.hooks.Busy(sch.LastSessionID)
 	}
 	if sch.WorkspaceID != "" && s.hooks.WorkspaceMode != nil {
