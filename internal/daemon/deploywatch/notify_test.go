@@ -129,7 +129,7 @@ func TestStartedAfterSettlePostsVerdictAndRecordsErrors(t *testing.T) {
 	if !strings.Contains(cancelled.NotifyError, "PR comment") {
 		t.Fatalf("notify error not recorded: %+v", cancelled)
 	}
-	got, err := svc.Started(context.Background(), w.ID, "sess-2", "")
+	got, err := svc.Started(context.Background(), w.ID, "sess-2", "plan")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestStartedAfterSettlePostsVerdictAndRecordsErrors(t *testing.T) {
 	n.mu.Lock()
 	n.prErr = nil
 	n.mu.Unlock()
-	if _, err := svc.Started(context.Background(), w.ID, "sess-2", ""); err != nil {
+	if _, err := svc.Started(context.Background(), w.ID, "sess-2", "plan"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := svc.Get(w.ID); got.NotifyError != "" {
@@ -154,6 +154,22 @@ func TestStartedAfterSettlePostsVerdictAndRecordsErrors(t *testing.T) {
 	}
 	if _, err := svc.Started(context.Background(), "dw_missing", "s", ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing watch err = %v", err)
+	}
+}
+
+func TestCreateSessionWithoutPostureGetsNoVerdict(t *testing.T) {
+	c := &clock{now: t0}
+	n := &fakeNotifier{}
+	svc := newNotifyService(t, c, n)
+	w, err := svc.Create(Input{Repo: "acme/app", SHA: testSHA, SessionID: "someone-elses", Checks: []CheckSpec{{Kind: KindGitHubChecks}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Cancel(w.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(n.sessions) != 0 {
+		t.Fatalf("verdict posted to an unlinked session: %+v", n.sessions)
 	}
 }
 
