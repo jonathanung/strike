@@ -1708,12 +1708,13 @@ try {
     if (!pop) return false;
     const note = pop.querySelector(".gw-form-note");
     // The panel detail line is the working gateway's live describe
-    // (host · loopback · auth on · host token · grants); the literal
-    // word "Connected" lives in the header pill, not inside .gw-pop.
+    // (host · loopback · auth on · host token · grants); the header
+    // gateway chip is gone (#1590 A6), so connected-ness is read here:
+    // the working gateway's detail never flips to "Could not reach
+    // this daemon".
     const txt = pop.innerText || "";
     return !!note && (note.textContent || "").includes("Could not reach")
-      && txt.includes("loopback") && !txt.includes("Unreachable")
-      && document.body.innerText.includes("Connected");
+      && txt.includes("loopback") && !txt.includes("Could not reach this daemon");
   })()`, "guarded switch keeps the working gateway connected with a form error");
   await evaluate(`document.querySelector(".gw-back")?.click()`);
   await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
