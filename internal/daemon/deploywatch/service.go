@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jonathanung/strike/internal/daemon/rootstart"
 )
 
 var (
@@ -28,18 +30,29 @@ type Config struct {
 	// Notify posts the monitoring plan and the final verdict (#1783). Nil
 	// posts nothing.
 	Notify Notifier
+	// Launcher starts the confirmed fix session (#1784). Nil makes that
+	// handoff unavailable.
+	Launcher rootstart.Launcher
+	// Revert drafts the confirmed revert PR (#1784). Nil makes that handoff
+	// unavailable.
+	Revert *Reverter
 	// Now overrides the clock. Tests use it.
 	Now func() time.Time
 }
 
 // Service owns watch creation, polling, and verdicts.
 type Service struct {
-	store *Store
-	gh    *GitHub
-	http  *http.Client
-	shell *Shell
-	note  Notifier
-	now   func() time.Time
+	store  *Store
+	gh     *GitHub
+	http   *http.Client
+	shell  *Shell
+	note   Notifier
+	launch rootstart.Launcher
+	revert *Reverter
+	now    func() time.Time
+	// handoffMu serializes confirmed handoffs so a double click cannot
+	// start two fix sessions or open two revert PRs.
+	handoffMu sync.Mutex
 	// pollMu serializes polls so a manual poll and the loop cannot race on
 	// the same record.
 	pollMu sync.Mutex
@@ -47,7 +60,7 @@ type Service struct {
 
 // New binds a store to the check backends.
 func New(store *Store, cfg Config) *Service {
-	s := &Service{store: store, gh: cfg.GitHub, http: cfg.HTTP, shell: cfg.Shell, note: cfg.Notify, now: cfg.Now}
+	s := &Service{store: store, gh: cfg.GitHub, http: cfg.HTTP, shell: cfg.Shell, note: cfg.Notify, launch: cfg.Launcher, revert: cfg.Revert, now: cfg.Now}
 	if s.gh == nil {
 		s.gh = &GitHub{}
 	}
