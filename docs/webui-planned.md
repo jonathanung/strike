@@ -464,6 +464,16 @@ events, and the cockpit Debug panel (hypothesis card, instrumentation
 list, reproduce checklist, mobile chip). Bash is not inspected by the
 gate; the permission layer still governs it.
 
+## Container actions (#1584 follow-up)
+
+Settings → Isolation (`GET /v1/container/status`) is read-only: posture
+ladder, engine probe, workspace container (`strike container status`),
+ejected-Dockerfile drift and detected manifests. Not drawn: eject,
+drift fix, and container start/stop/build from the web, and the
+`strike container ls --all` list of every managed container on the engine.
+Host mode stays a first-class posture (#1290); nothing here changes a
+default.
+
 ## Not planned as a copy
 
 Stall is already a real badge when the team roster sets `budget.stall`.

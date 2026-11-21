@@ -16,6 +16,7 @@ mod approvals_ui;
 mod chat_mode;
 mod clipboard;
 mod confirm;
+mod container_panel;
 mod composer_triggers;
 mod diag;
 mod draft_size;
@@ -1091,6 +1092,8 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // Bootstrap capability `container` (#1584): gates Settings → Isolation.
+    let container_capable = RwSignal::new(false);
     // Bootstrap capability `loops` (#1588): session /loop jobs.
     let loops_capable = RwSignal::new(false);
     let loop_rows = RwSignal::new(Vec::<session_loops::SessionLoop>::new());
@@ -1730,6 +1733,7 @@ fn App() -> impl IntoView {
                                 crate::local_issues::set_issues_capable(boot.capabilities.issues);
                                 issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                container_capable.set(boot.capabilities.container);
                                 skills.set(boot.skills);
                                 loops_capable.set(boot.capabilities.loops);
                                 commands.set(if boot.capabilities.loops {
@@ -4826,6 +4830,7 @@ fn App() -> impl IntoView {
                 status=status
                 diag_capable=diag_capable
                 project_init_capable=project_init_capable
+                container_capable=container_capable
                 root=active_root
                 theme=theme_id
                 scheme=scheme_id

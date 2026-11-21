@@ -134,6 +134,10 @@ type capabilities struct {
 	// UpdateCheck is true when GET /v1/update can run the release probe
 	// (settings readable + probe wired). Check-only; never installs (#1583).
 	UpdateCheck bool `json:"updateCheck"`
+	// Container is true when GET /v1/container/status reports the isolation
+	// posture ladder, engine probe, workspace container and Dockerfile drift
+	// (#1584). Read-only; host mode is a first-class posture (#1290).
+	Container bool `json:"container"`
 }
 
 type bootstrapResponse struct {
@@ -169,7 +173,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	// Timeline is host-safe and derived from SessionDir JSONL (always available).
 	// TeamControl shares the live gate: Ops are handled by the same engine path.
 	live := s.hasLive()
-	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live, Attachments: s.opts.Attachments != nil, Notifications: true, SideChat: s.opts.SideChat != nil, Loops: live && !s.opts.ReadOnly}
+	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live, Attachments: s.opts.Attachments != nil, Notifications: true, SideChat: s.opts.SideChat != nil, Loops: live && !s.opts.ReadOnly, Container: s.containerCapable()}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
