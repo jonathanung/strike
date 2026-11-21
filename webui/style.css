@@ -3163,3 +3163,74 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .files-head .hint, .changes-head .hint { margin: 0; }
 /* feature:files-refresh end */
+/* feature:diagnostics begin */
+/* #1404: LSP diagnostics side view + editor error badge. */
+.diag-results {
+  display: grid;
+  gap: var(--space-2);
+}
+.diag-path {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+  font-family: var(--mono, monospace);
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+.diag-count {
+  color: var(--muted);
+}
+.diag-entry {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 var(--space-2);
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--ink);
+  cursor: pointer;
+}
+.diag-entry:hover,
+.diag-entry:focus-visible {
+  background: var(--surface-muted);
+}
+.diag-msg {
+  overflow-wrap: anywhere;
+}
+.diag-meta {
+  grid-column: 2;
+  color: var(--muted);
+  font-family: var(--mono, monospace);
+  font-size: 0.8em;
+  overflow-wrap: anywhere;
+}
+.diag-sev {
+  font-size: 0.75em;
+  text-transform: uppercase;
+  border-left: var(--border-width) solid var(--border-muted);
+  padding-left: var(--space-1);
+  color: var(--muted);
+}
+.diag-error {
+  border-left-color: var(--danger);
+}
+.diag-warning {
+  border-left-color: var(--warning);
+}
+.diag-badge-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-1) var(--space-2) 0;
+}
+.diag-badge {
+  font-size: 0.8em;
+  border: var(--border-width) solid var(--warning);
+  background: none;
+  color: var(--ink);
+  padding: 0 var(--space-2);
+  cursor: pointer;
+}
+/* feature:diagnostics end */
