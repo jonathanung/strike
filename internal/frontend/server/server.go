@@ -450,6 +450,10 @@ func (s *Server) routes() {
 	// Daemon-generated session report artifact (#1444).
 	s.mux.HandleFunc("POST /v1/sessions/{id}/report", s.handleSessionReport)
 	s.mux.HandleFunc("PATCH /v1/sessions/{id}", s.handleSessionRename)
+	// Per-message pins (#1528): mark transcript messages, persisted beside the logs.
+	s.mux.HandleFunc("GET /v1/sessions/{id}/message-pins", s.handleMessagePinsList)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/message-pins", s.handleMessagePinsAdd)
+	s.mux.HandleFunc("DELETE /v1/sessions/{id}/message-pins", s.handleMessagePinsDelete)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.handleSessionDelete)
 	// Session-scoped /loop jobs (#1588): ephemeral, die with the session.
 	s.mux.HandleFunc("GET /v1/sessions/{id}/loops", s.handleSessionLoopsList)

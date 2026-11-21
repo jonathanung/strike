@@ -1095,6 +1095,9 @@ func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 	if s.opts.LiveHub != nil {
 		s.opts.LiveHub.RemoveForSession(id)
 	}
+	// Message pins (#1528) die with their session. Best effort: the
+	// session is already gone, and a stale entry is never shown.
+	_ = removeMessagePins(s.opts.SessionDir, id)
 	w.WriteHeader(http.StatusNoContent)
 }
 

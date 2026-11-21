@@ -62,6 +62,8 @@ pub fn TranscriptPane(
     note: RwSignal<String>,
     handlers: TranscriptHandlers,
     find: RwSignal<FindView>,
+    /// Message pins for the viewed session (#1528).
+    pins: crate::transcript_pins::PinStore,
 ) -> impl IntoView {
     let editing = RwSignal::new(false);
     // Controlled fold open-state (#1441): message id -> open override.
@@ -600,6 +602,7 @@ pub fn TranscriptPane(
                 }
             }}
         </div>
+        <crate::transcript_pins::PinRail store=pins transcript=transcript />
         <div class="sx-stage">
             <div
                 class="transcript sx-transcript"
@@ -667,7 +670,7 @@ pub fn TranscriptPane(
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, r.tail, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, pins, r.pin, r.hits, r.current, r.elapsed, r.usage, r.tail, fold_open, folds)}
                                 }
                             })
                         }
@@ -814,6 +817,8 @@ struct RowData {
     elapsed: Option<String>,
     usage: Option<(String, String)>,
     tail: Option<crate::tool_tail::ToolTail>,
+    /// Anchor, excerpt and time when the message can be pinned (#1528).
+    pin: Option<(message_pins::Anchor, String, f64)>,
 }
 
 fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
@@ -842,6 +847,7 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
         tail: t.tail_for(msg.id).cloned(),
+        pin: t.pin_anchor_at(idx),
     })
 }
 
@@ -1048,6 +1054,8 @@ fn message_view(
     open_file: Callback<(String, u32)>,
     retry: Callback<(String,)>,
     _fork: Callback<(i32,)>,
+    pins: crate::transcript_pins::PinStore,
+    pin: Option<(message_pins::Anchor, String, f64)>,
     find_hits: Vec<crate::transcript_find::TMatch>,
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
@@ -1172,6 +1180,19 @@ fn message_view(
                             crate::clipboard::after_ms(2_000, move || copy_state.set(None));
                         });
                     }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
+                    {pin.map(|(anchor, excerpt, at_ms)| {
+                        let label_anchor = anchor.clone();
+                        let pressed_anchor = anchor.clone();
+                        view! {
+                            <button
+                                type="button"
+                                class="sx-quiet sx-pin"
+                                title="Pin this message to the rail above the transcript"
+                                aria-pressed=move || pins.is_pinned(&pressed_anchor).to_string()
+                                on:click=move |_| pins.toggle(anchor.clone(), excerpt.clone(), at_ms)
+                            >{move || if pins.is_pinned(&label_anchor) { "Unpin" } else { "Pin message" }}</button>
+                        }
+                    })}
                 </span>
             </header>
             {if find_body {

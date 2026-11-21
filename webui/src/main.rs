@@ -51,6 +51,7 @@ mod storage;
 mod tab_title;
 mod task_runner;
 mod transcript_find;
+mod transcript_pins;
 mod usage_audit;
 mod session_delete;
 mod session_restore;
@@ -4173,6 +4174,8 @@ fn App() -> impl IntoView {
     })
     .into();
     let rename_for_palette = apply_title.clone();
+    // Message pins (#1528): daemon-backed, reloaded on session switch.
+    let pin_store = transcript_pins::PinStore::new(base, token, active_root, ux_note);
     let handlers = TranscriptHandlers {
         send: (move |text: String| {
             send_text(text);
@@ -5092,6 +5095,7 @@ fn App() -> impl IntoView {
                         note=ux_note
                         handlers=handlers
                         find=find_view
+                        pins=pin_store
                     />
                     </Show>
                     <ApprovalCards
