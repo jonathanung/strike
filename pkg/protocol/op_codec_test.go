@@ -22,6 +22,7 @@ func TestWrapOpDecodeRoundTrip(t *testing.T) {
 		SetAutonomy{Mode: AutonomyAgent},
 		SetPermissionMode{Mode: PermissionModeYolo},
 		SetFast{Enabled: true},
+		SetVerbosity{Level: VerbosityDetailed},
 		StartWorkflow{Name: "review-fix"},
 		StopWorkflow{},
 		Compact{Strategy: "trim"},

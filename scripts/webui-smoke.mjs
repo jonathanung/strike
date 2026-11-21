@@ -3443,6 +3443,74 @@ try {
     throw new Error(`daemon does not list issue ${smokeIssueId} as closed: ${JSON.stringify(persisted)}`);
   }
 
+  // Dashboards (#1628): a page started from a template renders a measured
+  // block with a daemon value, an unmeasured metric as a dash (never 0),
+  // and an agent-written block with its "agent wrote this" marker.
+  {
+    const dashAuth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const roots = await (await fetch(`http://127.0.0.1:${port}/v1/roots`, { headers: dashAuth })).json();
+    const dashRoot = roots.activeId || (roots.roots && roots.roots[0] && roots.roots[0].id) || "";
+    if (!dashRoot) {
+      throw new Error(`dashboards: no live root to own the page: ${JSON.stringify(roots).slice(0, 200)}`);
+    }
+    const dashNoAuth = await fetch(`http://127.0.0.1:${port}/v1/dashboards?root=${encodeURIComponent(dashRoot)}`);
+    if (dashNoAuth.status !== 401) {
+      throw new Error(`dashboards without token = ${dashNoAuth.status}`);
+    }
+    const made = await fetch(`http://127.0.0.1:${port}/v1/dashboards?root=${encodeURIComponent(dashRoot)}`, {
+      method: "POST",
+      headers: dashAuth,
+      body: JSON.stringify({ template: "project_report", title: "Smoke report" }),
+    });
+    if (made.status !== 201) {
+      throw new Error(`dashboard create = ${made.status} ${await made.text()}`);
+    }
+    const dashPage = await made.json();
+    const total = (dashPage.blocks || []).find((b) => b.metric === "sessions.total");
+    const cost = (dashPage.blocks || []).find((b) => b.metric === "cost.usd");
+    if (!total || !total.measured || typeof total.value !== "number" || !cost || cost.measured || "value" in cost) {
+      throw new Error(`dashboard measured blocks = ${JSON.stringify(dashPage.blocks).slice(0, 400)}`);
+    }
+    await runPalette("Dashboards");
+    await waitFor(
+      "dashboards index lists the new page",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const row = document.querySelector('[data-dashboard="${dashPage.id}"] button');
+          if (row && !document.querySelector('[data-dashboard-page="${dashPage.id}"]')) row.click();
+          return JSON.stringify({ root: !!document.querySelector("#dashboards-root"), row: !!row });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        return { ok: !!(p.root && p.row), ...p };
+      },
+      { timeout: WAIT_MS, interval: 300 },
+    );
+    await waitFor(
+      "dashboard page shows a measured value, a dash for unmeasured cost, and the agent marker",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const page = document.querySelector('[data-dashboard-page="${dashPage.id}"]');
+          if (!page) {
+            document.querySelector('[data-dashboard="${dashPage.id}"] button')?.click();
+            return JSON.stringify({ page: false });
+          }
+          const vals = [...page.querySelectorAll(".dash-value")].map((e) => ({ m: e.dataset.measured, t: e.textContent.trim(), k: e.title }));
+          const agent = page.querySelector('[data-provenance="agent"] .dash-mark');
+          return JSON.stringify({ page: true, vals, mark: agent ? agent.textContent.trim() : "" });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        const vals = p.vals || [];
+        const measured = vals.find((v) => v.k === "sessions.total");
+        const dash = vals.find((v) => v.k === "cost.usd");
+        return {
+          ok: !!(p.page && measured && measured.m === "true" && /^\d+$/.test(measured.t) && dash && dash.m === "false" && dash.t === "\u2014" && p.mark === "agent wrote this"),
+          ...p,
+        };
+      },
+      { timeout: WAIT_MS, interval: 300 },
+    );
+  }
+
   // Ideas inbox (#1323): a producer deposits a suggestion over the authed
   // API, the palette opens the Ideas page, the row renders with its why and
   // evidence, and Dismiss records it daemon-side so the list empties.
@@ -7100,6 +7168,47 @@ try {
     async () => {
       const chip = await evaluate(`document.querySelector('[data-fast-status]')?.textContent || "none"`);
       return { ok: chip === "none", chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+
+  // Response style (#1369): the chip starts at Default, changes only on
+  // the daemon's verbosity.selected, and says it is delivered as a
+  // session instruction while a non-default style is active.
+  await waitFor(
+    "style chip starts at default",
+    async () => {
+      const chip = await evaluate(`document.querySelector('[data-verbosity-status]')?.textContent || ""`);
+      return { ok: chip === "Style · Default", chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const pickStyle = async (id) => {
+    // The chip opens the palette at the style command; pick the choice.
+    await evaluate(`document.querySelector('[data-verbosity-status]')?.click()`);
+    await delay(250);
+    await evaluate(`document.querySelector('[data-choice-id="${id}"]')?.click()`);
+  };
+  await pickStyle("concise");
+  await waitFor(
+    "style chip shows concise via instruction after daemon confirmation",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        chip: document.querySelector('[data-verbosity-status]')?.textContent || "",
+        id: document.querySelector('[data-verbosity-status]')?.getAttribute("data-verbosity-status") || "",
+        title: document.querySelector('[data-verbosity-status]')?.getAttribute("title") || "",
+      })`);
+      const st = JSON.parse(raw || "{}");
+      return { ok: st.chip === "Style · Concise (instruction)" && st.id === "concise" && st.title.includes("session instruction"), ...st };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await pickStyle("default");
+  await waitFor(
+    "style chip back to default",
+    async () => {
+      const chip = await evaluate(`document.querySelector('[data-verbosity-status]')?.textContent || ""`);
+      return { ok: chip === "Style · Default", chip };
     },
     { timeout: STEP_MS, interval: 200 },
   );

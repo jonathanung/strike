@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -299,5 +300,137 @@ func TestWorkspaceTrustRootScoped(t *testing.T) {
 	code, _, _ = trustRequest(t, srv, http.MethodGet, "/v1/workspace/trust?root=nope", "")
 	if code != http.StatusNotFound {
 		t.Fatalf("unknown root = %d, want 404", code)
+	}
+}
+
+// newTrustReloadFixture is a daemon assembled untrusted for the repo, with
+// the given reload hook wired (#1834).
+func newTrustReloadFixture(t *testing.T, readOnly bool, reload func() error) trustFixture {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	repo := writeTrustRepo(t)
+	storePath := filepath.Join(t.TempDir(), "workspace-trust.json")
+	live := NewLive("sess-reload", repo, nil, make(chan protocol.Op))
+	t.Cleanup(live.Close)
+	srv, err := New(Options{
+		SessionDir:              t.TempDir(),
+		Live:                    live,
+		ReadOnly:                readOnly,
+		WorkspaceTrustPath:      storePath,
+		WorkspaceTrustAssembled: &WorkspaceTrustAssembly{Dir: repo, Root: trustCanonical(t, repo), Trusted: false},
+		WorkspaceTrustReload:    reload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return trustFixture{srv: srv, repo: repo, storePath: storePath}
+}
+
+func TestWorkspaceTrustApplyReloadsOnce(t *testing.T) {
+	calls := 0
+	f := newTrustReloadFixture(t, false, func() error { calls++; return nil })
+
+	_, got, _ := trustRequest(t, f.srv, http.MethodGet, "/v1/workspace/trust", "")
+	if got.RestartRequired || got.CanReload {
+		t.Fatalf("before any change: restartRequired=%v canReload=%v", got.RestartRequired, got.CanReload)
+	}
+	// Nothing changed: apply must not bounce the daemon.
+	code, got, raw := trustRequest(t, f.srv, http.MethodPost, "/v1/workspace/trust", `{"action":"apply"}`)
+	if code != http.StatusConflict || calls != 0 || got.Reloading {
+		t.Fatalf("apply with nothing to apply = %d %s calls=%d", code, raw, calls)
+	}
+
+	_, got, _ = trustRequest(t, f.srv, http.MethodPost, "/v1/workspace/trust", `{"action":"grant"}`)
+	if !got.RestartRequired || !got.CanReload {
+		t.Fatalf("after grant: restartRequired=%v canReload=%v", got.RestartRequired, got.CanReload)
+	}
+	if calls != 0 {
+		t.Fatal("grant alone must not reload")
+	}
+	code, got, raw = trustRequest(t, f.srv, http.MethodPost, "/v1/workspace/trust", `{"action":"apply"}`)
+	if code != http.StatusAccepted || !got.Reloading || !got.Trusted || calls != 1 {
+		t.Fatalf("apply = %d %s calls=%d", code, raw, calls)
+	}
+	// A second apply while the first drains is acknowledged, not re-signalled.
+	code, got, raw = trustRequest(t, f.srv, http.MethodPost, "/v1/workspace/trust", `{"action":"apply"}`)
+	if code != http.StatusAccepted || !got.Reloading || calls != 1 {
+		t.Fatalf("second apply = %d %s calls=%d", code, raw, calls)
+	}
+}
+
+func TestWorkspaceTrustApplyRevokeReloads(t *testing.T) {
+	calls := 0
+	f := newTrustReloadFixture(t, false, func() error { calls++; return nil })
+	store, err := workspacetrust.Open(f.storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The daemon was assembled untrusted; a grant then revoke returns to it.
+	if err := store.Trust(f.repo); err != nil {
+		t.Fatal(err)
+	}
+	_, got, _ := trustRequest(t, f.srv, http.MethodPost, "/v1/workspace/trust", `{"action":"revoke"}`)
+	if got.RestartRequired || got.CanReload {
+		t.Fatalf("revoke back to assembled state: restartRequired=%v canReload=%v", got.RestartRequired, got.CanReload)
+	}
+	code, _, raw := trustRequest(t, f.srv, http.MethodPost, "/v1/workspace/trust", `{"action":"apply"}`)
+	if code != http.StatusConflict || calls != 0 {
+		t.Fatalf("apply after revert = %d %s calls=%d", code, raw, calls)
+	}
+}
+
+func TestWorkspaceTrustApplyRefusals(t *testing.T) {
+	cases := []struct {
+		name     string
+		readOnly bool
+		reload   func() error
+		want     int
+	}{
+		{name: "no reload hook", reload: nil, want: http.StatusConflict},
+		{name: "read-only daemon", readOnly: true, reload: func() error { return nil }, want: http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newTrustReloadFixture(t, tc.readOnly, tc.reload)
+			store, err := workspacetrust.Open(f.storePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Trust(f.repo); err != nil {
+				t.Fatal(err)
+			}
+			_, got, _ := trustRequest(t, f.srv, http.MethodGet, "/v1/workspace/trust", "")
+			if !got.RestartRequired || got.CanReload {
+				t.Fatalf("GET: restartRequired=%v canReload=%v, want true/false", got.RestartRequired, got.CanReload)
+			}
+			code, got, raw := trustRequest(t, f.srv, http.MethodPost, "/v1/workspace/trust", `{"action":"apply"}`)
+			if code != tc.want || got.Reloading {
+				t.Fatalf("apply = %d %s, want %d", code, raw, tc.want)
+			}
+		})
+	}
+}
+
+func TestWorkspaceTrustApplyReloadErrorRetries(t *testing.T) {
+	fail := true
+	calls := 0
+	f := newTrustReloadFixture(t, false, func() error {
+		calls++
+		if fail {
+			return errors.New("reload unavailable")
+		}
+		return nil
+	})
+	if _, _, raw := trustRequest(t, f.srv, http.MethodPost, "/v1/workspace/trust", `{"action":"grant"}`); !strings.Contains(raw, `"trusted":true`) {
+		t.Fatalf("grant = %s", raw)
+	}
+	code, got, raw := trustRequest(t, f.srv, http.MethodPost, "/v1/workspace/trust", `{"action":"apply"}`)
+	if code != http.StatusInternalServerError || got.Reloading || !strings.Contains(got.Error, "reload unavailable") {
+		t.Fatalf("failed apply = %d %s", code, raw)
+	}
+	fail = false
+	code, got, raw = trustRequest(t, f.srv, http.MethodPost, "/v1/workspace/trust", `{"action":"apply"}`)
+	if code != http.StatusAccepted || !got.Reloading || calls != 2 {
+		t.Fatalf("retried apply = %d %s calls=%d", code, raw, calls)
 	}
 }

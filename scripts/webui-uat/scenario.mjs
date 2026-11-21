@@ -821,6 +821,26 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
         check(Boolean(closed), "team message composer did not close");
       }
 
+      // #1379: the child row carries a decorative identity disc beside the
+      // status dot; the dot and badge are unchanged.
+      const disc = await page.evaluate(`(() => {
+        const row = [...document.querySelectorAll(".activity-row")].find((el) =>
+          el.innerText.includes(${JSON.stringify(CHILD_NAME)}) || el.innerText.includes(${JSON.stringify(CHILD_OBJECTIVE)}));
+        const d = row && row.querySelector(".task-line .identity-disc");
+        return d ? {
+          text: d.textContent,
+          tone: d.getAttribute("data-tone"),
+          hidden: d.getAttribute("aria-hidden"),
+          dot: Boolean(row.querySelector(".task-line [data-status]")),
+        } : null;
+      })()`);
+      check(Boolean(disc), "child activity row has no identity disc");
+      if (disc) {
+        check(/^[0-5]$/.test(disc.tone || ""), `identity disc tone out of range: ${JSON.stringify(disc)}`);
+        check(disc.hidden === "true", "identity disc is not aria-hidden");
+        check(disc.dot, "status dot missing beside the identity disc");
+      }
+
       // #1381: when the daemon's /v1/team carries delegations, the
       // Activity tab renders them as the Delegations board.
       const teamNow = await fetch(`${baseURL}/v1/team?root=${encodeURIComponent(root)}`).then((r) => r.json());
@@ -900,6 +920,10 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       "switch back to the first session",
     );
     check(Boolean(back), "clicking the other session did not switch");
+    const sessionDiscs = await page.evaluate(
+      `[...document.querySelectorAll(".session-row")].filter((r) => r.querySelector(".identity-disc")).length`,
+    );
+    check(sessionDiscs >= 2, `expected identity discs on at least two session rows, got ${sessionDiscs}`);
     await press("ArrowLeft", 1);
     await delay(500);
     const stillHere = await page.evaluate(

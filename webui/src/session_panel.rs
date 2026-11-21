@@ -1504,6 +1504,14 @@ fn render_rows(
                 let open_main = open_id.clone();
                 let id_attr = id.clone();
                 let archived_row = item.archived;
+                // #1379: sessions hash their id; child rows hash the child
+                // alias so they match the child's activity row and card.
+                let disc_key = if is_session {
+                    id.clone()
+                } else {
+                    crate::identity::child_key(&label, &id)
+                };
+                let disc_name = label.clone();
                 view! {
                     <div class=class role="option" aria-selected=on.to_string() data-session-id=id_attr>
                         {is_session.then(|| {
@@ -1530,6 +1538,7 @@ fn render_rows(
                             <span class="ss-copy">
                                 <span class="ss-top">
                                     {slot.map(|n| view! { <span class="ss-slot">{n.to_string()}</span> })}
+                                    <crate::identity::IdentityDisc ident=disc_key name=disc_name />
                                     <span class="ss-name name">{label}</span>
                                     <span class="ss-time">{when}</span>
                                 </span>
