@@ -4,7 +4,7 @@
 // Unknown event type strings become Event::Unknown.
 // Unknown JSON fields are ignored. Missing fields are defaults.
 // Unknown op type strings return Err.
-// protocol.Version 1.22.0
+// protocol.Version 1.23.0
 
 use std::collections::HashMap;
 
@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "1.22.0";
+pub const PROTOCOL_VERSION: &str = "1.23.0";
 pub const LEGACY_VERSION: &str = "1.0.0";
 
 /// Open string. Known writer values live in the JSON Schema.
@@ -874,6 +874,8 @@ pub struct EngineError {
     pub message: String,
     #[serde(default, rename = "code")]
     pub code: String,
+    #[serde(default, rename = "provider")]
+    pub provider: String,
 }
 
 /// Envelope wraps an Event with a type tag and timestamp for JSONL persistence and replay.
@@ -2594,6 +2596,21 @@ pub struct UserMessage {
     pub images: Vec<ImageAttachment>,
 }
 
+/// VerificationAttempt is one focused rerun in a gate's triage history.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct VerificationAttempt {
+    #[serde(default, rename = "command")]
+    pub command: String,
+    #[serde(default, rename = "passed")]
+    pub passed: bool,
+    #[serde(default, rename = "exitCode")]
+    pub exit_code: i64,
+    #[serde(default, rename = "output")]
+    pub output: String,
+    #[serde(default, rename = "error")]
+    pub error: String,
+}
+
 /// VerificationCheck is one independent gate outcome inside a VerificationReport.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct VerificationCheck {
@@ -2613,6 +2630,8 @@ pub struct VerificationCheck {
     pub error: String,
     #[serde(default, rename = "durationMs")]
     pub duration_ms: i64,
+    #[serde(default, rename = "triage")]
+    pub triage: Option<VerificationTriage>,
 }
 
 /// VerificationCompleted is the harness-owned outcome of independent gates. Report.Claimed vs Report.Verified is the wire distinction between claimed_done and verified_done; model self-report text is never evidence.
@@ -2653,6 +2672,19 @@ pub struct VerificationEnv {
     pub finished_at: String,
 }
 
+/// VerificationFailure is one failing Go package parsed from gate output.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct VerificationFailure {
+    #[serde(default, rename = "package")]
+    pub package: String,
+    #[serde(default, rename = "dir")]
+    pub dir: String,
+    #[serde(default, rename = "tests", deserialize_with = "null_as_default")]
+    pub tests: Vec<String>,
+    #[serde(default, rename = "source")]
+    pub source: String,
+}
+
 /// VerificationReport is the harness-owned outcome of independent completion gates. Distinct from CompletionHandoff.Verification (model self-report text): implementer-done is Claimed; harness-verified is Verified/Passed. Present on ChildCompleted when gates were configured at spawn (or when a solo/harness path attaches verification — shared schema with #806).
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct VerificationReport {
@@ -2691,6 +2723,23 @@ pub struct VerificationStarted {
     pub scope: String,
     #[serde(default, rename = "gateCount")]
     pub gate_count: i64,
+}
+
+/// VerificationTriage reports focused reruns for a failed cmd gate (#1178). OriginalOutput keeps the last full-gate failure output even when a later run skipped the full gate because the focused rerun still failed.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct VerificationTriage {
+    #[serde(default, rename = "failures", deserialize_with = "null_as_default")]
+    pub failures: Vec<VerificationFailure>,
+    #[serde(default, rename = "focusedCommand")]
+    pub focused_command: String,
+    #[serde(default, rename = "originalOutput")]
+    pub original_output: String,
+    #[serde(default, rename = "attempts", deserialize_with = "null_as_default")]
+    pub attempts: Vec<VerificationAttempt>,
+    #[serde(default, rename = "fullGateSkipped")]
+    pub full_gate_skipped: bool,
+    #[serde(default, rename = "exhausted")]
+    pub exhausted: bool,
 }
 
 /// WaitResolved is the outcome of a wait subscription. Outcome is matched|timeout|canceled. On matched, Event is the canonical kind and TargetSessionID/Status identify the child; Handoff is set for terminal task.* outcomes when available.

@@ -1,0 +1,179 @@
+/* feature:storage begin */
+.side-tabs { flex-wrap: wrap; }
+.storage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.storage-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+.storage-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  min-width: 0;
+}
+.storage-form label.grow { flex: 1 1 140px; }
+.storage-form input,
+.storage-form textarea {
+  background: var(--ground);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font: inherit;
+}
+.storage-form textarea { min-height: 64px; resize: vertical; }
+.storage-row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--rule);
+}
+.storage-row .link {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  color: var(--ink);
+  border: 0;
+  padding: 0;
+}
+.storage-row .name { display: block; }
+.storage-row .path { display: block; color: var(--muted); font-size: var(--text-sm); }
+.storage-banner {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--acid) 12%, var(--surface));
+}
+.storage-error { color: var(--signal); }
+.storage-path {
+  overflow-wrap: anywhere;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+.storage-preview {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  background: var(--ground);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 8px;
+  font-size: var(--text-sm);
+}
+.storage-detail { display: flex; flex-direction: column; gap: var(--space-2); }
+/* feature:memory-export begin */
+.storage-export { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.storage-export .hint { margin: 0; flex: 1 1 220px; }
+/* feature:memory-export end */
+/* feature:memory-import begin */
+.storage-import { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.storage-import .hint { margin: 0; flex: 1 1 220px; }
+.storage-import-panel,
+.storage-import-danger {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+.storage-import-danger { border-color: var(--signal); }
+.storage-import-panel p { margin: 0; }
+.storage-import-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  min-width: 0;
+}
+.storage-import-field textarea {
+  background: var(--ground);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font: inherit;
+  font-family: var(--mono, ui-monospace, monospace);
+  resize: vertical;
+  min-width: 0;
+}
+.storage-import-preview { display: flex; flex-direction: column; gap: var(--space-2); }
+.storage-import-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.storage-import-actions button.danger {
+  background: var(--signal);
+  color: var(--on-accent);
+  border-color: transparent;
+}
+/* feature:memory-import end */
+@media (max-width: 720px) {
+  .storage-row { flex-wrap: wrap; }
+  .storage-form { flex-direction: column; align-items: stretch; }
+}
+/* feature:memory-search begin */
+.storage-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.storage-search {
+  flex: 1 1 180px;
+  min-width: 0;
+  background: var(--ground);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font: inherit;
+}
+.storage-count { margin: 0; }
+/* feature:memory-search end */
+/* feature:knowledge-filter begin */
+/* Knowledge reuses the .storage-filter / .storage-search / .storage-count
+   rules from the memory-search block above (same file, same idiom —
+   #1469: reuse the input/count idioms #1461 establishes). */
+/* feature:knowledge-filter end */
+/* feature:artifact-detail-actions begin */
+.storage-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+/* feature:artifact-detail-actions end */
+/* feature:storage end */
+/* feature:decision-ledger begin */
+.ledger {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.ledger-row[data-ledger-status="superseded"] .name { color: var(--muted); text-decoration: line-through; }
+.ledger-row[data-ledger-status="invalidated"] .name { color: var(--muted); font-style: italic; }
+.ledger-statement { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+.ledger-link {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--acid);
+  text-decoration: underline;
+  cursor: pointer;
+}
+/* feature:decision-ledger end */

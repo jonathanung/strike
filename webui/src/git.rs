@@ -174,6 +174,56 @@ fn focus_id(id: &str) {
     }
 }
 
+/// One `git stash list` entry from GET /v1/git/stash (#1471). The hash
+/// pins the entry for apply/pop/drop.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct GitStash {
+    index: usize,
+    #[serde(default)]
+    r#ref: String,
+    hash: String,
+    #[serde(default)]
+    message: String,
+    #[serde(default)]
+    date: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct GitStashes {
+    #[serde(default)]
+    stashes: Vec<GitStash>,
+}
+
+/// "Stash changes" is enabled only when there is something git would
+/// stash: tracked changes, or untracked files when opted in (#1471 Q1).
+fn stash_enabled(rows: &[GitRow], include_untracked: bool) -> bool {
+    rows.iter()
+        .any(|row| row.section != "Untracked" || include_untracked)
+}
+
+/// Relative age for a stash row ("just now", "5m ago", "3h ago", "2d ago").
+fn relative_age(then_ms: f64, now_ms: f64) -> String {
+    if !then_ms.is_finite() || !now_ms.is_finite() {
+        return String::new();
+    }
+    let secs = ((now_ms - then_ms) / 1000.0).max(0.0) as u64;
+    match secs {
+        0..=59 => "just now".into(),
+        60..=3599 => format!("{}m ago", secs / 60),
+        3600..=86_399 => format!("{}h ago", secs / 3600),
+        _ => format!("{}d ago", secs / 86_400),
+    }
+}
+
+/// Body for apply/pop/drop: index plus the pinning hash.
+fn stash_body(stash: &GitStash, confirm: Option<&str>) -> serde_json::Value {
+    let mut body = serde_json::json!({"index": stash.index, "hash": stash.hash});
+    if let Some(c) = confirm {
+        body["confirm"] = serde_json::Value::String(c.to_string());
+    }
+    body
+}
+
 pub(crate) fn shortcut_blocked(ev: &web_sys::KeyboardEvent) -> bool {
     let Some(el) = ev
         .target()
@@ -187,6 +237,13 @@ pub(crate) fn shortcut_blocked(ev: &web_sys::KeyboardEvent) -> bool {
     )
 }
 
+fn enter_on_button(ev: &web_sys::KeyboardEvent) -> bool {
+    ev.target()
+        .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+        .map(|el| el.tag_name().eq_ignore_ascii_case("button"))
+        .unwrap_or(false)
+}
+
 fn diff_kind(line: &str) -> &'static str {
     if line.starts_with('+') && !line.starts_with("+++") {
         "add"
@@ -197,8 +254,273 @@ fn diff_kind(line: &str) -> &'static str {
     }
 }
 
+/// One changed path on the branch versus its base (#1450).
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct BranchFile {
+    path: String,
+    #[serde(default)]
+    added: i64,
+    #[serde(default)]
+    deleted: i64,
+    #[serde(default)]
+    binary: bool,
+}
+
+/// GET /v1/git/branch-changes — what this branch contains versus base.
+#[derive(Clone, Debug, Deserialize)]
+struct BranchChanges {
+    #[serde(default)]
+    state: String,
+    #[serde(default)]
+    branch: String,
+    #[serde(default)]
+    base: String,
+    #[serde(default, rename = "baseDetected")]
+    base_detected: bool,
+    #[serde(default, rename = "mergeBase")]
+    merge_base: String,
+    #[serde(default)]
+    commits: Vec<GitCommit>,
+    #[serde(default, rename = "commitsTotal")]
+    commits_total: usize,
+    #[serde(default)]
+    files: Vec<BranchFile>,
+}
+
+/// Honest empty-state text for a non-"ok" branch-changes state (#1450).
+/// `None` means the lists below are the answer.
+fn branch_state_message(state: &str, branch: &str, base: &str) -> Option<String> {
+    match state {
+        "ok" | "" => None,
+        "on-base" => Some(format!("You are on {base} — choose another base to compare {branch} against.")),
+        "no-merge-base" => Some(format!("{branch} and {base} share no history — nothing to compare.")),
+        "detached" => Some("Detached HEAD — check out a branch to see its changes.".into()),
+        "no-commits" => Some("No commits yet.".into()),
+        "choose-base" => Some("No default branch found — choose a base branch.".into()),
+        other => Some(format!("Unknown state: {other}")),
+    }
+}
+
+/// Header line: counts are stated even when the commit list is capped.
+fn branch_summary(c: &BranchChanges) -> String {
+    let commits = if c.commits_total > c.commits.len() {
+        format!("{} commits (showing {})", c.commits_total, c.commits.len())
+    } else {
+        format!("{} commits", c.commits_total)
+    };
+    let files = c.files.len();
+    let mb = short_hash(&c.merge_base);
+    format!("{commits} · {files} files vs {} (merge-base {mb})", c.base)
+}
+
+/// Base picker choices: local branches other than the current one, plus
+/// the base in use when it is not a local branch (e.g. origin/main).
+fn base_options(branches: &[GitBranch], current: &str, base: &str) -> Vec<String> {
+    let mut out: Vec<String> = branches
+        .iter()
+        .filter(|b| b.name != current)
+        .map(|b| b.name.clone())
+        .collect();
+    if !base.is_empty() && base != current && !out.iter().any(|n| n == base) {
+        out.insert(0, base.to_string());
+    }
+    out
+}
+
+fn branch_file_stat(f: &BranchFile) -> String {
+    if f.binary {
+        "binary".into()
+    } else {
+        format!("+{} -{}", f.added, f.deleted)
+    }
+}
+
+/// One changed path in an inspected commit (#1484).
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+struct GitShowFile {
+    path: String,
+    #[serde(default)]
+    added: i64,
+    #[serde(default)]
+    deleted: i64,
+    #[serde(default)]
+    binary: bool,
+}
+
+/// GET /v1/git/show — read-only commit detail (#1484).
+#[derive(Clone, Debug, Deserialize)]
+struct GitShow {
+    hash: String,
+    #[serde(default)]
+    subject: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default)]
+    author: String,
+    #[serde(default)]
+    date: String,
+    #[serde(default)]
+    parents: Vec<String>,
+    #[serde(default)]
+    files: Vec<GitShowFile>,
+    #[serde(default, rename = "filesTotal")]
+    files_total: usize,
+    #[serde(default)]
+    patch: String,
+    #[serde(default)]
+    truncated: bool,
+}
+
+/// Render window shared by the working-tree diff (#1428) and a commit
+/// patch (#1484 Q2): wasm DOM cost, not data, limits the default view.
+const DIFF_RENDER_LINES: usize = 400;
+
+/// Diff/patch lines with add/del/ctx classes, capped at
+/// DIFF_RENDER_LINES unless expanded. One renderer for both surfaces.
+fn diff_lines_view(text: &str, expanded: bool) -> Vec<AnyView> {
+    let limit = if expanded { usize::MAX } else { DIFF_RENDER_LINES };
+    text.lines()
+        .take(limit)
+        .map(|line| {
+            let kind = diff_kind(line);
+            let text = line.to_string();
+            view! { <div class=kind>{text}</div> }.into_any()
+        })
+        .collect()
+}
+
+/// Clicking a log row opens that commit; clicking the open one closes it
+/// (#1484). Returns the hash to load, or `None` to close the detail.
+fn commit_click_target(open: &str, clicked: &str) -> Option<String> {
+    if !open.is_empty() && open == clicked {
+        None
+    } else {
+        Some(clicked.to_string())
+    }
+}
+
+/// Honest notes under a commit detail: merges are diffed against the
+/// first parent, and a daemon-truncated patch says so (#1484).
+fn commit_detail_notes(parents: usize, truncated: bool, shown: usize, total: usize) -> Vec<String> {
+    let mut notes = Vec::new();
+    if parents > 1 {
+        notes.push("Merge commit — changes shown against the first parent.".to_string());
+    }
+    if total > shown {
+        notes.push(format!("Showing {shown} of {total} changed files."));
+    }
+    if truncated {
+        notes.push("Patch truncated by the daemon — showing the first 200 KB.".to_string());
+    }
+    notes
+}
+
+/// "+3 -1" for text files, "binary" for binary ones.
+fn show_file_stat(file: &GitShowFile) -> String {
+    if file.binary {
+        "binary".to_string()
+    } else {
+        format!("+{} -{}", file.added, file.deleted)
+    }
+}
+
 fn short_hash(hash: &str) -> String {
     hash.chars().take(7).collect()
+}
+
+/// Initial Git log page (#1432) and the daemon's hard cap
+/// (`gitLogMax` in internal/frontend/server/git.go).
+const LOG_LIMIT_INITIAL: usize = 30;
+const LOG_LIMIT_MAX: usize = 100;
+
+/// Next log limit to request, or `None` when no More control should
+/// show: a short page (`returned < current`) means history is
+/// exhausted, and at [`LOG_LIMIT_MAX`] the daemon clamps anyway.
+fn next_log_limit(current: usize, returned: usize) -> Option<usize> {
+    if returned < current || current >= LOG_LIMIT_MAX {
+        return None;
+    }
+    Some(LOG_LIMIT_MAX)
+}
+
+/// Honest end-of-log note shown whenever the More control disappears
+/// (#1432 Q2), so a missing button is never ambiguous.
+fn log_end_note(current: usize, returned: usize) -> Option<String> {
+    if returned == 0 || next_log_limit(current, returned).is_some() {
+        return None;
+    }
+    if returned < current {
+        Some(format!("End of history — showing all {returned} commits."))
+    } else {
+        Some(format!("Showing the last {returned} commits."))
+    }
+}
+
+/// Case-insensitive substring match on the full path (#1435 Q1).
+/// An empty/blank query matches everything.
+fn path_matches_query(path: &str, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    query.is_empty() || path.to_lowercase().contains(&query)
+}
+
+/// Original indices of the rows visible under `query`, in row order
+/// (#1435). Cursor, Enter, Stage/Unstage and Discard keep acting on
+/// these original indices, never on visible positions.
+fn filtered_row_indices(rows: &[GitRow], query: &str) -> Vec<usize> {
+    rows.iter()
+        .enumerate()
+        .filter(|(_, row)| path_matches_query(&row.path, query))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// Step from `cursor` by `delta` through the visible (filtered)
+/// original indices. With no query this is the plain clamp over all
+/// rows, preserving today's behaviour exactly.
+fn filtered_cursor_step(
+    rows: &[GitRow],
+    query: &str,
+    cursor: usize,
+    delta: i32,
+) -> Option<usize> {
+    let visible = filtered_row_indices(rows, query);
+    if visible.is_empty() {
+        return None;
+    }
+    // Position of the cursor inside the visible list; if the cursor
+    // sits on a hidden row, start from just before the first visible
+    // row at/after it so Down lands on that row.
+    let pos = visible.iter().position(|&i| i == cursor);
+    let next_pos = match pos {
+        Some(p) => (p as i32 + delta).clamp(0, visible.len() as i32 - 1) as usize,
+        None if delta < 0 => visible
+            .iter()
+            .rposition(|&i| i < cursor)
+            .unwrap_or(0),
+        None => visible
+            .iter()
+            .position(|&i| i > cursor)
+            .unwrap_or(visible.len() - 1),
+    };
+    Some(visible[next_pos])
+}
+
+/// Where the cursor belongs after the filter or the row list changed:
+/// the cursor itself when visible, else the next visible original index
+/// (the last one if none follow). `None` when nothing is visible (#1435).
+fn snap_cursor(rows: &[GitRow], query: &str, cursor: usize) -> Option<usize> {
+    filtered_cursor_step(rows, query, cursor, 0)
+}
+
+/// The row a selected-row action (Stage / Unstage / Commit selected /
+/// Discard) may target: only the cursor row, and only while it is
+/// visible under the filter — never a hidden file (#1435).
+fn selected_row(rows: &[GitRow], query: &str, cursor: usize) -> Option<GitRow> {
+    if filtered_row_indices(rows, query).contains(&cursor) {
+        rows.get(cursor).cloned()
+    } else {
+        None
+    }
 }
 
 fn short_path(path: &str) -> String {
@@ -274,6 +596,19 @@ pub fn GitPanel(
     let rows = RwSignal::new(Vec::<GitRow>::new());
     let branches = RwSignal::new(Vec::<GitBranch>::new());
     let commits = RwSignal::new(Vec::<GitCommit>::new());
+    // #1471: stashes come from the daemon on every load, so terminal-
+    // created stashes appear too.
+    let stashes = RwSignal::new(Vec::<GitStash>::new());
+    let stash_msg = RwSignal::new(String::new());
+    let stash_untracked = RwSignal::new(false);
+    let stash_open = RwSignal::new(String::new());
+    let stash_diff = RwSignal::new(String::new());
+    let stash_diff_truncated = RwSignal::new(false);
+    let stash_epoch = RwSignal::new(LoadEpoch::new());
+    // Stash errors live here, not in `error`: a failed apply/pop reloads
+    // the panel (load() rewrites `error`) and git's conflict text must stay.
+    let stash_note = RwSignal::new(String::new());
+    let stash_diff_loaded = RwSignal::new(false);
     let cursor = RwSignal::new(0usize);
     let open_diff = RwSignal::new(false);
     let diff_text = RwSignal::new(String::new());
@@ -288,13 +623,135 @@ pub fn GitPanel(
     // copy partial rather than complete.
     let diff_truncated = RwSignal::new(false);
     let show_log = RwSignal::new(false);
+    // #1450: branch changes vs base. `bc_base` is the user's pick ("" =
+    // let the daemon detect the default branch).
+    let show_branch = RwSignal::new(false);
+    let bc = RwSignal::new(None::<BranchChanges>);
+    let bc_base = RwSignal::new(String::new());
+    let bc_note = RwSignal::new(String::new());
+    let bc_epoch = RwSignal::new(LoadEpoch::new());
+    // File diffs have their own epoch so a diff click never cancels a
+    // pending base change (and vice versa only via an explicit bump).
+    let bc_diff_epoch = RwSignal::new(LoadEpoch::new());
+    let bc_file = RwSignal::new(String::new());
+    let bc_diff = RwSignal::new(String::new());
+    let bc_diff_truncated = RwSignal::new(false);
+    let bc_diff_expanded = RwSignal::new(false);
+    // #1484: commit detail. `shown_hash` is the row the user opened (set
+    // at click so the row highlights while loading); `shown` its payload.
+    let shown_hash = RwSignal::new(String::new());
+    let shown = RwSignal::new(None::<GitShow>);
+    let show_note = RwSignal::new(String::new());
+    let show_expanded = RwSignal::new(false);
+    let show_epoch = RwSignal::new(LoadEpoch::new());
+    let log_limit = RwSignal::new(LOG_LIMIT_INITIAL);
+    let copied_hash = RwSignal::new(String::new());
+    let file_filter = RwSignal::new(String::new());
     let message = RwSignal::new(String::new());
     let switch_to = RwSignal::new(String::new());
     let load_epoch = RwSignal::new(LoadEpoch::new());
+    // Log-only fetches (Show more commits, #1432) race full loads; the
+    // newest log request wins.
+    let log_epoch = RwSignal::new(LoadEpoch::new());
 
+    // Move the cursor and close a diff that belonged to the old row
+    // (#1435): an open diff must always show the row actions target.
+    let select_row = move |i: usize| {
+        if cursor.get_untracked() == i {
+            return;
+        }
+        cursor.set(i);
+        open_diff.set(false);
+        diff_expanded.set(false);
+        diff_text.set(String::new());
+        diff_truncated.set(false);
+    };
+
+
+    // #1450: fetch branch changes for the chosen (or detected) base.
+    let load_branch_changes = move || {
+        let gen = begin(bc_epoch);
+        // Drop the old comparison and any in-flight file diff: nothing
+        // from the previous base stays clickable while this loads.
+        let _ = begin(bc_diff_epoch);
+        bc.set(None);
+        bc_note.set(String::new());
+        bc_file.set(String::new());
+        bc_diff.set(String::new());
+        let pick = bc_base.get_untracked();
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = if pick.is_empty() {
+                "/v1/git/branch-changes".to_string()
+            } else {
+                format!("/v1/git/branch-changes?base={}", crate::api::js_encode(&pick))
+            };
+            let res = get_json::<BranchChanges>(&b, &t, &path).await;
+            if !bc_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
+            }
+            match res {
+                Ok(body) => bc.set(Some(body)),
+                Err(e) => {
+                    bc.set(None);
+                    bc_note.set(format!("Branch changes: {}", http_message(&e)));
+                }
+            }
+        });
+    };
+    // Cumulative merge-base...HEAD diff of one branch file (#1450).
+    let open_branch_file = move |path: String, against: String| {
+        let gen = begin(bc_diff_epoch);
+        if bc_file.get_untracked() == path {
+            bc_file.set(String::new());
+            bc_diff.set(String::new());
+            return;
+        }
+        bc_file.set(path.clone());
+        bc_diff.set(String::new());
+        bc_diff_truncated.set(false);
+        bc_diff_expanded.set(false);
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let url = format!(
+                "/v1/git/branch-diff?base={}&path={}",
+                crate::api::js_encode(&against),
+                crate::api::js_encode(&path)
+            );
+            let res = get_json::<GitDiff>(&b, &t, &url).await;
+            if !bc_diff_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
+            }
+            match res {
+                Ok(body) => {
+                    bc_diff_truncated.set(body.truncated);
+                    bc_diff.set(body.diff);
+                }
+                Err(e) => bc_note.set(format!("Branch diff: {}", http_message(&e))),
+            }
+        });
+    };
+    let toggle_branch = move || {
+        let on = !show_branch.get_untracked();
+        show_branch.set(on);
+        if on {
+            load_branch_changes();
+        }
+    };
 
     let load = move || {
         let gen = begin(load_epoch);
+        let log_gen = begin(log_epoch);
+        // A refresh (commit, checkout, repo switch) may change history;
+        // drop any open commit detail and its in-flight request (#1484).
+        let _ = begin(show_epoch);
+        shown_hash.set(String::new());
+        shown.set(None);
+        show_note.set(String::new());
+        // A refresh (commit, checkout) can change what the branch holds.
+        if show_branch.get_untracked() {
+            load_branch_changes();
+        }
         // Rows are what Stage / Discard act on. Drop them before the new
         // status arrives so the previous branch's files are not clickable
         // under a checkout that has already moved on.
@@ -380,11 +837,12 @@ pub fn GitPanel(
                             inline_diff: String::new(),
                         });
                     }
-                    let n = list.len();
+                    let snapped =
+                        snap_cursor(&list, &file_filter.get_untracked(), cursor.get_untracked());
                     rows.set(list);
-                    if cursor.get_untracked() >= n {
-                        cursor.set(0);
-                    }
+                    // Rows reorder after Stage etc.; keep the cursor on a
+                    // visible row so actions never hit a hidden file.
+                    select_row(snapped.unwrap_or(0));
                 }
                 Err(e) => {
                     if !live() {
@@ -414,12 +872,33 @@ pub fn GitPanel(
             if !live() {
                 return;
             }
+            let log_path = format!("/v1/git/log?limit={}", log_limit.get_untracked());
             if let Some(body) = outcome::take_ok(
                 &mut err,
                 "Log",
-                get_json::<GitLog>(&b, &t, "/v1/git/log?limit=30").await,
+                get_json::<GitLog>(&b, &t, &log_path).await,
             ) {
-                commits.set(body.commits);
+                if log_epoch.with_untracked(|epoch| epoch.accept(log_gen)) {
+                    commits.set(body.commits);
+                }
+            }
+            if !live() {
+                return;
+            }
+            if let Some(body) = outcome::take_ok(
+                &mut err,
+                "Stashes",
+                get_json::<GitStashes>(&b, &t, "/v1/git/stash").await,
+            ) {
+                // A preview whose stash is gone (popped/dropped here or in
+                // a terminal) closes rather than showing a dead diff.
+                let open = stash_open.get_untracked();
+                if !open.is_empty() && !body.stashes.iter().any(|s| s.hash == open) {
+                    let _ = begin(stash_epoch);
+                    stash_open.set(String::new());
+                    stash_diff.set(String::new());
+                }
+                stashes.set(body.stashes);
             }
             if live() {
                 error.set(err);
@@ -427,12 +906,20 @@ pub fn GitPanel(
         });
     };
 
-    Effect::new(move |_| {
-        let _ = (base.get(), token.get());
+    Effect::new(move |prev: Option<(String, String)>| {
+        let cur = (base.get(), token.get());
+        if prev.as_ref() != Some(&cur) {
+            // Per-repo view state resets when the repo changes
+            // (#1432 Q3, #1435 Q3), not on panel re-activation.
+            log_limit.set(LOG_LIMIT_INITIAL);
+            file_filter.set(String::new());
+            copied_hash.set(String::new());
+        }
         load();
         if active.get() {
             focus_id("git-panel");
         }
+        cur
     });
     Effect::new(move |_| {
         let rows: Vec<(String, bool)> = branches
@@ -450,8 +937,11 @@ pub fn GitPanel(
         }
         // Per-diff expansion (#1428): every (re)load starts capped again.
         diff_expanded.set(false);
-        let rows = rows.get_untracked();
-        let Some(row) = rows.get(cursor.get_untracked()).cloned() else {
+        let Some(row) = selected_row(
+            &rows.get_untracked(),
+            &file_filter.get_untracked(),
+            cursor.get_untracked(),
+        ) else {
             diff_text.set(String::new());
             diff_truncated.set(false);
             return;
@@ -509,16 +999,71 @@ pub fn GitPanel(
     };
 
     let move_cursor = move |delta: i32| {
-        let n = rows.get_untracked().len() as i32;
-        if n == 0 {
+        let all = rows.get_untracked();
+        // Under an active filter, step through visible original
+        // indices only (#1435); unfiltered this is today's clamp.
+        let Some(next) = filtered_cursor_step(
+            &all,
+            &file_filter.get_untracked(),
+            cursor.get_untracked(),
+            delta,
+        ) else {
             return;
-        }
-        let next = (cursor.get_untracked() as i32 + delta).clamp(0, n - 1) as usize;
-        cursor.set(next);
-        open_diff.set(false);
-        diff_expanded.set(false);
-        diff_text.set(String::new());
-        diff_truncated.set(false);
+        };
+        select_row(next);
+    };
+
+    let show_more_log = move |_| {
+        let Some(next) =
+            next_log_limit(log_limit.get_untracked(), commits.get_untracked().len())
+        else {
+            return;
+        };
+        // Fetch only the log: a full load() would blank the changed-file
+        // rows and refetch status/branches just for more history.
+        let gen = begin(log_epoch);
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = format!("/v1/git/log?limit={next}");
+            let res = get_json::<GitLog>(&b, &t, &path).await;
+            if !log_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
+            }
+            match res {
+                // Raise the limit only once the larger page arrived, so a
+                // failed fetch never claims "End of history" (#1432).
+                Ok(body) => {
+                    log_limit.set(next);
+                    commits.set(body.commits);
+                }
+                Err(e) => error.set(format!("Log: {}", http_message(&e))),
+            }
+        });
+    };
+
+    let open_commit = move |hash: String| {
+        let gen = begin(show_epoch);
+        show_expanded.set(false);
+        show_note.set(String::new());
+        shown.set(None);
+        let Some(target) = commit_click_target(&shown_hash.get_untracked(), &hash) else {
+            shown_hash.set(String::new());
+            return;
+        };
+        shown_hash.set(target.clone());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            // Log hashes are hex; no query escaping needed.
+            let path = format!("/v1/git/show?ref={target}");
+            let res = get_json::<GitShow>(&b, &t, &path).await;
+            if !show_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
+            }
+            match res {
+                Ok(body) => shown.set(Some(body)),
+                Err(e) => show_note.set(format!("Commit: {}", http_message(&e))),
+            }
+        });
     };
 
     let open_selected = move || {
@@ -543,6 +1088,12 @@ pub fn GitPanel(
                 move_cursor(-1);
             }
             "Enter" => {
+                // A focused button (log row, file row, action) keeps its
+                // native click; Enter-to-open is for the panel itself
+                // (#1484: Enter on a commit row must open that commit).
+                if enter_on_button(&ev) {
+                    return;
+                }
                 ev.prevent_default();
                 open_selected();
             }
@@ -552,6 +1103,10 @@ pub fn GitPanel(
                 diff_expanded.set(false);
                 diff_text.set(String::new());
                 diff_truncated.set(false);
+            }
+            "b" if !ev.meta_key() && !ev.ctrl_key() && !ev.alt_key() => {
+                ev.prevent_default();
+                toggle_branch();
             }
             "l" if !ev.meta_key() && !ev.ctrl_key() && !ev.alt_key() => {
                 ev.prevent_default();
@@ -581,6 +1136,97 @@ pub fn GitPanel(
         };
     let mutate = move |path: String, body: serde_json::Value, ok: String| {
         mutate_with(path, body, ok, Rc::new(|| {}));
+    };
+
+    // #1471: stash actions. Pop/apply conflicts come back as the daemon's
+    // 409 with git's own words; nothing here resolves or discards.
+    // Stash mutations reload on failure too: a conflicting apply/pop has
+    // still written markers / restored files, and the panel must show it
+    // next to git's own words (#1471).
+    let stash_mutate = move |path: String, body: serde_json::Value, ok: String, on_ok: Rc<dyn Fn()>| {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match post_json_value(&b, &t, &path, body).await {
+                Ok(_) => {
+                    on_ok();
+                    stash_note.set(String::new());
+                    status_line.set(ok);
+                }
+                Err(e) => stash_note.set(http_message(&e)),
+            }
+            load();
+        });
+    };
+    let do_stash = move || {
+        let msg = stash_msg.get_untracked().trim().to_string();
+        let mut body = serde_json::json!({"includeUntracked": stash_untracked.get_untracked()});
+        if !msg.is_empty() {
+            body["message"] = serde_json::Value::String(msg);
+        }
+        stash_mutate(
+            "/v1/git/stash".into(),
+            body,
+            "Stashed changes.".into(),
+            Rc::new(move || stash_msg.set(String::new())),
+        );
+    };
+    let do_stash_apply = move |stash: GitStash, pop: bool| {
+        let (path, ok) = if pop {
+            ("/v1/git/stash/pop", format!("Popped {}.", stash.r#ref))
+        } else {
+            ("/v1/git/stash/apply", format!("Applied {}.", stash.r#ref))
+        };
+        stash_mutate(path.into(), stash_body(&stash, None), ok, Rc::new(|| {}));
+    };
+    let do_stash_drop = move |stash: GitStash| {
+        let label = stash.r#ref.clone();
+        let run = stash.clone();
+        let asked = crate::confirm::ask(
+            crate::confirm::ConfirmRequest {
+                title: format!("Drop {label}?"),
+                body: format!("“{}” is deleted from the stash list. This cannot be undone from the panel.", stash.message),
+                confirm_label: "Drop stash".into(),
+            },
+            Rc::new(move || {
+                stash_mutate(
+                    "/v1/git/stash/drop".into(),
+                    stash_body(&run, Some("drop-stash")),
+                    format!("Dropped {}.", run.r#ref),
+                    Rc::new(|| {}),
+                );
+            }),
+        );
+        if !asked {
+            stash_note.set(crate::confirm::BUSY.into());
+        }
+    };
+    let toggle_stash_preview = move |stash: GitStash| {
+        let gen = begin(stash_epoch);
+        if stash_open.get_untracked() == stash.hash {
+            stash_open.set(String::new());
+            stash_diff.set(String::new());
+            return;
+        }
+        stash_open.set(stash.hash.clone());
+        stash_diff.set(String::new());
+        stash_diff_truncated.set(false);
+        stash_diff_loaded.set(false);
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = format!("/v1/git/stash/diff?index={}&hash={}", stash.index, stash.hash);
+            let res = get_json::<GitDiff>(&b, &t, &path).await;
+            if !stash_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                return;
+            }
+            match res {
+                Ok(body) => {
+                    stash_diff_truncated.set(body.truncated);
+                    stash_diff.set(body.diff);
+                    stash_diff_loaded.set(true);
+                }
+                Err(e) => stash_note.set(http_message(&e)),
+            }
+        });
     };
 
     let do_switch = move |branch: String| {
@@ -635,16 +1281,14 @@ pub fn GitPanel(
     };
     let commit_staged = move |_| do_commit(vec![]);
     let commit_selected = move || {
-        let rows = rows.get();
-        let Some(row) = rows.get(cursor.get()) else {
+        let Some(row) = selected_row(&rows.get(), &file_filter.get(), cursor.get()) else {
             error.set("Select a file first.".into());
             return;
         };
         do_commit(vec![row.path.clone()]);
     };
     let stage_selected = move |_| {
-        let rows = rows.get();
-        let Some(row) = rows.get(cursor.get()) else {
+        let Some(row) = selected_row(&rows.get(), &file_filter.get(), cursor.get()) else {
             error.set("Select a file first.".into());
             return;
         };
@@ -656,8 +1300,9 @@ pub fn GitPanel(
         );
     };
     let unstage_selected = move |_| {
-        let rows = rows.get();
-        let Some(row) = rows.get(cursor.get()).filter(|r| r.staged) else {
+        let Some(row) = selected_row(&rows.get(), &file_filter.get(), cursor.get())
+            .filter(|r| r.staged)
+        else {
             error.set("Select a staged file.".into());
             return;
         };
@@ -696,8 +1341,7 @@ pub fn GitPanel(
         );
     };
     let discard_selected = move || {
-        let rows = rows.get();
-        let Some(row) = rows.get(cursor.get()) else {
+        let Some(row) = selected_row(&rows.get(), &file_filter.get(), cursor.get()) else {
             error.set("Select a file first.".into());
             return;
         };
@@ -774,11 +1418,13 @@ pub fn GitPanel(
     crate::shell::bind(
         "git.discard",
         Rc::new(move |_| {
-            let path = rows
-                .get_untracked()
-                .get(cursor.get_untracked())
-                .map(|row| row.path.clone())
-                .unwrap_or_default();
+            let path = selected_row(
+                &rows.get_untracked(),
+                &file_filter.get_untracked(),
+                cursor.get_untracked(),
+            )
+            .map(|row| row.path)
+            .unwrap_or_default();
             if path.is_empty() {
                 return Err("Select a file first.".into());
             }
@@ -867,7 +1513,113 @@ pub fn GitPanel(
                     let (a, b) = (ahead.get(), behind.get());
                     if a == 0 && b == 0 { String::new() } else { format!("ahead {a} · behind {b}") }
                 }}</span>
+                <button
+                    type="button"
+                    class="secondary git-branch-toggle"
+                    data-git-branch-toggle="true"
+                    aria-pressed=move || show_branch.get().to_string()
+                    on:click=move |_| toggle_branch()
+                >"Branch"</button>
             </div>
+            <Show when=move || show_branch.get()>
+                <section class="branch-changes" data-git-branch-changes="true" aria-label="Branch changes">
+                    {move || {
+                        // While loading, fall back to the head branch and
+                        // the user's pick so the picker never snaps back.
+                        let current = bc.get().map(|c| c.branch).unwrap_or_else(|| branch.get());
+                        let in_use = bc.get().map(|c| c.base).unwrap_or_else(|| bc_base.get());
+                        let options = base_options(&branches.get(), &current, &in_use);
+                        let selected = in_use.clone();
+                        view! {
+                            <label class="branch-base">
+                                <span class="git-meta">"Base"</span>
+                                <select
+                                    class="git-field"
+                                    data-git-branch-base="true"
+                                    aria-label="Base branch"
+                                    on:change=move |ev| {
+                                        bc_base.set(event_target_value(&ev));
+                                        load_branch_changes();
+                                    }
+                                >
+                                    <option value="" selected=in_use.is_empty()>"Choose a base branch"</option>
+                                    {options.into_iter().map(|name| {
+                                        let on = name == selected;
+                                        let label = name.clone();
+                                        view! { <option value=name selected=on>{label}</option> }
+                                    }).collect_view()}
+                                </select>
+                            </label>
+                        }
+                    }}
+                    <Show when=move || !bc_note.get().is_empty()>
+                        <p class="hint" role="alert">{move || bc_note.get()}</p>
+                    </Show>
+                    {move || bc.get().map(|c| {
+                        if let Some(msg) = branch_state_message(&c.state, &c.branch, &c.base) {
+                            return view! { <p class="hint" data-git-branch-state=c.state.clone()>{msg}</p> }.into_any();
+                        }
+                        let summary = branch_summary(&c);
+                        let against = c.base.clone();
+                        let no_commits = c.commits.is_empty();
+                        let no_files = c.files.is_empty();
+                        view! {
+                            <p class="git-meta" data-git-branch-summary="true">{summary}</p>
+                            <h3 class="git-section">"Commits"</h3>
+                            {no_commits.then(|| view! { <p class="hint">"No commits on this branch yet."</p> })}
+                            <ul class="plain">
+                                {c.commits.into_iter().map(|commit| {
+                                    let meta = format!("{} · {} · {}", short_hash(&commit.hash), commit.author, commit.date);
+                                    let full = commit.hash;
+                                    let subject = commit.subject;
+                                    view! {
+                                        <li class="wt-card">
+                                            <span class="name">{subject}</span>
+                                            <span class="path" title=full>{meta}</span>
+                                        </li>
+                                    }
+                                }).collect_view()}
+                            </ul>
+                            <h3 class="git-section">"Files"</h3>
+                            {no_files.then(|| view! { <p class="hint">"No file changes versus the merge-base."</p> })}
+                            {c.files.into_iter().map(|f| {
+                                let stat = branch_file_stat(&f);
+                                let path = f.path.clone();
+                                let path_on = f.path.clone();
+                                let attr = f.path.clone();
+                                let label = f.path;
+                                let against = against.clone();
+                                view! {
+                                    <button
+                                        type="button"
+                                        class="git-file"
+                                        class:on=move || bc_file.get() == path_on
+                                        data-git-branch-file=attr
+                                        on:click=move |_| open_branch_file(path.clone(), against.clone())
+                                    >
+                                        <span class="name">{label}</span>
+                                        <span class="branch-stat">{stat}</span>
+                                    </button>
+                                }
+                            }).collect_view()}
+                        }.into_any()
+                    })}
+                    <Show when=move || !bc_diff.get().is_empty()>
+                        <pre class="git-diff" aria-label="Branch diff" data-git-branch-diff="true">{move || diff_lines_view(&bc_diff.get(), bc_diff_expanded.get())}</pre>
+                        {move || {
+                            let total = bc_diff.get().lines().count();
+                            (total > DIFF_RENDER_LINES && !bc_diff_expanded.get()).then(|| view! {
+                                <button type="button" class="secondary git-diff-expand" on:click=move |_| bc_diff_expanded.set(true)>
+                                    {format!("Show all {total} lines")}
+                                </button>
+                            })
+                        }}
+                        <Show when=move || bc_diff_truncated.get()>
+                            <p class="hint">"Diff truncated by the daemon — showing the first 200 KB."</p>
+                        </Show>
+                    </Show>
+                </section>
+            </Show>
             <Show when=move || !error.get().is_empty()>
                 <div class="notice" role="alert">
                     <span>{move || error.get()}</span>
@@ -880,10 +1632,43 @@ pub fn GitPanel(
                         let hash = short_hash(&c.hash);
                         let subject = c.subject.clone();
                         let meta = format!("{} · {}", c.author, c.date);
+                        let full = c.hash.clone();
+                        let full_open = c.hash.clone();
+                        let full_on = c.hash.clone();
+                        let full_attr = c.hash.clone();
+                        let full_for_click = c.hash.clone();
+                        let full_for_label = c.hash.clone();
                         view! {
                             <li class="wt-card">
-                                <span class="name">{subject}</span>
-                                <span class="path">{hash} " · " {meta}</span>
+                                <button
+                                    type="button"
+                                    class="git-commit"
+                                    data-git-commit=full_attr
+                                    aria-pressed=move || (shown_hash.get() == full_on).to_string()
+                                    on:click=move |_| open_commit(full_open.clone())
+                                >
+                                    <span class="name">{subject}</span>
+                                    <span class="path" title=full>{hash} " · " {meta}</span>
+                                </button>
+                                <button type="button" class="secondary git-copy-hash" data-git-copy-hash=full_for_click.clone() on:click=move |_| {
+                                    // Shared helper awaits the write: "Copied" only
+                                    // once the browser accepted it (#1427).
+                                    let full = full_for_click.clone();
+                                    spawn_local(async move {
+                                        match crate::clipboard::copy_text(&full).await {
+                                            Ok(()) => {
+                                                copied_hash.set(full.clone());
+                                                status_line.set("Copied commit hash.".into());
+                                                crate::clipboard::after_ms(2_000, move || {
+                                                    if copied_hash.try_get_untracked().as_deref() == Some(full.as_str()) {
+                                                        copied_hash.set(String::new());
+                                                    }
+                                                });
+                                            }
+                                            Err(e) => status_line.set(e),
+                                        }
+                                    });
+                                }>{move || if copied_hash.get() == full_for_label { "Copied" } else { "Copy" }}</button>
                             </li>
                         }
                     }).collect_view()}
@@ -891,20 +1676,93 @@ pub fn GitPanel(
                 <Show when=move || commits.get().is_empty()>
                     <p class="hint">"No commits yet."</p>
                 </Show>
+                <Show when=move || next_log_limit(log_limit.get(), commits.get().len()).is_some()>
+                    <div class="git-actions">
+                        <button type="button" class="secondary" data-git-log-more on:click=show_more_log>"Show more commits"</button>
+                    </div>
+                </Show>
+                <Show when=move || log_end_note(log_limit.get(), commits.get().len()).is_some()>
+                    <p class="hint">{move || log_end_note(log_limit.get(), commits.get().len()).unwrap_or_default()}</p>
+                </Show>
+                <Show when=move || !show_note.get().is_empty()>
+                    <p class="hint" role="alert">{move || show_note.get()}</p>
+                </Show>
+                {move || shown.get().map(|c| {
+                    let notes = commit_detail_notes(c.parents.len(), c.truncated, c.files.len(), c.files_total);
+                    let meta = format!("{} · {}", c.author, c.date);
+                    let body = c.body.clone();
+                    let files = c.files.clone();
+                    let no_files = files.is_empty();
+                    let patch = c.patch.clone();
+                    let total = patch.lines().count();
+                    view! {
+                        <section class="git-commit-detail" data-git-commit-detail=c.hash.clone() aria-label="Commit detail">
+                            <h3 class="git-section">{c.subject.clone()}</h3>
+                            <span class="path" title=c.hash.clone()>{c.hash.clone()}</span>
+                            <span class="path">{meta}</span>
+                            {(!body.is_empty()).then(|| view! { <pre class="git-commit-body">{body}</pre> })}
+                            {notes.into_iter().map(|n| view! { <p class="hint">{n}</p> }).collect_view()}
+                            <ul class="plain git-commit-files" aria-label="Changed files">
+                                {files.into_iter().map(|f| {
+                                    let stat = show_file_stat(&f);
+                                    view! {
+                                        <li class="git-file">
+                                            <span class="name">{f.path}</span>
+                                            <span class="git-commit-stat">{stat}</span>
+                                        </li>
+                                    }
+                                }).collect_view()}
+                            </ul>
+                            {no_files.then(|| view! { <p class="hint">"No file changes."</p> })}
+                            <pre class="git-diff" aria-label="Commit patch">{move || diff_lines_view(&patch, show_expanded.get())}</pre>
+                            {move || (total > DIFF_RENDER_LINES && !show_expanded.get()).then(|| view! {
+                                <button type="button" class="secondary git-diff-expand" on:click=move |_| show_expanded.set(true)>
+                                    {format!("Show all {total} lines")}
+                                </button>
+                            })}
+                        </section>
+                    }
+                })}
             </Show>
+            <input class="git-field git-filter" data-git-filter type="text" aria-label="Filter changed files by path" placeholder="Filter changed files by path…" prop:value=move || file_filter.get() on:input=move |ev| {
+                let query = event_target_value(&ev);
+                file_filter.set(query.clone());
+                // Keep the cursor on a visible original index (#1435);
+                // with no match, selected_row() refuses every action.
+                if let Some(i) = snap_cursor(&rows.get_untracked(), &query, cursor.get_untracked()) {
+                    select_row(i);
+                } else {
+                    // Nothing visible: close a diff whose row is hidden.
+                    open_diff.set(false);
+                    diff_expanded.set(false);
+                    diff_text.set(String::new());
+                    diff_truncated.set(false);
+                }
+            }/>
             {move || {
                 let rows = rows.get();
                 let cur = cursor.get();
+                let query = file_filter.get();
+                let filtering = !query.trim().is_empty();
                 let mut views = Vec::new();
                 for section in ["Staged", "Unstaged", "Untracked"] {
-                    let heading = section.to_string();
+                    let total = rows.iter().filter(|row| row.section == section).count();
+                    let matched: Vec<_> = rows.iter().enumerate().filter(|(_, row)| row.section == section && path_matches_query(&row.path, &query)).collect();
+                    let heading = if filtering {
+                        format!("{section} ({} of {total})", matched.len())
+                    } else {
+                        section.to_string()
+                    };
                     views.push(view! { <h3 class="git-section">{heading}</h3> }.into_any());
-                    let matched: Vec<_> = rows.iter().enumerate().filter(|(_, row)| row.section == section).collect();
                     if matched.is_empty() {
-                        let empty = match section {
-                            "Staged" => "No staged files.",
-                            "Unstaged" => "No unstaged changes.",
-                            _ => "No untracked files.",
+                        let empty = if filtering {
+                            "No files match."
+                        } else {
+                            match section {
+                                "Staged" => "No staged files.",
+                                "Unstaged" => "No unstaged changes.",
+                                _ => "No untracked files.",
+                            }
                         };
                         views.push(view! { <p class="hint">{empty}</p> }.into_any());
                         continue;
@@ -937,21 +1795,13 @@ pub fn GitPanel(
                     <div class="git-diff-bar">
                         <button type="button" class="secondary git-copy-diff" disabled=move || !crate::clipboard::diff_copyable(&diff_text.get()) on:click=copy_diff>"Copy diff"</button>
                     </div>
-                    <pre class="git-diff" aria-label="Diff">{move || {
-                        let text = diff_text.get();
-                        // #1428: render-only cap. The full text is already
-                        // client-side; expansion renders every line with the
-                        // same line-kind classes as the capped render.
-                        let limit = if diff_expanded.get() { usize::MAX } else { 400 };
-                        text.lines().take(limit).map(|line| {
-                            let kind = diff_kind(line);
-                            let text = line.to_string();
-                            view! { <div class=kind>{text}</div> }.into_any()
-                        }).collect_view()
-                    }}</pre>
+                    // #1428: render-only cap. The full text is already
+                    // client-side; expansion renders every line with the
+                    // same line-kind classes as the capped render.
+                    <pre class="git-diff" aria-label="Diff">{move || diff_lines_view(&diff_text.get(), diff_expanded.get())}</pre>
                     {move || {
                         let total = diff_text.get().lines().count();
-                        (total > 400 && !diff_expanded.get()).then(|| view! {
+                        (total > DIFF_RENDER_LINES && !diff_expanded.get()).then(|| view! {
                             <button
                                 type="button"
                                 class="secondary git-diff-expand"
@@ -975,6 +1825,85 @@ pub fn GitPanel(
                 <button type="button" class="secondary" data-git-stage-all=true disabled=move || paths_where(&rows.get(), false).is_empty() on:click=stage_all>"Stage all"</button>
                 <button type="button" class="secondary" data-git-unstage-all=true disabled=move || paths_where(&rows.get(), true).is_empty() on:click=unstage_all>"Unstage all"</button>
             </div>
+            <section class="git-stash" data-git-stash="true" aria-label="Stashes">
+                <h3 class="git-section">"Stashes"</h3>
+                <input
+                    class="git-field"
+                    type="text"
+                    data-git-stash-message="true"
+                    aria-label="Stash message (optional)"
+                    placeholder="Stash message (optional)"
+                    prop:value=move || stash_msg.get()
+                    on:input=move |ev| stash_msg.set(event_target_value(&ev))
+                />
+                <div class="git-actions">
+                    <label class="git-stash-untracked">
+                        <input
+                            type="checkbox"
+                            data-git-stash-untracked="true"
+                            prop:checked=move || stash_untracked.get()
+                            on:change=move |ev| stash_untracked.set(event_target_checked(&ev))
+                        />
+                        "Include untracked"
+                    </label>
+                    <button
+                        type="button"
+                        class="secondary"
+                        data-git-stash-push="true"
+                        disabled=move || !stash_enabled(&rows.get(), stash_untracked.get())
+                        on:click=move |_| do_stash()
+                    >"Stash changes"</button>
+                </div>
+                <Show when=move || !stash_note.get().is_empty()>
+                    <p class="hint" role="alert" data-git-stash-note="true">{move || stash_note.get()}</p>
+                </Show>
+                <Show when=move || stashes.get().is_empty()>
+                    <p class="hint">"No stashes."</p>
+                </Show>
+                <ul class="plain">
+                    {move || {
+                        let now = js_sys::Date::now();
+                        stashes.get().into_iter().map(|stash| {
+                            let age = relative_age(js_sys::Date::parse(&stash.date), now);
+                            let meta = format!("{} · {}", stash.r#ref, age);
+                            let message = stash.message.clone();
+                            let open_hash = stash.hash.clone();
+                            let row_hash = stash.hash.clone();
+                            let (s1, s2, s3, s4) = (stash.clone(), stash.clone(), stash.clone(), stash);
+                            view! {
+                                <li class="wt-card git-stash-row" data-git-stash-row=row_hash>
+                                    <span class="name">{message}</span>
+                                    <span class="path">{meta}</span>
+                                    <div class="git-actions">
+                                        <button
+                                            type="button"
+                                            class="secondary"
+                                            aria-pressed=move || (stash_open.get() == open_hash).to_string()
+                                            on:click=move |_| toggle_stash_preview(s1.clone())
+                                        >"Preview"</button>
+                                        <button type="button" class="secondary" data-git-stash-apply="true" on:click=move |_| do_stash_apply(s2.clone(), false)>"Apply"</button>
+                                        <button type="button" class="secondary" title="Apply, then drop the stash if it applied cleanly" on:click=move |_| do_stash_apply(s3.clone(), true)>"Pop (apply + drop)"</button>
+                                        <button type="button" class="secondary" on:click=move |_| do_stash_drop(s4.clone())>"Drop…"</button>
+                                    </div>
+                                </li>
+                            }
+                        }).collect_view()
+                    }}
+                </ul>
+                <Show when=move || !stash_open.get().is_empty() && stash_diff_loaded.get() && stash_diff.get().is_empty()>
+                    <p class="hint">"This stash has no changes to preview."</p>
+                </Show>
+                <Show when=move || !stash_diff.get().is_empty()>
+                    <pre class="git-diff" aria-label="Stash diff" data-git-stash-diff="true">{move || diff_lines_view(&stash_diff.get(), false)}</pre>
+                    {move || {
+                        let total = stash_diff.get().lines().count();
+                        (total > DIFF_RENDER_LINES).then(|| view! { <p class="hint">{format!("Showing the first {DIFF_RENDER_LINES} of {total} lines.")}</p> })
+                    }}
+                    <Show when=move || stash_diff_truncated.get()>
+                        <p class="hint">"Diff truncated by the daemon — showing the first 200 KB."</p>
+                    </Show>
+                </Show>
+            </section>
         </div>
     }
 }
@@ -1210,6 +2139,176 @@ pub fn WorktreePanel(
 mod tests {
     use super::*;
 
+    fn stash_row(section: &str) -> GitRow {
+        GitRow {
+            section: section.into(),
+            path: "p".into(),
+            status: String::new(),
+            added: 0,
+            deleted: 0,
+            staged: section == "Staged",
+            inline_diff: String::new(),
+        }
+    }
+
+    #[test]
+    fn stash_enabled_only_when_git_would_stash_something() {
+        assert!(!stash_enabled(&[], false));
+        assert!(!stash_enabled(&[], true));
+        assert!(stash_enabled(&[stash_row("Unstaged")], false));
+        assert!(stash_enabled(&[stash_row("Staged")], false));
+        // Untracked-only trees need the opt-in (#1471 Q1).
+        assert!(!stash_enabled(&[stash_row("Untracked")], false));
+        assert!(stash_enabled(&[stash_row("Untracked")], true));
+    }
+
+    #[test]
+    fn relative_age_buckets() {
+        let now = 1_000_000_000_000.0;
+        assert_eq!(relative_age(now - 5_000.0, now), "just now");
+        assert_eq!(relative_age(now - 5.0 * 60_000.0, now), "5m ago");
+        assert_eq!(relative_age(now - 3.0 * 3_600_000.0, now), "3h ago");
+        assert_eq!(relative_age(now - 2.0 * 86_400_000.0, now), "2d ago");
+        // Clock skew never shows a negative age; unparseable dates are blank.
+        assert_eq!(relative_age(now + 60_000.0, now), "just now");
+        assert_eq!(relative_age(f64::NAN, now), "");
+    }
+
+    #[test]
+    fn stash_body_pins_hash_and_confirms_only_drop() {
+        let stash = GitStash {
+            index: 2,
+            r#ref: "stash@{2}".into(),
+            hash: "abcdef1234567".into(),
+            message: "m".into(),
+            date: String::new(),
+        };
+        let apply = stash_body(&stash, None);
+        assert_eq!(apply["index"], 2);
+        assert_eq!(apply["hash"], "abcdef1234567");
+        assert!(apply.get("confirm").is_none());
+        assert_eq!(stash_body(&stash, Some("drop-stash"))["confirm"], "drop-stash");
+    }
+
+    #[test]
+    fn stash_list_payload_decodes_daemon_shape() {
+        let raw = r#"{"stashes":[{"index":0,"ref":"stash@{0}","hash":"h1","message":"WIP on main: x","date":"2026-01-01T00:00:00Z"}]}"#;
+        let got: GitStashes = serde_json::from_str(raw).expect("decode");
+        assert_eq!(got.stashes[0].r#ref, "stash@{0}");
+        assert_eq!(got.stashes[0].message, "WIP on main: x");
+    }
+
+    fn branch(name: &str, current: bool) -> GitBranch {
+        GitBranch { name: name.into(), current }
+    }
+
+    fn changes(total: usize, shown: usize, files: usize) -> BranchChanges {
+        BranchChanges {
+            state: "ok".into(),
+            branch: "feature".into(),
+            base: "main".into(),
+            base_detected: true,
+            merge_base: "0123456789abcdef".into(),
+            commits: (0..shown)
+                .map(|i| GitCommit {
+                    hash: format!("{i:040}"),
+                    subject: "s".into(),
+                    author: "a".into(),
+                    date: "d".into(),
+                })
+                .collect(),
+            commits_total: total,
+            files: (0..files)
+                .map(|i| BranchFile { path: format!("f{i}"), added: 1, deleted: 0, binary: false })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn branch_state_messages_name_every_empty_state() {
+        assert_eq!(branch_state_message("ok", "feature", "main"), None);
+        for state in ["on-base", "no-merge-base", "detached", "no-commits", "choose-base", "weird"] {
+            let msg = branch_state_message(state, "feature", "main").expect(state);
+            assert!(!msg.is_empty(), "{state}");
+        }
+        assert!(branch_state_message("on-base", "main", "main").unwrap().contains("main"));
+        assert!(branch_state_message("choose-base", "x", "").unwrap().contains("choose a base"));
+    }
+
+    #[test]
+    fn branch_summary_states_counts_even_when_capped() {
+        assert_eq!(
+            branch_summary(&changes(2, 2, 3)),
+            "2 commits · 3 files vs main (merge-base 0123456)"
+        );
+        assert_eq!(
+            branch_summary(&changes(120, 30, 1)),
+            "120 commits (showing 30) · 1 files vs main (merge-base 0123456)"
+        );
+    }
+
+    #[test]
+    fn base_options_exclude_current_and_include_remote_base() {
+        let branches = vec![branch("main", false), branch("feature", true), branch("dev", false)];
+        assert_eq!(base_options(&branches, "feature", "main"), vec!["main", "dev"]);
+        assert_eq!(
+            base_options(&branches, "feature", "origin/main"),
+            vec!["origin/main", "main", "dev"]
+        );
+        assert_eq!(base_options(&branches, "feature", ""), vec!["main", "dev"]);
+    }
+
+    #[test]
+    fn branch_changes_payload_decodes_daemon_shape() {
+        let raw = r#"{"state":"ok","branch":"feature","base":"main","baseDetected":true,"mergeBase":"abc","commits":[{"hash":"h","subject":"s","author":"a","date":"d"}],"commitsTotal":5,"files":[{"path":"x","added":1,"deleted":2,"binary":false}]}"#;
+        let got: BranchChanges = serde_json::from_str(raw).expect("decode");
+        assert!(got.base_detected);
+        assert_eq!(got.commits_total, 5);
+        assert_eq!(got.files[0].deleted, 2);
+        assert_eq!(branch_file_stat(&got.files[0]), "+1 -2");
+        let bin = BranchFile { path: "p".into(), added: 0, deleted: 0, binary: true };
+        assert_eq!(branch_file_stat(&bin), "binary");
+    }
+
+    #[test]
+    fn commit_click_opens_then_toggles_closed() {
+        assert_eq!(commit_click_target("", "abc").as_deref(), Some("abc"));
+        assert_eq!(commit_click_target("abc", "abc"), None);
+        // Choosing another commit replaces the open one.
+        assert_eq!(commit_click_target("abc", "def").as_deref(), Some("def"));
+    }
+
+    #[test]
+    fn commit_detail_notes_are_honest_about_merges_and_truncation() {
+        assert!(commit_detail_notes(1, false, 3, 3).is_empty());
+        assert!(commit_detail_notes(0, false, 0, 0).is_empty());
+        let merge = commit_detail_notes(2, false, 1, 1);
+        assert_eq!(merge.len(), 1);
+        assert!(merge[0].contains("first parent"));
+        let all = commit_detail_notes(2, true, 500, 1640);
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[1], "Showing 500 of 1640 changed files.");
+        assert!(all[2].contains("truncated"));
+    }
+
+    #[test]
+    fn show_file_stat_labels_binary_and_text() {
+        let text = GitShowFile { path: "a.rs".into(), added: 3, deleted: 1, binary: false };
+        assert_eq!(show_file_stat(&text), "+3 -1");
+        let bin = GitShowFile { path: "a.png".into(), added: 0, deleted: 0, binary: true };
+        assert_eq!(show_file_stat(&bin), "binary");
+    }
+
+    #[test]
+    fn git_show_payload_decodes_daemon_shape() {
+        let raw = r#"{"hash":"0123456789abcdef0123456789abcdef01234567","subject":"s","body":"b","author":"A","date":"2026-01-01T00:00:00Z","parents":["p1","p2"],"files":[{"path":"x.rs","added":1,"deleted":2,"binary":false}],"patch":"+x","truncated":true}"#;
+        let got: GitShow = serde_json::from_str(raw).expect("decode");
+        assert_eq!(got.parents.len(), 2);
+        assert_eq!(got.files[0].path, "x.rs");
+        assert!(got.truncated);
+        assert_eq!(got.body, "b");
+    }
+
     fn row(section: &str, path: &str, staged: bool) -> GitRow {
         GitRow {
             section: section.into(),
@@ -1220,6 +2319,121 @@ mod tests {
             staged,
             inline_diff: String::new(),
         }
+    }
+
+    fn sample_rows() -> Vec<GitRow> {
+        vec![
+            row("Unstaged", "webui/src/git.rs", false),
+            row("Unstaged", "README.md", false),
+            row("Staged", "webui/src/main.rs", true),
+            row("Untracked", "docs/guide.md", false),
+        ]
+    }
+
+    #[test]
+    fn next_log_limit_full_page_below_max_steps_to_max() {
+        assert_eq!(next_log_limit(30, 30), Some(LOG_LIMIT_MAX));
+    }
+
+    #[test]
+    fn next_log_limit_at_max_is_none() {
+        assert_eq!(next_log_limit(LOG_LIMIT_MAX, LOG_LIMIT_MAX), None);
+    }
+
+    #[test]
+    fn next_log_limit_short_page_is_none() {
+        assert_eq!(next_log_limit(30, 12), None);
+        assert_eq!(next_log_limit(LOG_LIMIT_MAX, 87), None);
+    }
+
+    #[test]
+    fn log_end_note_states_ceiling_and_short_page() {
+        assert_eq!(log_end_note(30, 30), None);
+        assert_eq!(
+            log_end_note(LOG_LIMIT_MAX, LOG_LIMIT_MAX).as_deref(),
+            Some("Showing the last 100 commits.")
+        );
+        assert_eq!(
+            log_end_note(30, 12).as_deref(),
+            Some("End of history — showing all 12 commits.")
+        );
+        assert_eq!(log_end_note(30, 0), None);
+    }
+
+    #[test]
+    fn path_filter_is_case_insensitive_full_path_substring() {
+        assert!(path_matches_query("WebUI/src/Git.rs", "webui/"));
+        assert!(path_matches_query("webui/src/git.rs", "GIT.RS"));
+        assert!(path_matches_query("anything", "  "));
+        assert!(!path_matches_query("README.md", "webui/"));
+    }
+
+    #[test]
+    fn filtered_indices_preserve_original_indices() {
+        let rows = sample_rows();
+        // The load-bearing #1435 property: staging from the filtered
+        // list must act on original index 2, not visible position 0.
+        assert_eq!(filtered_row_indices(&rows, "main.rs"), vec![2]);
+        assert_eq!(filtered_row_indices(&rows, "webui/"), vec![0, 2]);
+        assert_eq!(filtered_row_indices(&rows, ""), vec![0, 1, 2, 3]);
+        assert!(filtered_row_indices(&rows, "zz-none").is_empty());
+    }
+
+    #[test]
+    fn filtered_cursor_steps_through_visible_original_indices() {
+        let rows = sample_rows();
+        assert_eq!(filtered_cursor_step(&rows, "webui/", 0, 1), Some(2));
+        assert_eq!(filtered_cursor_step(&rows, "webui/", 2, 1), Some(2));
+        assert_eq!(filtered_cursor_step(&rows, "webui/", 2, -1), Some(0));
+        // Cursor on a hidden row: Down lands on the next visible row.
+        assert_eq!(filtered_cursor_step(&rows, "webui/", 1, 1), Some(2));
+        // Cursor past the last visible row clamps, never wraps to 0.
+        assert_eq!(filtered_cursor_step(&rows, "webui/", 3, 1), Some(2));
+        assert_eq!(filtered_cursor_step(&rows, "webui/", 3, -1), Some(2));
+        assert_eq!(filtered_cursor_step(&rows, "zz-none", 0, 1), None);
+        // Unfiltered behaviour is the old clamp.
+        assert_eq!(filtered_cursor_step(&rows, "", 0, 1), Some(1));
+        assert_eq!(filtered_cursor_step(&rows, "", 3, 1), Some(3));
+    }
+
+    #[test]
+    fn selected_row_refuses_hidden_and_no_match_cursor() {
+        let rows = sample_rows();
+        // No match: nothing visible, so no action target.
+        assert!(selected_row(&rows, "zz", 1).is_none());
+        assert_eq!(snap_cursor(&rows, "zz", 1), None);
+        // A cursor on a hidden row is not a target either.
+        assert!(selected_row(&rows, "webui/", 1).is_none());
+        assert_eq!(
+            selected_row(&rows, "webui/", 2).map(|r| r.path).as_deref(),
+            Some("webui/src/main.rs")
+        );
+        assert_eq!(
+            selected_row(&rows, "", 1).map(|r| r.path).as_deref(),
+            Some("README.md")
+        );
+    }
+
+    #[test]
+    fn snap_cursor_follows_reordered_rows_to_a_visible_row() {
+        // After Stage, src/a.rs moves to index 0 and README.md to 1;
+        // a stale cursor of 1 must snap off hidden README.md.
+        let rows = vec![
+            row("Staged", "src/a.rs", true),
+            row("Unstaged", "README.md", false),
+        ];
+        assert_eq!(snap_cursor(&rows, "src", 1), Some(0));
+        assert_eq!(snap_cursor(&rows, "src", 0), Some(0));
+        assert_eq!(snap_cursor(&rows, "", 1), Some(1));
+        // A hidden cursor before a visible row snaps forward.
+        assert_eq!(snap_cursor(&sample_rows(), "webui/", 1), Some(2));
+    }
+
+    #[test]
+    fn short_hash_still_seven_chars_full_hash_untouched() {
+        let full = "0123456789abcdef0123456789abcdef01234567";
+        assert_eq!(short_hash(full), "0123456");
+        assert_eq!(full.len(), 40);
     }
 
     #[test]

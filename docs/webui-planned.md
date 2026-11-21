@@ -68,6 +68,10 @@ arm the next future slot); `missed: once` catches up a single run. A
 heartbeat records a quiet baseline and does not start a session until the
 workspace fingerprint changes. The first observation is that baseline.
 
+A fourth source, `script` (a shell command that fires with no session), is
+designed in [design/script-schedules.md](design/script-schedules.md) (#1614)
+and not shipped.
+
 The goal loop (`POST /v1/goals/{id}/run`) is still the evaluate-only
 harness. A scheduled goal starts a root session whose prompt is the goal
 text; it does not call that loop.
@@ -293,6 +297,16 @@ and stays on loopback unless `strike serve --terminal-remote` is set with
 board that is not the Activity list are not in the client. Activity is the
 subagent list. Changes is the diff list. Composer `!` already runs one
 command through the daemon permission model.
+
+## Customize
+
+Customize (`/v1/customize`) lists skills, agents, MCP servers, plugins, hooks,
+rules files, and the roster stall/handoff gate. Editable writes are strike-native
+files only, after a preview diff and a confirm. MCP env and header values are
+masked. Permission rules are shown and preserved; editing them is a different
+page. Plugin install and removal stay on `/v1/plugins`. The composer expands
+`$skill` through the daemon (see Composer triggers); this page is where those
+files are inspected and edited.
 
 ## Composer triggers
 

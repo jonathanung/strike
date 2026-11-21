@@ -4,7 +4,8 @@
 //! read-only drawer. Goals and Autopilot live in `goals`. Apps is the
 //! queue surface in `apps`. Triggers are a separate page. Schedule is
 //! the clock (`schedule` module). The task runner is the Tasks view in
-//! `task_runner`.
+//! `task_runner`. Customize (skills, agents, MCP, hooks, rules) lives
+//! in `customize`.
 
 mod api;
 mod appearance;
@@ -20,18 +21,24 @@ mod draft_size;
 mod editor;
 mod load_epoch;
 mod localfiles;
+mod customize;
 mod gateway;
 mod gateway_qr;
 mod git;
 mod goals;
 mod mobile;
 mod providers;
+mod rule_author;
+mod sandbox_explain;
 mod schedule;
+mod scheduler_presets;
 mod model;
 mod notify;
 mod outcome;
+mod project_init;
 mod onboarding;
 mod park;
+mod permissions_explain;
 mod steer_queue;
 mod model_menu;
 mod model_menu_view;
@@ -54,6 +61,7 @@ mod transcript;
 mod transcript_view;
 mod triggers;
 mod turn_elapsed;
+mod turn_usage;
 mod workspaces;
 use crate::shell::icon;
 
@@ -101,6 +109,7 @@ use crate::workspaces::WorkspacePicker;
 use crate::storage::StoragePanel;
 use crate::editor::DocumentPane;
 use crate::mobile::PhoneNav;
+use crate::customize::CustomizePane;
 use crate::side_chat::SideChatPanel;
 
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
@@ -749,6 +758,7 @@ fn note_live_title(
 fn transcript_matches(
     list: &[ChatLine],
     query: &str,
+    opts: crate::editor::FindOptions,
 ) -> Vec<transcript_find::TMatch> {
     let rows: Vec<transcript_find::SearchLine<'_>> = list
         .iter()
@@ -758,7 +768,7 @@ fn transcript_matches(
             detail: &line.detail,
         })
         .collect();
-    transcript_find::matches_for_lines(&rows, query)
+    transcript_find::matches_for_lines(&rows, query, opts)
 }
 
 #[cfg(test)]
@@ -784,7 +794,11 @@ mod transcript_matches_tests {
         let body = format!("{}needle", "log line\n".repeat(40));
         assert!(body.chars().count() > 240);
         let list = vec![line("tool", "bash", &body, "")];
-        let hits = transcript_matches(&list, "needle");
+        let hits = transcript_matches(
+            &list,
+            "needle",
+            crate::editor::FindOptions::default(),
+        );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].line, 0);
         assert_eq!(hits[0].field, transcript_find::Field::Body);
@@ -799,7 +813,11 @@ mod transcript_matches_tests {
             "{\"path\": \"/tmp/needle.json\"}",
             "",
         )];
-        let hits = transcript_matches(&list, "needle.json");
+        let hits = transcript_matches(
+            &list,
+            "needle.json",
+            crate::editor::FindOptions::default(),
+        );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].field, transcript_find::Field::Body);
     }
@@ -811,7 +829,11 @@ mod transcript_matches_tests {
             line("tool", "bash", "tests ran", "FAIL needle-test panicked"),
             line("strike", "Strike", "done", ""),
         ];
-        let hits = transcript_matches(&list, "needle-test");
+        let hits = transcript_matches(
+            &list,
+            "needle-test",
+            crate::editor::FindOptions::default(),
+        );
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].line, 1);
         assert_eq!(hits[0].field, transcript_find::Field::Detail);
@@ -824,7 +846,10 @@ mod transcript_matches_tests {
             line("tool", "bash", "{\"a\": 1}", "long folded output"),
             line("you", "You", "hello", ""),
         ];
-        assert!(transcript_matches(&list, "not-present").is_empty());
+        assert!(
+            transcript_matches(&list, "not-present", crate::editor::FindOptions::default())
+                .is_empty()
+        );
         assert_eq!(
             transcript_find::count_label("not-present", 0, 0),
             "No matches"
@@ -1056,6 +1081,10 @@ fn App() -> impl IntoView {
     let status = RwSignal::new("connecting…".to_string());
     // Bootstrap capability `diag` (#1489): gates Download diagnostics.
     let diag_capable = RwSignal::new(false);
+    // Bootstrap capability `ledger` (#1485): gates the Decisions tab.
+    let ledger_capable = RwSignal::new(false);
+    // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
+    let project_init_capable = RwSignal::new(false);
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -1149,6 +1178,13 @@ fn App() -> impl IntoView {
     let context_used = RwSignal::new(0i64);
     let context_limit = RwSignal::new(0i64);
     let context_fit = RwSignal::new(String::new());
+    // Compact now (#1567): true from sending the `compact` op until the
+    // daemon's own `compaction.completed` event lands — the meter only
+    // ever moves from daemon events, never optimistically.
+    let compacting = RwSignal::new(false);
+    // Daemon refusal text carried from the engine.error arm to the end
+    // of the same envelope handler (#1567).
+    let compact_refused = RwSignal::new(String::new());
     let model_defaults = RwSignal::new(ModelDefaults::default());
     // False until GET /v1/settings succeeds. Empty defaults are not "none saved".
     let defaults_known = RwSignal::new(false);
@@ -1252,6 +1288,10 @@ fn App() -> impl IntoView {
     // Escape / Close can restore it.
     let tf_open = RwSignal::new(false);
     let tf_query = RwSignal::new(String::new());
+    // Find options (#1409/#1419): per-bar, in-memory only, both off by
+    // default — independent from the editor bar's toggles.
+    let tf_match_case = RwSignal::new(false);
+    let tf_whole_word = RwSignal::new(false);
     let tf_idx = RwSignal::new(0usize);
     let tf_saved_scroll = RwSignal::new(0.0f64);
     let doc_path = RwSignal::new(String::new());
@@ -1652,6 +1692,9 @@ fn App() -> impl IntoView {
                                     live_busy_root.set(root);
                                 }
                                 diag_capable.set(boot.capabilities.diag);
+                                crate::storage::set_ledger_capable(boot.capabilities.ledger);
+                                ledger_capable.set(boot.capabilities.ledger);
+                                project_init_capable.set(boot.capabilities.project_init);
                                 skills.set(boot.skills);
                                 commands.set(boot.composer_commands);
                                 if !catalog_once.get_untracked() {
@@ -1812,6 +1855,7 @@ fn App() -> impl IntoView {
         context_used.set(0);
         context_limit.set(0);
         context_fit.set(String::new());
+        compacting.set(false);
         if root.is_empty() {
             stream_note.set(String::new());
             return;
@@ -1908,6 +1952,12 @@ fn App() -> impl IntoView {
                         steer_queue::LiveNote::Usage { .. } | steer_queue::LiveNote::Fit { .. } => {}
                         steer_queue::LiveNote::EngineError { message, .. } => {
                             queue_note.set(message.clone());
+                            if compacting.get_untracked()
+                                && crate::model_menu::is_compact_refusal(&message)
+                            {
+                                compacting.set(false);
+                                compact_refused.set(message.clone());
+                            }
                             if message.contains("no active turn") || message.contains("already waiting") {
                                 steer_note.set(String::new());
                                 steer_mode.set(String::new());
@@ -1947,7 +1997,18 @@ fn App() -> impl IntoView {
                     context_limit.set(next.context_limit);
                     context_fit.set(next.context_fit);
                     model_note.set(next.note);
-                    model_note_after.set(next.note_after);                }
+                    model_note_after.set(next.note_after);
+                    if data.contains("\"compaction.completed\"") {
+                        compacting.set(false);
+                    }
+                    // Set after reduce_envelope so its note does not
+                    // overwrite the daemon's refusal (#1567).
+                    let refused = compact_refused.get_untracked();
+                    if !refused.is_empty() {
+                        compact_refused.set(String::new());
+                        model_note.set(format!("compact refused: {refused}"));
+                    }
+                }
             });
         es.set_onmessage(Some(on_msg.as_ref().unchecked_ref()));
         on_msg.forget();
@@ -2116,6 +2177,22 @@ fn App() -> impl IntoView {
         );
     }
     interval.forget();
+
+    // Orphan settle on load (#1506): a replayed log that ends mid-tool
+    // leaves rows `running` with no turn boundary to sweep them. Once the
+    // daemon reports the open session idle, those calls cannot still be
+    // in flight, so settle them. Tracks roots only (refreshed by polls
+    // and the status stream); a stale idle that races a live call is
+    // healed by that call's `tool.end`, which matches by callId.
+    Effect::new(move |_| {
+        let root = active_root.get();
+        let idle = roots.with(|rows| model::root_reported_idle(rows, &root));
+        if !idle || !transcript.with_untracked(|t| t.has_running_tools()) {
+            return;
+        }
+        transcript.update(|t| t.settle_orphaned_tools());
+        lines.set(transcript.with_untracked(|t| t.chat_lines()));
+    });
 
     let status_tail: Rc<RefCell<Option<web_sys::EventSource>>> = Rc::new(RefCell::new(None));
     let status_tail_fx = status_tail.clone();
@@ -2616,6 +2693,14 @@ fn App() -> impl IntoView {
         } else {
             resume_session(id);
         }
+    };
+
+    // Page-level session links (Audit #1530, Permissions #1540): switch
+    // to chat and open through the shared live/resume path.
+    let open_session_page = move |id: String| {
+        mode.set("chat".into());
+        let live = roots.get_untracked().iter().any(|r| r.id == id);
+        open_session(id, live);
     };
 
     let travel = move |back: bool| {
@@ -3220,6 +3305,35 @@ fn App() -> impl IntoView {
             }
         });
     });
+    // Compact now (#1567): send the daemon-certified `compact` op on
+    // the same path as effort. No optimistic meter change — the UI
+    // waits for `compaction.completed`; a refusal surfaces as-is.
+    let on_compact = Callback::new(move |_: ()| {
+        let root = active_root.get_untracked();
+        if root.is_empty() {
+            return;
+        }
+        let busy = roots
+            .get_untracked()
+            .iter()
+            .any(|row| row.id == root && row.busy)
+            || (live_busy.get_untracked() && live_busy_root.get_untracked() == root);
+        if let Some(reason) =
+            crate::model_menu::compact_disabled(busy, compacting.get_untracked())
+        {
+            model_note.set(reason.into());
+            return;
+        }
+        compacting.set(true);
+        model_note.set(String::new());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(&b, &t, &root, "compact", serde_json::json!({})).await {
+                compacting.set(false);
+                model_note.set(format!("compact failed: {e}"));
+            }
+        });
+    });
     let on_default_effort = Callback::new(move |level: String| {
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
@@ -3472,6 +3586,22 @@ fn App() -> impl IntoView {
         roots,
         active_root,
         refresh: Rc::new(move || refresh_meta()),
+        // Waiting chip (#1543): jump to the pending ask card, or say
+        // plainly in the status line when it already resolved — the
+        // flags and the ask list are re-read at click time, not from
+        // the render that painted the chip.
+        go_to_ask: Rc::new(move || {
+            mode.set("chat".into());
+            let root = active_root.get_untracked();
+            let flagged = roots.get_untracked().iter().any(|row| {
+                row.id == root && (row.permission_pending || row.question_pending)
+            });
+            if asks.get_untracked().is_empty() && !flagged {
+                status.set("That ask is already resolved — nothing is waiting.".into());
+                return;
+            }
+            crate::status::scroll_to_pending_ask_soon();
+        }),
     });
     // Gateway switcher page wiring (#1265). The slot is registered at
     // boot by src/shell/contrib/gateway.rs and renders through this
@@ -3522,6 +3652,16 @@ fn App() -> impl IntoView {
         "panel-artifacts",
         Rc::new(move |_args: &str| {
             side_tab.set("artifacts".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "panel-decisions",
+        Rc::new(move |_args: &str| {
+            if !ledger_capable.get_untracked() {
+                return Err("This daemon does not serve the decision ledger.".into());
+            }
+            side_tab.set("decisions".into());
             Ok(())
         }),
     );
@@ -3848,7 +3988,14 @@ fn App() -> impl IntoView {
     };
     let tf_step = move |delta: i32| {
         let list = lines.get_untracked();
-        let hits = transcript_matches(&list, &tf_query.get_untracked());
+        let hits = transcript_matches(
+            &list,
+            &tf_query.get_untracked(),
+            crate::editor::FindOptions::new(
+                tf_match_case.get_untracked(),
+                tf_whole_word.get_untracked(),
+            ),
+        );
         if hits.is_empty() {
             return;
         }
@@ -3908,7 +4055,11 @@ fn App() -> impl IntoView {
             return;
         }
         let list = lines.get_untracked();
-        let hits = transcript_matches(&list, &q);
+        let hits = transcript_matches(
+            &list,
+            &q,
+            crate::editor::FindOptions::new(tf_match_case.get(), tf_whole_word.get()),
+        );
         if let Some(hit) = hits.get(transcript_find::clamped_idx(
             tf_idx.get_untracked(),
             hits.len(),
@@ -3929,7 +4080,11 @@ fn App() -> impl IntoView {
         let open = tf_open.get();
         let idx = tf_idx.get();
         let hits = if open && !q.is_empty() {
-            transcript_matches(&lines.get(), &q)
+            transcript_matches(
+                &lines.get(),
+                &q,
+                crate::editor::FindOptions::new(tf_match_case.get(), tf_whole_word.get()),
+            )
         } else {
             Vec::new()
         };
@@ -4400,6 +4555,13 @@ fn App() -> impl IntoView {
         }),
     );
     shell::bind(
+        "model.compact",
+        Rc::new(move |_| {
+            on_compact.run(());
+            Ok(())
+        }),
+    );
+    shell::bind(
         "model.effort-default",
         Rc::new(move |level| {
             let level = level.trim().to_string();
@@ -4486,6 +4648,22 @@ fn App() -> impl IntoView {
 
     let git_active = Memo::new(move |_| side_tab.get() == "git");
     let worktree_active = Memo::new(move |_| side_tab.get() == "worktrees");
+    // Names the open session for the chat-mode bar and the chat view's h1.
+    let chat_title = Memo::new(move |_| {
+        let id = active_root.get();
+        if id.is_empty() {
+            return "No session".to_string();
+        }
+        sessions
+            .get()
+            .into_iter()
+            .find(|s| s.id == id)
+            .map(|s| {
+                let fallback = short_id(&s.id);
+                session_label(&s.title, &fallback)
+            })
+            .unwrap_or_else(|| short_id(&id))
+    });
 
     view! {
         <ApprovalHost
@@ -4509,6 +4687,7 @@ fn App() -> impl IntoView {
             reply_n=reply_n
             reply_id=reply_id
             reply_decision=reply_decision
+            open_session=open_session_page
         />
         <shell::Chrome />
         {gateway_qr::phone_view()}
@@ -4539,6 +4718,7 @@ fn App() -> impl IntoView {
                 mode=mode
                 status=status
                 diag_capable=diag_capable
+                project_init_capable=project_init_capable
                 root=active_root
                 theme=theme_id
                 scheme=scheme_id
@@ -4552,10 +4732,16 @@ fn App() -> impl IntoView {
             />
         </Show>
         <Show when=move || mode.get() == "daemon" fallback=move || ()>
-            <DaemonPane gateway_detail=gateway_detail />
+            <DaemonPane gateway_detail=gateway_detail status=status />
         </Show>
         <Show when=move || mode.get() == "usage" || mode.get() == "audit" fallback=move || ()>
-            <usage_audit::UsageAuditPages mode=mode base=base token=token status=status />
+            <usage_audit::UsageAuditPages
+                mode=mode
+                base=base
+                token=token
+                status=status
+                open_session=open_session_page
+            />
         </Show>
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
@@ -4566,6 +4752,7 @@ fn App() -> impl IntoView {
                 token=token
                 active_root=active_root
                 status=status
+                mode=mode
             />
         </Show>
         <Show when=move || mode.get() == "schedule" fallback=move || ()>
@@ -4578,7 +4765,16 @@ fn App() -> impl IntoView {
             />
         </Show>
         <Show when=move || mode.get() == "triggers" fallback=move || ()>
-            <triggers::TriggersPage base=base token=token status=status />
+            <triggers::TriggersPage
+                base=base
+                token=token
+                status=status
+                open_session=move |id: String| {
+                    mode.set("chat".into());
+                    let live = roots.get_untracked().iter().any(|r| r.id == id);
+                    open_session(id, live);
+                }
+            />
         </Show>
         <Show when=move || mode.get() == "apps" fallback=move || ()>
             <apps::AppsPane
@@ -4591,6 +4787,9 @@ fn App() -> impl IntoView {
                     activate_root(id);
                 }
             />
+        </Show>
+        <Show when=move || mode.get() == "customize" fallback=move || ()>
+            <CustomizePane base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "chat">
             <div
@@ -4743,7 +4942,11 @@ fn App() -> impl IntoView {
                     </ul>
                     </details>
                 </aside>
-                <section class="chat">
+                <main class="chat" aria-labelledby="chat-heading">
+                    // #1516: landmark and heading so assistive tech can jump
+                    // to the conversation. Visually hidden; the status tabs
+                    // and chat-mode bar already show the session name.
+                    <h1 id="chat-heading" class="sr-only">{move || chat_title.get()}</h1>
                     {move || {
                         let _ = tick.get();
                         let active = active_root.get();
@@ -4770,16 +4973,7 @@ fn App() -> impl IntoView {
                             panel_drawer.set(false);
                             sessions_drawer.update(|v| *v = !*v);
                         }>"Sessions"</button>
-                        <span class="chat-mode-title">{move || {
-                            let id = active_root.get();
-                            if id.is_empty() {
-                                return "No session".to_string();
-                            }
-                            sessions.get().into_iter().find(|s| s.id == id).map(|s| {
-                                let fallback = short_id(&s.id);
-                                session_label(&s.title, &fallback)
-                            }).unwrap_or_else(|| short_id(&id))
-                        }}</span>
+                        <span class="chat-mode-title">{move || chat_title.get()}</span>
                         <button type="button" class="chip" data-chat-panel="true" on:click=move |_| {
                             sessions_drawer.set(false);
                             panel_drawer.update(|v| *v = !*v);
@@ -4840,9 +5034,27 @@ fn App() -> impl IntoView {
                             <span class="tf-count" data-tf-count="">{move || {
                                 let q = tf_query.get();
                                 let list = lines.get();
-                                let hits = transcript_matches(&list, &q);
+                                let hits = transcript_matches(&list, &q, crate::editor::FindOptions::new(tf_match_case.get(), tf_whole_word.get()));
                                 transcript_find::count_label(&q, hits.len(), tf_idx.get())
                             }}</span>
+                            <button
+                                type="button"
+                                class=move || if tf_match_case.get() { "chip on tf-find-toggle" } else { "chip tf-find-toggle" }
+                                data-tf-match-case="true"
+                                title="Match case"
+                                aria-label="Match case"
+                                aria-pressed=move || if tf_match_case.get() { "true" } else { "false" }
+                                on:click=move |_| { tf_match_case.update(|v| *v = !*v); tf_idx.set(0); }
+                            >"Aa"</button>
+                            <button
+                                type="button"
+                                class=move || if tf_whole_word.get() { "chip on tf-find-toggle" } else { "chip tf-find-toggle" }
+                                data-tf-whole-word="true"
+                                title="Whole word"
+                                aria-label="Whole word"
+                                aria-pressed=move || if tf_whole_word.get() { "true" } else { "false" }
+                                on:click=move |_| { tf_whole_word.update(|v| *v = !*v); tf_idx.set(0); }
+                            >"ab|"</button>
                             <button type="button" class="secondary" data-tf-prev="true" on:click=move |_| tf_step(-1)>"Prev"</button>
                             <button type="button" class="secondary" data-tf-next="true" on:click=move |_| tf_step(1)>"Next"</button>
                             <button type="button" class="secondary" data-tf-close="true" on:click=move |_| close_find()>"Close"</button>
@@ -5166,6 +5378,7 @@ fn App() -> impl IntoView {
                             />
                             <textarea
                                 id="composer-input"
+                                aria-label="Message this session"
                                 placeholder="Message this session"
                                 prop:value=move || draft.get()
                                 on:input=move |ev| {
@@ -5309,6 +5522,28 @@ fn App() -> impl IntoView {
                                     ac_force.set(String::new());
                                     plus_open.update(|v| *v = !*v);
                                 }>"+"</button>
+                                // #1512: the model chip is a labelled control,
+                                // first after "+" so a 390px phone shows it
+                                // without sideways-scrolling the chip strip.
+                                // It opens Switch model, which only accepts
+                                // catalog rows.
+                                <button type="button" class="composer-glance model-glance" data-model-status="true" title="Change the session model (Alt+M opens the palette)" aria-label=move || {
+                                    let model = model_name.get();
+                                    let name = if model.is_empty() { provider_name.get() } else { model };
+                                    if name.is_empty() { "Model: none. Change model".to_string() } else { format!("Model: {name}. Change model") }
+                                } on:click=move |_| {
+                                    mode_menu.set(false);
+                                    model_menu.set(false);
+                                    autonomy_menu.set(false);
+                                    plus_open.set(false);
+                                    ac_open.set(false);
+                                    ac_force.set(String::new());
+                                    shell::show_palette_at("switch-model");
+                                }>{move || {
+                                    let model = model_name.get();
+                                    let name = if model.is_empty() { provider_name.get() } else { model };
+                                    if name.is_empty() { "Model · none".into() } else { format!("Model · {name}") }
+                                }}</button>
                                 <span class=move || {
                                     if approvals::is_dangerous(&perm_mode.get()) {
                                         "composer-glance approvals-mode-chip danger"
@@ -5334,11 +5569,6 @@ fn App() -> impl IntoView {
                                 <Show when=move || fast_on.get()>
                                     <span class="composer-glance" data-fast-status="true" title="Fast (priority service tier) is on for this session, as confirmed by the daemon. The current provider may not support priority tier.">"Fast · on"</span>
                                 </Show>
-                                <span class="composer-glance" data-model-status="true">{move || {
-                                    let model = model_name.get();
-                                    let name = if model.is_empty() { provider_name.get() } else { model };
-                                    if name.is_empty() { "Model · none".into() } else { format!("Model · {name}") }
-                                }}</span>
                                 </div>
                                 <div class="steer-actions">
                                     <Show when=move || session_busy_now.get()>
@@ -5387,7 +5617,7 @@ fn App() -> impl IntoView {
                             }
                         }}</p>
                     </div>
-                </section>
+                </main>
                 <aside class="side">
                     <div class="side-tabs" role="tablist" aria-label="Side panel">
                         <button class=move || if side_tab.get() == "activity" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("activity".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("activity")></span>"Activity"</button>
@@ -5656,7 +5886,10 @@ fn App() -> impl IntoView {
                     </div>
                     <Show when=move || {
                         let tab = side_tab.get();
-                        tab == "memory" || tab == "knowledge" || tab == "artifacts"
+                        tab == "memory"
+                            || tab == "knowledge"
+                            || tab == "artifacts"
+                            || (tab == "decisions" && ledger_capable.get())
                     }>
                         <StoragePanel
                             tab=side_tab
@@ -5705,11 +5938,16 @@ fn App() -> impl IntoView {
 }
 
 #[component]
-fn DaemonPane(gateway_detail: RwSignal<String>) -> impl IntoView {
+fn DaemonPane(gateway_detail: RwSignal<String>, status: RwSignal<String>) -> impl IntoView {
     view! {
         <main class="daemon">
             <section class="card">
                 <h2 class="panel-title"><span class="icon-slot" aria-hidden="true" inner_html=icon("status")></span>"Daemon"</h2>
+                // Connection state and version ("Connected · v…" /
+                // "Unreachable"): this is their on-screen home now that the
+                // header prints neither (#1590 A6/A7); the brand mark only
+                // carries the same text as a tooltip.
+                <p class="hint" data-daemon-link="true">{move || status.get()}</p>
                 <p class="hint gw-detail">{move || {
                     let detail = gateway_detail.get();
                     if detail.is_empty() {

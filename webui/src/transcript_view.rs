@@ -3,6 +3,7 @@
 //! stream; this pane only emits `path:line` links.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use leptos::callback::{Callable, Callback};
@@ -14,6 +15,7 @@ use wasm_bindgen::JsValue;
 
 use crate::shell::Choice;
 use crate::status::{StatusKind, StatusMark, StatusSlot};
+use transcript_window as tw;
 
 thread_local! {
     static MESSAGES: RefCell<Vec<Choice>> = RefCell::new(Vec::new());
@@ -62,12 +64,22 @@ pub fn TranscriptPane(
     find: RwSignal<FindView>,
 ) -> impl IntoView {
     let editing = RwSignal::new(false);
+    // Controlled fold open-state (#1441): message id -> open override.
+    // Absent = collapsed (today's default). Bulk actions are a snapshot:
+    // they only write entries for folds present at click time, so a fold
+    // streamed in afterwards has no entry and starts collapsed. Cleared
+    // on session switch below (bulk state does not survive sessions).
+    let folds = FoldState {
+        map: RwSignal::new(HashMap::<u32, bool>::new()),
+        dismissed: RwSignal::new(None),
+    };
     let draft = RwSignal::new(String::new());
     let pinned = RwSignal::new(true);
     let cursor = RwSignal::new(None::<u32>);
     let cursor_session = RwSignal::new(String::new());
     let rename_for = RwSignal::new(String::new());
     let seen_session = RwSignal::new(None::<String>);
+    let win_start = RwSignal::new(tw::TAIL);
     Effect::new(move |_| {
         let next = session.get();
         let prev = seen_session.get_untracked();
@@ -84,9 +96,98 @@ pub fn TranscriptPane(
         cursor.set(None);
         cursor_session.set(String::new());
         rename_for.set(String::new());
+        win_start.set(tw::TAIL);
+        folds.map.set(HashMap::new());
+        folds.dismissed.update_untracked(|d| *d = None);
     });
     let scroller = NodeRef::<leptos::html::Div>::new();
     let scroller_fx = scroller;
+
+    // Windowed rendering (#1515): only `messages[win_start..]` is
+    // mounted. A following reader's window slides forward in steps so
+    // the DOM stays bounded; a reader scrolled up keeps every row above
+    // them. Row indices stay absolute (find hits, `tf-line-<idx>`).
+    Effect::new(move |_| {
+        let len = transcript.with(|t| t.messages.len());
+        let stick = pinned.get();
+        // Tracked so a reset to TAIL (session switch) resolves even when
+        // the new list happens to have the same length.
+        let cur = win_start.get();
+        let next = tw::follow(cur, len, stick);
+        if next != cur {
+            win_start.set(next);
+        }
+    });
+    // Mounts row `idx` if it sits above the window. Callers scroll to
+    // it after render (`scroll_message` / find's `scroll_to_line_soon`
+    // both defer a task, after the list has re-rendered).
+    let reveal_row = move |idx: usize| {
+        let len = transcript.with_untracked(|t| t.messages.len());
+        let base = tw::follow(win_start.get_untracked(), len, false);
+        let next = tw::reveal(base, idx);
+        if next != base {
+            pinned.set(false);
+            win_start.set(next);
+        }
+    };
+    // Find-in-transcript: the current match's row must be mounted
+    // before the shell scrolls to its `tf-line-<idx>` article. The
+    // window (and follow state) from before find opened is put back when
+    // it closes, because the shell then restores the scroll offset it
+    // saved at open, which only means the same place over the same
+    // mounted rows.
+    let find_base = StoredValue::new(None::<(usize, bool)>);
+    Effect::new(move |_| {
+        let (active, line) =
+            find.with(|f| (!f.hits.is_empty() || f.current.is_some(), f.current.map(|h| h.line)));
+        if active {
+            if find_base.get_value().is_none() {
+                let len = transcript.with_untracked(|t| t.messages.len());
+                let start = tw::follow(win_start.get_untracked(), len, false);
+                find_base.set_value(Some((start, pinned.get_untracked())));
+            }
+            if let Some(line) = line {
+                reveal_row(line);
+            }
+        } else if let Some((start, was_pinned)) = find_base.get_value() {
+            find_base.set_value(None);
+            pinned.set(was_pinned);
+            win_start.set(start);
+        }
+    });
+    // Mounts one page of earlier rows, keeping the first row that was
+    // already mounted at the same place on screen.
+    let earlier_busy = StoredValue::new(false);
+    let show_earlier = move || {
+        if earlier_busy.get_value() {
+            return;
+        }
+        let len = transcript.with_untracked(|t| t.messages.len());
+        let cur = tw::follow(win_start.get_untracked(), len, false);
+        if cur == 0 {
+            return;
+        }
+        let anchor_y = |idx: usize| -> Option<f64> {
+            let doc = web_sys::window()?.document()?;
+            let el = doc.get_element_by_id(&format!("tf-line-{idx}"))?;
+            Some(el.get_bounding_client_rect().top())
+        };
+        let before = anchor_y(cur);
+        earlier_busy.set_value(true);
+        win_start.set(tw::earlier(cur));
+        after_render(move || {
+            if let (Some(before), Some(after), Some(el)) =
+                (before, anchor_y(cur), scroller_fx.get_untracked())
+            {
+                let top = el.scroll_top() as f64;
+                let next = tw::anchor_scroll_top(top, before, after);
+                if (next - top).abs() > 0.5 {
+                    el.set_scroll_top(next as i32);
+                }
+            }
+            earlier_busy.set_value(false);
+        });
+    };
 
     Effect::new(move |_| {
         let count = transcript.with(|t| t.messages.len());
@@ -144,6 +245,10 @@ pub fn TranscriptPane(
                 if pinned.get_untracked() != next {
                     pinned.set(next);
                 }
+                let top = el.scroll_top() as f64;
+                if !next && tw::wants_earlier(win_start.get_untracked(), top) {
+                    show_earlier();
+                }
             }
         }
     };
@@ -194,6 +299,15 @@ pub fn TranscriptPane(
         }
     });
 
+    let expand_all_folds = move |_| {
+        let ids = transcript.with_untracked(|t| fold_ids(&t.messages));
+        folds.map.update(|map| apply_bulk_fold(map, &ids, true));
+    };
+    let collapse_all_folds = move |_| {
+        let ids = transcript.with_untracked(|t| fold_ids(&t.messages));
+        folds.map.update(|map| apply_bulk_fold(map, &ids, false));
+    };
+
     let rename = handlers.rename;
     let open_file = handlers.open_file;
     let retry = handlers.retry;
@@ -237,12 +351,14 @@ pub fn TranscriptPane(
                     let idx = ids.iter().position(|x| *x == id).unwrap_or(0);
                     let n = idx as isize + delta;
                     let n = n.clamp(0, ids.len() as isize - 1) as usize;
+                    reveal_row(n);
                     ids[n]
                 }
                 None => {
                     if delta < 0 {
                         *ids.last().unwrap()
                     } else {
+                        reveal_row(0);
                         ids[0]
                     }
                 }
@@ -264,6 +380,7 @@ pub fn TranscriptPane(
             "Home" => {
                 ev.prevent_default();
                 if let Some(id) = ids.first().copied() {
+                    reveal_row(0);
                     cursor.set(Some(id));
                     cursor_session.set(session.get_untracked());
                     scroll_message(id);
@@ -390,6 +507,10 @@ pub fn TranscriptPane(
                 .trim()
                 .parse()
                 .map_err(|_| "Pick a message.".to_string())?;
+            let idx = transcript.with_untracked(|t| t.messages.iter().position(|m| m.id == id));
+            if let Some(idx) = idx {
+                reveal_row(idx);
+            }
             cursor.set(Some(id));
             cursor_session.set(session.get_untracked());
             pinned.set(false);
@@ -408,6 +529,11 @@ pub fn TranscriptPane(
         }
         MESSAGES.with(|slot| slot.borrow_mut().clear());
     });
+
+    let hidden_rows = move || {
+        let len = transcript.with(|t| t.messages.len());
+        tw::mounted(win_start.get(), len).start
+    };
 
     view! {
         <div class="sx-head">
@@ -441,6 +567,38 @@ pub fn TranscriptPane(
             <Show when=move || !note.get().is_empty()>
                 <p class="sx-note" role="alert">{move || note.get()}</p>
             </Show>
+            {move || {
+                // Count what is visibly open among the folds that exist
+                // now: recorded state plus the fold find forces open
+                // (#1576), unless the user dismissed that one.
+                let ids = transcript.with(|t| fold_ids(&t.messages));
+                let count = ids.len();
+                let forced = find.with(|fv| {
+                    fv.current
+                        .filter(|m| m.field == crate::transcript_find::Field::Detail)
+                        .and_then(|m| transcript.with(|t| t.messages.get(m.line).map(|x| (x.id, m))))
+                });
+                let dismissed = folds.dismissed.get_untracked();
+                let open_count = folds.map.with(|map| {
+                    ids.iter()
+                        .filter(|id| {
+                            let f = forced.is_some_and(|(fid, _)| fid == **id);
+                            resolve_fold_open(fold_is_open(map, **id), f, f && dismissed == forced)
+                        })
+                        .count()
+                });
+                if count == 0 {
+                    view! { <span></span> }.into_any()
+                } else {
+                    view! {
+                        <div class="sx-toolbar sx-fold-toolbar" data-fold-all="true" data-fold-count=count.to_string() data-fold-open-count=open_count.to_string()>
+                            <button type="button" class="sx-quiet" data-fold-expand-all="true" on:click=expand_all_folds>"Expand all"</button>
+                            <button type="button" class="sx-quiet" data-fold-collapse-all="true" on:click=collapse_all_folds>"Collapse all"</button>
+                            <span class="sx-fold-count">{format!("{open_count}/{count} folds open")}</span>
+                        </div>
+                    }.into_any()
+                }
+            }}
         </div>
         <div class="sx-stage">
             <div
@@ -474,49 +632,47 @@ pub fn TranscriptPane(
                         </button>
                     </div>
                 </Show>
-                {move || {
-                    let fv = find.get();
-                    let snap = transcript.get();
-                    let msgs = snap.messages.clone();
-                    // A day separator precedes the first timed message of
-                    // each local day (#1349). Untimed messages never open
-                    // a new day.
-                    let mut prev_day: Option<(u32, u32, u32)> = None;
-                    let seps: Vec<Option<String>> = msgs
-                        .iter()
-                        .map(|msg| {
-                            if msg.at_ms <= 0.0 {
-                                return None;
-                            }
-                            let day = line_day(msg.at_ms);
-                            let label = if prev_day == Some(day) {
-                                None
+                <Show when=move || hidden_rows() != 0>
+                    <button type="button" class="sx-quiet sx-earlier" on:click=move |_| show_earlier()>
+                        {move || {
+                            let n = hidden_rows();
+                            let page = n.min(tw::PAGE);
+                            if page == n {
+                                format!("Show {n} earlier")
                             } else {
-                                Some(line_day_label(msg.at_ms))
-                            };
-                            prev_day = Some(day);
-                            label
-                        })
-                        .collect();
-                    msgs.into_iter()
-                        .zip(seps)
-                        .enumerate()
-                        .map(|(idx, (msg, sep))| {
-                            let msg_hits: Vec<crate::transcript_find::TMatch> = fv
-                                .hits
-                                .iter()
-                                .filter(|h| h.line == idx)
-                                .copied()
-                                .collect();
-                            let msg_current = fv.current.filter(|h| h.line == idx);
-                            let msg_elapsed = snap.elapsed_for(msg.id).map(str::to_owned);
-                            view! {
-                                {sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                {message_view(msg, idx, cursor, open_file, retry, fork, msg_hits, msg_current, msg_elapsed)}
+                                format!("Show {page} earlier ({n} hidden)")
                             }
-                        })
-                        .collect_view()
-                }}
+                        }}
+                    </button>
+                </Show>
+                // Keyed by absolute index: a streaming delta re-renders
+                // only the row whose data changed (each row memoizes its
+                // own slice), not the whole list.
+                <For
+                    each=move || {
+                        let len = transcript.with(|t| t.messages.len());
+                        tw::mounted(win_start.get(), len)
+                    }
+                    key=|idx: &usize| *idx
+                    children=move |idx: usize| {
+                        let row = Memo::new(move |_| {
+                            transcript.with(|t| find.with(|fv| row_at(t, fv, idx)))
+                        });
+                        move || {
+                            row.get().map(|r| {
+                                // Tracked here, not in the row memo: a fold
+                                // `notify()` re-renders every mounted row so
+                                // each `<details open>` re-syncs with the
+                                // fold state (see `FoldState`).
+                                let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
+                                view! {
+                                    {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, fold_open, folds)}
+                                }
+                            })
+                        }
+                    }
+                />
             </div>
             <Show when=move || !pinned.get() && transcript.with(|t| !t.messages.is_empty())>
                 <button type="button" class="sx-jump" on:click=jump>"Latest"</button>
@@ -647,7 +803,67 @@ fn palette_fork(active: &str, cursor: Option<&CursorBind>, messages: &[CursorMsg
     })
 }
 
+/// Everything one transcript row renders from. Compared per row on
+/// each transcript change so an unchanged row keeps its DOM.
+#[derive(Clone, PartialEq)]
+struct RowData {
+    msg: Message,
+    sep: Option<String>,
+    hits: Vec<crate::transcript_find::TMatch>,
+    current: Option<crate::transcript_find::TMatch>,
+    elapsed: Option<String>,
+    usage: Option<(String, String)>,
+}
+
+fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
+    let msg = t.messages.get(idx)?;
+    // A day separator precedes the first timed message of each local
+    // day (#1349). Untimed messages never open a new day; the previous
+    // day comes from the nearest earlier timed message, mounted or not.
+    let sep = if msg.at_ms > 0.0 {
+        let day = line_day(msg.at_ms);
+        let prev = t.messages[..idx]
+            .iter()
+            .rev()
+            .find(|m| m.at_ms > 0.0)
+            .map(|m| line_day(m.at_ms));
+        (prev != Some(day)).then(|| line_day_label(msg.at_ms))
+    } else {
+        None
+    };
+    Some(RowData {
+        msg: msg.clone(),
+        sep,
+        hits: fv.hits.iter().filter(|h| h.line == idx).copied().collect(),
+        current: fv.current.filter(|h| h.line == idx),
+        elapsed: t.elapsed_for(msg.id).map(str::to_owned),
+        usage: t
+            .usage_for(msg.id)
+            .and_then(|u| u.label().map(|label| (label, u.detail()))),
+    })
+}
+
+/// Runs `f` in a task after the current one, by which point pending
+/// reactive updates (the windowed list) have rendered.
+fn after_render(f: impl FnOnce() + 'static) {
+    let Some(w) = web_sys::window() else {
+        return;
+    };
+    let cb = Closure::once(f);
+    let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(
+        cb.as_ref().unchecked_ref(),
+        0,
+    );
+    cb.forget();
+}
+
+/// Scrolls to message `id` after render, so a row just mounted by
+/// `reveal_row` exists when the lookup runs.
 fn scroll_message(id: u32) {
+    after_render(move || scroll_message_now(id));
+}
+
+fn scroll_message_now(id: u32) {
     if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
         // Articles carry their find-in-transcript id (`tf-line-<idx>`) as
         // the element id, so the pane's own cursor scroll keys off the
@@ -715,16 +931,127 @@ pub fn save_download(filename: &str, mime: &str, text: &str) {
     let _ = web_sys::Url::revoke_object_url(&url);
 }
 
+/// Ids of messages that actually render a fold (#1441): only a
+/// non-empty `detail` produces a `<details class="sx-fold">`.
+fn fold_ids(messages: &[Message]) -> Vec<u32> {
+    messages
+        .iter()
+        .filter(|m| !m.detail.is_empty())
+        .map(|m| m.id)
+        .collect()
+}
+
+/// A fold is open only when a bulk action or a per-fold toggle wrote
+/// an explicit `true` for it. No entry = collapsed, which is both
+/// today's default and the state a fold streamed in after a bulk
+/// Expand all starts in (bulk actions are a snapshot, not a mode).
+fn fold_is_open(overrides: &HashMap<u32, bool>, id: u32) -> bool {
+    overrides.get(&id).copied().unwrap_or(false)
+}
+
+/// Apply a bulk Expand/Collapse to exactly the folds that exist at
+/// click time. Entries for other ids are untouched; ids created
+/// later get no entry and therefore stay collapsed.
+fn apply_bulk_fold(overrides: &mut HashMap<u32, bool>, ids: &[u32], open: bool) {
+    for id in ids {
+        overrides.insert(*id, open);
+    }
+}
+
+/// Fold signals shared by the list and each message (#1441).
+#[derive(Clone, Copy)]
+struct FoldState {
+    /// Recorded open state per message id. Every write notifies, so
+    /// each render's `open` matches the DOM: tachys diffs a static
+    /// attribute against its previous render value, and a user toggle
+    /// that skipped the rebuild would leave that value stale and make
+    /// the next bulk action a no-op on the DOM.
+    map: RwSignal<HashMap<u32, bool>>,
+    /// The (message id, find match) whose forced-open fold the user
+    /// closed; only that exact pairing stays closed (#1576).
+    dismissed: RwSignal<Option<(u32, crate::transcript_find::TMatch)>>,
+}
+
+/// Rendered open state: the recorded/bulk state, plus the current find
+/// match's fold unless the user closed it while it was forced open. A
+/// recorded `false` never overrides the forced open (Collapse all must
+/// not stop find from revealing folded hits).
+fn resolve_fold_open(recorded: bool, find_forced: bool, dismissed: bool) -> bool {
+    recorded || (find_forced && !dismissed)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum FoldToggle {
+    /// DOM state equals the rendered state (our own re-render).
+    Ignore,
+    /// A user change: record it.
+    Record,
+    /// The user closed a find-forced fold: record closed and dismiss the
+    /// forced open for this match.
+    Dismiss,
+}
+
+fn fold_toggle_action(dom_open: bool, rendered_open: bool, find_forced: bool) -> FoldToggle {
+    if dom_open == rendered_open {
+        FoldToggle::Ignore
+    } else if find_forced && !dom_open {
+        FoldToggle::Dismiss
+    } else {
+        FoldToggle::Record
+    }
+}
+
+/// Apply one native `toggle` of fold `id` against the live state:
+/// the currently rendered open state is recomputed from `map` and
+/// `dismissed` (never a captured render-time value), then the change is
+/// ignored, recorded, or recorded as a dismissal of the forced open.
+/// Returns whether anything was written.
+fn handle_fold_toggle(
+    map: &mut HashMap<u32, bool>,
+    dismissed: &mut Option<(u32, crate::transcript_find::TMatch)>,
+    id: u32,
+    current_key: Option<(u32, crate::transcript_find::TMatch)>,
+    find_forced: bool,
+    dom_open: bool,
+) -> bool {
+    let is_dismissed = find_forced && current_key.is_some() && *dismissed == current_key;
+    let rendered = resolve_fold_open(fold_is_open(map, id), find_forced, is_dismissed);
+    match fold_toggle_action(dom_open, rendered, find_forced) {
+        FoldToggle::Ignore => false,
+        FoldToggle::Record => {
+            record_fold_toggle(map, id, dom_open);
+            true
+        }
+        FoldToggle::Dismiss => {
+            record_fold_toggle(map, id, false);
+            *dismissed = current_key;
+            true
+        }
+    }
+}
+
+/// Record a single fold's native toggle. Returns without writing
+/// when the state already matches, so the `toggle` event fired by
+/// our own controlled re-render does not loop.
+fn record_fold_toggle(overrides: &mut HashMap<u32, bool>, id: u32, open: bool) {
+    if fold_is_open(overrides, id) != open {
+        overrides.insert(id, open);
+    }
+}
+
 fn message_view(
     msg: Message,
     idx: usize,
     cursor: RwSignal<Option<u32>>,
     open_file: Callback<(String, u32)>,
-    _retry: Callback<(String,)>,
+    retry: Callback<(String,)>,
     _fork: Callback<(i32,)>,
     find_hits: Vec<crate::transcript_find::TMatch>,
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
+    turn_usage: Option<(String, String)>,
+    fold_open: bool,
+    folds: FoldState,
 ) -> impl IntoView {
     let id = msg.id;
     let role = msg.role.class();
@@ -742,6 +1069,12 @@ fn message_view(
     };
     let retry_text = msg.retry_text.clone();
     let keep = msg.keep_events;
+    // #1546: only the daemon's provider_auth code makes a notice
+    // actionable — never a match on the message text.
+    let auth_notice =
+        msg.role == Role::Notice && msg.badge == crate::transcript::PROVIDER_AUTH_CODE;
+    let reconnect = msg.reconnect.clone();
+    let auth_retry = retry_text.trim().to_string();
     let stamp = line_stamp(msg.at_ms);
     let stamp_full = line_full_time(msg.at_ms);
     let has_stamp = !stamp.is_empty();
@@ -780,9 +1113,15 @@ fn message_view(
     // #1576: the fold opens when the current match sits inside it, so
     // stepping onto a folded hit lands somewhere visible. Only the
     // current match's fold is forced open; other folds keep the user's
-    // own open/closed state (the `open` attribute is only rendered in
-    // the forced branch below, never rendered as closed).
-    let fold_open = cur_detail.is_some();
+    // own open/closed state, which #1441 records in `folds` (per-fold
+    // toggles and Expand all / Collapse all) so the controlled `open`
+    // attribute never closes a fold the user opened.
+    let find_forced = cur_detail.is_some();
+    let current_key = find_current.map(|m| (id, m));
+    let dismissed = find_forced
+        && current_key.is_some()
+        && folds.dismissed.get_untracked() == current_key;
+    let fold_open = resolve_fold_open(fold_open, find_forced, dismissed);
     let _ = (prose, retry_text, keep);
     let class = move || {
         let on = cursor.get() == Some(id);
@@ -805,13 +1144,16 @@ fn message_view(
                     {match StatusKind::parse_known(&badge) {
                         Some(kind) => view! { <StatusMark kind=kind place=StatusSlot::Badge /> }.into_any(),
                         None => {
-                            let class = format!("sx-status sx-status-{badge}");
+                            // Badge text keeps its space ("no result"); the
+                            // class token cannot, so it is dashed (#1506).
+                            let class = format!("sx-status sx-status-{}", badge.replace(' ', "-"));
                             view! { <span class=class data-status=badge.clone()>{badge.clone()}</span> }.into_any()
                         }
                     }}
                 </Show>
                 {has_stamp.then(|| view! { <span class="stamp" title=stamp_full.clone()>{stamp.clone()}</span> })}
                 {turn_elapsed.clone().map(|label| view! { <span class="turn-elapsed" title="Turn elapsed time">{label}</span> })}
+                {turn_usage.clone().map(|(label, detail)| view! { <span class="turn-usage" title=detail>{label}</span> })}
                 {diff.clone().map(|d| view! {
                     <span class="sx-diff" aria-label=format!("+{} -{}", d.added, d.deleted)>
                         <span class="sx-add">{format!("+{}", d.added)}</span>
@@ -851,8 +1193,41 @@ fn message_view(
             } else {
                 view! { <span></span> }.into_any()
             }}
+            {auth_notice.then(|| {
+                let target = reconnect.clone();
+                let resend = auth_retry.clone();
+                let can_retry = !resend.is_empty();
+                view! {
+                    <div class="sx-auth-actions">
+                        <button
+                            type="button"
+                            class="sx-auth-open"
+                            on:click=move |_| {
+                                // Same navigation as the empty state's
+                                // Add provider; then focus the named row.
+                                let _ = crate::shell::set_view("providers");
+                                crate::providers::focus_provider_row(target.clone());
+                            }
+                        >"Open Providers"</button>
+                        {can_retry.then(|| view! {
+                            <button
+                                type="button"
+                                class="sx-quiet"
+                                title="Re-send the failed message after fixing the credential"
+                                on:click=move |_| retry.run((resend.clone(),))
+                            >"Retry"</button>
+                        })}
+                    </div>
+                }
+            })}
             {if !detail.is_empty() {
-                let summary = if diff.is_some() { "Diff" } else { "Output" };
+                let summary = if diff.is_some() {
+                    "Diff"
+                } else if auth_notice {
+                    "Details"
+                } else {
+                    "Output"
+                };
                 // Detail hits highlight through MarkedText, exactly
                 // like body hits (#1576); without hits the fold is the
                 // plain <pre> it has always been.
@@ -861,21 +1236,47 @@ fn message_view(
                 } else {
                     view! { <pre>{detail.clone()}</pre> }.into_any()
                 };
-                if fold_open {
-                    view! {
-                        <details class="sx-fold" open=true data-tf-fold-current="true">
-                            <summary>{summary}</summary>
-                            {detail_inner}
-                        </details>
-                    }.into_any()
-                } else {
-                    view! {
-                        <details class="sx-fold">
-                            <summary>{summary}</summary>
-                            {detail_inner}
-                        </details>
-                    }.into_any()
-                }
+                view! {
+                    <details
+                        class="sx-fold"
+                        open=fold_open
+                        data-fold-open=if fold_open { "true" } else { "false" }
+                        data-fold-id=id.to_string()
+                        data-tf-fold-current=if find_forced { "true" } else { "false" }
+                        on:toggle=move |ev: web_sys::Event| {
+                            let Some(target) = ev.target() else { return };
+                            let Ok(el) = target.dyn_into::<web_sys::Element>() else { return };
+                            let open = js_sys::Reflect::get(&el, &JsValue::from_str("open"))
+                                .ok()
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(fold_open);
+                            // Decided against live map/dismissed state, not
+                            // the render-time `fold_open`. A real change
+                            // notifies `map` so the rendered `open` is
+                            // re-synced with the DOM (see `FoldState`);
+                            // our own re-render's toggle writes nothing.
+                            let mut dismissed = folds.dismissed.get_untracked();
+                            let mut changed = false;
+                            folds.map.update_untracked(|map| {
+                                changed = handle_fold_toggle(
+                                    map,
+                                    &mut dismissed,
+                                    id,
+                                    current_key,
+                                    find_forced,
+                                    open,
+                                );
+                            });
+                            if changed {
+                                folds.dismissed.update_untracked(|d| *d = dismissed);
+                                folds.map.notify();
+                            }
+                        }
+                    >
+                        <summary>{summary}</summary>
+                        {detail_inner}
+                    </details>
+                }.into_any()
             } else {
                 view! { <span></span> }.into_any()
             }}
@@ -917,6 +1318,9 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                 }
                 Block::Code { lang, text } => {
                     let copy = text.clone();
+                    // #1575: known fence languages get the file viewer's
+                    // `ev-*` token spans; unknown/empty stay plain text.
+                    let code = crate::editor::highlighted_code(&lang, &text);
                     // Same honest per-button feedback as the message
                     // Copy button (#1582).
                     let copy_state = RwSignal::new(None::<bool>);
@@ -933,7 +1337,7 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                                     });
                                 }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
                             </div>
-                            <pre class="sx-code">{text}</pre>
+                            <pre class="sx-code">{code}</pre>
                         </div>
                     }.into_any()
                 }
@@ -1096,6 +1500,113 @@ mod tests {
             Some("newest prompt")
         );
         assert_eq!(resolve_fork("sess-a", Some(&hit), &a), Some(4));
+    }
+
+    #[test]
+    fn fold_bulk_is_a_snapshot_and_per_fold_toggle_still_works() {
+        // Default: no entry = collapsed, as before #1441.
+        let mut map: HashMap<u32, bool> = HashMap::new();
+        assert!(!fold_is_open(&map, 1));
+        // Expand all over the folds present at click time.
+        apply_bulk_fold(&mut map, &[1, 2, 3], true);
+        assert!(fold_is_open(&map, 1) && fold_is_open(&map, 2) && fold_is_open(&map, 3));
+        // A fold streamed in after Expand all has no entry: collapsed,
+        // not force-opened (bulk is a snapshot, not a mode).
+        assert!(!fold_is_open(&map, 4));
+        // Per-fold toggle after a bulk action.
+        record_fold_toggle(&mut map, 2, false);
+        assert!(!fold_is_open(&map, 2));
+        assert!(fold_is_open(&map, 1));
+        // Recording the same state is a no-op (own re-render's toggle).
+        record_fold_toggle(&mut map, 1, true);
+        assert!(fold_is_open(&map, 1));
+        // Collapse all hides every present fold; the streamed-in fold
+        // stays collapsed too.
+        apply_bulk_fold(&mut map, &[1, 2, 3, 4], false);
+        assert!(!fold_is_open(&map, 1) && !fold_is_open(&map, 4));
+        // Session switch resets by clearing the map.
+        map.clear();
+        assert!(!fold_is_open(&map, 1));
+    }
+
+    #[test]
+    fn find_forced_fold_can_be_closed_and_collapse_all_does_not_hide_hits() {
+        // Collapse all recorded false: the current match still opens.
+        assert!(resolve_fold_open(false, true, false));
+        // Recorded open (Expand all), user closes the forced fold:
+        // dismiss, and the fold renders closed.
+        assert_eq!(fold_toggle_action(false, true, true), FoldToggle::Dismiss);
+        assert!(!resolve_fold_open(false, true, true));
+        // Own re-render toggles are ignored.
+        assert_eq!(fold_toggle_action(true, true, true), FoldToggle::Ignore);
+        assert_eq!(fold_toggle_action(false, false, false), FoldToggle::Ignore);
+        // Plain user toggles are recorded; reopening a dismissed fold
+        // records open.
+        assert_eq!(fold_toggle_action(true, false, false), FoldToggle::Record);
+        assert_eq!(fold_toggle_action(false, true, false), FoldToggle::Record);
+        assert_eq!(fold_toggle_action(true, false, true), FoldToggle::Record);
+        assert!(resolve_fold_open(true, true, true));
+        // No find: recorded state rules.
+        assert!(!resolve_fold_open(false, false, false));
+        assert!(resolve_fold_open(true, false, false));
+    }
+
+    #[test]
+    fn repeated_toggles_without_rebuild_use_live_state() {
+        let m = crate::transcript_find::TMatch {
+            line: 3,
+            field: crate::transcript_find::Field::Detail,
+            start: 0,
+            end: 2,
+        };
+        let key = Some((7, m));
+        let shown = |map: &HashMap<u32, bool>, d: &Option<(u32, crate::transcript_find::TMatch)>, forced: bool| {
+            resolve_fold_open(fold_is_open(map, 7), forced, forced && *d == key)
+        };
+        // Plain fold: open then close, no rebuild in between.
+        let (mut map, mut d) = (HashMap::new(), None);
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, None, false, true));
+        assert!(shown(&map, &d, false));
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, None, false, false));
+        assert!(!shown(&map, &d, false), "second toggle must not be ignored");
+        // A rebuild's own toggle (DOM equals state) writes nothing.
+        assert!(!handle_fold_toggle(&mut map, &mut d, 7, None, false, false));
+        // Forced fold: dismiss, reopen, close again.
+        let (mut map, mut d) = (HashMap::new(), None);
+        assert!(shown(&map, &d, true));
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, key, true, false));
+        assert!(!shown(&map, &d, true), "dismissed");
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, key, true, true));
+        assert!(shown(&map, &d, true), "reopen after dismiss sticks");
+        assert!(handle_fold_toggle(&mut map, &mut d, 7, key, true, false));
+        assert!(!shown(&map, &d, true));
+        // After Collapse all the forced fold still shows (no dismissal).
+        let (mut map, d) = (HashMap::new(), None);
+        apply_bulk_fold(&mut map, &[7], false);
+        assert!(shown(&map, &d, true));
+    }
+
+    #[test]
+    fn fold_ids_only_count_messages_with_detail() {
+        let msg = |id: u32, detail: &str| Message {
+            id,
+            role: Role::Tool,
+            title: String::new(),
+            body: String::new(),
+            badge: String::new(),
+            detail: detail.into(),
+            key: String::new(),
+            call_id: String::new(),
+            diff: None,
+            chips: Vec::new(),
+            keep_events: -1,
+            retry_text: String::new(),
+            copy_text: String::new(),
+            at_ms: 0.0,
+        };
+        let msgs = vec![msg(1, "out"), msg(2, ""), msg(3, "diff")];
+        assert_eq!(fold_ids(&msgs), vec![1, 3]);
+        assert!(fold_ids(&[]).is_empty());
     }
 
     #[test]

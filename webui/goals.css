@@ -69,7 +69,7 @@
   width: 100%;
   background: var(--ground);
   color: var(--ink);
-  border: 1px solid var(--border-muted);
+  border: 1px solid var(--rule);
   border-radius: var(--radius-sm);
   padding: 6px 8px;
 }
@@ -146,3 +146,9 @@
   .goals-list { max-height: 200px; }
 }
 /* feature:goals-autopilot end */
+/* feature:goals-filter begin */
+.goals-filter-chips { margin-bottom: 8px; }
+.goals-search { width: 100%; margin-bottom: 8px; }
+.goals-count { margin: 0 0 8px; }
+.goals-no-match .secondary { width: auto; }
+/* feature:goals-filter end */

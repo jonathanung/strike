@@ -20,7 +20,26 @@ materially affect the shipped product.
 
 ### Added
 
+- **Sandbox state in the web cockpit** — the Permissions panel has a read-only OS sandbox section built from the daemon's `GET /v1/sandbox`. It shows the active mode, backend, whether the backend is available, any network allowlist, and the saved default when it differs (only new sessions use it). The full sandbox profile text expands inline. When the daemon has no sandbox capability, the section says so and shows no mode. When the backend has not been checked yet, or was checked and is unavailable, the mode is labelled as configured and confinement is shown as not confirmed. The section changes nothing. The mode dial is a separate follow-up.
+
+- **Skill and agent load diagnostics** — the skill and agent loaders now report per-file findings (unreadable, empty, malformed frontmatter, missing description, invalid in a Strike root and so failing the whole load, skipped in an external root) instead of only writing to stderr or failing silently. `GET /v1/bootstrap` returns them as `loadWarnings` (kind, severity, code, path, file, message, fatal, fingerprint), rescanned on each call so a fixed file stops warning. Each entry carries the path and the loader's reason, never file contents. What loads does not change ([#1386](https://github.com/jonathanung/strike/issues/1386)).
+
+- **Automatic Go test failure triage for verification gates** — when a `cmd` completion gate fails with `go test` output, the harness maps the failure to its package, tests, and first `file:line`, reruns just that target with `go test <dir> -run '^(Tests)$' -count=1`, and attaches the result to the verification report. On the next claim the focused rerun runs first. For a plain `go test` gate, the full gate is skipped while the focused rerun still fails. Wrapped gates such as `make test` always rerun in full, and the full gate is always the final check. Focused reruns are capped at 3 per gate until it passes, and the report keeps the original command, its output, and a short attempt history. Wire: optional `triage` on `VerificationCheck` (protocol 1.23.0).
+
+- **Reconnect path when a provider credential dies mid-session** — when a provider rejects the saved API key or OAuth grant (vendor 401, or a 403 that explicitly says authentication), the turn now ends with a named notice ("OpenAI authentication failed — the saved credential was rejected.") instead of raw vendor text. The notice offers **Open Providers**, focused on that provider's card, and **Retry** to re-send the failed message once the credential is fixed — nothing is re-sent automatically. The vendor message stays under Details, and the session reads as blocked rather than cleanly stopped until the next turn. Wire: `EngineError` code `provider_auth` with an optional `provider` name (protocol 1.23.0); never carries credential material.
+
+- **Customize** — the web client lists skills, agents, MCP servers, plugins,
+  hooks, rules files, and the roster stall/handoff gate. A write is a redacted
+  preview, then a confirm. MCP env, header, and URL secrets stay masked.
+  Permission rules are shown and preserved. Open it from the command
+  palette (Ctrl/Cmd+K `customize`)
+  ([#1281](https://github.com/jonathanung/strike/issues/1281)).
+
 - **"Allow in this folder" approval scope** — write/edit approval cards in the web cockpit offer a fourth grant scope between Allow once and Allow session/project: the daemon records a session-only grant for the folder the file lives in (covering its subfolders), derived server-side from the ask — never from a client-supplied pattern. The card names the exact folder before you commit, the grant is listed under Permissions → Rules and audit as a "session folder" rule, and removing it there revokes it in the live session. Hard and managed denies still win. Wire: `PermissionReply` decision `folder` (protocol 1.22.0); older daemons treat it as allow-once.
+
+### Security
+
+- **Signed releases with build provenance** — release archives, desktop installers, and checksum files now ship with a keyless Sigstore signature (`<asset>.sigstore.json`) and a GitHub SLSA build provenance attestation, on top of the existing sha256 checksums. Verify with `cosign verify-blob` or `gh attestation verify`; see `docs/release.md` ([#581](https://github.com/jonathanung/strike/issues/581)).
 
 ## [v0.10.0] - 2026-10-29
 

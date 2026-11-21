@@ -17,7 +17,7 @@
   min-width: 0;
   height: var(--control);
   background: var(--ground);
-  border: 1px solid var(--border-muted);
+  border: 1px solid var(--rule);
   border-radius: var(--radius-sm);
   padding: 0 var(--space-2);
   color: var(--ink);
@@ -42,3 +42,11 @@
   outline: 1px solid var(--warning);
 }
 /* feature:transcript-find end */
+/* feature:find-match-case begin */
+/* Find toggles (#1409 Aa match-case, #1419 ab| whole-word) in the
+   transcript find bar — same chip pattern as the editor bar. */
+.tf-find-toggle { flex: 0 0 auto; font-family: ui-monospace, monospace; }
+/* feature:find-match-case end */
+/* feature:whole-word-find begin */
+.tf-find-toggle[aria-pressed="true"] { font-weight: 700; }
+/* feature:whole-word-find end */
