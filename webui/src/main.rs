@@ -24,6 +24,8 @@ mod draft_size;
 mod drafts;
 mod editor;
 mod lessons;
+mod elicitation;
+mod elicitation_ui;
 mod load_epoch;
 mod markdown_review;
 mod local_issues;
@@ -91,7 +93,9 @@ mod turn_failure;
 mod turn_usage;
 mod turn_verify;
 mod workspace_image;
+mod workspace_trust;
 mod workspaces;
+mod workflows;
 mod workflow_run;
 use crate::shell::icon;
 use crate::child_signals::TeamMessagesFeed;
@@ -1104,6 +1108,9 @@ fn App() -> impl IntoView {
     let token = RwSignal::new(gateway::initial_token());
     provide_context(transcript_attachments::AttachmentAuth { base, token });
     let status = RwSignal::new("connecting…".to_string());
+    // Bootstrap capability `workspaceTrust` (#1781): gates the untrusted
+    // workspace badge and trust card.
+    let workspace_trust_capable = RwSignal::new(false);
     // Bootstrap capability `diag` (#1489): gates Download diagnostics.
     let diag_capable = RwSignal::new(false);
     // Bootstrap capability `ledger` (#1485): gates the Decisions tab.
@@ -1224,6 +1231,7 @@ fn App() -> impl IntoView {
     });
     let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
+    let elicitations = RwSignal::new(Vec::<elicitation::Pending>::new());
     let questions = RwSignal::new(Vec::<questions::Pending>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
     let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
@@ -1840,6 +1848,7 @@ fn App() -> impl IntoView {
                                         }
                                     });
                                 }
+                                workspace_trust_capable.set(boot.capabilities.workspace_trust);
                                 diag_capable.set(boot.capabilities.diag);
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
                                 ledger_capable.set(boot.capabilities.ledger);
@@ -1978,6 +1987,7 @@ fn App() -> impl IntoView {
             children.set(Vec::new());
             children_note.set(String::new());
             asks.set(Vec::new());
+            elicitations.set(Vec::new());
             questions.set(Vec::new());
             live_audit.set(Vec::new());
             confirm.set(None);
@@ -2131,6 +2141,7 @@ fn App() -> impl IntoView {
                     };
                     note_steer(transcript_cb, &data, &on_note);
                     apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
+                    elicitation_ui::apply_elicitation_notes(&data, elicitations);
                     questions_ui::apply_question_notes(&data, questions);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
@@ -5102,6 +5113,9 @@ fn App() -> impl IntoView {
                 status=status
             />
         </Show>
+        <Show when=move || mode.get() == "workflows" fallback=move || ()>
+            <workflows::WorkflowsPage base=base token=token status=status />
+        </Show>
         <Show when=move || mode.get() == "triggers" fallback=move || ()>
             <triggers::TriggersPage
                 base=base
@@ -5285,6 +5299,14 @@ fn App() -> impl IntoView {
                     // to the conversation. Visually hidden; the status tabs
                     // and chat-mode bar already show the session name.
                     <h1 id="chat-heading" class="sr-only">{move || chat_title.get()}</h1>
+                    // #1781: persistent untrusted-workspace badge + trust card.
+                    <workspace_trust::WorkspaceTrust
+                        base=base
+                        token=token
+                        root=active_root
+                        status=status
+                        capable=workspace_trust_capable
+                    />
                     {move || {
                         let _ = tick.get();
                         let active = active_root.get();
@@ -5414,6 +5436,7 @@ fn App() -> impl IntoView {
                         find=find_view
                     />
                     </Show>
+                    <elicitation_ui::ElicitationCards base=base token=token root=active_root elicitations=elicitations />
                     <questions_ui::QuestionCards base=base token=token root=active_root questions=questions />
                     <ApprovalCards
                         asks=asks

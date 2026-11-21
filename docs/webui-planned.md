@@ -577,6 +577,24 @@ effort field on the spawn op), worktree merge/cleanup on adopt, parent
 commentary, the comparison card and model picker, and verification
 reuse (#780).
 
+## MCP elicitation
+
+Shipped (#1353): `elicitation.requested` renders a card above the composer
+(`webui/src/elicitation.rs`, `elicitation_ui.rs`) with the server name, its
+message, and fields from the requested schema, or a URL with Open / Done.
+Answers go back as one `elicitation.reply` (accept with content, decline,
+cancel) and are never posted as chat text.
+
+Not built yet:
+
+- The card sits with the approval cards above the composer, not inline in
+  the tool timeline where the call paused.
+- Streamable HTTP MCP servers: the capability is declared on stdio only;
+  HTTP does not route server requests yet.
+- TUI and ACP rendering: both cancel with a note.
+- Property order follows the field names (the cockpit's JSON maps are
+  sorted), not the server's key order.
+
 ## Agent questions
 
 Shipped (#1338): the `question` tool's `question.asked` renders as a card
