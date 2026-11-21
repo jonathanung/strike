@@ -40,6 +40,87 @@ pub fn canvas_class(idx: usize) -> String {
     format!("mmd-canvas mmd-z{}", idx.min(ZOOMS.len() - 1))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoomAction {
+    Out,
+    Fit,
+    In,
+}
+
+/// Next zoom step for a control press.
+pub fn apply_zoom(idx: usize, action: ZoomAction) -> usize {
+    match action {
+        ZoomAction::Out => step_zoom(idx, false),
+        ZoomAction::In => step_zoom(idx, true),
+        ZoomAction::Fit => FIT,
+    }
+}
+
+/// Label of the middle zoom button: "Fit" or the current percentage.
+pub fn zoom_label(idx: usize) -> String {
+    if idx == FIT {
+        "Fit".to_string()
+    } else {
+        format!("{:.0}%", ZOOMS[idx.min(ZOOMS.len() - 1)] * 100.0)
+    }
+}
+
+/// The `.mmd` block containing the clicked control.
+fn block_of(ev: &web_sys::MouseEvent) -> Option<web_sys::Element> {
+    use wasm_bindgen::JsCast;
+    ev.current_target()?
+        .dyn_into::<web_sys::Element>()
+        .ok()?
+        .closest(".mmd")
+        .ok()
+        .flatten()
+}
+
+fn set_flag(el: &web_sys::Element, name: &str, on: bool) {
+    if on {
+        let _ = el.set_attribute(name, "");
+    } else {
+        let _ = el.remove_attribute(name);
+    }
+}
+
+fn zoom_click(ev: &web_sys::MouseEvent, action: ZoomAction) {
+    let Some(block) = block_of(ev) else { return };
+    let Ok(Some(canvas)) = block.query_selector(".mmd-canvas") else { return };
+    let cur = canvas
+        .get_attribute("data-zoom")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(FIT);
+    let next = apply_zoom(cur, action);
+    let _ = canvas.set_attribute("class", &canvas_class(next));
+    let _ = canvas.set_attribute("data-zoom", &next.to_string());
+    if let Ok(Some(fit)) = block.query_selector("[data-mermaid-zoom=fit]") {
+        fit.set_text_content(Some(&zoom_label(next)));
+    }
+    if let Ok(Some(out)) = block.query_selector("[data-mermaid-zoom=out]") {
+        set_flag(&out, "disabled", next == 0);
+    }
+    if let Ok(Some(zin)) = block.query_selector("[data-mermaid-zoom=in]") {
+        set_flag(&zin, "disabled", next + 1 >= ZOOMS.len());
+    }
+}
+
+fn toggle_click(ev: &web_sys::MouseEvent) {
+    let Some(block) = block_of(ev) else { return };
+    let Ok(Some(source)) = block.query_selector(".mmd-source") else { return };
+    let show_source = source.has_attribute("hidden");
+    set_flag(&source, "hidden", !show_source);
+    for sel in [".mmd-canvas", ".mmd-zoom"] {
+        if let Ok(Some(el)) = block.query_selector(sel) {
+            set_flag(&el, "hidden", show_source);
+        }
+    }
+    if let Ok(Some(btn)) = block.query_selector("[data-mermaid-toggle]") {
+        let _ = btn.set_attribute("aria-pressed", if show_source { "true" } else { "false" });
+        btn.set_text_content(Some(toggle_label(show_source)));
+    }
+}
+
 /// Note under a block that did not render.
 pub fn failure_note(e: &mermaid_lite::ParseError) -> String {
     format!("Diagram didn't parse ({e}); showing the source.")
@@ -138,41 +219,33 @@ pub fn MermaidBlock(source: String, children: Children) -> impl IntoView {
             .into_any();
         }
     };
-    let source_on = RwSignal::new(false);
-    let zoom = RwSignal::new(FIT);
     let (w, h) = (scene.width, scene.height);
     let kind = scene.kind;
     let label = scene_label(&scene);
     let shapes = scene.shapes.into_iter().map(shape_view).collect_view();
-    // The <svg> keeps static attributes (natural size); zoom is a class
-    // on the HTML canvas wrapper (`mmd-z0`..`mmd-z6`, CSS `zoom` steps,
-    // `mmd-z2` = Fit capped at the column width). Updating attributes on
-    // the svg element itself did not take effect, and a `style` attribute
-    // is refused by the server CSP (`style-src 'self'`).
-    let canvas_cls = move || canvas_class(zoom.get());
+    // Controls act on the DOM of this block directly, found from the
+    // clicked button, with no reactive state: transcript rows can dispose
+    // a block's reactive owner while its DOM stays mounted, which left
+    // signal-driven controls dead (and `.update` panicking). The svg keeps
+    // static attributes; zoom is a class on the HTML canvas
+    // (`mmd-z0`..`mmd-z6`, CSS `zoom`; `mmd-z2` = Fit), never a `style`
+    // attribute (CSP `style-src 'self'`).
     view! {
         <div class="mmd" data-mermaid=kind>
             <div class="sx-fence-bar mmd-bar" role="toolbar" aria-label="Diagram controls">
                 <span class="sx-lang">"mermaid"</span>
-                <span class="mmd-zoom" hidden=move || source_on.get()>
+                <span class="mmd-zoom">
                     <button type="button" class="sx-quiet" data-mermaid-zoom="out" aria-label="Zoom out"
-                        disabled=move || zoom.get() == 0
-                        on:click=move |_| { let _ = zoom.try_update(|z| *z = step_zoom(*z, false)); }>"−"</button>
+                        on:click=move |ev| zoom_click(&ev, ZoomAction::Out)>"−"</button>
                     <button type="button" class="sx-quiet" data-mermaid-zoom="fit" aria-label="Fit diagram to width"
-                        on:click=move |_| { let _ = zoom.try_set(FIT); }>
-                        {move || if zoom.get() == FIT { "Fit".to_string() } else { format!("{:.0}%", ZOOMS[zoom.get()] * 100.0) }}
-                    </button>
+                        on:click=move |ev| zoom_click(&ev, ZoomAction::Fit)>{zoom_label(FIT)}</button>
                     <button type="button" class="sx-quiet" data-mermaid-zoom="in" aria-label="Zoom in"
-                        disabled=move || zoom.get() + 1 >= ZOOMS.len()
-                        on:click=move |_| { let _ = zoom.try_update(|z| *z = step_zoom(*z, true)); }>"+"</button>
+                        on:click=move |ev| zoom_click(&ev, ZoomAction::In)>"+"</button>
                 </span>
-                <button type="button" class="sx-quiet" data-mermaid-toggle=true
-                    aria-pressed=move || if source_on.get() { "true" } else { "false" }
-                    on:click=move |_| { let _ = source_on.try_update(|s| *s = !*s); }>
-                    {move || toggle_label(source_on.get())}
-                </button>
+                <button type="button" class="sx-quiet" data-mermaid-toggle=true aria-pressed="false"
+                    on:click=move |ev| toggle_click(&ev)>{toggle_label(false)}</button>
             </div>
-            <div class=canvas_cls tabindex="0" aria-label="Diagram canvas; scroll to pan" hidden=move || source_on.get()>
+            <div class=canvas_class(FIT) data-zoom=FIT.to_string() tabindex="0" aria-label="Diagram canvas; scroll to pan">
                 <svg
                     class="mmd-svg"
                     role="img"
@@ -185,7 +258,7 @@ pub fn MermaidBlock(source: String, children: Children) -> impl IntoView {
                     {shapes}
                 </svg>
             </div>
-            <div class="mmd-source" hidden=move || !source_on.get()>{code}</div>
+            <div class="mmd-source" hidden=true>{code}</div>
         </div>
     }
     .into_any()
@@ -219,6 +292,16 @@ mod tests {
         assert_eq!(canvas_class(FIT), "mmd-canvas mmd-z2");
         assert_eq!(canvas_class(0), "mmd-canvas mmd-z0");
         assert_eq!(canvas_class(99), "mmd-canvas mmd-z6");
+    }
+
+    #[test]
+    fn zoom_actions_and_labels() {
+        assert_eq!(apply_zoom(FIT, ZoomAction::In), FIT + 1);
+        assert_eq!(apply_zoom(FIT, ZoomAction::Out), FIT - 1);
+        assert_eq!(apply_zoom(5, ZoomAction::Fit), FIT);
+        assert_eq!(zoom_label(FIT), "Fit");
+        assert_eq!(zoom_label(FIT + 1), "125%");
+        assert_eq!(zoom_label(0), "50%");
     }
 
     #[test]
