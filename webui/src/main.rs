@@ -17,8 +17,10 @@ mod approvals_ui;
 mod chat_mode;
 mod child_signals;
 mod clipboard;
+mod compaction_marks;
 mod confirm;
 mod composer_triggers;
+mod config_sources;
 mod diag;
 mod draft_size;
 mod drafts;
@@ -36,9 +38,11 @@ mod gateway_peek;
 mod gateway_qr;
 mod git;
 mod goals;
+mod instance_backup;
 mod mobile;
 mod provider_signin;
 mod providers;
+mod review_queue;
 mod push;
 mod rule_author;
 mod sandbox_explain;
@@ -1119,6 +1123,8 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // Typed config-source list (#1493), from bootstrap `configFiles`.
+    let config_files_capable = RwSignal::new(false);
     // #1375: daemon-aggregated team signals from the /v1/team poll — the
     // bounded inter-agent mail, member names for its From/To, the lead id,
     // and each child's latest escalation sentence by session id.
@@ -1858,6 +1864,7 @@ fn App() -> impl IntoView {
                                 crate::local_issues::set_issues_capable(boot.capabilities.issues);
                                 issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                config_files_capable.set(boot.capabilities.config_files);
                                 crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
                                 skills.set(boot.skills);
                                 loops_capable.set(boot.capabilities.loops);
@@ -5009,6 +5016,7 @@ fn App() -> impl IntoView {
 
     let git_active = Memo::new(move |_| side_tab.get() == "git");
     let worktree_active = Memo::new(move |_| side_tab.get() == "worktrees");
+    let review_active = Memo::new(move |_| side_tab.get() == "review");
     // Names the open session for the chat-mode bar and the chat view's h1.
     let chat_title = Memo::new(move |_| {
         let id = active_root.get();
@@ -5081,6 +5089,7 @@ fn App() -> impl IntoView {
                 status=status
                 diag_capable=diag_capable
                 project_init_capable=project_init_capable
+                config_files_capable=config_files_capable
                 root=active_root
                 theme=theme_id
                 theme_catalog=themes_state
@@ -6038,6 +6047,7 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "files" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("files".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("files")></span>"Files"</button>
                         <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
                         <button class=move || if side_tab.get() == "git" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("git".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("git")></span>"Git"</button>
+                        <button class=move || if side_tab.get() == "review" { "chip on" } else { "chip" } data-side-tab="review" on:click=move |_| side_tab.set("review".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Review"</button>
                         <button class=move || if side_tab.get() == "terminal" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("terminal".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("terminal")></span>"Terminal"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
@@ -6329,6 +6339,9 @@ fn App() -> impl IntoView {
                     <div hidden=move || !git_active.get()>
                         <pr_watch::PrWatch base=base token=token session=active_root active=git_active />
                         <git::GitPanel base=base token=token status_line=status active=git_active />
+                    </div>
+                    <div hidden=move || !review_active.get()>
+                        <review_queue::ReviewPanel base=base token=token root=active_root busy=session_busy_now active=review_active />
                     </div>
                     <div hidden=move || !worktree_active.get()>
                         <git::WorktreePanel base=base token=token status_line=status active_root=active_root active=worktree_active />
