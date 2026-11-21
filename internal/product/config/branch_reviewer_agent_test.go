@@ -30,6 +30,9 @@ func TestBranchReviewerAgentIsReadOnly(t *testing.T) {
 		"verify", "browser", "webfetch", "websearch", "mcp",
 		"memory_write", "issue_write", "plan_write", "plan_delegate",
 		"artifact_write", "ledger_write", "todowrite", "question",
+		// No messaging: a prompt-injected reviewer must not relay orders
+		// to a sibling that can write.
+		"agent_message", "agent_broadcast", "task_message", "task_interrupt", "agent_ownership",
 	} {
 		if !rulesetHas(got.Permissions, perm, permission.Deny) {
 			t.Errorf("branch-reviewer must deny %s: %+v", perm, got.Permissions)
