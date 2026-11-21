@@ -772,12 +772,25 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	// Triggers use their authored launcher (internal/daemon/rootstart,
 	// server.NewRootLauncher); the landed scheduler uses internal/rootstart.
 	// Do not spawn a third way.
-	trigSvc := trigger.New(trigStore, server.NewRootLauncher(liveHub))
+	rootLauncher := server.NewRootLauncher(liveHub)
+	trigSvc := trigger.New(trigStore, rootLauncher)
 	dwStore, err := deploywatch.Open("")
 	if err != nil {
 		return err
 	}
-	deployWatches := deploywatch.New(dwStore, deploywatch.Config{})
+	// Deploy watch (#1783): shell checks run under the same sandbox dial as
+	// agent bash; plan and verdict post through the shared root launcher.
+	var dwShell *deploywatch.Shell
+	if terminalSandboxLoaded {
+		dwShell = &deploywatch.Shell{Sandbox: terminalSandbox, WorkDir: cwd}
+	}
+	dwGitHub := &deploywatch.GitHub{}
+	deployWatches := deploywatch.New(dwStore, deploywatch.Config{
+		GitHub: dwGitHub,
+		Shell:  dwShell,
+		Notify: deploywatch.Poster{GitHub: dwGitHub, Launcher: rootLauncher},
+	})
+	trigSvc.SetDeployWatches(deployWatches)
 	if !opts.readOnly {
 		go deployWatches.Run(ctx, deploywatch.DefaultTick)
 	}
