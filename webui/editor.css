@@ -84,7 +84,7 @@
 .ev-str { color: var(--accent-alt); }
 .ev-com { color: var(--muted); }
 .ev-num { color: var(--warning); }
-.ev-mark { background: var(--raised); color: var(--ink); border-radius: 2px; }
+.ev-mark { background: var(--raised); color: var(--ink); border-radius: var(--radius); }
 .ev-mark.ev-current { outline: 1px solid var(--warning); }
 .ev-editor {
   flex: 1;

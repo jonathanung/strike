@@ -23,7 +23,7 @@
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border-radius: 99px;
+  border-radius: var(--radius-sm);
   background: var(--signal);
   color: var(--on-accent);
   font-size: 10px;
@@ -145,7 +145,7 @@ button.notify-open {
 .notify-dot {
   width: 8px;
   height: 8px;
-  border-radius: 99px;
+  border-radius: var(--radius-sm);
   background: var(--acid);
 }
 

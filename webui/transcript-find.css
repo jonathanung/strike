@@ -33,7 +33,7 @@
 .tf-mark {
   background: var(--raised);
   color: var(--ink);
-  border-radius: 2px;
+  border-radius: var(--radius);
   outline: 1px solid var(--overlay);
 }
 .tf-mark.tf-current {
