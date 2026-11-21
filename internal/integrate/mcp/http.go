@@ -68,7 +68,7 @@ func (c *HTTPClient) initialize(ctx context.Context) error {
 	var result initializeResult
 	if err := c.call(ctx, "initialize", initializeParams{
 		ProtocolVersion: ProtocolVersion,
-		Capabilities:    clientCapabilities(),
+		Capabilities:    clientCapabilities(false),
 		ClientInfo:      implementationInfo{Name: "strike", Version: "1"},
 	}, &result); err != nil {
 		return fmt.Errorf("mcp %s: initialize: %w", c.cfg.Name, err)

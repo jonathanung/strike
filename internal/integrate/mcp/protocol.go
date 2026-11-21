@@ -118,11 +118,17 @@ func truthy(v any) bool {
 }
 
 // clientCapabilities advertises what Strike supports during initialize.
-func clientCapabilities() map[string]any {
-	return map[string]any{
+// elicitation is declared only on transports that answer server requests
+// (stdio today); streamable HTTP does not route them yet (#1353).
+func clientCapabilities(elicitation bool) map[string]any {
+	caps := map[string]any{
 		"roots":    map[string]any{"listChanged": false},
 		"sampling": map[string]any{},
 	}
+	if elicitation {
+		caps["elicitation"] = map[string]any{"form": map[string]any{}, "url": map[string]any{}}
+	}
+	return caps
 }
 
 type listToolsResult struct {
