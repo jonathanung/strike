@@ -1124,6 +1124,7 @@ fn message_view(
     let detail = msg.detail.clone();
     let diff = msg.diff.clone();
     let chips = msg.chips.clone();
+    let sent_attachments = msg.attachments.clone();
     let copy_text = if msg.copy_text.is_empty() {
         body.clone()
     } else {
@@ -1277,6 +1278,9 @@ fn message_view(
             } else {
                 view! { <span></span> }.into_any()
             }}
+            {(!sent_attachments.is_empty()).then(|| view! {
+                <crate::transcript_attachments::SentAttachments items=sent_attachments.clone() />
+            })}
             {tail.map(crate::tool_tail::tail_view)}
             {auth_notice.then(|| {
                 let target = reconnect.clone();

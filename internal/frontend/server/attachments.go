@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -100,6 +102,62 @@ func (s *Server) handleAttachmentIngest(w http.ResponseWriter, r *http.Request) 
 		Kind:   meta.Kind,
 		Name:   attachment.RedactName(meta.Name),
 	})
+}
+
+// handleAttachmentGet serves one stored blob by its att:sha256: ref
+// (#1389) so the cockpit can show thumbnails and downloads after reload.
+// Auth is the /v1 middleware, same as ingest. Reads are allowed on a
+// read-only gateway and do not spend the ops rate-limit bucket, which a
+// transcript full of thumbnails would otherwise drain before a send.
+// Content-Type is the stored MIME; the response is sandboxed and only
+// raster images are served inline, so an SVG or HTML-looking blob opened
+// directly cannot run script in the cockpit's origin.
+func (s *Server) handleAttachmentGet(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Attachments == nil {
+		writeJSON(w, http.StatusServiceUnavailable, opErrorResponse{Error: "attachment store is not configured"})
+		return
+	}
+	ref := strings.TrimSpace(r.PathValue("ref"))
+	if _, ok := attachment.ParseRef(ref); !ok {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "invalid attachment ref"})
+		return
+	}
+	raw, meta, err := s.opts.Attachments.Get(ref)
+	if err != nil {
+		if errors.Is(err, attachment.ErrNotFound) {
+			writeJSON(w, http.StatusNotFound, opErrorResponse{Error: "attachment not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: "attachment read failed"})
+		return
+	}
+	mime := strings.TrimSpace(meta.MIME)
+	if mime == "" {
+		mime = "application/octet-stream"
+	}
+	h := w.Header()
+	h.Set("Content-Type", mime)
+	h.Set("Content-Length", strconv.Itoa(len(raw)))
+	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox; frame-ancestors 'none'")
+	h.Set("Cache-Control", "private, max-age=31536000, immutable")
+	h.Set("Content-Disposition", attachmentDisposition(mime, attachment.RedactName(meta.Name)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
+}
+
+// attachmentDisposition is inline for raster images (thumbnails) and
+// attachment for everything else, carrying the stored name.
+func attachmentDisposition(mime, name string) string {
+	disp := "attachment"
+	switch strings.ToLower(mime) {
+	case "image/png", "image/jpeg", "image/webp", "image/gif":
+		disp = "inline"
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return disp
+	}
+	return disp + "; filename*=UTF-8''" + url.PathEscape(name)
 }
 
 // prepareOp enforces attachment limits on user.input and steer, stores inline
