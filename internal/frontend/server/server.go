@@ -218,6 +218,9 @@ type Server struct {
 	// notifyOnce lazily opens the redacted notification log under SessionDir.
 	notifyOnce sync.Once
 	notifyLog  *notifyLog
+	// clientMsgOnce lazily opens the outbox client-message-id dedupe (#1325).
+	clientMsgOnce  sync.Once
+	clientMsgStore *clientMsgDedupe
 
 	// tokenHash is the sha256 of the daemon token file last observed.
 	// A change appends a token-rotation audit entry. The token is not stored.
@@ -443,6 +446,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sandbox", s.handleSandboxGet)
 	s.mux.HandleFunc("PATCH /v1/sandbox", s.handleSandboxPatch)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/children", s.handleSessionChildren)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/reference", s.handleSessionReference)
 	s.mux.HandleFunc("GET /v1/session-lifecycle", s.handleSessionLifecycleCapabilities)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.handleSessionFork)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork_at", s.handleSessionForkAt)
@@ -565,6 +569,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/plugins/{id}", s.handlePluginGet)
 	s.mux.HandleFunc("GET /v1/customize", s.handleCustomize)
 	s.mux.HandleFunc("GET /v1/customize/doc", s.handleCustomizeDoc)
+	s.mux.HandleFunc("GET /v1/customize/skill-usage", s.handleSkillUsage)
 	s.mux.HandleFunc("POST /v1/customize/preview", s.handleCustomizePreview)
 	s.mux.HandleFunc("POST /v1/customize/apply", s.handleCustomizeApply)
 	s.mux.HandleFunc("GET /v1/panes", s.handlePanesList)
@@ -947,7 +952,7 @@ func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, "+clientMessageHeader)
 	}
 }
 

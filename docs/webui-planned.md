@@ -308,6 +308,32 @@ page. Plugin install and removal stay on `/v1/plugins`. The composer expands
 `$skill` through the daemon (see Composer triggers); this page is where those
 files are inspected and edited.
 
+## Powers
+
+The daemon side is in place but no chip is drawn yet (#1347).
+`internal/integrate/powers` loads packs from
+`<workspace>/.strike/powers/<pack>/` and `~/.strike/powers/<pack>/`, and
+the workspace copy wins on a name clash. Each pack is an Agent Plugins
+package: `plugin.json` holds `name` and `keywords`, `mcp.json` holds
+`mcpServers`, and `skills/<name>/SKILL.md` holds skills. These are
+references by name, not copies.
+
+A pack is suggested when a keyword appears in the prompt as a whole word
+or phrase. Packs that are muted or already active are not suggested, and
+nothing activates on its own. Activation is per session and
+reference-counted: packs that share a server keep it until the last one is
+deactivated, and ending one session never disconnects another session's
+servers. If a server fails to connect, it is listed as failed and left
+out of the session, and the chip and the tool set read the same result.
+If a pack names a deny-listed server, the whole pack stays inactive and
+the reason is shown.
+
+Not built yet:
+- a `Connector` connected to the MCP session manager, and the daemon routes for it;
+- the composer chip row with context cost (#1259);
+- pack membership on Customize;
+- goal-declared Powers (#1284).
+
 ## Composer triggers
 
 `user.input` and `steer` expand in the daemon (`internal/composer/triggers`,
@@ -407,6 +433,27 @@ that push service. The next open replays the daemon log into the centre.
 A gateway drop is detected by the page (the daemon cannot deliver "I am
 gone"); it is not a JSONL record.
 
+## Offline outbox
+
+Shipped (#1325, first slice): when the gateway is unreachable, a text send
+from the composer is queued in a per-gateway `localStorage` outbox (survives
+a tab close or PWA restart) and shown above the composer as "Queued — will
+send when reconnected", with Edit and Delete. On reconnect items flush one at
+a time in the order written, before any new send for the same session. Each
+send carries `X-Strike-Client-Message-Id`; `POST /v1/ops` remembers delivered
+ids per live root (memory, 24h, bounded) and answers a repeat with
+`{"ok":true,"duplicate":true}` without submitting, or 409 while the first
+attempt is still in flight. A send that loses its connection mid-request is
+queued under the same id, so a half-open retry cannot post twice. The op
+(`user.input` or `steer`) is fixed at send time. Approvals are never queued.
+Items older than 24h are held for confirmation (Send) instead of auto-sent;
+a refused send (4xx) holds that session's later items until it is retried or
+deleted.
+
+Not built: queuing attachments (they need an upload while online), a
+daemon-restart-proof dedupe (ids are memory-only), and a hold for sessions
+that finished while the message was queued.
+
 ## Find in transcript
 
 Shipped (#1342): Ctrl/Cmd+F, the Find chip, or the palette command opens
@@ -437,6 +484,26 @@ Not drawn yet: the session flag in the engine turn loop, the protocol
 events, and the cockpit Debug panel (hypothesis card, instrumentation
 list, reproduce checklist, mobile chip). Bash is not inspected by the
 gate; the permission layer still governs it.
+
+## Run with N models
+
+Orchestration core shipped, card not drawn (#1346).
+`internal/daemon/bestofn` validates a comparison (2–4 distinct
+model/effort pairs, non-empty prompt, non-negative per-run budget), shows
+the N× cost multiplier, and builds one spawn spec per model: same prompt,
+the parent's permission mode passed through (never widened), and a
+worktree per candidate when the prompt may edit files (shared otherwise).
+A candidate whose spawn fails, fails mid-run, or is cancelled is recorded
+as such and the comparison completes with the rest; cancelling all
+interrupts only running children. Picking a winner is a separate call
+that requires every candidate to have stopped and the winner to have
+finished; it returns which child to keep and which to archive. "Keep
+none" archives all. A run is decided once.
+
+Not drawn yet: the Spawner wired to `team.spawn` (a per-child model and
+effort field on the spawn op), worktree merge/cleanup on adopt, parent
+commentary, the comparison card and model picker, and verification
+reuse (#780).
 
 ## Not planned as a copy
 
