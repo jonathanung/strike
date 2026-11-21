@@ -53,6 +53,143 @@ async function headerAt(page, check, viewport, grab) {
   await viewport(1440, 900);
 }
 
+// #1533 / #1538: a card offers device-code / OAuth sign-in only when the
+// daemon lists it in `methods` (today: xai device+oauth, openai oauth). The
+// flows hit the real daemon endpoints; the vendor step cannot finish here,
+// so the check is start -> pending (link, code or paste field) -> cancel,
+// or an honest daemon error at the card. Never a "Signed in".
+async function signinFlow(page, check, waitUntil, grab) {
+  const offered = await page.evaluate(`(() => {
+    const pick = (name) => {
+      const card = document.querySelector('[data-provider="' + name + '"]');
+      if (!card) return null;
+      return [...card.querySelectorAll("[data-signin]")].map((el) => el.getAttribute("data-signin")).sort().join(",");
+    };
+    return { xai: pick("xai"), openai: pick("openai"), anthropic: pick("anthropic"), echo: pick("echo") };
+  })()`);
+  check(offered.xai === "device,oauth", `xai sign-in actions were ${offered.xai}, want device,oauth`);
+  check(offered.openai === "oauth", `openai sign-in actions were ${offered.openai}, want oauth`);
+  check(offered.anthropic === "", `anthropic offered sign-in it does not advertise: ${offered.anthropic}`);
+  check(offered.echo === "", `echo offered sign-in it does not advertise: ${offered.echo}`);
+
+  for (const [provider, method] of [
+    ["openai", "oauth"],
+    ["xai", "device"],
+  ]) {
+    const card = `[data-provider="${provider}"]`;
+    await page.evaluate(`document.querySelector('${card} [data-signin="${method}"]')?.click()`);
+    const outcome = await waitUntil(
+      `(() => {
+        const flow = document.querySelector('${card} [data-signin-flow="${method}"]');
+        const note = document.querySelector('${card} [data-provider-note]');
+        return Boolean(flow) || Boolean(note && note.innerText.trim());
+      })()`,
+      20000,
+      `${provider} ${method} sign-in start`,
+    );
+    check(Boolean(outcome), `${provider} ${method} sign-in showed neither a flow nor an error`);
+    const state = await page.evaluate(`(() => {
+      const flow = document.querySelector('${card} [data-signin-flow="${method}"]');
+      if (!flow) return { phase: "" };
+      return {
+        phase: flow.getAttribute("data-signin-phase") || "",
+        url: flow.querySelector("[data-signin-url]")?.textContent || "",
+        code: flow.querySelector("[data-signin-code]")?.textContent || "",
+        paste: Boolean(flow.querySelector("[data-signin-paste]")),
+        cancel: Boolean(flow.querySelector("[data-signin-cancel]")),
+      };
+    })()`);
+    check(state.phase !== "completed", `${provider} ${method} claimed a completed sign-in in UAT`);
+    if (state.phase !== "pending") {
+      // Vendor unreachable from this box: the daemon's error is the evidence.
+      continue;
+    }
+    check(/^https?:\/\//.test(state.url), `${provider} ${method} pending flow has no link`);
+    check(state.cancel, `${provider} ${method} pending flow has no Cancel`);
+    if (method === "oauth") check(state.paste, `${provider} oauth pending flow has no paste field`);
+    if (method === "device") check(state.code.trim().length > 0, `${provider} device flow shows no user code`);
+    const stored = await page.evaluate(`(() => {
+      let store = "";
+      try { store = JSON.stringify(localStorage); } catch (err) { store = ""; }
+      const url = ${JSON.stringify(state.url)};
+      return url !== "" && store.includes(url);
+    })()`);
+    check(!stored, `${provider} ${method} flow link was written to localStorage`);
+    await grab(`providers-signin-${method}-pending-1440`);
+    await page.evaluate(`document.querySelector('${card} [data-signin-cancel]')?.click()`);
+    const canceled = await waitUntil(
+      `document.querySelector('${card} [data-signin-flow="${method}"]')?.getAttribute("data-signin-phase") === "canceled"`,
+      8000,
+      `${provider} ${method} cancel`,
+    );
+    check(Boolean(canceled), `${provider} ${method} Cancel did not reach the canceled state`);
+    await page.evaluate(`document.querySelector('${card} [data-signin-dismiss]')?.click()`);
+  }
+}
+
+// #1508: the composer action row must never scroll sideways or clip a
+// chip, Send must stay on screen, and the transcript must not render
+// underneath the composer — at 1024x594 especially.
+async function composerAt(page, check, viewport, grab) {
+  const sizes = [
+    [1024, 594],
+    [1440, 900],
+    [390, 844],
+    [360, 800],
+  ];
+  for (const [width, height] of sizes) {
+    await viewport(width, height);
+    await delay(180);
+    const fit = await page.evaluate(`(() => {
+      const composer = document.querySelector(".chat > .composer");
+      const bar = document.querySelector(".composer-bar");
+      const chips = document.querySelector(".composer-chips");
+      const send = document.querySelector("#send-primary");
+      if (!composer || !bar || !chips || !send) return null;
+      const box = composer.getBoundingClientRect();
+      if (box.width === 0 || box.height === 0) return { hidden: true };
+      const clipped = [...chips.children]
+        .filter((el) => el.getBoundingClientRect().width > 0)
+        .filter((el) => {
+          const r = el.getBoundingClientRect();
+          return r.left < box.left - 1 || r.right > box.right + 1;
+        })
+        .map((el) => (el.innerText || el.getAttribute("aria-label") || "").trim());
+      const s = send.getBoundingClientRect();
+      const t = document.querySelector(".chat .transcript");
+      const tb = t ? t.getBoundingClientRect() : null;
+      return {
+        hidden: false,
+        phone: document.body.getAttribute("data-phone") === "1",
+        barScroll: bar.scrollWidth > bar.clientWidth + 1,
+        chipScroll: chips.scrollWidth > chips.clientWidth + 1,
+        clipped,
+        sendOnScreen: s.width > 0 && s.left >= 0 && s.right <= window.innerWidth + 1 && s.bottom <= window.innerHeight + 1,
+        overlap: tb && tb.height > 0 ? Math.round(tb.bottom - box.top) : 0,
+      };
+    })()`);
+    check(Boolean(fit), `composer missing at ${width}x${height}`);
+    if (!fit || fit.hidden) continue;
+    // Phones keep the #1332 chip scroller (wrapping would push the
+    // composer out of a keyboard-open viewport); Send must still be on
+    // screen there. Desktop layouts must not scroll or clip at all.
+    if (!fit.phone) {
+      check(!fit.barScroll && !fit.chipScroll, `composer row scrolls sideways at ${width}x${height}`);
+      check(fit.clipped.length === 0, `composer chip clipped at ${width}x${height}: ${fit.clipped.join(", ")}`);
+    } else {
+      check(!fit.barScroll, `composer bar (Send column) scrolls sideways at ${width}x${height}`);
+    }
+    check(fit.sendOnScreen, `Send is off screen at ${width}x${height}`);
+    // Phones use a sticky composer over a scrolling pane (#1332); the
+    // overlap rule is for the in-flow desktop column.
+    if (width > 720) {
+      check(fit.overlap <= 1, `transcript renders ${fit.overlap}px under the composer at ${width}x${height}`);
+    }
+    await grab(`composer-${width}`);
+  }
+  await viewport(1440, 900);
+}
+
 async function providerFlow(page, check, waitUntil, grab) {
   await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
   const opened = await waitUntil(
@@ -78,6 +215,7 @@ async function providerFlow(page, check, waitUntil, grab) {
     `document.querySelector('[data-provider="echo"]')?.innerText || ""`,
   );
   check(String(echoState).includes("Connected"), `echo was not Connected: ${echoState}`);
+  await signinFlow(page, check, waitUntil, grab);
   for (const [width, height] of [
     [390, 844],
     [768, 1024],
@@ -416,6 +554,11 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       await writeFile(join(outDir, "screenshots", `${name}.png`), Buffer.from(png.data, "base64"));
       shots.push(name);
     });
+    await composerAt(page, check, viewport, async (name) => {
+      const png = await page.send("Page.captureScreenshot", { format: "png" });
+      await writeFile(join(outDir, "screenshots", `${name}.png`), Buffer.from(png.data, "base64"));
+      shots.push(name);
+    });
 
     // Keyboard path: Ctrl+K opens the palette, "plan" filters to Approval: Plan, Enter applies it.
     await press("k", 2);
@@ -600,6 +743,40 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       await click(".activity-row button.activity-main", CHILD_OBJECTIVE);
       await delay(250);
       await shoot("shell-activity", ["desk1024", "desk1440"]);
+
+      // #1375: a lead -> child message the daemon accepts is aggregated
+      // into /v1/team messages and must appear in the Activity feed.
+      const team = await fetch(`${baseURL}/v1/team?root=${encodeURIComponent(root)}`).then((r) => r.json());
+      const child = Object.values(team.members || {}).find(
+        (m) => m.name === CHILD_NAME || m.objective === CHILD_OBJECTIVE,
+      );
+      if (child?.sessionId) {
+        const sent = await fetch(`${baseURL}/v1/ops?root=${encodeURIComponent(root)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "team.message",
+            data: {
+              to: child.sessionId,
+              body: "uat feed body",
+              idempotencyKey: "uat-feed-1",
+            },
+          }),
+        });
+        const sentBody = await sent.text();
+        log(`team.message for feed: HTTP ${sent.status} ${sentBody.slice(0, 200)}`);
+        if (sent.ok) {
+          const fed = await waitUntil(
+            `[...document.querySelectorAll("[data-agent-feed] .agent-msg")].some((el) => el.innerText.includes("uat feed body"))`,
+            15000,
+            "agent message feed entry",
+          );
+          check(Boolean(fed), "accepted team.message never appeared in the agent message feed");
+          await shoot("shell-agent-feed", ["desk1024"]);
+        }
+      } else {
+        log("no child member in /v1/team; skipped agent feed check");
+      }
     }
 
     const before = await page.evaluate(
