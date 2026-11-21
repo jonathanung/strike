@@ -319,6 +319,8 @@ pub struct Transcript {
     /// the turn's final message id. Only turns whose `turn.completed`
     /// carried a verification report get an entry.
     pub turn_verify: HashMap<u32, crate::turn_verify::TurnVerify>,
+    /// Steer acknowledgement markers (#1343), keyed by message id.
+    pub steer_acks: crate::steer_ack::SteerAcks,
     /// Live `tool.output` tails (#1374), keyed by the tool card's message
     /// id. Removed when the call's `tool.end` arrives; a call that never
     /// ends keeps its last tail as the only record of what it printed.
@@ -351,6 +353,7 @@ impl Transcript {
             turn_session: String::new(),
             reasoning: crate::reasoning::ReasoningLog::default(),
             turn_verify: HashMap::new(),
+            steer_acks: crate::steer_ack::SteerAcks::default(),
             tool_tails: HashMap::new(),
         }
     }
@@ -520,6 +523,7 @@ impl Transcript {
                 self.attach_reasoning_to_last();
                 let text = field_str(&data, "text");
                 let shown = display_user_text(&strip_echo_progress(&text));
+                let (ack_text, ack_shown) = (text.clone(), shown.clone());
                 let id = self.push(Message {
                     id: 0,
                     role: Role::You,
@@ -539,8 +543,14 @@ impl Transcript {
                     turn_id: field_str(&data, "turnId"),
                     attachments: crate::transcript_attachments::parse_images(&data),
                 });
+                self.steer_acks.on_user_message(id, &ack_text, &ack_shown);
                 self.turn_start = Some(id);
                 self.absorb();
+            }
+            "turn.steered" => {
+                let text = field_str(&data, "text");
+                let mode = field_str(&data, "mode");
+                self.steer_acks.on_steered(&self.messages, &text, &mode);
             }
             "session.titled" => self.note_titled(&field_str(&data, "title")),
             "turn.started" => {
@@ -826,6 +836,7 @@ impl Transcript {
                     copy_text: body,
                     reconnect: String::new(),
                     at_ms,
+                    attachments: Vec::new(),
                     turn_id: field_str(&data, "turnId"),
                     attachments: Vec::new(),
                 });
@@ -973,6 +984,7 @@ impl Transcript {
                     copy_text: permission,
                     reconnect: String::new(),
                     at_ms,
+                    attachments: Vec::new(),
                     turn_id: String::new(),
                     attachments: Vec::new(),
                 });
