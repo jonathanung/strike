@@ -617,10 +617,11 @@ impl Transcript {
                 });
             }
             "tool.output" => {
-                // #1374: append to the card for this callId only. No
-                // name or newest-running fallback: a chunk without a
-                // matching card is dropped rather than shown on the
-                // wrong call.
+                // #1374: append to the running card for this callId only.
+                // No name or newest-running fallback: a chunk without a
+                // matching card is dropped rather than shown on the wrong
+                // call, and a straggler after tool.end (or after the row
+                // was settled) never resurrects a tail on a finished card.
                 let call_id = field_str(&data, "callId");
                 if call_id.is_empty() {
                     return;
@@ -628,6 +629,9 @@ impl Transcript {
                 let Some(idx) = self.find_tool(&call_id, "") else {
                     return;
                 };
+                if self.messages[idx].badge != "running" {
+                    return;
+                }
                 let id = self.messages[idx].id;
                 self.tool_tails
                     .entry(id)
@@ -3068,5 +3072,74 @@ mod tests {
         assert!(t.messages[0].body.contains("**world**"));
         let blocks = parse_markdown(&t.messages[0].body);
         assert!(matches!(blocks[0], Block::Paragraph(_)));
+    }
+
+    // #1374: live tool.output tail.
+    fn begin(t: &mut Transcript, call: &str) -> u32 {
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": call, "name": "bash", "args": {"command": "make"}}),
+        ));
+        t.messages.last().unwrap().id
+    }
+
+    fn output(t: &mut Transcript, call: &str, data: &str) {
+        t.apply_envelope(&env("tool.output", serde_json::json!({"callId": call, "data": data})));
+    }
+
+    #[test]
+    fn tool_output_appends_to_its_card_until_end() {
+        let mut t = Transcript::new();
+        let a = begin(&mut t, "a");
+        let b = begin(&mut t, "b");
+        output(&mut t, "a", "a1\n");
+        output(&mut t, "b", "b1\n");
+        output(&mut t, "a", "a2\n");
+        assert_eq!(t.tail_for(a).unwrap().text, "a1\na2\n");
+        assert_eq!(t.tail_for(b).unwrap().text, "b1\n");
+        t.apply_envelope(&env(
+            "tool.end",
+            serde_json::json!({"callId": "a", "name": "bash", "output": "final"}),
+        ));
+        assert!(t.tail_for(a).is_none(), "tool.end replaces the tail");
+        assert!(t.tail_for(b).is_some());
+        // A straggler after tool.end does not resurrect a tail.
+        output(&mut t, "a", "late\n");
+        assert!(t.tail_for(a).is_none());
+    }
+
+    #[test]
+    fn tool_output_without_matching_card_is_dropped() {
+        let cases = [("", "x\n"), ("nope", "x\n")];
+        for (call, data) in cases {
+            let mut t = Transcript::new();
+            let a = begin(&mut t, "a");
+            output(&mut t, call, data);
+            assert!(t.tail_for(a).is_none(), "call {call:?}");
+            assert!(t.tool_tails.is_empty(), "call {call:?}");
+        }
+    }
+
+    #[test]
+    fn tool_output_tail_is_bounded() {
+        let mut t = Transcript::new();
+        let a = begin(&mut t, "a");
+        for i in 0..(crate::tool_tail::TAIL_MAX_LINES + 5) {
+            output(&mut t, "a", &format!("{i}\n"));
+        }
+        let tail = t.tail_for(a).unwrap();
+        assert!(tail.truncated);
+        assert_eq!(crate::tool_tail::line_count(&tail.text), crate::tool_tail::TAIL_MAX_LINES);
+        assert!(tail.text.starts_with("5\n"));
+    }
+
+    #[test]
+    fn orphaned_call_keeps_its_last_tail() {
+        let mut t = Transcript::new();
+        let a = begin(&mut t, "a");
+        output(&mut t, "a", "last words\n");
+        t.settle_orphaned_tools();
+        assert_eq!(t.messages[0].badge, NO_RESULT_BADGE);
+        assert_eq!(t.tail_for(a).unwrap().text, "last words\n");
     }
 }
