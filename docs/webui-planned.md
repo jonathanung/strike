@@ -611,6 +611,7 @@ goals/autopilot state, workspaces and their rules, issues, plans and the
 ledger are not in archive version 1; the manifest names them as
 `not-yet-included`. Passphrase encryption is not offered: the file says
 `"encrypted": false` and secrets are excluded regardless.
+
 ## Live preview
 
 The side panel **Preview** tab (#1341) proxies one user-picked loopback port
