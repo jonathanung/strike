@@ -224,6 +224,11 @@ export async function skillProposalsCheck({ send, repoDir, port, token, home }) 
 
   // #1958 dismiss path: the dismissed card goes, and a rescan does not
   // bring it back.
+  await waitFor(
+    send,
+    `(() => { const b = (${cardSel(DISMISSED_SKILL)})?.querySelector('[data-cz-proposal-dismiss]'); return b && !b.disabled ? "ok" : "dismiss " + (b ? "disabled" : "missing"); })()`,
+    "Dismiss is ready",
+  );
   await evalValue(send, `(${cardSel(DISMISSED_SKILL)}).querySelector('[data-cz-proposal-dismiss]').click()`);
   await waitFor(
     send,
@@ -243,16 +248,24 @@ export async function skillProposalsCheck({ send, repoDir, port, token, home }) 
   await waitFor(
     send,
     `(() => {
+      // The click disables the buttons until the scan reply lands; dismiss
+      // already left "1 proposal", so wait for the scan itself to finish.
+      const scan = document.querySelector('[data-cz-proposals-scan]');
       const status = document.querySelector('[data-cz-proposals-status]')?.innerText || "";
       const cards = [...document.querySelectorAll('[data-cz-proposal]')];
       const text = cards.map((c) => c.innerText).join(" | ");
-      return status.includes("1 proposal") && cards.length === 1 && text.includes(${JSON.stringify(PROPOSED_SKILL)}) && !text.includes(${JSON.stringify(DISMISSED_SKILL)})
+      return scan && !scan.disabled && status.includes("1 proposal") && cards.length === 1 && text.includes(${JSON.stringify(PROPOSED_SKILL)}) && !text.includes(${JSON.stringify(DISMISSED_SKILL)})
         ? "ok"
         : "status " + JSON.stringify(status) + " cards " + JSON.stringify(text.slice(0, 300));
     })()`,
     "rescan does not bring the dismissed proposal back",
   );
 
+  await waitFor(
+    send,
+    `(() => { const b = (${cardSel(PROPOSED_SKILL)})?.querySelector('[data-cz-proposal-accept]'); return b && !b.disabled ? "ok" : "accept " + (b ? "disabled" : "missing"); })()`,
+    "Accept is ready",
+  );
   await evalValue(send, `(${cardSel(PROPOSED_SKILL)}).querySelector('[data-cz-proposal-accept]').click()`);
   try {
     await waitFor(
