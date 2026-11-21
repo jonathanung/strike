@@ -1692,7 +1692,11 @@ try {
   })()`);
   // #1539: the saved profile shows up as a read-only peek group in the
   // Sessions list, under a Local label, badged from a real probe — here
-  // unreachable, never a fake count.
+  // unreachable, never a fake count. The Sessions rail lives in the
+  // chat view (settings was open above), so go there first; mounting
+  // the list is itself one of the peek's refresh triggers.
+  await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
+  await waitUntil(`!!document.querySelector(".ss-panel")`, "sessions list for the peek");
   await waitUntil(`(() => {
     const group = [...document.querySelectorAll(".ss-peek [data-peek-gateway]")]
       .find((el) => (el.textContent || "").includes("bad"));
