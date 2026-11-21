@@ -1380,6 +1380,7 @@ type Services struct {
 	Providers   Providers // custom/self-hosted provider CRUD; nil when unsupported
 	Init        ProjectInit
 	MCP         MCP       // external MCP server status; nil when unsupported
+	Powers      Powers    // capability packs activated per session (#1347); nil when unsupported
 	LSP         LSP       // language server status + diagnostics; nil when unsupported
 	Plugins     Plugins   // plugin lifecycle manager; nil when unsupported
 	Panes       Panes     // enabled pane contributions; nil when unsupported
