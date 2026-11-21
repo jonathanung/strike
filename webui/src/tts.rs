@@ -66,14 +66,29 @@ pub fn engine_of(api: bool, voices: &[Voice]) -> Engine {
     }
 }
 
+/// Identifies one reply across transcripts. Message ids restart per
+/// transcript, so the text hash keeps another session's line with the
+/// same id from showing as playing after a session switch.
+pub type PlayKey = (u32, u64);
+
+/// FNV-1a 64 of the reply text, for [`PlayKey`].
+pub fn text_hash(text: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in text.as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
 /// Playback state shared by every reply's control.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Playback {
-    /// Message id currently speaking (or paused).
-    pub playing: Option<u32>,
+    /// Reply currently speaking (or paused).
+    pub playing: Option<PlayKey>,
     pub paused: bool,
-    /// Message id whose control shows `note` (a refusal or an error).
-    pub note_for: Option<u32>,
+    /// Reply whose control shows `note` (a refusal or an error).
+    pub note_for: Option<PlayKey>,
     pub note: String,
 }
 
@@ -332,7 +347,7 @@ pub fn stored_rate() -> String {
     }
 }
 
-fn note(id: u32, msg: &str) {
+fn note(id: PlayKey, msg: &str) {
     state().update(|st| {
         st.note_for = Some(id);
         st.note = msg.to_string();
@@ -342,7 +357,7 @@ fn note(id: u32, msg: &str) {
 /// Starts reading `markdown` for message `id`, stopping whatever was
 /// playing. Returns false (and leaves a note on the control) when there
 /// is no usable voice.
-pub fn play(id: u32, markdown: &str) -> bool {
+pub fn play(id: PlayKey, markdown: &str) -> bool {
     let engine = refresh_voices();
     let Some(s) = synth() else {
         note(id, NO_VOICE);
@@ -452,6 +467,7 @@ pub fn toggle_pause() {
 /// playing, and the engine note (network voice, or why it cannot play).
 #[component]
 pub fn ReadAloud(id: u32, text: String) -> impl IntoView {
+    let id: PlayKey = (id, text_hash(&text));
     let st = state();
     let vs = voices();
     let (st_a, st_b, st_c, st_d, st_e) = (st.clone(), st.clone(), st.clone(), st.clone(), st.clone());
@@ -581,6 +597,12 @@ mod tests {
         assert_eq!(engine_of(true, &[]), Engine::NoVoices);
         assert_eq!(engine_of(true, &[remote.clone()]), Engine::NetworkOnly);
         assert_eq!(engine_of(true, &[remote, local]), Engine::Local);
+    }
+
+    #[test]
+    fn play_keys_differ_for_same_id_other_text() {
+        assert_ne!((7, text_hash("hello")), (7, text_hash("other reply")));
+        assert_eq!(text_hash("same"), text_hash("same"));
     }
 
     #[test]
