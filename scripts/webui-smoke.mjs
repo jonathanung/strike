@@ -14,6 +14,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
+import { bestOfNCheck } from "./webui-best-of-n-check.mjs";
 import { createServer } from "node:http";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
 import { seedRepeatedWorkflow, skillProposalsCheck } from "./webui-skill-proposals-check.mjs";
@@ -7575,6 +7576,7 @@ try {
 
   await seedRepeatedWorkflow({ home, port, token });
   await skillProposalsCheck({ send, repoDir: process.cwd() });
+  await bestOfNCheck({ send });
 
   console.log("webui-smoke ok");
 } catch (err) {
