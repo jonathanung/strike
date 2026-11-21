@@ -366,6 +366,19 @@ try {
     join(sessionsDir, "elapsed-session.meta.json"),
     JSON.stringify({ title: "Elapsed replay" }) + "\n",
   );
+  // Regenerate title (#1370) fixture: the auto-title came from the first
+  // prompt, and the conversation has since drifted.
+  await writeFile(
+    join(sessionsDir, "retitle-session.jsonl"),
+    line("fix the login bug") +
+      JSON.stringify({ type: "session.titled", time: "2026-10-26T06:00:01Z", data: { title: "fix the login bug" } }) +
+      "\n" +
+      line("split the session store into packages"),
+  );
+  await writeFile(
+    join(sessionsDir, "retitle-session.meta.json"),
+    JSON.stringify({ title: "fix the login bug" }) + "\n",
+  );
   const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
     throw new Error(`content search ${found.status} ${found.text.slice(0, 300)}`);
@@ -3622,6 +3635,65 @@ try {
     }),
     { timeout: STEP_MS, interval: 250 },
   );
+  // Regenerate title (#1370): the row action proposes a title from the
+  // drifted conversation in the shared confirm. Cancel must leave the
+  // daemon's title untouched; Confirm must store the proposal and update
+  // the list entry.
+  const retitleID = "retitle-session";
+  const retitleSel = `[data-ss-regen-id="${retitleID}"]`;
+  const savedTitle = async (id) =>
+    ((await listJSON("/v1/sessions")).sessions || []).find((s) => s.id === id)?.title || "";
+  await waitFor(
+    "regenerate title row action",
+    async () => ({ ok: (await evaluate(`!!document.querySelector(${JSON.stringify(retitleSel)})`)) === true }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await clickSel(retitleSel);
+  const proposalText = await waitFor(
+    "regenerate title proposal in the confirm",
+    async () => {
+      const t = (await dialogText()) || "";
+      return { ok: t.includes("split the session store") && t.includes("fix the login bug"), text: t };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!proposalText.text.includes("Rename to")) {
+    throw new Error(`regenerate confirm copy wrong: ${proposalText.text.slice(0, 300)}`);
+  }
+  await clickSel("[data-confirm='cancel']");
+  await waitFor(
+    "regenerate confirm to close on cancel",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === false,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if ((await savedTitle(retitleID)) !== "fix the login bug") {
+    throw new Error(`cancelled regenerate changed the title to ${await savedTitle(retitleID)}`);
+  }
+  await clickSel(retitleSel);
+  await waitFor(
+    "regenerate confirm to reopen",
+    async () => ({ ok: ((await dialogText()) || "").includes("split the session store") }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await clickSel("[data-confirm='accept']");
+  await waitFor(
+    "confirmed regenerate stores the new title and updates the row",
+    async () => {
+      const stored = await savedTitle(retitleID);
+      const row = (await evaluate(
+        `(() => { const r = document.querySelector(${JSON.stringify(rowSel(retitleID))}); return r ? r.innerText : ""; })()`,
+      )) || "";
+      return {
+        ok: stored.startsWith("split the session store") && row.includes("split the session store"),
+        stored,
+        row,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+
   const openIDs = await rootIDs();
   if (!openIDs.length) {
     throw new Error("session-delete 409 check found no open root");

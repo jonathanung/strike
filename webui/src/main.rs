@@ -50,6 +50,7 @@ mod tab_title;
 mod task_runner;
 mod transcript_find;
 mod usage_audit;
+mod regenerate_title;
 mod session_delete;
 mod session_restore;
 mod shell;

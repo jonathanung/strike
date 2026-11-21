@@ -126,6 +126,7 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `POST` | `/v1/sessions/{id}/fork` | **yes** | Fork durable session → new id |
 | `POST` | `/v1/sessions/{id}/report` | **yes** | Generate a `session_report` artifact from the session record (#1444) → **201** artifact. Facts only (turns, asks, tool counts, files, approvals, children, tokens, errors); tool args/output never copied; redacted. **404** unknown session; **501** without sessions or artifact store |
 | `PATCH` | `/v1/sessions/{id}` | **yes** | Rename (`{ "title" }`) |
+| `POST` | `/v1/sessions/{id}/title/propose` | **yes** | Regenerate title (#1370): re-derives a title from the newest substantive user message with the creation-time titling logic and returns `{title, current, manual, unchanged, messages}` **without storing it** — the cockpit writes a confirmed proposal through `PATCH`. **422** `title_session_empty` / `title_single_message`; **404** unknown session; **501** without sessions |
 | `DELETE` | `/v1/sessions/{id}` | **yes** | Delete durable session (`?force=true` optional) |
 | `GET` | `/v1/sessions/{id}/loops` | **yes** | Session `/loop` jobs (see [Session loops](#session-loops)) |
 | `POST` | `/v1/sessions/{id}/loops` | **yes** | Start a loop (`{ "interval", "job" }`) |

@@ -1685,6 +1685,18 @@ select.mode, .daemon select {
 }
 .ss-quiet:hover { color: var(--acid); }
 /* feature:session-selection end */
+/* feature:regenerate-title begin */
+.ss-quiet:disabled { opacity: 0.55; cursor: default; }
+.ss-quiet:disabled:hover { color: var(--muted); }
+.ss-regen-note {
+  flex: 1 1 100%;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+/* feature:regenerate-title end */
 /* feature:model-menu begin */
 .model-menu { position: relative; flex: 0 0 auto; max-width: 240px; }
 .model-menu .chip {
