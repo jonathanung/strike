@@ -310,13 +310,13 @@ files are inspected and edited.
 
 ## Powers
 
-The daemon side is in place but no chip is drawn yet (#1347).
+The daemon side is in place but no chip is drawn yet (#1347, #1867).
 `internal/integrate/powers` loads packs from
 `<workspace>/.strike/powers/<pack>/` and `~/.strike/powers/<pack>/`, and
-the workspace copy wins on a name clash. Each pack is an Agent Plugins
-package: `plugin.json` holds `name` and `keywords`, `mcp.json` holds
-`mcpServers`, and `skills/<name>/SKILL.md` holds skills. These are
-references by name, not copies.
+the workspace copy wins on a name clash. Workspace packs load only in a
+trusted workspace. Each pack is an Agent Plugins package: `plugin.json`
+holds `name` and `keywords`, `mcp.json` holds `mcpServers`, and
+`skills/<name>/SKILL.md` holds skills.
 
 A pack is suggested when a keyword appears in the prompt as a whole word
 or phrase. Packs that are muted or already active are not suggested, and
@@ -325,14 +325,29 @@ reference-counted: packs that share a server keep it until the last one is
 deactivated, and ending one session never disconnects another session's
 servers. If a server fails to connect, it is listed as failed and left
 out of the session, and the chip and the tool set read the same result.
-If a pack names a deny-listed server, the whole pack stays inactive and
-the reason is shown.
+If a pack names a server the permission rules deny (`mcp` `<server>/*`),
+the whole pack stays inactive and the reason is shown.
 
-Not built yet:
-- a `Connector` connected to the MCP session manager, and the daemon routes for it;
+`mcp.PackConnector` attaches pack servers through the MCP manager, with
+the same admission scan as configured servers, and detaches them when the
+last session releases them. A server already configured in `mcp.json` is
+borrowed and never detached. The dial runs outside the Powers lock, so a
+slow server does not stall other sessions.
+
+Routes: `GET /v1/powers?session=`, `POST /v1/powers/suggest`
+`{session, prompt}`, `POST /v1/powers/activate` and `/deactivate`
+`{session, name}` (activate needs a live session, a denied pack is 403),
+and `POST /v1/powers/mute` `{name, muted}`. The mutating routes refuse
+`--read-only`. Closing a root or deleting a session unloads its Powers.
+
+Not built yet (#1943):
+- skills loaded into context per session;
+- per-session tool scoping (the MCP registry is process-wide, so a pack's
+  tools are visible to every root until the last session releases them);
 - the composer chip row with context cost (#1259);
 - pack membership on Customize;
-- goal-declared Powers (#1284).
+- goal-declared Powers (#1284);
+- persisted mute and last-used time.
 
 ## Composer triggers
 
@@ -440,8 +455,11 @@ and tool text are never sent. 404/410 from the push service prunes the
 subscription; `GET /v1/notifications` reports `push.lastResult` so the
 toggle can say a push failed. The VAPID key is `push/vapid.json` beside the
 session dir (0600). Unsupported browsers, blocked permission, and iOS
-without Home Screen install are named in the toggle. Not built yet:
-opt-in push for finished or failed runs.
+without Home Screen install are named in the toggle. Finished and failed
+runs (`session.finished`, `child.finished`) push only after "Also push
+finished and failed runs" is checked under Push notifications (#1917): the
+daemon-side `pushFinished` pref in `NotifyPrefs`, default off, with the same
+generic payload.
 A gateway drop is detected by the page (the daemon cannot deliver "I am
 gone"); it is not a JSONL record.
 
@@ -703,6 +721,27 @@ lines) on later security reviews of the same branch
 (`/v1/git/review-suppressions`, stored in the session dir); suppressions are
 listed and removable. Not in this slice: SARIF/JSONL export, PR-scoped
 suppressions (#1356 follow-up), an authoring UI for security rules.
+
+## PR watch
+
+The Git tab shows the open session's linked pull request (#1356): a chip
+with the PR number, state and check rollup, an expandable per-check list
+(queued / running / passed / failed / skipped), and "Open on GitHub". Data
+comes from `GET /v1/sessions/{id}/pr`, which runs the host's own `gh pr view`
+(the browser never sees a token; gh stderr is never returned). `/v1/sessions`
+also carries `prUrl` / `prNumber` / `prState`. The cockpit polls every 60s
+while the PR is open and a client is connected; the daemon caches a poll for
+30s, stops on merged/closed, and stops on errors retrying cannot fix (gh not
+installed, gh signed out, no GitHub remote, non-GitHub PR) with an actionable
+"PR tracking unavailable" line. A failed check or a changes-requested review
+raises a `pr.attention` notification once per distinct failure set.
+
+"Fix in this session" asks `POST /v1/sessions/{id}/pr/fix-draft` for a
+draft (failing check names, the last 100 lines of each failed Actions job
+log via `gh run view --log-failed`, redacted), shows it, and only after the
+user confirms posts it as a normal `user.input` op. No automatic fix turns,
+push or merge. Not in this slice: the chip on session-list rows, marking
+checks that also fail on the base branch, and any autonomous fix loop.
 
 ## Not planned as a copy
 

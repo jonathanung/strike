@@ -191,6 +191,25 @@
   font: inherit;
 }
 .lesson-draft textarea { min-height: 80px; resize: vertical; }
+/* Pending proposals (#1874): dashed edge marks "not stored yet". */
+.lesson-pending { border: 1px dashed var(--warning); border-radius: var(--radius); padding: var(--space-2); margin-bottom: var(--space-2); }
+.lesson-pending h3 { margin: 0 0 4px; font-size: var(--type-md); }
+.lesson-pending-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.lesson-pending-row { border-top: 1px solid var(--rule); padding-top: var(--space-2); }
+.lesson-pending-head { display: flex; gap: var(--space-2); align-items: baseline; flex-wrap: wrap; }
+.lesson-pending-key { font-weight: 600; overflow-wrap: anywhere; }
+.lesson-pending-text { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.lesson-pending-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.lesson-pending-edit { display: flex; flex-direction: column; gap: var(--space-2); }
+.lesson-pending-edit .lesson-field { display: flex; flex-direction: column; gap: 4px; color: var(--muted); }
+.lesson-pending-edit textarea,
+.lesson-pending-edit input { background: var(--ground); color: var(--ink); border: 1px solid var(--rule); border-radius: var(--radius); padding: 6px 8px; font: inherit; }
+/* "N lessons used" session marker (#1874): quiet, display-only. */
+.lessons-used { font-size: var(--type-sm); color: var(--muted); padding: 2px var(--space-2); }
+.lessons-used > summary { cursor: pointer; width: fit-content; }
+.lessons-used-list { list-style: none; margin: 4px 0 0; padding: 0; }
+.lessons-used-key { color: var(--ink); overflow-wrap: anywhere; }
+.lessons-used-text { margin: 2px 0 4px 1em; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
 /* feature:lessons end */
 
 /* feature:local-issues begin (#1500) */
