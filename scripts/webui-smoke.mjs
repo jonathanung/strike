@@ -2661,16 +2661,25 @@ try {
     throw new Error(`side chat shell did not boot ${JSON.stringify(booted)}`);
   }
 
-  const seeded = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+  // The seed carries an outbox client message id (#1325); the retry below
+  // must be acknowledged as a duplicate and never start a second turn.
+  const seedInit = {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      "X-Strike-Client-Message-Id": "smoke-seed-1325",
     },
     body: JSON.stringify({ type: "user.input", data: { text: "read the makefile" } }),
-  });
+  };
+  const seeded = await fetch(`http://127.0.0.1:${port}/v1/ops`, seedInit);
   if (!seeded.ok) {
     throw new Error(`seed user.input ${seeded.status} ${await seeded.text()}`);
+  }
+  const seedRetry = await fetch(`http://127.0.0.1:${port}/v1/ops`, seedInit);
+  const seedRetryBody = await seedRetry.text();
+  if (seedRetry.status !== 200 || !seedRetryBody.includes('"duplicate":true')) {
+    throw new Error(`outbox retry was not deduped: ${seedRetry.status} ${seedRetryBody}`);
   }
 
   await evaluate(`document.querySelector(".side-chat-open-activity").click()`);

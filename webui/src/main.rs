@@ -37,6 +37,7 @@ mod notify;
 mod outcome;
 mod project_init;
 mod onboarding;
+mod outbox;
 mod park;
 mod permissions_explain;
 mod steer_queue;
@@ -111,6 +112,7 @@ use crate::editor::DocumentPane;
 use crate::mobile::PhoneNav;
 use crate::customize::CustomizePane;
 use crate::side_chat::SideChatPanel;
+use crate::outbox::OutboxList;
 
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
 use crate::model_menu::{active_context, context_view, reduce_envelope, LiveModelState, ModelDefaults};
@@ -1137,6 +1139,8 @@ fn App() -> impl IntoView {
     let stream_note = RwSignal::new(String::new());
     let load_error = RwSignal::new(String::new());
     let gateway = RwSignal::new("checking".to_string());
+    // Offline outbox (#1325): text sends queued while the gateway is down.
+    let outbox = outbox::Outbox::new(base, token);
     let gateway_kind = RwSignal::new(StatusKind::Idle);
     let gateway_label = RwSignal::new("Checking".to_string());
     let last_beat = RwSignal::new(0.0f64);
@@ -1466,6 +1470,8 @@ fn App() -> impl IntoView {
                     gateway.set("connected".into());
                     last_beat.set(now_ms());
                     gateway_up = true;
+                    // Deliver anything queued while offline (#1325).
+                    outbox.kick();
                     // HTTP is up. If the event stream is still down after an
                     // outage, open it again now instead of waiting out backoff.
                     if was == "unreachable"
@@ -2405,6 +2411,26 @@ fn App() -> impl IntoView {
             draft_armed.set(String::new());
         }
         let op = steer_queue::send_op(session_busy(&root), &enter_mode.get_untracked(), which);
+        // One id per send. The daemon dedupes on it, so the outbox may
+        // retry a send whose answer was lost without posting it twice.
+        let client_id = outbox::new_client_id();
+        // Offline outbox (#1325): with the gateway down, or earlier queued
+        // items for this session still waiting, a text send is queued in
+        // order instead of posted. Attachments need an upload, so they keep
+        // the normal path (and its failure restore).
+        if !ready
+            && outbox::should_queue(&gateway.get_untracked(), &outbox.items.get_untracked(), &root)
+        {
+            if !outbox.enqueue(client_id, root.clone(), op, text.clone()) {
+                status.set("Outbox is full. Delete a queued message first.".into());
+                return;
+            }
+            queue_note.set(String::new());
+            prompt_history.update(|h| h.push(&text));
+            draft.set(String::new());
+            outbox.kick();
+            return;
+        }
         queue_note.set(String::new());
         if op == "steer" {
             steer_note.set(steer_queue::STEER_WAITING.into());
@@ -2482,7 +2508,7 @@ fn App() -> impl IntoView {
             } else {
                 serde_json::json!({"text": text, "images": images})
             };
-            match post_op(&b, &t, &root, op, body).await {
+            match outbox::post_op_with_id(&b, &t, &root, op, body, &client_id).await {
                 Ok(()) => {
                     for file in &updated {
                         chat_mode::revoke_preview(&file.preview);
@@ -2492,6 +2518,16 @@ fn App() -> impl IntoView {
                 Err(err) => {
                     if op == "steer" && steer_note.get_untracked() == steer_queue::STEER_WAITING {
                         steer_note.set(String::new());
+                    }
+                    // Lost connection on a text send: queue it under the
+                    // same id. If the daemon did get it, the retry is a
+                    // no-op there instead of a second prompt (#1325).
+                    if images.is_empty()
+                        && outbox::classify_failure(&err) == outbox::SendFailure::Transient
+                        && outbox.enqueue(client_id.clone(), root.clone(), op, text.clone())
+                    {
+                        sending.set(false);
+                        return;
                     }
                     queue_note.set(format!("Send failed: {err}"));
                     status.set(format!("send failed: {err}"));
@@ -5241,6 +5277,7 @@ fn App() -> impl IntoView {
                             </div>
                         </Show>
                         <div class="steer-queue" id="steer-queue">
+                            <OutboxList outbox=outbox root=active_root gateway=gateway />
                             <Show when=move || !steer_note.get().is_empty()>
                                 <p class="steer-note" role="status">{move || steer_note.get()}</p>
                             </Show>

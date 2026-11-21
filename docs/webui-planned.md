@@ -398,6 +398,27 @@ that push service. The next open replays the daemon log into the centre.
 A gateway drop is detected by the page (the daemon cannot deliver "I am
 gone"); it is not a JSONL record.
 
+## Offline outbox
+
+Shipped (#1325, first slice): when the gateway is unreachable, a text send
+from the composer is queued in a per-gateway `localStorage` outbox (survives
+a tab close or PWA restart) and shown above the composer as "Queued — will
+send when reconnected", with Edit and Delete. On reconnect items flush one at
+a time in the order written, before any new send for the same session. Each
+send carries `X-Strike-Client-Message-Id`; `POST /v1/ops` remembers delivered
+ids per live root (memory, 24h, bounded) and answers a repeat with
+`{"ok":true,"duplicate":true}` without submitting, or 409 while the first
+attempt is still in flight. A send that loses its connection mid-request is
+queued under the same id, so a half-open retry cannot post twice. The op
+(`user.input` or `steer`) is fixed at send time. Approvals are never queued.
+Items older than 24h are held for confirmation (Send) instead of auto-sent;
+a refused send (4xx) holds that session's later items until it is retried or
+deleted.
+
+Not built: queuing attachments (they need an upload while online), a
+daemon-restart-proof dedupe (ids are memory-only), and a hold for sessions
+that finished while the message was queued.
+
 ## Find in transcript
 
 Shipped (#1342): Ctrl/Cmd+F, the Find chip, or the palette command opens
