@@ -248,6 +248,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashboard-view"
+version = "0.1.0"
+
+[[package]]
 name = "derive-where"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1009,6 +1013,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "prompt-library"
+version = "0.1.0"
+
+[[package]]
 name = "protocol-schema"
 version = "0.1.0"
 dependencies = [
@@ -1373,6 +1381,7 @@ version = "0.1.0"
 dependencies = [
  "away-briefing",
  "composer-drafts",
+ "dashboard-view",
  "edit-resend",
  "gloo-net",
  "ideas-inbox",
@@ -1381,6 +1390,7 @@ dependencies = [
  "load-guard",
  "md-review",
  "mermaid-lite",
+ "prompt-library",
  "protocol-schema",
  "qrcode",
  "send_wrapper",

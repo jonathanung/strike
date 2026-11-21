@@ -108,6 +108,10 @@ func (s *Server) refuseReadOnly(w http.ResponseWriter) bool {
 
 func (s *Server) handleSkillProposals(w http.ResponseWriter, r *http.Request) {
 	key, dir := s.proposalWorkspace(r)
+	if !s.opts.ReadOnly {
+		// Remember the directory for the weekly cadence (#1913).
+		_ = proposalStore().SetDir(key, dir)
+	}
 	ws, err := proposalStore().Get(key)
 	if err != nil {
 		proposalFail(w, http.StatusInternalServerError, err)
@@ -126,6 +130,7 @@ func (s *Server) handleSkillProposalSettings(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	key, dir := s.proposalWorkspace(r)
+	_ = proposalStore().SetDir(key, dir)
 	ws, err := proposalStore().Settings(key, body.Enabled, body.Threshold)
 	if err != nil {
 		proposalFail(w, http.StatusBadRequest, err)
@@ -139,6 +144,7 @@ func (s *Server) handleSkillProposalScan(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	key, dir := s.proposalWorkspace(r)
+	_ = proposalStore().SetDir(key, dir)
 	now := time.Now()
 	wfs, err := skillpropose.ReadWorkflows(s.opts.SessionDir, key, now.Add(-skillpropose.DefaultWindow))
 	if err != nil {
@@ -155,6 +161,7 @@ func (s *Server) handleSkillProposalScan(w http.ResponseWriter, r *http.Request)
 		proposalFail(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.mirrorProposalIdeas(ws.Pending)
 	writeJSON(w, http.StatusOK, proposalsView(key, ws, installed))
 }
 
@@ -176,6 +183,7 @@ func (s *Server) handleSkillProposalDismiss(w http.ResponseWriter, r *http.Reque
 		proposalFail(w, code, err)
 		return
 	}
+	s.settleProposalIdea(body.ID, true)
 	ws, err := proposalStore().Get(key)
 	if err != nil {
 		proposalFail(w, http.StatusInternalServerError, err)
@@ -231,5 +239,6 @@ func (s *Server) handleSkillProposalAccept(w http.ResponseWriter, r *http.Reques
 		proposalFail(w, http.StatusInternalServerError, err)
 		return
 	}
+	s.settleProposalIdea(p.ID, false)
 	writeJSON(w, http.StatusOK, res)
 }

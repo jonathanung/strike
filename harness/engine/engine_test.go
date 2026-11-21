@@ -1439,6 +1439,12 @@ func eventCorrelation(t *testing.T, ev protocol.Event) protocol.Correlation {
 		return ev.Correlation
 	case protocol.FastSelected:
 		return ev.Correlation
+	case protocol.FallbackModelSelected:
+		return ev.Correlation
+	case protocol.ModelFallback:
+		return ev.Correlation
+	case protocol.VerbositySelected:
+		return ev.Correlation
 	case protocol.PhaseChanged:
 		return ev.Correlation
 	case protocol.CompactionStarted:

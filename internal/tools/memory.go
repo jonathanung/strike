@@ -51,9 +51,9 @@ Usage notes:
   - key is required and identifies the entry (upsert on repeat writes).
   - value is the stored text; pass delete=true to remove an entry instead.
   - tags are optional labels for later filtered reads via memory_read.
-  - Tags instruction, preference, or project-convention auto-load into context
-    each turn, including the start of a session (capped). Other tags stay
-    on demand.
+  - Tags instruction, preference, project-convention, or lesson auto-load
+    into context each turn, including the start of a session (capped). Other
+    tags stay on demand.
   - scope is "project" (default, this repo) or "global" (every project on
     this machine).
   - Incognito sessions can read memory but this tool refuses writes.

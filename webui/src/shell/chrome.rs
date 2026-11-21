@@ -344,6 +344,7 @@ pub fn Chrome() -> impl IntoView {
                         status.into_iter().map(slot_view).collect_view().into_any()
                     }
                 }}
+                {move || ideas_slot()}
                 {move || bell_slot()}
                 <button
                     type="button"
@@ -602,6 +603,7 @@ fn phone_bar(open_palette: impl Fn() + Copy + 'static, command_mark: &'static st
             }}
         </div>
         <div class="nav-more phone-more">
+            {ideas_slot()}
             {bell_slot()}
             <button
                 type="button"
@@ -656,6 +658,19 @@ fn bell_slot() -> AnyView {
     }
 }
 
+/// The Ideas inbox open-count badge (#1926): beside the bell, in the bar
+/// at every width so it is visible on every page and on phone. It renders
+/// nothing at zero.
+fn ideas_slot() -> AnyView {
+    match registry::slots(TopRegion::Trailing)
+        .into_iter()
+        .find(|slot| slot.id == "ideas")
+    {
+        Some(slot) => slot_view(slot),
+        None => view! { <span class="nav-slot nav-slot-empty"></span> }.into_any(),
+    }
+}
+
 /// Popover-owning slots stay mounted (visually clipped) so their panels
 /// can still open from palette commands — there is no menu any more
 /// (#1590), the palette is the only launcher. Excluded: `view` (the
@@ -663,12 +678,18 @@ fn bell_slot() -> AnyView {
 /// bottom nav own view switching), `gateway` (the gateway status chip
 /// is not rendered in the header any more — gateway health lives in the
 /// Daemon view and the Gateways panel), and `notifications` (the bell's
-/// one live mount is `bell_slot`, above).
+/// one live mount is `bell_slot`, above), and `ideas` (its one live mount
+/// is `ideas_slot`, above).
 fn alive_slots() -> Vec<super::registry::TopSlot> {
     [TopRegion::Leading, TopRegion::Trailing]
         .into_iter()
         .flat_map(registry::slots)
-        .filter(|slot| slot.id != "view" && slot.id != "gateway" && slot.id != "notifications")
+        .filter(|slot| {
+            slot.id != "view"
+                && slot.id != "gateway"
+                && slot.id != "ideas"
+                && slot.id != "notifications"
+        })
         .collect()
 }
 

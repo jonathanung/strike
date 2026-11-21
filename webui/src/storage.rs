@@ -11,6 +11,7 @@ use load_guard::{commit_load, Commit, ErrPolicy, LoadEpoch};
 use crate::load_epoch::begin;
 
 use crate::api::{delete_json, get_json, get_text, now_ms, post_raw_json, put_json};
+use crate::lessons::PendingLessons;
 use crate::model::{fmt_ago, rfc3339_to_ms};
 
 /// Daemon route for the whole-store memory import (#1541). Like export,
@@ -1085,6 +1086,8 @@ pub fn StoragePanel(
                 </p>
             </Show>
             <Show when=move || tab.get() == "memory">
+                // Lessons slice 2 (#1874): pending proposals, distinct from stored entries.
+                <PendingLessons base=base token=token status=status storage_rev=storage_rev />
                 <div class="storage-export">
                     <button type="button" class="secondary" data-action="memory-export"
                         disabled=move || exporting.get()

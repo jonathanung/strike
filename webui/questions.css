@@ -1,0 +1,82 @@
+/* feature:agent-questions begin */
+/* Agent question cards (#1338). Sit above the composer beside the
+   approval cards and reuse their surface; tokens only. */
+.question-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+}
+.question-card {
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--rule));
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  max-height: 60vh;
+  overflow: auto;
+}
+.question-card:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.question-card header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.question-step[hidden] { display: none; }
+.question-label {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+.question-text {
+  margin: var(--space-1) 0 0;
+  color: var(--ink);
+  font-size: var(--type-md);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.question-options {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.question-option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-2);
+  align-items: start;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--ink);
+  font-size: var(--type-sm);
+  min-height: 32px;
+}
+.question-option:hover { background: var(--surface-muted); }
+.question-option input { margin-top: 3px; }
+.question-option-label { overflow-wrap: anywhere; }
+.question-option-detail {
+  grid-column: 2;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.question-own {
+  margin: var(--space-2) 0 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.question-error {
+  margin: var(--space-2) 0 0;
+  color: var(--danger);
+  font-size: var(--type-sm);
+}
+.question-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+body[data-phone="1"] .question-actions button { min-height: 44px; flex: 1 1 auto; }
+/* feature:agent-questions end */
