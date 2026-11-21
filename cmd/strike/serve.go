@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -69,6 +70,7 @@ Endpoints:
   GET  /v1/status                   live status chrome
   GET  /v1/agents                   selectable agents
   GET  /v1/sessions                 session list (+ liveId)
+  GET  /v1/sessions/{id}/reference size of an @session:<id> reference (summary + last turns)
   GET  /v1/sessions/{id}/events     SSE tail of a session JSONL log
   GET  /v1/sessions/{id}/loops      session /loop jobs (POST start, DELETE stop)
   GET  /v1/triggers                 trigger registry
@@ -733,9 +735,17 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	if err != nil {
 		cwd = ""
 	}
+	// The server is built after the clock; script-run notices reach its
+	// notification centre once it exists (a run finishing earlier posts none).
+	var notifySrv atomic.Pointer[server.Server]
 	schedules, err := openScheduleService(workspace.DefaultDir(), liveHub, services, wsStore, cwd, scheduleScripts{
 		runner: newScriptRunner(served, auditSink, opts.tokenFile, serveCwd()),
 		sink:   auditSink,
+		notify: func(scheduleID, runID, name string, exitCode *int, failed bool) {
+			if srv := notifySrv.Load(); srv != nil {
+				srv.NotifyScriptRun(scheduleID, runID, name, exitCode, failed)
+			}
+		},
 	})
 	if err != nil {
 		return err
@@ -808,6 +818,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	notifySrv.Store(srv)
 
 	ln, err := net.Listen("tcp", opts.addr)
 	if err != nil {
