@@ -17,6 +17,7 @@ func TestWrapOpDecodeRoundTrip(t *testing.T) {
 		QuestionReply{RequestID: "q1", Answers: []string{"a"}},
 		Interrupt{},
 		SelectModel{Provider: "echo", Model: "echo"},
+		SetFallbackModel{Provider: "openai", Model: "gpt"},
 		SelectAgent{Name: "build"},
 		SetEffort{Level: EffortLow},
 		SetAutonomy{Mode: AutonomyAgent},

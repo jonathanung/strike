@@ -38,6 +38,9 @@ pub struct TranscriptHandlers {
     pub export_markdown: Callback<()>,
     pub retry: Callback<(String,)>,
     pub fork: Callback<(i32,)>,
+    /// Rewind to before the turn with this keep-count (#1336): opens the
+    /// preview dialog owned by `crate::rewind`; never rewinds directly.
+    pub rewind: Callback<(i32,)>,
     pub open_file: Callback<(String, u32)>,
     /// "Edit & resend" on the newest user message (#1361).
     pub edit_last: Callback<(u32,)>,
@@ -321,6 +324,7 @@ pub fn TranscriptPane(
     let open_file = handlers.open_file;
     let retry = handlers.retry;
     let fork = handlers.fork;
+    let rewind = handlers.rewind;
     let edit_last = handlers.edit_last;
     // Only the newest user message offers Edit & resend (#1361).
     let last_you = Memo::new(move |_| transcript.with(|t| t.last_user_id()));
@@ -520,6 +524,20 @@ pub fn TranscriptPane(
         }),
     );
     crate::shell::bind(
+        "transcript.rewind",
+        Rc::new(move |_| {
+            let active = session.get_untracked();
+            let bound = cursor.get_untracked().map(|id| CursorBind {
+                session: cursor_session.get_untracked(),
+                id,
+            });
+            let keep = palette_fork(&active, bound.as_ref(), &cursor_messages(&transcript))
+                .ok_or_else(|| "No completed turn to rewind to.".to_string())?;
+            rewind.run((keep,));
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
         "transcript.jump",
         Rc::new(move |args| {
             let id: u32 = args
@@ -542,6 +560,7 @@ pub fn TranscriptPane(
             "transcript.regenerate",
             "transcript.retry",
             "transcript.fork-message",
+            "transcript.rewind",
             "transcript.jump",
         ] {
             crate::shell::unbind(id);
@@ -713,7 +732,7 @@ pub fn TranscriptPane(
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
                                     {above.map(|text| reasoning_block(text, false))}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, edit_last, last_you, r.hits, r.current, r.elapsed, r.usage, r.verify, r.files, r.steer, r.tail, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, rewind, edit_last, last_you, r.hits, r.current, r.elapsed, r.usage, r.verify, r.files, r.steer, r.tail, fold_open, folds)}
                                     {after.map(|text| reasoning_block(text, false))}
                                 }
                             })
@@ -1126,6 +1145,7 @@ fn message_view(
     open_file: Callback<(String, u32)>,
     retry: Callback<(String,)>,
     _fork: Callback<(i32,)>,
+    rewind: Callback<(i32,)>,
     edit_last: Callback<(u32,)>,
     last_you: Memo<Option<u32>>,
     find_hits: Vec<crate::transcript_find::TMatch>,
@@ -1247,6 +1267,11 @@ fn message_view(
     // once the awaited clipboard write resolves; a rejection reads
     // "Copy failed" instead of silence. Reverts after 2s.
     let copy_state = RwSignal::new(None::<bool>);
+    // Rewind to before this turn (#1336): on the user's prompt once its
+    // turn has completed (keep-count known). Never on the read-only share view.
+    let can_rewind = msg.role == Role::You
+        && keep > 0
+        && use_context::<crate::share::ReadOnlyTranscript>().is_none();
     view! {
         <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role data-kind=notice_kind data-turn-stop=turn_stop data-compaction=compaction>
             <header>
@@ -1296,6 +1321,15 @@ fn message_view(
                             crate::clipboard::after_ms(2_000, move || copy_state.set(None));
                         });
                     }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
+                    {can_rewind.then(|| view! {
+                        <button
+                            type="button"
+                            class="sx-quiet"
+                            data-rewind-keep=keep.to_string()
+                            title="Restore the conversation and/or code to before this prompt"
+                            on:click=move |_| rewind.run((keep,))
+                        >"Rewind\u{2026}"</button>
+                    })}
                     {is_you.then(|| view! {
                         <Show when=move || last_you.get() == Some(id)>
                             <button
