@@ -80,6 +80,9 @@ pub fn TranscriptPane(
     let rename_for = RwSignal::new(String::new());
     let seen_session = RwSignal::new(None::<String>);
     let win_start = RwSignal::new(tw::TAIL);
+    // #1372: per-session reasoning toggle, off by default; reset on
+    // session switch below and on reload (never persisted).
+    let show_reasoning = RwSignal::new(false);
     Effect::new(move |_| {
         let next = session.get();
         let prev = seen_session.get_untracked();
@@ -99,6 +102,7 @@ pub fn TranscriptPane(
         win_start.set(tw::TAIL);
         folds.map.set(HashMap::new());
         folds.dismissed.update_untracked(|d| *d = None);
+        show_reasoning.set(false);
     });
     let scroller = NodeRef::<leptos::html::Div>::new();
     let scroller_fx = scroller;
@@ -441,6 +445,10 @@ pub fn TranscriptPane(
                 ev.prevent_default();
                 export_timeline.run(());
             }
+            k if k == crate::reasoning::TOGGLE_KEY => {
+                ev.prevent_default();
+                show_reasoning.update(|v| *v = !*v);
+            }
             _ => {}
         }
     };
@@ -567,6 +575,20 @@ pub fn TranscriptPane(
             <Show when=move || !note.get().is_empty()>
                 <p class="sx-note" role="alert">{move || note.get()}</p>
             </Show>
+            // #1372: the toggle appears once the session has reasoning;
+            // a session without any renders nothing new.
+            <Show when=move || transcript.with(|t| !t.reasoning.is_empty())>
+                <div class="sx-toolbar sx-reasoning-toolbar">
+                    <button
+                        type="button"
+                        class="sx-quiet"
+                        data-reasoning-toggle="true"
+                        title="Show or hide model reasoning for this session (h)"
+                        aria-pressed=move || if show_reasoning.get() { "true" } else { "false" }
+                        on:click=move |_| show_reasoning.update(|v| *v = !*v)
+                    >{move || crate::reasoning::toggle_label(show_reasoning.get())}</button>
+                </div>
+            </Show>
             {move || {
                 // Count what is visibly open among the folds that exist
                 // now: recorded state plus the fold find forces open
@@ -665,14 +687,32 @@ pub fn TranscriptPane(
                                 // each `<details open>` re-syncs with the
                                 // fold state (see `FoldState`).
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
+                                // #1372: reasoning renders above the line
+                                // it preceded (below a user line, which
+                                // only holds a turn's trailing reasoning),
+                                // and only while the toggle is on.
+                                let thought = r.reasoning.clone().filter(|_| show_reasoning.get());
+                                let below = r.msg.role == Role::You;
+                                let (above, after) = if below { (None, thought) } else { (thought, None) };
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
+                                    {above.map(|text| reasoning_block(text, false))}
                                     {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, fold_open, folds)}
+                                    {after.map(|text| reasoning_block(text, false))}
                                 }
                             })
                         }
                     }
                 />
+                {move || {
+                    // #1372: reasoning still streaming, not yet attached
+                    // to a line, at the tail of the turn.
+                    if !show_reasoning.get() {
+                        return None;
+                    }
+                    let live = transcript.with(|t| t.reasoning.live().to_string());
+                    (!live.trim().is_empty()).then(|| reasoning_block(live, true))
+                }}
             </div>
             <Show when=move || !pinned.get() && transcript.with(|t| !t.messages.is_empty())>
                 <button type="button" class="sx-jump" on:click=jump>"Latest"</button>
@@ -813,6 +853,7 @@ struct RowData {
     current: Option<crate::transcript_find::TMatch>,
     elapsed: Option<String>,
     usage: Option<(String, String)>,
+    reasoning: Option<String>,
 }
 
 fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
@@ -840,7 +881,22 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
         usage: t
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
+        reasoning: t.reasoning.for_message(msg.id).map(str::to_owned),
     })
+}
+
+/// One reasoning block (#1372): muted, collapsible, labelled as not the
+/// answer. Open when shown — the user asked to see it.
+fn reasoning_block(text: String, live: bool) -> impl IntoView {
+    view! {
+        <details class="sx-reasoning" data-reasoning=if live { "live" } else { "done" } open=true>
+            <summary>
+                <span class="sx-reasoning-label">{crate::reasoning::block_label(live)}</span>
+                <span class="sx-reasoning-note">"not part of the answer"</span>
+            </summary>
+            <pre class="sx-reasoning-text">{text}</pre>
+        </details>
+    }
 }
 
 /// Runs `f` in a task after the current one, by which point pending

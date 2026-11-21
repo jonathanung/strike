@@ -28,6 +28,7 @@ mod git;
 mod goals;
 mod mobile;
 mod providers;
+mod reasoning;
 mod rule_author;
 mod sandbox_explain;
 mod schedule;
