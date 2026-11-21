@@ -263,6 +263,9 @@ pub struct BootstrapCapabilities {
     /// present, live engine, and not `--read-only`.
     #[serde(default, rename = "projectInit")]
     pub project_init: bool,
+    /// True when the daemon wires plugin lifecycle (`/v1/plugins*`, #1570).
+    #[serde(default)]
+    pub plugins: bool,
     /// True when the daemon serves the typed config-source list
     /// (`GET /v1/config-sources`, #1493).
     #[serde(default, rename = "configFiles")]
@@ -1646,6 +1649,14 @@ fn one_line(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bootstrap_plugins_capability() {
+        let on: Bootstrap = serde_json::from_str(r#"{"capabilities":{"plugins":true,"panes":true}}"#).unwrap();
+        assert!(on.capabilities.plugins);
+        let off: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
+        assert!(!off.capabilities.plugins);
+    }
 
     #[test]
     fn config_sources_decode_in_daemon_order() {

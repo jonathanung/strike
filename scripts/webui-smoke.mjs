@@ -32,6 +32,26 @@ const chromePort = 9222 + (process.pid % 200);
 await mkdir(join(home, ".strike"), { recursive: true });
 await writeFile(join(home, ".strike", "config"), '{"sandboxAllowDegrade":true}\n');
 
+// Plugin lifecycle (#1570): one installed, passive-only global plugin.
+// The cockpit lists it from GET /v1/plugins and remove needs a confirm step.
+const smokePluginId = "smoke.lifecycle";
+await mkdir(join(home, ".strike", "plugins", smokePluginId, "themes"), { recursive: true });
+await writeFile(
+  join(home, ".strike", "plugins", smokePluginId, "plugin.json"),
+  JSON.stringify({
+    schemaVersion: 1,
+    id: smokePluginId,
+    version: "1.0.0",
+    name: "Smoke Lifecycle",
+    strike: { min: "0.1.0" },
+    contributions: { themes: [{ path: "themes/smoke.json" }] },
+  }),
+);
+await writeFile(
+  join(home, ".strike", "plugins", smokePluginId, "themes", "smoke.json"),
+  JSON.stringify({ name: "Smoke Plugin Theme", id: "smoke-plugin-theme", colors: { accent: "#123456" } }),
+);
+
 // Theme catalog (#1529): a user theme the daemon's GET /v1/themes lists.
 // The cockpit picker must offer it, paint it, and keep it across reload.
 const smokeTheme = {
@@ -6581,6 +6601,56 @@ try {
     throw new Error(`customize catalog missing smoke-note: ${customizeText.slice(0, 500)}`);
   }
   await skillUsageCheck({ send });
+
+  // #1570: Customize > Plugins lifecycle lists GET /v1/plugins, and remove
+  // is a two-step action: arming shows a confirm, Cancel sends nothing.
+  {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/plugins`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status !== 200) throw new Error(`plugins HTTP ${res.status}`);
+    const wireIds = ((await res.json()).plugins || []).map((p) => p.id);
+    if (!wireIds.includes(smokePluginId)) {
+      throw new Error(`seeded plugin missing from GET /v1/plugins: ${JSON.stringify(wireIds)}`);
+    }
+    let last = "";
+    for (let i = 0; i < 60; i++) {
+      last = String(await evalJson(`(() => {
+        document.querySelector('[data-cz-section="plugins"]')?.click();
+        const rows = [...document.querySelectorAll('[data-plugin-lifecycle] li[data-plugin-id]')].map((li) => li.getAttribute("data-plugin-id"));
+        return JSON.stringify(rows);
+      })()`));
+      if (last === JSON.stringify(wireIds)) break;
+      if (i === 59) throw new Error(`plugin lifecycle rows ${last} != GET /v1/plugins ${JSON.stringify(wireIds)}\n${await diagnostics()}`);
+      await delay(250);
+    }
+    const row = `[data-plugin-lifecycle] li[data-plugin-id="${smokePluginId}"]`;
+    const trustText = String(await evalJson(`document.querySelector('${row} [data-plugin-trust]')?.innerText || ""`));
+    if (!trustText.includes("Passive only")) throw new Error(`passive plugin trust label: ${trustText}`);
+    if (await evalJson(`!!document.querySelector('${row} [data-plugin-action="trust-preview"]')`)) {
+      throw new Error("a passive-only plugin must not offer trust");
+    }
+    await evalJson(`document.querySelector('${row} [data-plugin-action="remove"]').click()`);
+    for (let i = 0; i < 40; i++) {
+      const armed = await evalJson(`!!document.querySelector('${row} [data-plugin-remove-confirm]') && !!document.querySelector('${row} [data-plugin-action="confirm"]')`);
+      if (armed === true) break;
+      if (i === 39) throw new Error(`remove did not arm a confirm step\n${await diagnostics()}`);
+      await delay(250);
+    }
+    await evalJson(`document.querySelector('${row} [data-plugin-action="cancel"]').click()`);
+    for (let i = 0; i < 40; i++) {
+      const cleared = await evalJson(`!document.querySelector('[data-plugin-lifecycle] [data-plugin-remove-confirm]') && !!document.querySelector('${row}')`);
+      if (cleared === true) break;
+      if (i === 39) throw new Error("cancel did not clear the remove confirm");
+      await delay(250);
+    }
+    const after = await fetch(`http://127.0.0.1:${port}/v1/plugins`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const afterIds = ((await after.json()).plugins || []).map((p) => p.id);
+    if (!afterIds.includes(smokePluginId)) throw new Error("cancelled remove still removed the plugin");
+    await evalJson(`document.querySelector('[data-cz-section="skills"]')?.click()`);
+  }
 
   await evalJson(`(() => {
     const tabs = document.querySelector('[aria-label="Customize sections"]');

@@ -60,6 +60,8 @@ mod onboarding;
 mod outbox;
 mod park;
 mod permissions_explain;
+mod plugin_flow;
+mod plugin_lifecycle;
 mod plan_card;
 mod steer_queue;
 mod steer_ack;
@@ -1125,6 +1127,8 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // Bootstrap capability `plugins` (#1570): gates plugin lifecycle.
+    let plugins_capable = RwSignal::new(false);
     // Typed config-source list (#1493), from bootstrap `configFiles`.
     let config_files_capable = RwSignal::new(false);
     // #1375: daemon-aggregated team signals from the /v1/team poll — the
@@ -1870,6 +1874,7 @@ fn App() -> impl IntoView {
                                 crate::local_issues::set_issues_capable(boot.capabilities.issues);
                                 issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                plugins_capable.set(boot.capabilities.plugins);
                                 config_files_capable.set(boot.capabilities.config_files);
                                 crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
                                 skills.set(boot.skills);
@@ -5223,7 +5228,7 @@ fn App() -> impl IntoView {
             />
         </Show>
         <Show when=move || mode.get() == "customize" fallback=move || ()>
-            <CustomizePane base=base token=token status=status />
+            <CustomizePane base=base token=token status=status plugins_capable=plugins_capable />
         </Show>
         <Show when=move || mode.get() == "chat">
             <div
