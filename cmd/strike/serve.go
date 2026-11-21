@@ -32,6 +32,7 @@ import (
 	"github.com/jonathanung/strike/internal/product/update"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/trust/usageaudit"
+	"github.com/jonathanung/strike/internal/trust/workspacetrust"
 )
 
 const serveUsage = `Web agent workspace (live engine + durable session attach).
@@ -331,6 +332,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	var sandboxSnap *server.SandboxSnapshot
 	var sideChat server.SideChatModel
 	var keepAwake *keepawake.Service
+	// trustAssembly is the workspace + trust decision this daemon was
+	// assembled with (#1781); nil in attach-only mode.
+	var trustAssembly *server.WorkspaceTrustAssembly
 	var taskRuns *taskrun.Store
 	var terminalSandbox sandbox.Policy
 	var terminalSandboxFor func(sessionID, workDir string) (sandbox.Policy, bool)
@@ -597,6 +601,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		taskRuns = a.taskRuns
 		terminalSandbox = a.sandboxPolicy
 		terminalSandboxLoaded = true
+		trustAssembly = &server.WorkspaceTrustAssembly{Dir: a.trustDir, Root: a.trustRoot, Trusted: a.trustedAtStart}
 		terminalSandboxFor = func(sessionID, workDir string) (sandbox.Policy, bool) {
 			id := strings.TrimSpace(sessionID)
 			if id == "" && liveHub != nil {
@@ -785,6 +790,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		GitHub: dwGitHub,
 		Shell:  dwShell,
 		Notify: deploywatch.Poster{GitHub: dwGitHub, Launcher: rootLauncher},
+		// Confirmed regression handoffs (#1784).
+		Launcher: rootLauncher,
+		Revert:   &deploywatch.Reverter{RepoDir: cwd, GitHub: dwGitHub},
 	})
 	trigSvc.SetDeployWatches(deployWatches)
 	if !opts.readOnly {
@@ -828,6 +836,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		KeepAwake:             keepAwake,
 		// Check-only release probe for GET /v1/update (#1583); never installs.
 		UpdateProbe: server.NewUpdateProbe(update.ProbeOptions{}),
+		// Cockpit workspace trust card (#1781).
+		WorkspaceTrustPath:      workspacetrust.DefaultPath(config.GlobalRoot()),
+		WorkspaceTrustAssembled: trustAssembly,
 	})
 	if err != nil {
 		return err
