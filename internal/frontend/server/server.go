@@ -521,6 +521,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sessions/{id}/message-pins", s.handleMessagePinsList)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/message-pins", s.handleMessagePinsAdd)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}/message-pins", s.handleMessagePinsDelete)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/title/propose", s.handleSessionTitlePropose)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.handleSessionDelete)
 	// Session-scoped /loop jobs (#1588): ephemeral, die with the session.
 	s.mux.HandleFunc("GET /v1/sessions/{id}/loops", s.handleSessionLoopsList)

@@ -659,8 +659,8 @@ func NewLive(sessionID, cwd string, agents []AgentInfo, ops chan<- protocol.Op) 
 	// A firing is an ordinary UserInput: the engine queues it behind a busy
 	// turn on the same FIFO as a queued send (#1331), and it is a normal turn
 	// for usage, budget, and guardrail accounting.
-	l.loops = sessionloop.New(func(ctx context.Context, job string) error {
-		return l.Submit(ctx, protocol.UserInput{Text: job})
+	l.loops = sessionloop.New(func(ctx context.Context, id, job string) error {
+		return l.Submit(ctx, protocol.UserInput{Text: job, LoopID: id})
 	})
 	return l
 }

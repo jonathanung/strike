@@ -12,6 +12,7 @@ webui/dashboard-view/target/
 webui/ideas-inbox/target/
 webui/status-card/target/
 webui/composer-drafts/target/
+webui/prompt-library/target/
 webui/protocol-schema/target/
 desktop/target/
 desktop/app/gen/
