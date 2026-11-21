@@ -231,6 +231,17 @@ type UserDefaults struct {
 	// product defaults resolved (e.g. turn timeout 1800s, delegation enforce,
 	// handoff required, shared child workdir).
 	Guardrails Guardrails
+	// LinkPatterns are the cockpit's Text Link Patterns (webui.linkPatterns,
+	// #1879), shared by every device paired to the gateway.
+	LinkPatterns []LinkPattern
+}
+
+// LinkPattern is one Text Link Patterns rule: a regular expression and an
+// absolute http/https URL template containing {match}.
+type LinkPattern struct {
+	Name     string
+	Pattern  string
+	Template string
 }
 
 // Guardrails is the effective session guardrail snapshot. Zero caps mean
@@ -361,6 +372,12 @@ type Settings interface {
 	// (on|off). Unknown values are rejected. Applying the preference to a
 	// running daemon is the daemon's job, not the store's.
 	SaveKeepAwake(mode string) error
+	// SaveLinkPatterns replaces the cockpit's Text Link Patterns list
+	// (webui.linkPatterns) in the global config. The whole list is validated
+	// first (at most 50 rules; bounded, compilable patterns that do not match
+	// empty text; fixed-host http/https templates with {match}); an invalid
+	// list is refused and nothing is written. An empty list clears it.
+	SaveLinkPatterns(rules []LinkPattern) error
 	// SaveGuardrailDials persists non-empty session guardrail dials into the
 	// global config (#1577). See GuardrailDials for the vocabulary. They are
 	// gateway defaults read when a strike process assembles; a running

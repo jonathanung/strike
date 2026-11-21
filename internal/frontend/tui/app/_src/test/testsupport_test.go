@@ -468,6 +468,13 @@ func (s *fakeSettings) SaveGuardrailDials(host.GuardrailDials) error {
 	return s.err
 }
 
+func (s *fakeSettings) SaveLinkPatterns(rules []host.LinkPattern) error {
+	if s.err == nil {
+		s.defaults.LinkPatterns = append([]host.LinkPattern(nil), rules...)
+	}
+	return s.err
+}
+
 func (s *fakeSettings) SaveKeepAwake(mode string) error {
 	if mode != "" {
 		s.defaults.KeepAwake = mode

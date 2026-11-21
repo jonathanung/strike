@@ -2130,6 +2130,9 @@ fn App() -> impl IntoView {
                     }
                 }
             }
+            // Text Link Patterns live on the gateway (#1879): read them once
+            // per gateway address, moving a legacy browser list there.
+            crate::link_patterns::sync_once(&b, &t);
             let settings = get_json::<ModelDefaults>(&b, &t, "/v1/settings").await;
             if !live() {
                 poll_team();

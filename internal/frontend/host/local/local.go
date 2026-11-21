@@ -676,7 +676,19 @@ func (settingsAdapter) Defaults() host.UserDefaults {
 		PruneKeepUserTurns:           cfg.PruneKeepUserTurns,
 		PruneProtectTools:            append([]string(nil), cfg.PruneProtectTools...),
 		Guardrails:                   guardrailsFromConfig(cfg.Session),
+		LinkPatterns:                 linkPatternsFromConfig(cfg.WebUI.LinkPatterns),
 	}
+}
+
+func linkPatternsFromConfig(in []config.LinkPattern) []host.LinkPattern {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]host.LinkPattern, len(in))
+	for i, r := range in {
+		out[i] = host.LinkPattern(r)
+	}
+	return out
 }
 
 func guardrailsFromConfig(s config.SessionConfig) host.Guardrails {
@@ -726,6 +738,14 @@ func (settingsAdapter) SaveConfigDials(sandboxMode, notify, leanCode, deferTools
 
 func (settingsAdapter) SaveKeepAwake(mode string) error {
 	return config.SetGlobalKeepAwake(mode)
+}
+
+func (settingsAdapter) SaveLinkPatterns(rules []host.LinkPattern) error {
+	out := make([]config.LinkPattern, len(rules))
+	for i, r := range rules {
+		out[i] = config.LinkPattern(r)
+	}
+	return config.SetGlobalLinkPatterns(out)
 }
 
 func (settingsAdapter) SaveGuardrailDials(d host.GuardrailDials) error {
