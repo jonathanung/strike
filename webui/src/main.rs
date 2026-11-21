@@ -34,6 +34,7 @@ mod markdown_review;
 mod local_issues;
 mod localfiles;
 mod customize;
+mod deploy_watch;
 mod gateway;
 mod gateway_peek;
 mod gateway_qr;
@@ -5429,6 +5430,8 @@ fn App() -> impl IntoView {
                     <Show when=move || !stream_note.get().is_empty()>
                         <p class="hint banner">{move || stream_note.get()}</p>
                     </Show>
+                    // #1785: a deploy watch session shows its verdict card.
+                    <deploy_watch::DeployWatchCard base=base token=token active=active_root tick=tick />
                     <Show when=move || !doc_path.get().is_empty()>
                         <DocumentPane
                             base=base
