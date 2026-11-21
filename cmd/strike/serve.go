@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -30,7 +31,6 @@ import (
 	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/product/update"
 	"github.com/jonathanung/strike/internal/protocol"
-	"github.com/jonathanung/strike/internal/trust/audit"
 	"github.com/jonathanung/strike/internal/trust/usageaudit"
 )
 
@@ -70,6 +70,7 @@ Endpoints:
   GET  /v1/status                   live status chrome
   GET  /v1/agents                   selectable agents
   GET  /v1/sessions                 session list (+ liveId)
+  GET  /v1/sessions/{id}/reference size of an @session:<id> reference (summary + last turns)
   GET  /v1/sessions/{id}/events     SSE tail of a session JSONL log
   GET  /v1/sessions/{id}/loops      session /loop jobs (POST start, DELETE stop)
   GET  /v1/triggers                 trigger registry
@@ -335,6 +336,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	terminalSandboxLoaded := false
 	var cleanup func() error
 	var sharedAttachments *attachment.Store
+	// served is the assembled root config (nil attach-only); script
+	// schedules and the retention-bounded audit sink read it.
+	var served *assembled
 	sessionDir := opts.sessionDir
 	assembled := false
 
@@ -374,6 +378,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			fmt.Fprintln(stderr, n)
 		}
 		sharedAttachments = a.attachments
+		served = a
 		// Opt-in host sleep inhibition (#1496): default off; the persisted
 		// dial is applied at start and flipped live by PATCH /v1/settings.
 		keepAwake = keepawake.New(keepawake.Options{})
@@ -709,7 +714,10 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		writePermissionsModeWarning(stderr, opts.auto, opts.dangerouslySkipPermissions)
 	}
 
-	auditSink, err := audit.Open(audit.Options{})
+	// Retention-bounded like every engine's sink: the clock writes one
+	// script_run record per tick outcome, so an unbounded sink would grow
+	// forever behind an every-minute schedule (#1774).
+	auditSink, err := openAuditSink(serveAuditConfig(served))
 	if err != nil {
 		return fmt.Errorf("open audit sink: %w", err)
 	}
@@ -727,12 +735,30 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	if err != nil {
 		cwd = ""
 	}
-	schedules, err := openScheduleService(workspace.DefaultDir(), liveHub, services, wsStore, cwd)
+	// The server is built after the clock; script-run notices reach its
+	// notification centre once it exists (a run finishing earlier posts none).
+	var notifySrv atomic.Pointer[server.Server]
+	schedules, err := openScheduleService(workspace.DefaultDir(), liveHub, services, wsStore, cwd, scheduleScripts{
+		runner: newScriptRunner(served, auditSink, opts.tokenFile, serveCwd()),
+		sink:   auditSink,
+		notify: func(scheduleID, runID, name string, exitCode *int, failed bool) {
+			if srv := notifySrv.Load(); srv != nil {
+				srv.NotifyScriptRun(scheduleID, runID, name, exitCode, failed)
+			}
+		},
+	})
 	if err != nil {
 		return err
 	}
+	// Script runs detach into schedCtx. Cancel it and wait for their
+	// outcomes before the audit sink closes (defers run in reverse).
+	schedCtx, schedCancel := context.WithCancel(ctx)
+	defer func() {
+		schedCancel()
+		schedules.Shutdown()
+	}()
 	if liveHub != nil && !opts.readOnly {
-		go schedules.Run(ctx)
+		go schedules.Run(schedCtx)
 	}
 	trigStore, err := trigger.Open("")
 	if err != nil {
@@ -808,6 +834,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	notifySrv.Store(srv)
 
 	ln, err := net.Listen("tcp", opts.addr)
 	if err != nil {
