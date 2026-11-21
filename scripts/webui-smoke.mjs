@@ -1852,6 +1852,29 @@ try {
     [...document.querySelectorAll(".gw-pop button")].find((b) => b.textContent === "Save").click();
     return true;
   })()`);
+  // #1539: the saved profile shows up as a read-only peek group in the
+  // Sessions list, under a Local label, badged from a real probe — here
+  // unreachable, never a fake count. The Sessions rail lives in the
+  // chat view (settings was open above), so go there first; mounting
+  // the list is itself one of the peek's refresh triggers.
+  await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
+  await waitUntil(`!!document.querySelector(".ss-panel")`, "sessions list for the peek");
+  await waitUntil(`(() => {
+    const group = [...document.querySelectorAll(".ss-peek [data-peek-gateway]")]
+      .find((el) => (el.textContent || "").includes("bad"));
+    if (!group) return false;
+    return group.getAttribute("data-peek-state") === "unreachable"
+      && (group.textContent || "").includes("Unreachable")
+      && !(group.textContent || "").includes(" running · ")
+      && !!document.querySelector(".ss-peek-local");
+  })()`, "cross-gateway peek group for the saved bad gateway");
+  // Manual refresh re-probes and lands on the same honest badge.
+  await evaluate(`document.querySelector('[data-action="peek-refresh"]')?.click()`);
+  await waitUntil(`(() => {
+    const group = [...document.querySelectorAll(".ss-peek [data-peek-gateway]")]
+      .find((el) => (el.textContent || "").includes("bad"));
+    return !!group && group.getAttribute("data-peek-state") === "unreachable";
+  })()`, "peek refresh keeps the unreachable badge");
   await waitUntil(`(() => {
     const hit = [...document.querySelectorAll("[data-command-id]")].some((el) => (el.textContent || "").includes("Switch to gateway: bad"));
     if (hit) return true;

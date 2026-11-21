@@ -28,6 +28,7 @@ mod local_issues;
 mod localfiles;
 mod customize;
 mod gateway;
+mod gateway_peek;
 mod gateway_qr;
 mod git;
 mod goals;
