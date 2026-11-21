@@ -2646,6 +2646,79 @@ try {
     { timeout: WAIT_MS, interval: 250 },
   );
 
+  // Lessons capture (#1376): "Remember this" on a user message opens a
+  // pre-filled draft; Cancel stores nothing; Save stores a tagged lesson
+  // through /v1/memory. The entry is removed again so later memory counts
+  // are unaffected.
+  const lessonKey = "lesson-smoke-capture";
+  const memoryKeys = async () => {
+    const r = await fetch(`http://127.0.0.1:${port}/v1/memory?scope=project`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const j = await r.json();
+    return (j.entries || []).map((e) => ({ key: e.key, tags: e.tags || [], value: e.value }));
+  };
+  const openLessonDraft = async () => {
+    const clicked = await evaluate(`(() => {
+      const btn = [...document.querySelectorAll('[data-role="you"] [data-action="lesson-remember"]')].pop();
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+    if (clicked !== "clicked") throw new Error(`no Remember this action on a user message (${clicked})`);
+    await waitFor(
+      "lesson draft opens pre-filled from the message",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const d = document.querySelector('[data-lesson="draft"]');
+          if (!d) return JSON.stringify({ open: false });
+          return JSON.stringify({
+            open: true,
+            value: d.querySelector('[data-lesson="value"]').value,
+            key: d.querySelector('[data-lesson="key"]').value,
+            scope: d.querySelector('[data-lesson-scope="project"]').getAttribute("aria-pressed"),
+          });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        return { ok: !!(p.open && p.value.trim() && p.key.startsWith("lesson-") && p.scope === "true"), ...p };
+      },
+      { timeout: STEP_MS, interval: 200 },
+    );
+  };
+  const lessonBefore = (await memoryKeys()).length;
+  await openLessonDraft();
+  await evaluate(`document.querySelector('[data-lesson="cancel"]').click()`);
+  await waitFor(
+    "lesson draft cancel closes without storing",
+    async () => ({
+      ok:
+        (await evaluate(`!!document.querySelector('[data-lesson="draft"]')`)) === false &&
+        (await memoryKeys()).length === lessonBefore,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await openLessonDraft();
+  await evaluate(`(() => {
+    const el = document.querySelector('[data-lesson="key"]');
+    el.value = ${JSON.stringify(lessonKey)};
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector('[data-lesson="save"]').click();
+    return true;
+  })()`);
+  await waitFor(
+    "saved lesson is stored with the lesson tag and the draft closes",
+    async () => {
+      const rows = await memoryKeys();
+      const row = rows.find((r) => r.key === lessonKey);
+      const open = await evaluate(`!!document.querySelector('[data-lesson="draft"]')`);
+      return { ok: !!row && row.tags.includes("lesson") && !!row.value && open === false, body: JSON.stringify(row) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await fetch(`http://127.0.0.1:${port}/v1/memory/${lessonKey}?scope=project`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
   // Local issues (#1500): create → listed under Open → close → listed under
   // Closed → still closed after the panel remounts (fresh daemon read) and
   // in the daemon's own list. An empty title is refused inline.
