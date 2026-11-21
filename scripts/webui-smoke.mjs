@@ -4723,7 +4723,92 @@ try {
       await new Promise((resolve) => fixture.close(resolve));
     }
   }
+  // PR watch (#1356): link the live session to a non-GitHub PR through its
+  // meta sidecar (the host's PR capture writes the same fields). The
+  // daemon must degrade GET /v1/sessions/{id}/pr to "tracking unavailable"
+  // without running gh and with polling off, and opening the Git tab must
+  // render that chip state with no "Fix in this session" action. The PR
+  // fields are removed from the sidecar again afterwards.
+  const prHeaders = { Authorization: `Bearer ${token}` };
+  const prSessions = await (await fetch(`http://127.0.0.1:${port}/v1/sessions`, { headers: prHeaders })).json();
+  const prLiveId = prSessions.liveId || "";
+  if (!prLiveId) {
+    throw new Error(`PR watch: no live session id in /v1/sessions\n${JSON.stringify(prSessions).slice(0, 300)}`);
+  }
+  const prMetaPath = join(sessionsDir, `${prLiveId}.meta.json`);
+  const readPRMeta = async () => {
+    try {
+      return JSON.parse(await readFile(prMetaPath, "utf8"));
+    } catch {
+      return {};
+    }
+  };
+  const prGitLab = "https://gitlab.example.com/acme/widgets/-/merge_requests/7";
+  await writeFile(
+    prMetaPath,
+    JSON.stringify({ ...(await readPRMeta()), prUrl: prGitLab, prNumber: 7, prState: "open" }) + "\n",
+  );
+  const prRes = await fetch(`http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(prLiveId)}/pr`, {
+    headers: prHeaders,
+  });
+  const prBody = await prRes.json();
+  if (
+    !prRes.ok ||
+    !prBody.linked ||
+    prBody.available ||
+    prBody.poll ||
+    prBody.attention ||
+    !String(prBody.reason || "").includes("GitHub pull requests only")
+  ) {
+    throw new Error(`PR watch route: HTTP ${prRes.status} ${JSON.stringify(prBody)}`);
+  }
+  const prList = await (await fetch(`http://127.0.0.1:${port}/v1/sessions`, { headers: prHeaders })).json();
+  const prRow = (prList.sessions || []).find((s) => s.id === prLiveId);
+  if (prRow && (prRow.prUrl !== prGitLab || prRow.prNumber !== 7 || prRow.prState !== "open")) {
+    throw new Error(`PR watch: /v1/sessions row lacks PR fields: ${JSON.stringify(prRow)}`);
+  }
+  const prDraft = await fetch(
+    `http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(prLiveId)}/pr/fix-draft`,
+    { method: "POST", headers: prHeaders },
+  );
+  if (prDraft.status !== 409) {
+    throw new Error(`PR watch: fix-draft on an untracked PR should be 409, got ${prDraft.status}`);
+  }
   await clickSideTab("Git", "Staged");
+  await waitFor(
+    "PR watch chip shows tracking unavailable (data-pr-watch)",
+    async () => {
+      const raw = await evaluate(`JSON.stringify((() => {
+        const root = document.querySelector("[data-pr-watch]");
+        if (!root) return null;
+        const chip = root.querySelector("[data-pr-chip]");
+        const why = root.querySelector("[data-pr-unavailable]");
+        return {
+          tone: root.getAttribute("data-pr-tone"),
+          chip: chip ? chip.textContent : "",
+          why: why ? why.textContent : "",
+          fix: !!root.querySelector("[data-pr-fix]"),
+        };
+      })())`);
+      const got = JSON.parse(raw || "null");
+      const ok =
+        !!got &&
+        got.tone === "unavailable" &&
+        got.chip.includes("PR #7") &&
+        got.why.includes("GitHub pull requests only") &&
+        !got.fix;
+      return { ok, got };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  {
+    const meta = await readPRMeta();
+    delete meta.prUrl;
+    delete meta.prNumber;
+    delete meta.prState;
+    delete meta.prUpdatedAt;
+    await writeFile(prMetaPath, JSON.stringify(meta) + "\n");
+  }
   // Pre-push review (#1487): the preview route sizes the diff and names the
   // read-only reviewer profile, a start without confirm never spawns (400),
   // and the Git tab's "Review this branch" panel renders the same state

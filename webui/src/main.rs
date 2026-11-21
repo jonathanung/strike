@@ -83,6 +83,7 @@ mod permissions_explain;
 mod plugin_flow;
 mod plugin_lifecycle;
 mod plan_card;
+mod pr_watch;
 mod steer_queue;
 mod steer_ack;
 mod model_menu;
@@ -7136,6 +7137,7 @@ fn App() -> impl IntoView {
                     <div hidden=move || !git_active.get()>
                         <ship_pr::ShipPr base=base token=token status_line=status active=git_active />
                         <review_branch::ReviewBranch base=base token=token active=git_active doc_path=doc_path doc_line=doc_line doc_diff=doc_diff />
+                        <pr_watch::PrWatch base=base token=token session=active_root active=git_active />
                         <git::GitPanel base=base token=token status_line=status active=git_active />
                     </div>
                     <div hidden=move || !review_active.get()>
