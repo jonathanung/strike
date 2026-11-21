@@ -223,6 +223,9 @@ type Server struct {
 	// notifyOnce lazily opens the redacted notification log under SessionDir.
 	notifyOnce sync.Once
 	notifyLog  *notifyLog
+	// pushOnce lazily opens the Web Push subscription store (#1564).
+	pushOnce  sync.Once
+	pushStore *pushStore
 	// clientMsgOnce lazily opens the outbox client-message-id dedupe (#1325).
 	clientMsgOnce  sync.Once
 	clientMsgStore *clientMsgDedupe
@@ -323,6 +326,7 @@ func (s *Server) Handler() http.Handler { return s.http.Handler }
 // ListenAndServe binds and serves until the server is closed.
 func (s *Server) ListenAndServe() error {
 	go s.warmStaticGzip()
+	go s.runPush()
 	return s.http.ListenAndServe()
 }
 
@@ -330,6 +334,7 @@ func (s *Server) ListenAndServe() error {
 func (s *Server) Serve(ln net.Listener) error {
 	s.http.Addr = ln.Addr().String()
 	go s.warmStaticGzip()
+	go s.runPush()
 	return s.http.Serve(ln)
 }
 
@@ -451,6 +456,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sandbox", s.handleSandboxGet)
 	s.mux.HandleFunc("PATCH /v1/sandbox", s.handleSandboxPatch)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/children", s.handleSessionChildren)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/reference", s.handleSessionReference)
 	s.mux.HandleFunc("GET /v1/session-lifecycle", s.handleSessionLifecycleCapabilities)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.handleSessionFork)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork_at", s.handleSessionForkAt)
@@ -502,6 +508,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/git/worktrees/prune", s.handleGitWorktreePrune)
 	s.mux.HandleFunc("GET /v1/file", s.handleFile)
 	s.mux.HandleFunc("GET /v1/file/view", s.handleFileView)
+	s.mux.HandleFunc("GET /v1/file/raw", s.handleFileRaw)
 	s.mux.HandleFunc("PUT /v1/file", s.handleFilePut)
 	// Reviewed file mutations (WEBUI.9 / #1084) — typed apply only, no free-form write.
 	s.mux.HandleFunc("POST /v1/files/apply-edit", s.handleFilesApplyEdit)
@@ -567,6 +574,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/plugins/{id}", s.handlePluginGet)
 	s.mux.HandleFunc("GET /v1/customize", s.handleCustomize)
 	s.mux.HandleFunc("GET /v1/customize/doc", s.handleCustomizeDoc)
+	s.mux.HandleFunc("GET /v1/customize/skill-usage", s.handleSkillUsage)
 	s.mux.HandleFunc("POST /v1/customize/preview", s.handleCustomizePreview)
 	s.mux.HandleFunc("POST /v1/customize/apply", s.handleCustomizeApply)
 	s.mux.HandleFunc("GET /v1/panes", s.handlePanesList)
@@ -656,6 +664,7 @@ func (s *Server) routes() {
 	// Container posture (#1584): read-only isolation ladder + engine status.
 	s.mux.HandleFunc("GET /v1/container/status", s.handleContainerStatus)
 	s.mux.HandleFunc("POST /v1/attachments", s.handleAttachmentIngest)
+	s.mux.HandleFunc("GET /v1/attachments/{ref}", s.handleAttachmentGet)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)
 	s.mux.HandleFunc("GET /v1/sidechat", s.handleSideChatList)
 	s.mux.HandleFunc("POST /v1/sidechat/ask", s.handleSideChatAsk)
@@ -664,6 +673,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/notifications", s.handleNotifications)
 	s.mux.HandleFunc("GET /v1/notifications/stream", s.handleNotificationStream)
 	s.mux.HandleFunc("PUT /v1/notifications/prefs", s.handleNotificationPrefs)
+	// Web Push (#1564): VAPID public key and browser push subscriptions.
+	s.mux.HandleFunc("GET /v1/notifications/push-key", s.handlePushKey)
+	s.mux.HandleFunc("POST /v1/notifications/push-subscriptions", s.handlePushSubscribe)
+	s.mux.HandleFunc("DELETE /v1/notifications/push-subscriptions", s.handlePushUnsubscribe)
 	s.mux.HandleFunc("POST /v1/notifications/seen", s.handleNotificationSeen)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
 	s.mux.HandleFunc("GET /v1/terminals", s.handleTerminalsList)
@@ -786,7 +799,9 @@ func (s *Server) applySecurityHeaders(w http.ResponseWriter) {
 	for _, h := range s.scriptCSPHashes {
 		scriptSrc += " " + h
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self' ws: wss: http: https:; img-src 'self' data: blob:; style-src 'self'; "+scriptSrc+"; font-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+	// media-src blob: lets composer audio/video chips play their local
+	// File preview (#1390); without it media falls back to default-src.
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; connect-src 'self' ws: wss: http: https:; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self'; "+scriptSrc+"; font-src 'self'; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")

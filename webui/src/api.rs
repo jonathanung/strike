@@ -45,6 +45,27 @@ pub async fn get_json<T: DeserializeOwned>(
     resp.json::<T>().await.map_err(|e| e.to_string())
 }
 
+/// GET raw bytes (#1393 workspace image/binary viewer): the body and its
+/// Content-Type. A non-2xx answer becomes a sentence via
+/// `workspace_image::raw_error_message`.
+pub async fn get_bytes(base: &str, token: &str, path: &str) -> Result<(Vec<u8>, String), String> {
+    let resp = with_auth(Request::get(&api(base, path)), token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.ok() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(crate::workspace_image::raw_error_message(status, &body));
+    }
+    let ctype = resp
+        .headers()
+        .get("content-type")
+        .unwrap_or_else(|| "application/octet-stream".into());
+    let bytes = resp.binary().await.map_err(|e| e.to_string())?;
+    Ok((bytes, ctype))
+}
+
 pub async fn post_json_value(
     base: &str,
     token: &str,
