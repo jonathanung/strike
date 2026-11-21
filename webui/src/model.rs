@@ -263,6 +263,10 @@ pub struct BootstrapCapabilities {
     /// present, live engine, and not `--read-only`.
     #[serde(default, rename = "projectInit")]
     pub project_init: bool,
+    /// True when the daemon serves the typed config-source list
+    /// (`GET /v1/config-sources`, #1493).
+    #[serde(default, rename = "configFiles")]
+    pub config_files: bool,
     /// True when `GET /v1/update` can run the release probe (#1583).
     #[serde(default, rename = "updateCheck")]
     pub update_check: bool,
@@ -270,6 +274,75 @@ pub struct BootstrapCapabilities {
     /// loops (#1588): live engine and not `--read-only`.
     #[serde(default)]
     pub loops: bool,
+}
+
+/// One `GET /v1/config-sources` row (#1493). The daemon withholds absolute
+/// host paths; `display` is the only location the cockpit may show.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Hash)]
+pub struct ConfigSource {
+    /// Primary slot id: config | mcp | providers | keybinds. Empty for extras.
+    #[serde(default)]
+    pub slot: String,
+    /// Extra-file group: agents | skills | themes | workflows. Empty for primary.
+    #[serde(default)]
+    pub kind: String,
+    /// global | project.
+    #[serde(default)]
+    pub scope: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub display: String,
+    #[serde(default)]
+    pub exists: bool,
+    #[serde(default, rename = "canCreate")]
+    pub can_create: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ConfigSourcesReply {
+    #[serde(default)]
+    pub sources: Vec<ConfigSource>,
+}
+
+impl ConfigSource {
+    /// "Global" / "Project", or the daemon's word for any other scope.
+    pub fn scope_label(&self) -> String {
+        match self.scope.as_str() {
+            "global" => "Global".into(),
+            "project" => "Project".into(),
+            "" => "Unknown scope".into(),
+            other => other.to_string(),
+        }
+    }
+
+    /// What the row is: the primary slot, or the extra-file group.
+    pub fn kind_label(&self) -> String {
+        match (self.slot.as_str(), self.kind.as_str()) {
+            ("", "") => "file".into(),
+            ("", kind) => format!("{kind} file"),
+            (slot, _) => format!("{slot} slot"),
+        }
+    }
+
+    /// Present / not present, with the create fact stated as text only:
+    /// slice 1 never creates files.
+    pub fn state_label(&self) -> &'static str {
+        match (self.exists, self.can_create) {
+            (true, _) => "Present",
+            (false, true) => "Not present (the daemon can create it; not from here)",
+            (false, false) => "Not present",
+        }
+    }
+
+    /// The row's name. Falls back to `display` so a row is never blank.
+    pub fn title(&self) -> &str {
+        if self.label.trim().is_empty() {
+            &self.display
+        } else {
+            &self.label
+        }
+    }
 }
 
 /// One `/v1/init` reply (#1581). `exists` with a non-empty `error` is the
@@ -1573,6 +1646,45 @@ fn one_line(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_sources_decode_in_daemon_order() {
+        let reply: ConfigSourcesReply = serde_json::from_str(
+            r#"{"sources":[
+                {"slot":"config","kind":"","scope":"global","label":"Main config","display":"~/.strike/config","exists":true,"canCreate":true},
+                {"slot":"mcp","kind":"","scope":"project","label":"MCP servers","display":"./.strike/mcp.json","exists":false,"canCreate":true},
+                {"slot":"","kind":"agents","scope":"project","label":"agents/review.md","display":"./.strike/agents/review.md","exists":true,"canCreate":false},
+                {"display":"./odd","exists":false,"futureField":1}
+            ]}"#,
+        )
+        .unwrap();
+        let titles: Vec<&str> = reply.sources.iter().map(ConfigSource::title).collect();
+        assert_eq!(titles, ["Main config", "MCP servers", "agents/review.md", "./odd"]);
+        let cases = [
+            (0, "Global", "config slot", "Present"),
+            (1, "Project", "mcp slot", "Not present (the daemon can create it; not from here)"),
+            (2, "Project", "agents file", "Present"),
+            (3, "Unknown scope", "file", "Not present"),
+        ];
+        for (i, scope, kind, state) in cases {
+            let row = &reply.sources[i];
+            assert_eq!(row.scope_label(), scope, "row {i}");
+            assert_eq!(row.kind_label(), kind, "row {i}");
+            assert_eq!(row.state_label(), state, "row {i}");
+        }
+        let empty: ConfigSourcesReply = serde_json::from_str("{}").unwrap();
+        assert!(empty.sources.is_empty());
+    }
+
+    #[test]
+    fn bootstrap_config_files_capability() {
+        let on: Bootstrap = serde_json::from_str(r#"{"capabilities":{"configFiles":true}}"#).unwrap();
+        assert!(on.capabilities.config_files);
+        let off: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
+        assert!(!off.capabilities.config_files);
+        let old: Bootstrap = serde_json::from_str("{}").unwrap();
+        assert!(!old.capabilities.config_files);
+    }
 
     #[test]
     fn card_budget_keeps_missing_counters_unmeasured() {

@@ -217,6 +217,10 @@ type Server struct {
 	// status and reset calls on one repo corrupt the index.
 	gitMu sync.Mutex
 
+	// review holds the review queue's unsent comments, accept marks and
+	// rejections per session (#1324).
+	review *reviewStore
+
 	// grants are short-lived bearers kept in memory only. grantNow overrides
 	// the clock in tests. rootSum is the last host-token hash; a change
 	// (strike daemon logout, or POST /v1/gateway/rotate) drops every grant.
@@ -300,6 +304,7 @@ func New(opts Options) (*Server, error) {
 		scriptCSPHashes: inlineScriptHashes(static),
 		terms:           terminal.NewManager(terminal.ManagerConfig{Sandbox: opts.TerminalSandbox}),
 		pairs:           newPairStore(opts),
+		review:          newReviewStore(opts.SessionDir),
 		shutdownCtx:     shutdownCtx,
 		shutdownCancel:  shutdownCancel,
 	}
@@ -519,6 +524,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/git/worktrees", s.handleGitWorktreeCreate)
 	s.mux.HandleFunc("POST /v1/git/worktrees/remove", s.handleGitWorktreeRemove)
 	s.mux.HandleFunc("POST /v1/git/worktrees/prune", s.handleGitWorktreePrune)
+	// Review queue (#1324): per-hunk accept/reject/comment, sent as one turn.
+	s.mux.HandleFunc("GET /v1/review", s.handleReviewGet)
+	s.mux.HandleFunc("POST /v1/review/state", s.handleReviewState)
+	s.mux.HandleFunc("POST /v1/review/reject", s.handleReviewReject)
+	s.mux.HandleFunc("POST /v1/review/comments", s.handleReviewCommentAdd)
+	s.mux.HandleFunc("DELETE /v1/review/comments/{id}", s.handleReviewCommentDelete)
+	s.mux.HandleFunc("POST /v1/review/send", s.handleReviewSend)
 	s.mux.HandleFunc("GET /v1/file", s.handleFile)
 	s.mux.HandleFunc("GET /v1/file/view", s.handleFileView)
 	s.mux.HandleFunc("GET /v1/file/raw", s.handleFileRaw)
@@ -529,6 +541,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/memory", s.handleMemory)
 	s.mux.HandleFunc("GET /v1/memory/export", s.handleMemoryExport)
 	s.mux.HandleFunc("POST /v1/memory/import", s.handleMemoryImport)
+	// Whole-gateway backup/restore (#1339). Secrets are never exported.
+	s.mux.HandleFunc("GET /v1/backup/export", s.handleBackupExport)
+	s.mux.HandleFunc("POST /v1/backup/restore", s.handleBackupRestore)
 	s.mux.HandleFunc("GET /v1/memory/mode", s.handleMemoryModeGet)
 	s.mux.HandleFunc("PUT /v1/memory/mode", s.handleMemoryModePut)
 	s.mux.HandleFunc("PUT /v1/memory/{key}", s.handleMemoryPut)
