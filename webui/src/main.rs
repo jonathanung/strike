@@ -1139,6 +1139,9 @@ fn App() -> impl IntoView {
     // #1386: one notice per session start for skill/agent load diagnostics
     // this browser has not announced yet. Cleared only by the user.
     let load_notice = RwSignal::new(String::new());
+    // Keys announced this page load, merged with the stored list so a
+    // browser that refuses localStorage writes still never re-nags.
+    let load_seen = RwSignal::new(Vec::<String>::new());
     let load_error = RwSignal::new(String::new());
     let gateway = RwSignal::new("checking".to_string());
     let gateway_kind = RwSignal::new(StatusKind::Idle);
@@ -1701,11 +1704,13 @@ fn App() -> impl IntoView {
                                 project_init_capable.set(boot.capabilities.project_init);
                                 skills.set(boot.skills);
                                 {
-                                    let seen = crate::load_warnings::parse_seen(&load(crate::load_warnings::SEEN_KEY));
+                                    let mut seen = crate::load_warnings::parse_seen(&load(crate::load_warnings::SEEN_KEY));
+                                    seen.extend(load_seen.get_untracked());
                                     let fresh = crate::load_warnings::unseen(&boot.load_warnings, &seen);
                                     if !fresh.is_empty() {
                                         load_notice.set(crate::load_warnings::notice_text(&fresh));
                                         let kept = crate::load_warnings::remember(&seen, &fresh);
+                                        load_seen.set(kept.clone());
                                         if let Ok(raw) = serde_json::to_string(&kept) {
                                             save(crate::load_warnings::SEEN_KEY, &raw);
                                         }

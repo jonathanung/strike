@@ -20,21 +20,36 @@ pub const SEEN_KEY: &str = "strike.loadWarningsSeen";
 /// Remembered fingerprints are capped; the oldest drop first.
 pub const SEEN_CAP: usize = 256;
 
-/// Diagnostics whose fingerprint has not been announced yet. A diagnostic
-/// without a fingerprint is always fresh: it cannot be deduped honestly.
+/// The key a diagnostic is deduped on: the daemon's fingerprint, or, for
+/// a diagnostic without one, its path, code, and message. That fallback
+/// still dedupes, but it cannot notice an edit that leaves the reason
+/// unchanged.
+pub fn dedupe_key(w: &LoadWarning) -> String {
+    if w.fingerprint.is_empty() {
+        format!("{}\u{0}{}\u{0}{}", w.path, w.code, w.message)
+    } else {
+        w.fingerprint.clone()
+    }
+}
+
+/// Diagnostics not announced yet.
 pub fn unseen<'a>(warnings: &'a [LoadWarning], seen: &[String]) -> Vec<&'a LoadWarning> {
     warnings
         .iter()
-        .filter(|w| w.fingerprint.is_empty() || !seen.iter().any(|s| s == &w.fingerprint))
+        .filter(|w| {
+            let key = dedupe_key(w);
+            !seen.iter().any(|s| s == &key)
+        })
         .collect()
 }
 
-/// Add newly announced fingerprints, keeping the newest `SEEN_CAP`.
+/// Add newly announced keys, keeping the newest `SEEN_CAP`.
 pub fn remember(seen: &[String], fresh: &[&LoadWarning]) -> Vec<String> {
     let mut out: Vec<String> = seen.to_vec();
     for w in fresh {
-        if !w.fingerprint.is_empty() && !out.iter().any(|s| s == &w.fingerprint) {
-            out.push(w.fingerprint.clone());
+        let key = dedupe_key(w);
+        if !out.iter().any(|s| s == &key) {
+            out.push(key);
         }
     }
     if out.len() > SEEN_CAP {
@@ -180,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn unseen_skips_announced_fingerprints_and_keeps_unfingerprinted() {
+    fn unseen_skips_announced_keys() {
         let list = vec![
             warn("skill", "empty", "a.md", "f1", false),
             warn("skill", "empty", "b.md", "f2", false),
@@ -191,6 +206,9 @@ mod tests {
         let files: Vec<&str> = fresh.iter().map(|w| w.file.as_str()).collect();
         assert_eq!(files, vec!["b.md", "c.md"]);
         assert_eq!(unseen(&[], &seen).len(), 0);
+        // Once remembered, an unfingerprinted diagnostic stops re-announcing.
+        let kept = remember(&seen, &fresh);
+        assert!(unseen(&list, &kept).is_empty());
     }
 
     #[test]
@@ -206,7 +224,8 @@ mod tests {
         let b = warn("skill", "empty", "b.md", "f2", false);
         let none = warn("skill", "empty", "c.md", "", false);
         let out = remember(&["f1".to_string()], &[&a, &b, &none]);
-        assert_eq!(out, vec!["f1".to_string(), "f2".to_string()]);
+        assert_eq!(out, vec!["f1".to_string(), "f2".to_string(), dedupe_key(&none)]);
+        assert_eq!(dedupe_key(&none), "/w/c.md\u{0}empty\u{0}reason");
 
         let many: Vec<String> = (0..SEEN_CAP).map(|i| format!("x{i}")).collect();
         let out = remember(&many, &[&b]);
