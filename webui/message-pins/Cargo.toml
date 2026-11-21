@@ -1,0 +1,8 @@
+[package]
+name = "message-pins"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Transcript message pins for the cockpit: durable anchors from the event log, strict resolution, and the pin rail rows."
+
+[dependencies]

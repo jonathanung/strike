@@ -1,0 +1,37 @@
+/* feature:error-block begin (#1535)
+   The cockpit's one designed error state (src/error_notice.rs). Square,
+   2px ruled block on the normal surface — no tinted pink fill — with a
+   danger stripe as the only alarm colour. Copy comes from error-copy. */
+.error-block {
+  display: grid;
+  gap: var(--space-1, 4px);
+  margin: 8px 0 0;
+  padding: 10px 12px 10px 14px;
+  background: var(--surface);
+  color: var(--ink);
+  border: var(--border-width, 2px) solid var(--rule);
+  border-left: 6px solid var(--danger);
+  border-radius: 0;
+  box-shadow: var(--shadow);
+}
+.error-block-title {
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.error-block-action {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+.error-block-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.error-block-actions .hint { margin: 0; }
+.error-block button { border-radius: 0; }
+/* feature:error-block end */

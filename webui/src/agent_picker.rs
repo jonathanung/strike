@@ -227,7 +227,7 @@ mod tests {
             let got = resolve_pick(raw, &list);
             match want {
                 Ok(name) => assert_eq!(got.as_deref(), Ok(*name), "raw={raw:?}"),
-                Err(msg) => assert_eq!(got.as_deref(), Err(*msg), "raw={raw:?}"),
+                Err(msg) => assert_eq!(got, Err(msg.to_string()), "raw={raw:?}"),
             }
         }
         assert_eq!(

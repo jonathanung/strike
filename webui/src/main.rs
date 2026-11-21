@@ -34,11 +34,13 @@ mod diagnostics;
 mod draft_size;
 mod drafts;
 mod editor;
+mod error_notice;
 mod fallback;
 mod files_invalidated;
 mod lessons;
 mod elicitation;
 mod elicitation_ui;
+mod link_patterns;
 mod load_epoch;
 mod load_warnings;
 mod markdown_review;
@@ -106,6 +108,7 @@ mod team_message;
 mod file_history;
 mod quick_open;
 mod transcript_find;
+mod transcript_pins;
 mod usage_audit;
 mod regenerate_title;
 mod rewind;
@@ -161,6 +164,8 @@ use composer_triggers::{
     trigger_status, Kind, Suggestion,
 };
 use leptos::prelude::*;
+use leptos::callback::UnsyncCallback;
+use crate::error_notice::{humanize, ErrorNotice};
 use leptos::task::spawn_local;
 use model::{
     activity_panel, display_state, fmt_elapsed, is_running, merge_sessions, mode_label,
@@ -5162,6 +5167,8 @@ fn App() -> impl IntoView {
     })
     .into();
     let rename_for_palette = apply_title.clone();
+    // Message pins (#1528): daemon-backed, reloaded on session switch.
+    let pin_store = transcript_pins::PinStore::new(base, token, active_root, ux_note);
     // A quote's anchor is per session: switching sessions drops it.
     Effect::new(move |prev: Option<String>| {
         let root = active_root.get();
@@ -6109,12 +6116,7 @@ fn App() -> impl IntoView {
                         busy=live_busy
                         storage_rev=storage_rev
                     />
-                    <Show when=move || !load_error.get().is_empty()>
-                        <div class="notice" role="alert">
-                            <span>{move || load_error.get()}</span>
-                            <button class="secondary" on:click=move |_| refresh_meta()>"Retry"</button>
-                        </div>
-                    </Show>
+                    <ErrorNotice message=load_error on_retry=UnsyncCallback::new(move |_: ()| refresh_meta()) />
                     <Show when=move || !stream_note.get().is_empty()>
                         <p class="hint banner">{move || stream_note.get()}</p>
                     </Show>
@@ -6233,6 +6235,7 @@ fn App() -> impl IntoView {
                         note=ux_note
                         handlers=handlers
                         find=find_view
+                        pins=pin_store
                     />
                     </Show>
                     <debug_mode_ui::DebugPanel base=base token=token root=active_root debug=debug_state />
@@ -7004,7 +7007,7 @@ fn App() -> impl IntoView {
                         </form>
                         <annotate::AnnotateOverlay target=annotate_target store=annotate_marks />
                         <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
-                            <p class="hint" data-model-note="true">{move || model_note.get()}</p>
+                            <p class="hint" data-model-note="true">{move || humanize(&model_note.get())}</p>
                         </Show>
                         <Show when=move || !agent_note.get().is_empty()>
                             <p class="hint" data-agent-note="true">{move || agent_note.get()}</p>
@@ -7257,12 +7260,7 @@ fn App() -> impl IntoView {
                                     </ul>
                                 </div>
                             </Show>
-                            <Show when=move || !files_error.get().is_empty()>
-                                <div class="notice" role="alert">
-                                    <span>{move || files_error.get()}</span>
-                                    <button class="secondary" on:click=move |_| load_files()>"Retry"</button>
-                                </div>
-                            </Show>
+                            <ErrorNotice message=files_error on_retry=UnsyncCallback::new(move |_: ()| load_files()) />
                             <Show when=move || !files_path.get().is_empty()>
                                 <button class="secondary" on:click=move |_| files_path.set(parent_path(&files_path.get()))>"Up"</button>
                             </Show>
@@ -7315,12 +7313,7 @@ fn App() -> impl IntoView {
                                 <button class="secondary" on:click=move |_| load_changes()>"Refresh"</button>
                             </div>
                             <p class="hint">"Click a change to open its diff. @ mentions it in chat; drag also inserts @path."</p>
-                            <Show when=move || !changes_error.get().is_empty()>
-                                <div class="notice" role="alert">
-                                    <span>{move || changes_error.get()}</span>
-                                    <button class="secondary" on:click=move |_| load_changes()>"Retry"</button>
-                                </div>
-                            </Show>
+                            <ErrorNotice message=changes_error on_retry=UnsyncCallback::new(move |_: ()| load_changes()) />
                             <Show when=move || changes.get().is_empty() && changes_error.get().is_empty()>
                                 <EmptyState title="No changes".into() body="Git diffs for the daemon working directory show up here.".into() />
                             </Show>

@@ -172,7 +172,7 @@ const SUGGESTIONS: [Suggestion; 6] = [
     },
 ];
 
-/// The text a quote carries: what Copy copies, else the body.
+/// The text a quote or a message pin carries: what Copy copies, else the body.
 fn quote_text(m: &Message) -> &str {
     if m.copy_text.trim().is_empty() {
         &m.body
@@ -1292,6 +1292,19 @@ impl Transcript {
             .unwrap_or_default()
     }
 
+    /// Rows reduced to what message pins (#1528) need.
+    pub fn pin_rows(&self) -> Vec<message_pins::Row<'_>> {
+        self.messages
+            .iter()
+            .map(|m| message_pins::Row {
+                id: m.id,
+                role: m.role.class(),
+                keep: m.keep_events,
+                text: quote_text(m),
+            })
+            .collect()
+    }
+
     /// `files.invalidated` (#1380): one muted notice naming the paths
     /// (TUI wording, capped). Back-to-back invalidations extend the
     /// previous notice instead of stacking lines; `copy_text` keeps the
@@ -1347,6 +1360,27 @@ impl Transcript {
                 file_change: m.role == Role::Tool && edit_resend::is_file_tool(&m.key),
             })
             .collect()
+    }
+
+    /// Durable anchor, stored excerpt and time of the message at `idx`,
+    /// when it can be pinned (settled prose).
+    pub fn pin_anchor_at(&self, idx: usize) -> Option<(message_pins::Anchor, String, f64)> {
+        let m = self.messages.get(idx)?;
+        let prev = self.messages[..idx]
+            .iter()
+            .rev()
+            .map(|p| (p.role.class(), p.keep_events));
+        let anchor = message_pins::anchor_from_prev(m.role.class(), m.keep_events, prev)?;
+        let excerpt = message_pins::excerpt(quote_text(m));
+        if excerpt.is_empty() {
+            return None;
+        }
+        Some((anchor, excerpt, m.at_ms))
+    }
+
+    /// Pin rail rows against this transcript.
+    pub fn pin_rail(&self, pins: &[message_pins::Pin]) -> Vec<message_pins::RailItem> {
+        message_pins::rail(pins, &self.pin_rows())
     }
 
     /// Id of the newest user message (the one edit & resend can edit).
@@ -4283,6 +4317,37 @@ mod tests {
         t.settle_orphaned_tools();
         assert_eq!(t.messages[0].badge, NO_RESULT_BADGE);
         assert_eq!(t.tail_for(a).unwrap().text, "last words\n");
+    }
+
+    #[test]
+    fn pin_anchor_survives_a_replay() {
+        let log = [
+            env("user.message", serde_json::json!({"text": "why does it fail"})),
+            env("text.delta", serde_json::json!({"text": "The bug is in parse()."})),
+            env("turn.completed", serde_json::json!({})),
+        ];
+        let mut t = Transcript::new();
+        for raw in &log {
+            t.apply_envelope(raw);
+        }
+        let (anchor, excerpt, _) = t.pin_anchor_at(1).expect("settled reply is pinnable");
+        assert_eq!(anchor.role, "strike");
+        assert_eq!(excerpt, "The bug is in parse().");
+        let pin = message_pins::Pin { anchor, excerpt, at_ms: 0.0 };
+        let mut again = Transcript::new();
+        for raw in &log {
+            again.apply_envelope(raw);
+        }
+        let rail = again.pin_rail(&[pin]);
+        assert_eq!(rail[0].target, Some(again.messages[1].id));
+    }
+
+    #[test]
+    fn streaming_reply_is_not_pinnable() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "go"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "partial"})));
+        assert!(t.pin_anchor_at(1).is_none());
     }
 
     // #1365: per-turn file-change summary.

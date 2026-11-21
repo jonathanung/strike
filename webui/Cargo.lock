@@ -334,6 +334,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1731451909bde27714eacba19c2566362a7f35224f52b153d3f42cf60f72472"
 
 [[package]]
+name = "error-copy"
+version = "0.1.0"
+
+[[package]]
 name = "event-listener"
 version = "5.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -849,6 +853,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
+name = "link-patterns"
+version = "0.1.0"
+dependencies = [
+ "regex",
+]
+
+[[package]]
 name = "litemap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -893,6 +904,10 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "mermaid-lite"
+version = "0.1.0"
+
+[[package]]
+name = "message-pins"
 version = "0.1.0"
 
 [[package]]
@@ -1406,13 +1421,16 @@ dependencies = [
  "dashboard-view",
  "debug-mode",
  "edit-resend",
+ "error-copy",
  "gloo-net",
  "ideas-inbox",
  "js-sys",
  "leptos",
+ "link-patterns",
  "load-guard",
  "md-review",
  "mermaid-lite",
+ "message-pins",
  "prompt-library",
  "protocol-schema",
  "qrcode",

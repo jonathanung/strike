@@ -11,6 +11,7 @@ serde_json = "1"
 a11y-announce = { path = "a11y-announce" }
 best-of-n = { path = "best-of-n" }
 protocol-schema = { path = "protocol-schema" }
+error-copy = { path = "error-copy" }
 session-ref = { path = "session-ref" }
 load-guard = { path = "load-guard" }
 away-briefing = { path = "away-briefing" }
@@ -23,7 +24,9 @@ composer-drafts = { path = "composer-drafts" }
 debug-mode = { path = "debug-mode" }
 prompt-library = { path = "prompt-library" }
 signin-flow = { path = "signin-flow" }
+link-patterns = { path = "link-patterns" }
 transcript-window = { path = "transcript-window" }
+message-pins = { path = "message-pins" }
 quote-message = { path = "quote-message" }
 edit-resend = { path = "edit-resend" }
 theme-catalog = { path = "theme-catalog" }
@@ -33,7 +36,7 @@ send_wrapper = "0.6"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
-web-sys = { version = "0.3", features = ["AbortController", "AbortSignal", "BeforeUnloadEvent", "Blob", "BlobPropertyBag", "CanvasRenderingContext2d", "Clipboard", "ClipboardEvent", "CloseEvent", "CssStyleDeclaration", "CustomEvent", "CustomEventInit", "DataTransfer", "Document", "DomRect", "DomRectReadOnly", "DragEvent", "Element", "Event", "EventSource", "EventTarget", "File", "FileList", "FileReader", "History", "HtmlAnchorElement", "HtmlButtonElement", "HtmlCanvasElement", "HtmlDocument", "HtmlElement", "HtmlHeadElement", "HtmlImageElement", "HtmlInputElement", "HtmlTextAreaElement", "HtmlVideoElement", "KeyboardEvent", "Location", "MediaDevices", "MediaQueryList", "MediaStream", "MediaStreamConstraints", "MediaStreamTrack", "MessageEvent", "MouseEvent", "Navigator", "Node", "NodeList", "Notification", "NotificationOptions", "NotificationPermission", "PointerEvent", "RequestCredentials", "ResizeObserver", "ResizeObserverEntry", "Selection", "ServiceWorker", "ServiceWorkerContainer", "Storage", "SubmitEvent", "Touch", "TouchEvent", "TouchList", "Url", "VisualViewport", "WebSocket", "Window"] }
+web-sys = { version = "0.3", features = ["AbortController", "AbortSignal", "BeforeUnloadEvent", "Blob", "BlobPropertyBag", "CanvasRenderingContext2d", "Clipboard", "ClipboardEvent", "CloseEvent", "CssStyleDeclaration", "CustomEvent", "CustomEventInit", "DataTransfer", "Document", "DomRect", "DomRectReadOnly", "DragEvent", "Element", "Event", "EventSource", "EventTarget", "File", "FileList", "FileReader", "History", "HtmlAnchorElement", "HtmlButtonElement", "HtmlCanvasElement", "HtmlDocument", "HtmlElement", "HtmlHeadElement", "HtmlImageElement", "HtmlInputElement", "HtmlTextAreaElement", "HtmlVideoElement", "KeyboardEvent", "Location", "MediaDevices", "MediaQueryList", "MediaStream", "MediaStreamConstraints", "MediaStreamTrack", "MessageEvent", "MouseEvent", "Navigator", "Node", "NodeList", "Notification", "NotificationOptions", "NotificationPermission", "PointerEvent", "RequestCredentials", "ResizeObserver", "ResizeObserverEntry", "Selection", "ServiceWorker", "ServiceWorkerContainer", "Storage", "SubmitEvent", "Touch", "TouchEvent", "TouchList", "Url", "VisualViewport", "WebSocket", "Window", "console"] }
 
 [profile.release]
 opt-level = 2

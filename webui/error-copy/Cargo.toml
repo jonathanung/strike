@@ -1,0 +1,8 @@
+[package]
+name = "error-copy"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "One mapping from daemon/fetch/parse error strings to user-facing cockpit copy."
+
+[dependencies]

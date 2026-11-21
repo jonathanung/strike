@@ -1,0 +1,57 @@
+/* feature:quote-message begin (#1362) */
+/* Composer chip: the quoted line rides above the composer until sent. */
+.quote-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 8px 6px 10px;
+  border: var(--border-width) solid var(--rule);
+  border-left-color: var(--accent-alt);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: var(--type-sm);
+  min-width: 0;
+}
+.quote-chip-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quote-chip-remove {
+  flex: none;
+  min-width: 32px;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+.quote-chip-remove:hover,
+.quote-chip-remove:focus-visible { color: var(--ink); }
+/* Card above a sent message that quoted a line; click jumps back. */
+.sx-quote-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  border: 0;
+  border-left: var(--border-width) solid var(--accent-alt);
+  background: var(--surface-muted);
+  color: var(--muted);
+  font: var(--type-sm)/1.4 var(--font-body);
+  text-align: left;
+}
+button.sx-quote-card { cursor: pointer; }
+button.sx-quote-card:hover,
+button.sx-quote-card:focus-visible { color: var(--ink); }
+.sx-quote-missing { border-left-color: var(--rule); }
+.sx-quote-note { font-style: italic; }
+body[data-phone="1"] .quote-chip-remove { min-width: 44px; min-height: 44px; }
+/* feature:quote-message end */

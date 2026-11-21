@@ -4,6 +4,7 @@
 use std::rc::Rc;
 
 use leptos::prelude::*;
+use crate::error_notice::humanize;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use serde_json::Value;
@@ -818,7 +819,7 @@ pub fn UsagePage(
                 <h2 class="panel-title">"Usage"</h2>
                 <p class="hint">"Token totals are summed from usage.reported events, including cache tokens. Dollars appear only when the model catalog published a price. Cache tokens without a published cache rate stay out of the dollar figure."</p>
                 <Show when=move || !error.get().is_empty()>
-                    <p class="ua-alert bad" role="alert">{move || error.get()}</p>
+                    <p class="ua-alert bad" role="alert">{move || humanize(&error.get())}</p>
                 </Show>
                 {move || {
                     report.get().alerts.into_iter().map(|a| {
@@ -1136,10 +1137,10 @@ pub fn AuditPage(
                     <span class=move || if list.get().verified { "chip ok" } else { "chip bad" }>{move || if !list.get().configured { "Not configured".to_string() } else if list.get().verified { "Chain intact".to_string() } else { "Chain broken".to_string() }}</span>
                 </div>
                 <Show when=move || !error.get().is_empty()>
-                    <p class="ua-alert bad" role="alert">{move || error.get()}</p>
+                    <p class="ua-alert bad" role="alert">{move || humanize(&error.get())}</p>
                 </Show>
                 <Show when=move || !list.get().error.is_empty()>
-                    <p class="ua-alert bad" role="alert">{move || list.get().error}</p>
+                    <p class="ua-alert bad" role="alert">{move || humanize(&list.get().error)}</p>
                 </Show>
                 <Show when=move || !list.get().note.is_empty()>
                     <p class="hint">{move || list.get().note}</p>

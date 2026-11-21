@@ -6,6 +6,7 @@
 //! path and the fallback when the daemon record cannot be written.
 
 use leptos::prelude::*;
+use crate::error_notice::humanize;
 use leptos::task::spawn_local;
 use serde_json::Value;
 
@@ -176,7 +177,7 @@ pub fn OnboardingCard(
                             <p class="hint">"Reading the paths this process uses…"</p>
                         </Show>
                         <Show when=move || !files_error.get().is_empty()>
-                            <p class="banner" role="alert">{move || files_error.get()}</p>
+                            <p class="banner" role="alert">{move || humanize(&files_error.get())}</p>
                             <button type="button" class="secondary" data-action="reload-files" on:click=reload>"Retry"</button>
                         </Show>
                         <Show when=move || !loading.get() && files_error.get().is_empty()>

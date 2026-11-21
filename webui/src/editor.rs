@@ -1785,10 +1785,12 @@ pub(crate) fn Inlines(text: String) -> impl IntoView {
     inline_parse(&text)
         .into_iter()
         .map(|part| match part {
-            Inline::Text(t) => view! { <span>{t}</span> }.into_any(),
-            Inline::Code(t) => view! { <code>{t}</code> }.into_any(),
-            Inline::Strong(t) => view! { <strong>{t}</strong> }.into_any(),
-            Inline::Em(t) => view! { <em>{t}</em> }.into_any(),
+            // User Text Link Patterns (#1383): plain text and whole-match
+            // code spans only.
+            Inline::Text(t) => view! { <span>{crate::link_patterns::linked_text(t)}</span> }.into_any(),
+            Inline::Code(t) => crate::link_patterns::linked_code(t, None).into_any(),
+            Inline::Strong(t) => view! { <strong>{crate::link_patterns::linked_text(t)}</strong> }.into_any(),
+            Inline::Em(t) => view! { <em>{crate::link_patterns::linked_text(t)}</em> }.into_any(),
             Inline::Link { text, href } => {
                 view! { <a href=href target="_blank" rel="noopener noreferrer">{text}</a> }.into_any()
             }
@@ -4221,7 +4223,7 @@ mod tests {
     }
 
     #[test]
-    fn markdown_fence_keeps_its_language() {
+    fn markdown_fence_language_and_plain_fence() {
         let blocks = markdown_blocks("```rust\nfn main() {}\n```\n\n```\nplain\n```\n");
         match &blocks[0] {
             MdBlock::Code { lang, text } => {

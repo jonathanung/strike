@@ -3,6 +3,7 @@
 //! the mode dial is a separate, security-reviewed follow-up.
 
 use leptos::prelude::*;
+use crate::error_notice::humanize;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 
@@ -190,7 +191,7 @@ pub fn SandboxSection(base: RwSignal<String>, token: RwSignal<String>) -> impl I
                     </p>
                 }.into_any(),
                 SandboxLoad::Failed(e) => view! {
-                    <p class="notice" data-sandbox-state="error">{format!("Could not load sandbox state: {e}")}</p>
+                    <p class="notice" data-sandbox-state="error">{humanize(&format!("Could not load sandbox state: {e}"))}</p>
                 }.into_any(),
                 SandboxLoad::Ready(snap) => {
                     let rows = summary_rows(&snap);

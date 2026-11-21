@@ -5,6 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use leptos::prelude::*;
+use crate::error_notice::humanize;
 use leptos::task::spawn_local;
 use serde_json::Value;
 
@@ -177,6 +178,7 @@ pub fn SettingsPage(
             </section>
             <crate::guardrails::Guardrails base=base token=token status=status dials=dials />
             <crate::update_check::AutoupdateRow base=base token=token status=status dials=dials />
+            <crate::link_patterns::LinkPatternsSettings />
             <section class="card settings-section" id="settings-project">
                 <h2 class="panel-title">"Project"</h2>
                 <crate::project_init::ProjectInit
@@ -233,7 +235,7 @@ pub fn SettingsPage(
                         <p class="hint">"Reading the paths this process uses…"</p>
                     </Show>
                     <Show when=move || !files_error.get().is_empty()>
-                        <p class="banner" role="alert">{move || files_error.get()}</p>
+                        <p class="banner" role="alert">{move || humanize(&files_error.get())}</p>
                         <button type="button" class="secondary" data-action="reload-files" on:click=move |_| refresh_files()>"Retry"</button>
                     </Show>
                     <Show when=move || !loading_files.get() && files_error.get().is_empty()>

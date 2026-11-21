@@ -4632,6 +4632,124 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+  // Text Link Patterns (#1383). Settings refuses an invalid regex and a
+  // javascript: template inline (nothing saved, transcript unaffected),
+  // then a valid rule linkifies a seeded ticket key (LPS-1383) in the
+  // transcript at display time. Removing the rule and saving restores
+  // plain text. Inputs are set the way a keyboard user's typing lands.
+  const lpOpen = async () => {
+    await evaluate(`document.querySelector('[data-action="open-settings"]')?.click()`);
+    await waitFor(
+      "Text Link Patterns section in Settings",
+      async () => ({ ok: (await evaluate(`!!document.querySelector("[data-link-patterns]")`)) === true }),
+      { timeout: STEP_MS, interval: 200 },
+    );
+  };
+  const lpSet = async (field, value) => {
+    const sent = await evaluate(`(() => {
+      const rows = document.querySelectorAll("[data-link-patterns] [data-lp-rule]");
+      const el = rows.length ? rows[rows.length - 1].querySelector('input[data-lp-field="${field}"]') : null;
+      if (!el) return "missing";
+      const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+      proto.set.call(el, ${JSON.stringify(value)});
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return "typed";
+    })()`);
+    if (sent !== "typed") throw new Error(`link pattern field ${field}: ${sent}`);
+  };
+  const lpProbe = async () => {
+    const raw = await evaluate(`(() => JSON.stringify({
+      note: (document.querySelector("[data-lp-note]") || {}).textContent || "",
+      error: [...document.querySelectorAll("[data-lp-error]")].map((e) => e.textContent).join(" | "),
+      rules: document.querySelectorAll("[data-link-patterns] [data-lp-rule]").length,
+      stored: localStorage.getItem("strike.linkPatterns"),
+    }))()`);
+    return JSON.parse(raw || "{}");
+  };
+  const lpSave = () => evaluate(`document.querySelector("[data-lp-save]").click()`);
+  const userLinks = () => evaluate(
+    `[...document.querySelectorAll(".sx-transcript a.sx-userlink, .sx-transcript a[data-link-pattern]")].map((a) => a.getAttribute("href")).join(" ")`,
+  );
+  const lpSeed = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ type: "user.input", data: { text: "link pattern smoke LPS-1383 done" } }),
+  });
+  if (!lpSeed.ok) {
+    throw new Error(`seed link-pattern user.input ${lpSeed.status} ${await lpSeed.text()}`);
+  }
+  await waitFor(
+    "seeded ticket key in the transcript",
+    async () => ({ ok: (await evaluate(`(document.querySelector(".sx-transcript") || {}).innerText || ""`) || "").includes("LPS-1383") }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await lpOpen();
+  await evaluate(`document.querySelector("[data-lp-add]").click()`);
+  await lpSet("name", "Smoke tracker");
+  await lpSet("pattern", "(LPS-\\d+");
+  await lpSet("template", "https://tracker.example.com/browse/{match}");
+  await lpSave();
+  await waitFor(
+    "invalid regex refused inline in Settings",
+    async () => {
+      const p = await lpProbe();
+      return {
+        ok: p.error.includes("Invalid regular expression") && p.note.includes("Nothing was saved") && !p.stored,
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await lpSet("pattern", "LPS-\\d+");
+  await lpSet("template", "javascript:alert('{match}')");
+  await lpSave();
+  await waitFor(
+    "javascript: template refused inline in Settings",
+    async () => {
+      const p = await lpProbe();
+      return { ok: p.error.includes("https://") && p.note.includes("Nothing was saved") && !p.stored, ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await lpSet("template", "https://tracker.example.com/browse/{match}");
+  await lpSave();
+  await waitFor(
+    "valid link pattern saved",
+    async () => {
+      const p = await lpProbe();
+      return { ok: p.note.includes("Saved 1 rule") && (p.stored || "").includes("Smoke tracker"), ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
+  await waitFor(
+    "transcript mention linkified by the user pattern",
+    async () => {
+      const hrefs = String((await userLinks()) || "");
+      return { ok: hrefs.includes("https://tracker.example.com/browse/LPS-1383"), hrefs };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await lpOpen();
+  await evaluate(`document.querySelector("[data-link-patterns] [data-lp-remove]").click()`);
+  await lpSave();
+  await waitFor(
+    "removing the rule saves an empty list",
+    async () => {
+      const p = await lpProbe();
+      return { ok: p.rules === 0 && p.stored === "[]" && p.note.includes("No rules"), ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
+  await waitFor(
+    "transcript back to plain text with no rules",
+    async () => ({ ok: String((await userLinks()) || "") === "" }),
+    { timeout: STEP_MS, interval: 250 },
+  );
   // Markdown table actions (#1505): a seeded GFM table in the transcript
   // renders through the shared Markdown view with its action row — three
   // explicit Copy buttons and a Widen toggle, real <button>s with text
