@@ -1,4 +1,5 @@
-//! Composer trigger detection for `/command`, `@file`, `$skill`, and `!shell`.
+//! Composer trigger detection for `/command`, `@file`, `@session:`, `$skill`,
+//! and `!shell`.
 //!
 //! Slash rows come from the daemon bootstrap catalog (`composerCommands`).
 //! When the shell command registry lands, replace that slice at the call
@@ -13,6 +14,18 @@ use crate::model::{ComposerCommand, SkillInfo};
 
 thread_local! {
     static PALETTE_SKILLS: RefCell<Vec<(String, String)>> = RefCell::new(Vec::new());
+    static SESSION_CATALOG: RefCell<(Vec<(String, String)>, String)> =
+        RefCell::new((Vec::new(), String::new()));
+}
+
+/// Recent sessions `(id, title)` for the `@` menu, newest first, plus
+/// the id of the session the composer sends to.
+pub fn set_session_catalog(rows: Vec<(String, String)>, self_id: String) {
+    SESSION_CATALOG.with(|slot| *slot.borrow_mut() = (rows, self_id));
+}
+
+pub fn session_catalog() -> (Vec<(String, String)>, String) {
+    SESSION_CATALOG.with(|slot| slot.borrow().clone())
 }
 
 pub fn set_palette_skills(rows: Vec<(String, String)>) {
@@ -26,6 +39,7 @@ pub fn palette_skills() -> Vec<(String, String)> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     File,
+    Session,
     Command,
     Skill,
     Shell,
@@ -128,6 +142,14 @@ pub fn trigger_at(draft: &str, utf16_cursor: u32) -> Option<Trigger> {
                 query: draft[after..cursor].to_string(),
             });
         }
+    }
+    if let Some((at, id)) = session_ref::trigger(head) {
+        return Some(Trigger {
+            kind: Kind::Session,
+            start: at,
+            end: cursor,
+            query: id.to_string(),
+        });
     }
     let mut i = head.len();
     while i > 0 {
@@ -261,6 +283,51 @@ pub fn file_suggestions(paths: &[String]) -> Vec<Suggestion> {
             replace_all: false,
         })
         .collect()
+}
+
+/// `@` menu Sessions section (#1550): a header row, then the matching
+/// sessions from [`session_ref::menu`]. Empty when nothing matches. The
+/// current session is listed but not selectable: referencing it attaches
+/// nothing.
+pub fn session_suggestions(
+    rows: &[(String, String)],
+    self_id: &str,
+    query: &str,
+) -> Vec<Suggestion> {
+    let picked = session_ref::menu(rows, self_id, query);
+    if picked.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec![Suggestion {
+        id: "section-sessions".into(),
+        label: "Sessions".into(),
+        detail: String::new(),
+        insert: String::new(),
+        selectable: false,
+        replace_all: false,
+    }];
+    out.extend(picked.into_iter().map(|row| Suggestion {
+        id: format!("session-{}", row.id),
+        detail: if row.own {
+            "This session. Referencing it attaches nothing.".into()
+        } else {
+            "Attach its summary and last turns on send".into()
+        },
+        insert: if row.own {
+            String::new()
+        } else {
+            format!("{}{} ", session_ref::PREFIX, row.id)
+        },
+        selectable: !row.own,
+        label: row.label,
+        replace_all: false,
+    }));
+    out
+}
+
+/// First selectable row, so Enter never lands on a section header.
+pub fn first_selectable(items: &[Suggestion]) -> usize {
+    items.iter().position(|item| item.selectable).unwrap_or(0)
 }
 
 pub fn shell_hint(query: &str) -> Vec<Suggestion> {
@@ -398,6 +465,25 @@ mod tests {
         assert_eq!(files[0].insert, "@a.go ");
         assert!(!file_suggestions(&[])[0].selectable);
         assert!(!shell_hint("ls")[0].selectable);
+    }
+
+    #[test]
+    fn session_trigger_and_menu_rows() {
+        let t = trigger_at("see @session:ab", 15).expect("session");
+        assert_eq!((t.kind, t.start, t.query.as_str()), (Kind::Session, 4, "ab"));
+        assert_eq!(trigger_at("@sess", 5).expect("file").kind, Kind::File);
+
+        let rows = vec![
+            ("live".to_string(), String::new()),
+            ("auth-1".to_string(), "Auth investigation".to_string()),
+        ];
+        let all = session_suggestions(&rows, "live", "");
+        assert_eq!(all.len(), 3);
+        assert!(!all[0].selectable && all[0].id == "section-sessions");
+        assert!(!all[1].selectable && all[1].insert.is_empty());
+        assert_eq!(all[2].insert, "@session:auth-1 ");
+        assert_eq!(first_selectable(&all), 2);
+        assert!(session_suggestions(&rows, "live", "zzz").is_empty());
     }
 
     #[test]
