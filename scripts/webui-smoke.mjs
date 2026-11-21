@@ -15,6 +15,12 @@ import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
+import {
+  BROKEN_SKILL,
+  BROKEN_SKILL_BODY,
+  loadWarningCustomizeCheck,
+  loadWarningNoticeCheck,
+} from "./webui-load-warnings-check.mjs";
 import { mdReviewBrowserCheck } from "./webui-md-review-check.mjs";
 import { seedSkillUsage, skillUsageCheck } from "./webui-skill-usage-check.mjs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -2502,8 +2508,10 @@ try {
   });
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitUntil(
+    // Right after Page.navigate the new document may not have a body yet;
+    // read it as empty so the wait retries instead of throwing.
     `(() => {
-      const t = document.body.innerText;
+      const t = document.body?.innerText ?? "";
       const sent = [...document.querySelectorAll("[data-sent-attachments]")].some((el) => el.innerText.includes("annotate-shot-annotated.png"));
       if (sent && t.includes("annotate smoke 1545") && t.includes("Annotations on annotate-shot.png") && t.includes('[pin x=50%, y=50%] "move this button"')) return true;
       const msgs = [...document.querySelectorAll(".sx-msg")].slice(-3).map((m) => m.innerText.slice(0, 300));
@@ -3763,6 +3771,50 @@ try {
   if (still !== true) {
     throw new Error("main composer lost its approval chip");
   }
+
+  // #1384: read replies aloud. The speech engine is mocked at the browser
+  // boundary (CI Chrome has no reliable voices): an on-device voice reads
+  // the cleaned reply and marks the line playing until the engine ends;
+  // with no voices the control explains instead of pretending to play.
+  await evaluate(`(() => {
+    const spoken = [];
+    window.__ttsSpoken = spoken;
+    window.__ttsVoices = [{ name: "Smoke Voice", lang: "en-US", localService: true, default: true, voiceURI: "smoke-voice" }];
+    window.SpeechSynthesisUtterance = function (text) { this.text = text; };
+    const fake = {
+      current: null,
+      getVoices() { return window.__ttsVoices; },
+      speak(u) { spoken.push(u.text); this.current = u; },
+      cancel() { const u = this.current; this.current = null; if (u && u.onerror) u.onerror({ error: "canceled" }); },
+      pause() {}, resume() {},
+    };
+    Object.defineProperty(window, "speechSynthesis", { configurable: true, value: fake });
+    return true;
+  })()`);
+  await waitUntil(
+    `!!document.querySelector('article[data-role="strike"] [data-action="read-aloud"]')`,
+    "read-aloud control on an assistant reply",
+  );
+  const ttsRoles = await evaluate(`JSON.stringify([...document.querySelectorAll('[data-action="read-aloud"]')].map((b) => b.closest("article")?.getAttribute("data-role")))`);
+  if (JSON.parse(ttsRoles).some((r) => r !== "strike")) {
+    throw new Error(`read-aloud on non-assistant lines: ${ttsRoles}`);
+  }
+  await evaluate(`document.querySelector('article[data-role="strike"] [data-action="read-aloud"]').focus()`);
+  await evaluate(`document.activeElement.click()`);
+  await waitUntil(
+    `window.__ttsSpoken.length === 1 && window.__ttsSpoken[0].length > 0 && !window.__ttsSpoken[0].includes("\u0060\u0060\u0060") && !!document.querySelector('article[data-role="strike"] .sx-tts[data-tts-playing="true"]') && document.activeElement.textContent.includes("Stop")`,
+    "read-aloud plays and marks the line",
+  );
+  await evaluate(`(() => { const u = window.speechSynthesis.current; window.speechSynthesis.current = null; u.onend({}); return true; })()`);
+  await waitUntil(
+    `!document.querySelector('.sx-tts[data-tts-playing="true"]') && document.querySelector('article[data-role="strike"] [data-action="read-aloud"]').textContent.includes("Read aloud")`,
+    "read-aloud clears when the engine finishes",
+  );
+  await evaluate(`window.__ttsVoices = []; document.querySelector('article[data-role="strike"] [data-action="read-aloud"]').click()`);
+  await waitUntil(
+    `!!document.querySelector('[data-tts-note]') && document.querySelector('[data-tts-note]').textContent.includes("no speech voice") && window.__ttsSpoken.length === 1`,
+    "read-aloud explains when no voice is available",
+  );
 
   // Find in transcript (#1342). The seed above sent "read the makefile"
   // to the open session, so the transcript holds that word in the user
@@ -6829,6 +6881,7 @@ try {
     join(home, ".strike", "skills", "smoke-note.md"),
     "---\nname: smoke-note\ndescription: seeded note\n---\nSay hello from smoke.\n",
   );
+  await writeFile(join(home, ".strike", "skills", `${BROKEN_SKILL}.md`), BROKEN_SKILL_BODY);
   await seedSkillUsage(home);
   await writeFile(
     join(home, ".strike", "mcp.json"),
@@ -6894,7 +6947,10 @@ try {
   await evalJson(`document.querySelector('.settings-page input[data-theme-choice="${smokeTheme.id}"]').click()`);
   await themePainted("user theme applied from the catalog", smokeTheme.id);
 
-  await evalJson(`localStorage.setItem("strike.token", ${JSON.stringify(token)})`);
+  // The page polls bootstrap every 2s and may already have announced the
+  // seeded broken skill; forget announced fingerprints so the reload's
+  // session-start notice is deterministic (#1386).
+  await evalJson(`(() => { localStorage.setItem("strike.token", ${JSON.stringify(token)}); localStorage.removeItem("strike.loadWarningsSeen"); return true; })()`);
   await send("Page.reload", { ignoreCache: true });
   for (let i = 0; i < 40; i++) {
     const body = await evalJson(`document.body ? document.body.innerText : ""`);
@@ -6905,6 +6961,7 @@ try {
     if (i === 39) throw new Error(`reload did not show the cockpit: ${String(body).slice(0, 300)}`);
     await delay(250);
   }
+  await loadWarningNoticeCheck({ send });
   await themePainted("user theme persisted across reload", smokeTheme.id);
   await evalJson(`document.querySelector('[data-action="open-settings"]')?.click()`);
   for (let i = 0; i < 60; i++) {
@@ -6933,6 +6990,7 @@ try {
   if (!customizeText.includes("smoke-note")) {
     throw new Error(`customize catalog missing smoke-note: ${customizeText.slice(0, 500)}`);
   }
+  await loadWarningCustomizeCheck({ send });
   await skillUsageCheck({ send });
 
   // #1570: Customize > Plugins lifecycle lists GET /v1/plugins, and remove

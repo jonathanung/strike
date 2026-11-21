@@ -32,6 +32,7 @@ mod lessons;
 mod elicitation;
 mod elicitation_ui;
 mod load_epoch;
+mod load_warnings;
 mod markdown_review;
 mod local_issues;
 mod localfiles;
@@ -100,6 +101,7 @@ mod terminal;
 mod transcript;
 mod transcript_attachments;
 mod transcript_view;
+mod tts;
 mod update_check;
 mod triggers;
 mod turn_elapsed;
@@ -1283,6 +1285,12 @@ fn App() -> impl IntoView {
     let meta_base = RwSignal::new(load("strike.base"));
     let tick = RwSignal::new(0u32);
     let stream_note = RwSignal::new(String::new());
+    // #1386: one notice per session start for skill/agent load diagnostics
+    // this browser has not announced yet. Cleared only by the user.
+    let load_notice = RwSignal::new(String::new());
+    // Keys announced this page load, merged with the stored list so a
+    // browser that refuses localStorage writes still never re-nags.
+    let warn_announced = RwSignal::new(Vec::<String>::new());
     let load_error = RwSignal::new(String::new());
     let gateway = RwSignal::new("checking".to_string());
     // Offline outbox (#1325): text sends queued while the gateway is down.
@@ -1969,6 +1977,19 @@ fn App() -> impl IntoView {
                                 config_files_capable.set(boot.capabilities.config_files);
                                 crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
                                 skills.set(boot.skills);
+                                {
+                                    let mut announced = crate::load_warnings::parse_seen(&load(crate::load_warnings::SEEN_KEY));
+                                    announced.extend(warn_announced.get_untracked());
+                                    let fresh = crate::load_warnings::unseen(&boot.load_warnings, &announced);
+                                    if !fresh.is_empty() {
+                                        load_notice.set(crate::load_warnings::notice_text(&fresh));
+                                        let kept = crate::load_warnings::remember(&announced, &fresh);
+                                        warn_announced.set(kept.clone());
+                                        if let Ok(raw) = serde_json::to_string(&kept) {
+                                            save(crate::load_warnings::SEEN_KEY, &raw);
+                                        }
+                                    }
+                                }
                                 agent_list.set(boot.agents);
                                 loops_capable.set(boot.capabilities.loops);
                                 commands.set(if boot.capabilities.loops {
@@ -5746,6 +5767,18 @@ fn App() -> impl IntoView {
                     </Show>
                     <Show when=move || !stream_note.get().is_empty()>
                         <p class="hint banner">{move || stream_note.get()}</p>
+                    </Show>
+                    <Show when=move || !load_notice.get().is_empty()>
+                        <div class="notice" role="status" data-load-warning-notice="true">
+                            <span>{move || load_notice.get()}</span>
+                            <span class="load-warning-actions">
+                                <button class="secondary" data-load-warning-open="true" on:click=move |_| {
+                                    load_notice.set(String::new());
+                                    let _ = shell::set_view("customize");
+                                }>"Open Customize"</button>
+                                <button class="secondary" data-load-warning-dismiss="true" on:click=move |_| load_notice.set(String::new())>"Dismiss"</button>
+                            </span>
+                        </div>
                     </Show>
                     // #1785: a deploy watch session shows its verdict card.
                     <deploy_watch::DeployWatchCard base=base token=token active=active_root tick=tick />
