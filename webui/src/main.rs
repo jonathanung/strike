@@ -52,6 +52,7 @@ mod tab_title;
 mod task_runner;
 mod transcript_find;
 mod usage_audit;
+mod rewind;
 mod session_delete;
 mod session_restore;
 mod shell;
@@ -1324,6 +1325,8 @@ fn App() -> impl IntoView {
     // for. `None` means no deletion is pending; setting it never issues
     // a request by itself.
     let delete_target = RwSignal::new(None::<session_delete::DeleteTarget>);
+    // Session rewind (#1336): the preview dialog's open request.
+    let rewind_target = RwSignal::new(None::<rewind::RewindTarget>);
     let pending_files = RwSignal::new(Vec::<chat_mode::PendingAttachment>::new());
     let sending = RwSignal::new(false);
     let listening = RwSignal::new(false);
@@ -2994,6 +2997,21 @@ fn App() -> impl IntoView {
     // is filed separately; this PR only composes the two existing
     // endpoints, in delete-then-close order, after the user's force
     // confirmation when one was required.
+    // Rewind applied (#1336): after a conversation restore the picked
+    // turn's prompt returns to the composer for edit-and-resend; it is
+    // never sent automatically.
+    let rewind_busy = Signal::derive(move || {
+        let active = active_root.get();
+        roots.with(|list| list.iter().any(|r| r.id == active && r.busy))
+    });
+    let on_rewound = Callback::new(move |(prompt, mode, turns): (String, rewind::Mode, u32)| {
+        let what = if mode.restores_files() { "conversation and code" } else { "conversation" };
+        ux_note.set(format!("Rewound {turns} turn(s) ({what}). The prompt is back in the composer."));
+        if !prompt.trim().is_empty() {
+            draft.set(prompt);
+            sync_composer_height_soon();
+        }
+    });
     let on_deleted = Callback::new(move |id: String| {
         let was_live = roots.get_untracked().iter().any(|row| row.id == id);
         // Drop the deleted session's draft (#1367) before the fallback
@@ -4259,6 +4277,15 @@ fn App() -> impl IntoView {
             });
         })
         .into(),
+        rewind: (move |keep: i32| {
+            let root = active_root.get_untracked();
+            if root.is_empty() || keep <= 0 {
+                ux_note.set("No completed turn to rewind to.".into());
+                return;
+            }
+            rewind_target.set(Some(rewind::RewindTarget { session: root, keep }));
+        })
+        .into(),
         open_file: (move |path: String, line: u32| {
             // The editor stream (#1269) is wired now: a file chip opens the
             // document pane at the line, beside the transcript.
@@ -4718,6 +4745,13 @@ fn App() -> impl IntoView {
             base=base
             token=token
             on_deleted=on_deleted
+        />
+        <rewind::RewindDialog
+            target=rewind_target
+            base=base
+            token=token
+            busy_turn=rewind_busy
+            on_done=on_rewound
         />
         <Show when=move || mode.get() == "providers" fallback=move || ()>
             <providers::ProvidersPage base=base token=token />

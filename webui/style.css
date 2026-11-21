@@ -3163,3 +3163,64 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .files-head .hint, .changes-head .hint { margin: 0; }
 /* feature:files-refresh end */
+/* feature:rewind begin */
+/* Session rewind (#1336): preview + confirm dialog. Tokens only;
+   warnings use the theme's --warning, errors --signal. */
+.rewind-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: color-mix(in srgb, var(--overlay) 45%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
+.rewind-dialog {
+  width: min(560px, 94vw);
+  max-height: 88vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.rewind-dialog h2 { margin: 0; font-size: var(--type-lg); }
+.rewind-scope { margin: 0; }
+.rewind-prompt {
+  margin: 0;
+  padding: var(--space-2);
+  border-left: 3px solid var(--rule);
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 8em;
+  overflow: auto;
+}
+.rewind-modes {
+  margin: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rewind-mode { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.rewind-reason { flex: 1 1 100%; padding-left: 22px; color: var(--muted); font-size: var(--type-sm); }
+.rewind-files ul { margin: 6px 0 0; padding-left: 18px; }
+.rewind-kind { color: var(--muted); font-size: var(--type-sm); }
+.rewind-warnings {
+  margin: 0;
+  padding: var(--space-2) var(--space-2) var(--space-2) 26px;
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 12%, var(--surface));
+}
+.rewind-ack { display: flex; align-items: center; gap: 6px; }
+.rewind-error { margin: 0; color: var(--signal); }
+.rewind-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+/* feature:rewind end */

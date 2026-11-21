@@ -38,6 +38,9 @@ pub struct TranscriptHandlers {
     pub export_markdown: Callback<()>,
     pub retry: Callback<(String,)>,
     pub fork: Callback<(i32,)>,
+    /// Rewind to before the turn with this keep-count (#1336): opens the
+    /// preview dialog owned by `crate::rewind`; never rewinds directly.
+    pub rewind: Callback<(i32,)>,
     pub open_file: Callback<(String, u32)>,
 }
 
@@ -312,6 +315,7 @@ pub fn TranscriptPane(
     let open_file = handlers.open_file;
     let retry = handlers.retry;
     let fork = handlers.fork;
+    let rewind = handlers.rewind;
     let export_timeline = handlers.export_timeline;
     let _ = (handlers.export_markdown, handlers.send);
     let regenerate = handlers.regenerate;
@@ -501,6 +505,20 @@ pub fn TranscriptPane(
         }),
     );
     crate::shell::bind(
+        "transcript.rewind",
+        Rc::new(move |_| {
+            let active = session.get_untracked();
+            let bound = cursor.get_untracked().map(|id| CursorBind {
+                session: cursor_session.get_untracked(),
+                id,
+            });
+            let keep = palette_fork(&active, bound.as_ref(), &cursor_messages(&transcript))
+                .ok_or_else(|| "No completed turn to rewind to.".to_string())?;
+            rewind.run((keep,));
+            Ok(())
+        }),
+    );
+    crate::shell::bind(
         "transcript.jump",
         Rc::new(move |args| {
             let id: u32 = args
@@ -523,6 +541,7 @@ pub fn TranscriptPane(
             "transcript.regenerate",
             "transcript.retry",
             "transcript.fork-message",
+            "transcript.rewind",
             "transcript.jump",
         ] {
             crate::shell::unbind(id);
@@ -667,7 +686,7 @@ pub fn TranscriptPane(
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, r.tail, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, rewind, r.hits, r.current, r.elapsed, r.usage, r.tail, fold_open, folds)}
                                 }
                             })
                         }
@@ -1048,6 +1067,7 @@ fn message_view(
     open_file: Callback<(String, u32)>,
     retry: Callback<(String,)>,
     _fork: Callback<(i32,)>,
+    rewind: Callback<(i32,)>,
     find_hits: Vec<crate::transcript_find::TMatch>,
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
@@ -1135,6 +1155,9 @@ fn message_view(
     // once the awaited clipboard write resolves; a rejection reads
     // "Copy failed" instead of silence. Reverts after 2s.
     let copy_state = RwSignal::new(None::<bool>);
+    // Rewind to before this turn (#1336): on the user's prompt once its
+    // turn has completed (keep-count known).
+    let can_rewind = msg.role == Role::You && keep > 0;
     view! {
         <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role>
             <header>
@@ -1172,6 +1195,15 @@ fn message_view(
                             crate::clipboard::after_ms(2_000, move || copy_state.set(None));
                         });
                     }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
+                    {can_rewind.then(|| view! {
+                        <button
+                            type="button"
+                            class="sx-quiet"
+                            data-rewind-keep=keep.to_string()
+                            title="Restore the conversation and/or code to before this prompt"
+                            on:click=move |_| rewind.run((keep,))
+                        >"Rewind\u{2026}"</button>
+                    })}
                 </span>
             </header>
             {if find_body {

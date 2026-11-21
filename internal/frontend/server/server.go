@@ -447,6 +447,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.handleSessionFork)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork_at", s.handleSessionForkAt)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/rewind_points", s.handleSessionRewindPoints)
+	// Rewind-to-turn preview for the cockpit (#1336); read-only.
+	s.mux.HandleFunc("GET /v1/sessions/{id}/rewind_preview", s.handleSessionRewindPreview)
 	// Daemon-generated session report artifact (#1444).
 	s.mux.HandleFunc("POST /v1/sessions/{id}/report", s.handleSessionReport)
 	s.mux.HandleFunc("PATCH /v1/sessions/{id}", s.handleSessionRename)
