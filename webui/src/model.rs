@@ -245,6 +245,11 @@ pub struct BootstrapCapabilities {
     /// present, live engine, and not `--read-only`.
     #[serde(default, rename = "projectInit")]
     pub project_init: bool,
+    /// True when the daemon accepts human team-control ops (`team.message`,
+    /// `team.broadcast`, …; docs/human-orchestration-ops.md §5). Gates the
+    /// activity panel's Message action (#1573).
+    #[serde(default, rename = "teamControl")]
+    pub team_control: bool,
 }
 
 /// One `/v1/init` reply (#1581). `exists` with a non-empty `error` is the
@@ -1617,6 +1622,15 @@ mod tests {
         assert!(boot.capabilities.project_init);
         let boot: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
         assert!(!boot.capabilities.project_init);
+    }
+
+    #[test]
+    fn bootstrap_reads_team_control_capability() {
+        let boot: Bootstrap =
+            serde_json::from_str(r#"{"capabilities":{"teamControl":true}}"#).unwrap();
+        assert!(boot.capabilities.team_control);
+        let boot: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
+        assert!(!boot.capabilities.team_control);
     }
 
     #[test]

@@ -48,6 +48,7 @@ mod session_panel;
 mod storage;
 mod tab_title;
 mod task_runner;
+mod team_message;
 mod transcript_find;
 mod usage_audit;
 mod session_delete;
@@ -64,6 +65,7 @@ mod turn_elapsed;
 mod turn_usage;
 mod workspaces;
 use crate::shell::icon;
+use crate::team_message::TeamMessageComposer;
 
 
 use std::cell::{Cell, RefCell};
@@ -1085,6 +1087,11 @@ fn App() -> impl IntoView {
     let ledger_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // #1573: bootstrap `teamControl` plus a live team with members gate the
+    // activity panel's Message action; absent otherwise, never disabled.
+    let team_control_capable = RwSignal::new(false);
+    let team_live = RwSignal::new(false);
+    let message_target = RwSignal::new(None::<team_message::Target>);
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -1390,6 +1397,7 @@ fn App() -> impl IntoView {
                     let now = now_ms();
                     let prev = activity.get_untracked();
                     let rows = rows_from_team(&prev, &team, now);
+                    team_live.set(team.available && !rows.is_empty());
                     let rows = if rows.is_empty() {
                         activity_panel(
                             &[],
@@ -1402,7 +1410,10 @@ fn App() -> impl IntoView {
                     };
                     activity.set(rows);
                 }
-                Err(e) => team_note.set(e),
+                Err(e) => {
+                    team_live.set(false);
+                    team_note.set(e);
+                }
             }
         });
     };
@@ -1695,6 +1706,7 @@ fn App() -> impl IntoView {
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
                                 ledger_capable.set(boot.capabilities.ledger);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                team_control_capable.set(boot.capabilities.team_control);
                                 skills.set(boot.skills);
                                 commands.set(boot.composer_commands);
                                 if !catalog_once.get_untracked() {
@@ -5632,6 +5644,9 @@ fn App() -> impl IntoView {
                         <span class="hint">"Live tasks"</span>
                         <span class="row-actions">
                             <button type="button" class="secondary side-chat-open-activity" on:click=move |_| open_side(String::new(), String::new())>"Side chat"</button>
+                            <Show when=move || team_control_capable.get() && team_live.get()>
+                                <button type="button" class="secondary" data-team-message-all="true" on:click=move |_| message_target.set(Some(team_message::Target::All))>"Message all"</button>
+                            </Show>
                             <button class="secondary" disabled=move || running_count() == 0 on:click=move |_| stop_all()>"Stop all"</button>
                         </span>
                     </header>
@@ -5646,6 +5661,7 @@ fn App() -> impl IntoView {
                     <Show when=move || !children_note.get().is_empty()>
                         <p class="hint" data-children-note="true">{move || children_note.get()}</p>
                     </Show>
+                    <TeamMessageComposer base=base token=token root=active_root activity=activity target=message_target />
                     <Show when=move || activity.get().is_empty()>
                         {move || {
                             let failed = !children_note.get().is_empty();
@@ -5692,6 +5708,8 @@ fn App() -> impl IntoView {
                                 let name = row.name.clone();
                                 let name_chat = name.clone();
                                 let sid_chat = sid.clone();
+                                let sid_msg = sid.clone();
+                                let name_msg = name.clone();
                                 let who = name.clone();
                                 let agent = row.agent.clone();
                                 let agent_label = agent.clone();
@@ -5741,6 +5759,19 @@ fn App() -> impl IntoView {
                                                     open_side(sid_chat.clone(), name_chat.clone());
                                                 }
                                             }>"Side chat"</button>
+                                            <Show when=move || team_control_capable.get() && team_live.get()>
+                                                <button type="button" class="secondary" data-team-message-open=sid_msg.clone() on:click={
+                                                    let sid_msg = sid_msg.clone();
+                                                    let name_msg = name_msg.clone();
+                                                    move |ev: web_sys::MouseEvent| {
+                                                        ev.stop_propagation();
+                                                        message_target.set(Some(team_message::Target::Child {
+                                                            session_id: sid_msg.clone(),
+                                                            name: name_msg.clone(),
+                                                        }));
+                                                    }
+                                                }>"Message"</button>
+                                            </Show>
                                             <button class="secondary" disabled=move || !running on:click={
                                                 let sid_stop = sid_stop.clone();
                                                 move |ev: web_sys::MouseEvent| {

@@ -600,6 +600,52 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       await click(".activity-row button.activity-main", CHILD_OBJECTIVE);
       await delay(250);
       await shoot("shell-activity", ["desk1024", "desk1440"]);
+
+      // #1573: the live child row carries a Message action (bootstrap
+      // teamControl + live team). The composer posts team.message and
+      // renders the daemon's outcome, not a local echo.
+      const msgButton = await waitUntil(
+        `Boolean(document.querySelector(".activity-row [data-team-message-open]"))`,
+        8000,
+        "Message action on the child row",
+      );
+      check(Boolean(msgButton), "child row has no Message action while teamControl is live");
+      if (msgButton) {
+        await page.evaluate(`document.querySelector(".activity-row [data-team-message-open]").click()`);
+        const opened = await waitUntil(
+          `Boolean(document.querySelector('[data-team-message="open"] .team-message-body'))`,
+          4000,
+          "team message composer",
+        );
+        check(Boolean(opened), "Message did not open the team message composer");
+        if (opened) {
+          await page.evaluate(`(() => {
+            const ta = document.querySelector(".team-message-body");
+            const proto = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+            proto.set.call(ta, "uat: please also list hidden files");
+            ta.dispatchEvent(new InputEvent("input", { bubbles: true, data: "x" }));
+            return true;
+          })()`);
+          await shoot("team-message-composer", ["desk1024", "desk1440", "mobile"]);
+          await page.evaluate(`document.querySelector("[data-team-message-send]").click()`);
+          const outcome = await waitUntil(
+            `document.querySelector("[data-team-message-outcome]")?.textContent || ""`,
+            20000,
+            "team message outcome",
+          );
+          check(Boolean(outcome), "team message send rendered no daemon outcome");
+          check(!/^HTTP \d+$/.test(String(outcome).trim()), `team message outcome is a raw status: ${outcome}`);
+          log(`team message outcome: ${outcome}`);
+          await shoot("team-message-outcome", ["desk1024"]);
+          await page.evaluate(`document.querySelector('[data-team-message="open"] .team-message-head button')?.click()`);
+          const closed = await waitUntil(
+            `!document.querySelector('[data-team-message="open"]')`,
+            4000,
+            "team message composer closed",
+          );
+          check(Boolean(closed), "team message composer did not close");
+        }
+      }
     }
 
     const before = await page.evaluate(
