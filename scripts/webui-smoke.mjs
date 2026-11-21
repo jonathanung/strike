@@ -3041,6 +3041,54 @@ try {
     stageAllSeeded = false;
   }
   await clickSideTab("Git", "Staged");
+  // Pre-push review (#1487): the preview route sizes the diff and names the
+  // read-only reviewer profile, a start without confirm never spawns (400),
+  // and the Git tab's "Review this branch" panel renders the same state
+  // with its cost notice. No reviewer is spawned here.
+  {
+    const revHeaders = { Authorization: `Bearer ${token}` };
+    const revRes = await fetch(`http://127.0.0.1:${port}/v1/git/review`, { headers: revHeaders });
+    if (!revRes.ok) {
+      throw new Error(`branch review preview: HTTP ${revRes.status} ${await revRes.text()}`);
+    }
+    const rev = await revRes.json();
+    if (!["ok", "empty", "refuse"].includes(rev.state) || rev.agent !== "branch-reviewer" || rev.turns !== 1) {
+      throw new Error(`branch review preview shape: ${JSON.stringify(rev).slice(0, 300)}`);
+    }
+    const revStart = await fetch(`http://127.0.0.1:${port}/v1/git/review`, {
+      method: "POST",
+      headers: { ...revHeaders, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (revStart.status !== 400) {
+      throw new Error(`branch review start without confirm: HTTP ${revStart.status} ${await revStart.text()}`);
+    }
+    await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+    await waitFor(
+      `branch review notice renders state ${rev.state}`,
+      async () => {
+        const raw = await evaluate(`JSON.stringify((() => {
+          const n = document.querySelector("[data-review-notice]");
+          if (!n) return null;
+          const run = n.querySelector("[data-review-run]");
+          return {
+            state: n.getAttribute("data-review-state"),
+            size: (n.querySelector("[data-review-size]") || {}).textContent || "",
+            runDisabled: run ? run.disabled : null,
+          };
+        })())`);
+        const got = JSON.parse(raw || "null");
+        const ok =
+          !!got &&
+          got.state === rev.state &&
+          got.size.startsWith("Diff:") &&
+          got.runDisabled === (rev.state !== "ok");
+        return { ok, got };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+  }
   // Git panel small wins (#1427/#1432/#1435): the path filter exists,
   // an active no-match query flips every section's empty text to
   // "No files match.", and the log rows carry full-hash copy hooks.

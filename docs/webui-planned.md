@@ -438,6 +438,22 @@ events, and the cockpit Debug panel (hypothesis card, instrumentation
 list, reproduce checklist, mobile chip). Bash is not inspected by the
 gate; the permission layer still governs it.
 
+## Pre-push review
+
+"Review this branch" in the Git tab (#1487) sizes the branch diff first
+(`GET /v1/git/review`: committed `base...HEAD` plus uncommitted changes,
+untracked file names, one model turn, warn above 60 KB, refuse above the
+200 KB diff cap). "Run review" (`POST /v1/git/review {confirm:true}`) spawns
+a fresh-context child through the normal `team.spawn` path with the
+built-in `branch-reviewer` agent, whose denies (write, edit, bash, task,
+verify, browser, web, MCP, store writes) the engine enforces for children,
+fed the diff, the repo's AGENTS.md and the findings format. The daemon parses
+`FINDING | severity | path:line | scenario` lines and the `VERDICT:` line from
+the child's transcript (`GET /v1/git/review/{id}`); each finding opens its
+file at the line. No review store, no autofix, no merge gate. Not in this
+slice: the `/review` composer trigger (#1275), a cross-model reviewer (team
+spawn has no per-child model), and Ship to PR's warn-on-blocking hook.
+
 ## Not planned as a copy
 
 Stall is already a real badge when the team roster sets `budget.stall`.

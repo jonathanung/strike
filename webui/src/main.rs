@@ -30,6 +30,7 @@ mod git;
 mod goals;
 mod mobile;
 mod providers;
+mod review_branch;
 mod rule_author;
 mod sandbox_explain;
 mod schedule;
@@ -5953,6 +5954,7 @@ fn App() -> impl IntoView {
                         </div>
                     </Show>
                     <div hidden=move || !git_active.get()>
+                        <review_branch::ReviewBranch base=base token=token active=git_active doc_path=doc_path doc_line=doc_line doc_diff=doc_diff />
                         <git::GitPanel base=base token=token status_line=status active=git_active />
                     </div>
                     <div hidden=move || !worktree_active.get()>
