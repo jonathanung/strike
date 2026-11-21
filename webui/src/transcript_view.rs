@@ -667,7 +667,7 @@ pub fn TranscriptPane(
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, r.tail, fold_open, folds)}
                                 }
                             })
                         }
@@ -813,6 +813,7 @@ struct RowData {
     current: Option<crate::transcript_find::TMatch>,
     elapsed: Option<String>,
     usage: Option<(String, String)>,
+    tail: Option<crate::tool_tail::ToolTail>,
 }
 
 fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
@@ -840,6 +841,7 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
         usage: t
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
+        tail: t.tail_for(msg.id).cloned(),
     })
 }
 
@@ -1050,6 +1052,7 @@ fn message_view(
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
     turn_usage: Option<(String, String)>,
+    tail: Option<crate::tool_tail::ToolTail>,
     fold_open: bool,
     folds: FoldState,
 ) -> impl IntoView {
@@ -1200,6 +1203,7 @@ fn message_view(
             } else {
                 view! { <span></span> }.into_any()
             }}
+            {tail.map(crate::tool_tail::tail_view)}
             {auth_notice.then(|| {
                 let target = reconnect.clone();
                 let resend = auth_retry.clone();
