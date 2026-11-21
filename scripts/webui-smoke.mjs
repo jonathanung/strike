@@ -2992,6 +2992,56 @@ try {
     { timeout: WAIT_MS, interval: 250 },
   );
 
+  // Context doctor (#1537): the statusline meter opens the breakdown, the
+  // engine answers inspect.prompt over the live stream, and the dialog lists
+  // real layers with token figures labelled as estimates.
+  await evaluate(`document.querySelector('[data-context-doctor="open"]').click()`);
+  await waitFor(
+    "context doctor lists the live session's layers",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const d = document.querySelector('[data-context-doctor="dialog"]');
+        if (!d) return JSON.stringify({ open: false });
+        return JSON.stringify({
+          open: true,
+          layers: d.querySelectorAll("[data-context-layer]").length,
+          scope: d.querySelector("[data-context-doctor-scope]")?.dataset.contextDoctorScope || "",
+          error: d.querySelector("[data-context-doctor-error]")?.innerText || "",
+          text: d.innerText.slice(0, 600),
+        });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: !!(p.open && p.layers > 0 && p.scope && !p.error && p.text.includes("chars/4") && p.text.includes("~")),
+        ...p,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-context-doctor="refresh"]').click()`);
+  await waitFor(
+    "context doctor refresh settles with layers and no error",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const d = document.querySelector('[data-context-doctor="dialog"]');
+        return JSON.stringify({
+          layers: d ? d.querySelectorAll("[data-context-layer]").length : 0,
+          pending: !!d?.querySelector('[data-context-doctor="refresh"]')?.disabled,
+          error: d?.querySelector("[data-context-doctor-error]")?.innerText || "",
+        });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: p.layers > 0 && !p.pending && !p.error, ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-context-doctor="close"]').click()`);
+  await waitFor(
+    "context doctor closes",
+    async () => ({ ok: (await evaluate(`!!document.querySelector('[data-context-doctor="dialog"]')`)) === false }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+
   // Lessons capture (#1376): "Remember this" on a user message opens a
   // pre-filled draft; Cancel stores nothing; Save stores a tagged lesson
   // through /v1/memory. The entry is removed again so later memory counts

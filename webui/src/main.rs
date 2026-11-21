@@ -20,6 +20,7 @@ mod child_signals;
 mod clipboard;
 mod compaction_marks;
 mod confirm;
+mod context_doctor;
 mod composer_triggers;
 mod config_sources;
 mod diag;
@@ -1264,6 +1265,8 @@ fn App() -> impl IntoView {
     let context_used = RwSignal::new(0i64);
     let context_limit = RwSignal::new(0i64);
     let context_fit = RwSignal::new(String::new());
+    // Context doctor (#1537): inspect.prompt breakdown dialog.
+    let doctor = context_doctor::DoctorState::new();
     // Compact now (#1567): true from sending the `compact` op until the
     // daemon's own `compaction.completed` event lands — the meter only
     // ever moves from daemon events, never optimistically.
@@ -2103,6 +2106,7 @@ fn App() -> impl IntoView {
                 if let Some(data) = ev.data().as_string() {
                     note_live_title(sessions_cb, roots_cb, &titled_root, &data);
                     transcript_cb.update(|t| t.apply_envelope(&data));
+                    doctor.on_envelope(&data, &titled_root);
                     let mut plan_changed = false;
                     plan.update_untracked(|p| plan_changed = p.apply_envelope(&data));
                     if plan_changed {
@@ -2128,6 +2132,7 @@ fn App() -> impl IntoView {
                         }
                         steer_queue::LiveNote::TurnStarted => {
                             live_busy.set(true);
+                            doctor.on_turn_started();
                             live_busy_root.set(active_root.get_untracked());
                             if steer_mode.get_untracked() == "queued_fallback" {
                                 steer_note.set(String::new());
@@ -2136,6 +2141,11 @@ fn App() -> impl IntoView {
                         }
                         steer_queue::LiveNote::TurnFinished => {
                             live_busy.set(false);
+                            doctor.on_turn_finished(
+                                base.get_untracked(),
+                                token.get_untracked(),
+                                active_root.get_untracked(),
+                            );
                             confirm_stop.set(false);
                             if context_fit.get_untracked() == "critical" {
                                 context_fit.set(String::new());
@@ -3987,6 +3997,30 @@ fn App() -> impl IntoView {
             Ok(())
         }),
     );
+    // Context doctor (#1537): open the breakdown and ask the live root.
+    shell::bind(
+        "context-doctor",
+        Rc::new(move |_args: &str| {
+            doctor.open.set(true);
+            doctor.request(
+                base.get_untracked(),
+                token.get_untracked(),
+                active_root.get_untracked(),
+            );
+            Ok(())
+        }),
+    );
+    // A different session's breakdown never lingers in the dialog.
+    Effect::new(move |prev: Option<String>| {
+        let root = active_root.get();
+        if prev.as_ref().is_some_and(|p| p != &root) {
+            doctor.reset();
+            if doctor.open.get_untracked() {
+                doctor.request(base.get_untracked(), token.get_untracked(), root.clone());
+            }
+        }
+        root
+    });
     shell::bind(
         "lesson-remember",
         Rc::new(move |text: &str| {
@@ -6143,7 +6177,11 @@ fn App() -> impl IntoView {
                             };
                             view! {
                                 <span>{if custom.is_empty() { memory } else { custom }}</span>
-                                <span class="context-meter">{meter}</span>
+                                // Context doctor (#1537): the meter opens the breakdown.
+                                <button type="button" class="context-meter context-doctor-open" data-context-doctor="open"
+                                    title="Where is my context going? Opens the context doctor."
+                                    on:click=move |_| { let _ = shell::dispatch("context-doctor", ""); }
+                                >{if meter.is_empty() { "Context".to_string() } else { meter }}</button>
                             }
                         }}</p>
                     </div>
@@ -6514,6 +6552,16 @@ fn App() -> impl IntoView {
             refresh=refresh_meta
         />
         <PhoneNav pane=phone_pane side_tab=side_tab mode=mode />
+        <context_doctor::ContextDoctorDialog
+            state=doctor
+            limit=Signal::derive(move || {
+                let ctx = active_context(&catalog.get(), &provider_name.get(), &model_name.get());
+                context_view(context_used.get(), context_limit.get(), ctx, &context_fit.get()).limit
+            })
+            on_refresh=Callback::new(move |_| {
+                doctor.request(base.get_untracked(), token.get_untracked(), active_root.get_untracked())
+            })
+        />
         <lessons::LessonDraftDialog
             draft=lesson_draft
             base=base
