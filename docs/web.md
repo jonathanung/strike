@@ -215,6 +215,7 @@ JSON objects with a `type` and optional `data`:
 | `select.model` | `{ "provider", "model?" }` |
 | `set.permission_mode` | `{ "mode": "default\|plan\|accept-edits\|yolo" }` |
 | `set.autonomy` | `{ "mode": "supervised\|agent\|checks\|skip-all" }` |
+| `set.verbosity` | `{ "level": "default\|concise\|detailed" }` — response style (#1369); confirmed by `verbosity.selected` `{ level, delivery: "none\|instruction" }`, reported on status as `verbosity` / `verbosityDelivery` |
 | `team.spawn` | `{ "idempotencyKey", "objective", "agent?", "name?", "isolation?", "budget?", "rootSessionId?" }` |
 | `team.message` | `{ "idempotencyKey", "to", "body", "kind?", "urgency?", "taskId?" }` |
 | `team.broadcast` | `{ "idempotencyKey", "body", "urgency?", "taskId?" }` |
