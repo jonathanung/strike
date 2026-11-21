@@ -126,6 +126,13 @@ type Options struct {
 	// changes, and a decision that differs from Trusted sets
 	// restartRequired. Nil (attach-only) falls back to the live root's CWD.
 	WorkspaceTrustAssembled *WorkspaceTrustAssembly
+	// WorkspaceTrustReload asks the daemon to apply a changed trust decision
+	// (#1834): stop every root and project MCP/LSP/harness process, then
+	// re-exec with the same flags. It must only signal and return; the
+	// daemon reloads after the HTTP server drains. Nil (attach-only,
+	// --read-only, an in-memory token, or no exec on this OS) keeps
+	// restartRequired with canReload=false: the operator restarts by hand.
+	WorkspaceTrustReload func() error
 	// WorkDir is the process working directory. Customize uses it as the
 	// workspace scope when no live session is attached. Apps uses it as the
 	// git workspace for GitHub triage. The browser cannot choose it. Empty
@@ -203,6 +210,11 @@ type Server struct {
 	updateMu   sync.Mutex
 	updateLast *updateCheckResponse
 
+	// workspaceTrustReloading is set once POST /v1/workspace/trust
+	// {"action":"apply"} has signalled a reload (#1834); guarded by
+	// workspaceTrustMu.
+	workspaceTrustReloading bool
+
 	authFlowOnce   sync.Once
 	authFlowsStore *authFlowStore
 
@@ -251,6 +263,10 @@ type Server struct {
 	// clientMsgOnce lazily opens the outbox client-message-id dedupe (#1325).
 	clientMsgOnce  sync.Once
 	clientMsgStore *clientMsgDedupe
+
+	// briefingOnce lazily opens the away-briefing watermark (#1488).
+	briefingOnce  sync.Once
+	briefingStore *briefingStore
 
 	// suggestOnce lazily opens the Ideas inbox store (#1323).
 	suggestOnce  sync.Once
@@ -489,8 +505,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.handleSessionFork)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork_at", s.handleSessionForkAt)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/rewind_points", s.handleSessionRewindPoints)
+	// Rewind-to-turn preview for the cockpit (#1336); read-only.
+	s.mux.HandleFunc("GET /v1/sessions/{id}/rewind_preview", s.handleSessionRewindPreview)
 	// Daemon-generated session report artifact (#1444).
 	s.mux.HandleFunc("POST /v1/sessions/{id}/report", s.handleSessionReport)
+	s.mux.HandleFunc("GET /v1/dashboards", s.handleDashboardsList)
+	s.mux.HandleFunc("POST /v1/dashboards", s.handleDashboardCreate)
+	s.mux.HandleFunc("GET /v1/dashboards/{id}", s.handleDashboardGet)
 	s.mux.HandleFunc("PATCH /v1/sessions/{id}", s.handleSessionRename)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.handleSessionDelete)
 	// Session-scoped /loop jobs (#1588): ephemeral, die with the session.
@@ -500,6 +521,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}/loops/{loopID}", s.handleSessionLoopStop)
 	// Session list organisation (pins, archive, folders, search). Not filesystem dirs.
 	s.mux.HandleFunc("GET /v1/session-list/search", s.handleSessionListSearch)
+	// Global transcript search across all root sessions (#1355).
+	s.mux.HandleFunc("GET /v1/search", s.handleGlobalSearch)
 	s.mux.HandleFunc("POST /v1/session-list/bulk", s.handleSessionListBulk)
 	s.mux.HandleFunc("POST /v1/session-list/folders", s.handleSessionListFolderCreate)
 	s.mux.HandleFunc("PATCH /v1/session-list/folders/{id}", s.handleSessionListFolderRename)
@@ -568,6 +591,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /v1/memory/mode", s.handleMemoryModePut)
 	s.mux.HandleFunc("PUT /v1/memory/{key}", s.handleMemoryPut)
 	s.mux.HandleFunc("DELETE /v1/memory/{key}", s.handleMemoryDelete)
+	// Lessons loop (#1874): pending proposals + "lesson used" provenance.
+	s.mux.HandleFunc("GET /v1/memory/proposals", s.handleLessonProposals)
+	s.mux.HandleFunc("POST /v1/memory/proposals", s.handleLessonPropose)
+	s.mux.HandleFunc("PATCH /v1/memory/proposals/{id}", s.handleLessonProposalEdit)
+	s.mux.HandleFunc("POST /v1/memory/proposals/{id}/approve", s.handleLessonProposalApprove)
+	s.mux.HandleFunc("DELETE /v1/memory/proposals/{id}", s.handleLessonProposalDismiss)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/lessons-used", s.handleSessionLessonsUsed)
 	s.mux.HandleFunc("GET /v1/knowledge", s.handleKnowledgeList)
 	s.mux.HandleFunc("PUT /v1/knowledge", s.handleKnowledgePut)
 	s.mux.HandleFunc("DELETE /v1/knowledge", s.handleKnowledgeDelete)
@@ -592,6 +622,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/plans/{id}/status", s.handlePlanSetStatus)
 	s.mux.HandleFunc("POST /v1/plans/{id}/reopen", s.handlePlanReopen)
 	s.mux.HandleFunc("GET /v1/plans/{id}/run", s.handleTaskRunGet)
+	s.mux.HandleFunc("GET /v1/specs", s.handleSpecsList)
+	s.mux.HandleFunc("POST /v1/specs", s.handleSpecCreate)
+	s.mux.HandleFunc("GET /v1/specs/{name}", s.handleSpecGet)
+	s.mux.HandleFunc("PUT /v1/specs/{name}/{phase}", s.handleSpecPhaseSave)
+	s.mux.HandleFunc("POST /v1/specs/{name}/phases/{phase}", s.handleSpecPhaseStatus)
+	s.mux.HandleFunc("POST /v1/specs/{name}/handoff", s.handleSpecHandOff)
 	s.mux.HandleFunc("POST /v1/plans/{id}/run", s.handleTaskRunPost)
 	s.mux.HandleFunc("GET /v1/goals", s.handleGoalsList)
 	s.mux.HandleFunc("POST /v1/goals", s.handleGoalsSet)
@@ -604,6 +640,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/mcp", s.handleMCPList)
 	s.mux.HandleFunc("POST /v1/mcp/retry", s.handleMCPRetry)
 	s.mux.HandleFunc("POST /v1/mcp/disable", s.handleMCPDisable)
+	// Powers capability packs (#1347 / #1867).
+	s.mux.HandleFunc("GET /v1/powers", s.handlePowersList)
+	s.mux.HandleFunc("POST /v1/powers/activate", s.handlePowersActivate)
+	s.mux.HandleFunc("POST /v1/powers/deactivate", s.handlePowersDeactivate)
+	s.mux.HandleFunc("POST /v1/powers/mute", s.handlePowersMute)
+	s.mux.HandleFunc("POST /v1/powers/suggest", s.handlePowersSuggest)
 	// Plugin lifecycle + pane contributions (web parity #732).
 	// Action paths are body-id based (POST /v1/plugins/disable) so static
 	// segments never collide with plugin ids that contain dots/slashes.
@@ -743,6 +785,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/notifications/push-subscriptions", s.handlePushSubscribe)
 	s.mux.HandleFunc("DELETE /v1/notifications/push-subscriptions", s.handlePushUnsubscribe)
 	s.mux.HandleFunc("POST /v1/notifications/seen", s.handleNotificationSeen)
+	s.mux.HandleFunc("GET /v1/briefing/seen", s.handleBriefingSeen)
+	s.mux.HandleFunc("POST /v1/briefing/seen", s.handleBriefingSeenSet)
 	s.mux.HandleFunc("GET /v1/suggestions", s.handleSuggestionsList)
 	s.mux.HandleFunc("POST /v1/suggestions", s.handleSuggestionCreate)
 	s.mux.HandleFunc("PUT /v1/suggestions/prefs", s.handleSuggestionPrefs)

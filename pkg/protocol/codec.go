@@ -94,6 +94,8 @@ func eventType(ev Event) string {
 		return "permission.mode"
 	case FastSelected:
 		return "fast.selected"
+	case VerbositySelected:
+		return "verbosity.selected"
 	case FilesInvalidated:
 		return "files.invalidated"
 	case PathOverlap:
@@ -265,6 +267,8 @@ func (e Envelope) Decode() (Event, error) {
 		ev = &PermissionModeSelected{}
 	case "fast.selected":
 		ev = &FastSelected{}
+	case "verbosity.selected":
+		ev = &VerbositySelected{}
 	case "files.invalidated":
 		ev = &FilesInvalidated{}
 	case "path.overlap":
@@ -419,6 +423,8 @@ func deref(ev Event) Event {
 	case *PermissionModeSelected:
 		return *v
 	case *FastSelected:
+		return *v
+	case *VerbositySelected:
 		return *v
 	case *FilesInvalidated:
 		return *v

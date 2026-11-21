@@ -83,6 +83,7 @@ type capabilities struct {
 	Providers      bool `json:"providers"`
 	ProjectInit    bool `json:"projectInit"`
 	MCP            bool `json:"mcp"`
+	Powers         bool `json:"powers"`
 	LSP            bool `json:"lsp"`
 	Telemetry      bool `json:"telemetry"`
 	Workflows      bool `json:"workflows"`
@@ -164,7 +165,7 @@ type bootstrapResponse struct {
 var browserProtocolOps = []string{
 	"compact", "context.controls", "elicitation.reply", "inspect.prompt", "interrupt", "permission.reply", "question.reply",
 	"rewind", "select.agent", "select.model", "set.autonomy", "set.effort",
-	"set.fast", "set.permission_mode", "steer", "user.input",
+	"set.fast", "set.permission_mode", "set.verbosity", "steer", "user.input",
 	"input.queue_edit", "input.queue_cancel", "input.queue_reorder", "input.queue_send_now",
 	"workflow.start", "workflow.stop",
 }
@@ -198,6 +199,8 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		c.Permissions = h.Permissions != nil
 		// MCP status/control is exposed via /v1/mcp*.
 		c.MCP = h.MCP != nil
+		// Powers capability packs via /v1/powers* (#1867).
+		c.Powers = h.Powers != nil
 		// Plugin lifecycle + pane contributions via /v1/plugins* and /v1/panes* (#732).
 		c.Plugins = h.Plugins != nil
 		c.Panes = h.Panes != nil
@@ -1105,6 +1108,7 @@ func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 	if s.opts.LiveHub != nil {
 		s.opts.LiveHub.RemoveForSession(id)
 	}
+	s.endPowers(id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -2070,6 +2074,7 @@ func (s *Server) handleRootClose(w http.ResponseWriter, r *http.Request) {
 	if s.terms != nil {
 		s.terms.EndSession(id)
 	}
+	s.endPowers(id, s.opts.LiveHub.LiveFor(id).SessionID())
 	s.opts.LiveHub.Remove(id)
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
 }

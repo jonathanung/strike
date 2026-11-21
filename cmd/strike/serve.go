@@ -133,14 +133,57 @@ func runServeCLI(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, serveUsage)
 		return 2
 	}
-	if err := runServe(opts, stdout, stderr); err != nil {
-		if errors.Is(err, http.ErrServerClosed) {
-			return 0
-		}
-		fmt.Fprintln(stderr, "strike:", err)
-		return 1
+	return finishServe(runServe(opts, stdout, stderr), serveReexec, stderr)
+}
+
+// finishServe maps runServe's result to an exit code. errServeReload (a
+// cockpit workspace-trust apply, #1834) re-execs strike serve with the same
+// argv and environment so it re-assembles under the stored trust decision;
+// runServe only returns it after every root and project process stopped.
+func finishServe(err error, reexec func() error, stderr io.Writer) int {
+	if err == nil || errors.Is(err, http.ErrServerClosed) {
+		return 0
 	}
-	return 0
+	if errors.Is(err, errServeReload) {
+		fmt.Fprintln(stderr, "strike: workspace trust changed; restarting strike serve")
+		if rerr := reexec(); rerr != nil {
+			fmt.Fprintln(stderr, "strike: restart failed; start strike serve again:", rerr)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintln(stderr, "strike:", err)
+	return 1
+}
+
+// errServeReload is runServe's result when the cockpit asked the daemon to
+// apply a changed workspace trust decision (#1834).
+var errServeReload = errors.New("strike serve: reload requested")
+
+// serveReloadable reports whether this daemon can re-exec itself without
+// stranding the cockpit: the token and port must survive the restart. An
+// in-memory minted token or a random port (:0) would change, so those keep
+// the manual-restart path.
+func serveReloadable(opts serveOptions) bool {
+	if !serveReexecSupported || opts.attachOnly || opts.readOnly {
+		return false
+	}
+	if opts.auth && opts.token == "" && opts.tokenFile == "" {
+		return false
+	}
+	_, port, err := net.SplitHostPort(opts.addr)
+	return err == nil && port != "" && port != "0"
+}
+
+// reloadGate decides runServe's final result once cleanup ran. A reload
+// re-execs only when cleanup confirmed every root, MCP, LSP and harness
+// process stopped; otherwise the daemon exits with the cleanup error, so a
+// revoked workspace never re-execs past a project process that is still up.
+func reloadGate(result, cleanupErr error) error {
+	if errors.Is(result, errServeReload) && cleanupErr != nil {
+		return fmt.Errorf("workspace trust reload aborted, shutdown incomplete: %w", cleanupErr)
+	}
+	return result
 }
 
 func parseServeArgs(args []string) (serveOptions, error) {
@@ -281,7 +324,7 @@ func waitForServeRoots(done []<-chan struct{}, timeout time.Duration) bool {
 	}
 }
 
-func runServe(opts serveOptions, stdout, stderr io.Writer) error {
+func runServe(opts serveOptions, stdout, stderr io.Writer) (result error) {
 	bindAddr, err := server.ResolveDaemonBindAddr(opts.addr, opts.allowPrivateBind)
 	if err != nil {
 		return err
@@ -594,6 +637,10 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			if sr != nil && sr.cancel != nil {
 				sr.cancel()
 			}
+			// Every way a root leaves the hub unloads its Powers (#1867).
+			if a.services.Powers != nil {
+				a.services.Powers.EndSession(id)
+			}
 			_ = a.sessions.Close(id)
 		})
 
@@ -715,7 +762,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			}
 			return out
 		}
-		defer func() { _ = cleanup() }()
+		defer func() { result = reloadGate(result, cleanup()) }()
 
 		writePermissionsModeWarning(stderr, opts.auto, opts.dangerouslySkipPermissions)
 	}
@@ -795,8 +842,30 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		Revert:   &deploywatch.Reverter{RepoDir: cwd, GitHub: dwGitHub},
 	})
 	trigSvc.SetDeployWatches(deployWatches)
+	// Ideas inbox trigger producer (#1926): a delivery whose session did
+	// not start becomes one suggestion per trigger, once the server exists.
+	trigSvc.SetProblems(func(p trigger.Problem) {
+		if srv := notifySrv.Load(); srv != nil {
+			srv.SuggestTriggerProblem(p)
+		}
+	})
 	if !opts.readOnly {
 		go deployWatches.Run(ctx, deploywatch.DefaultTick)
+	}
+
+	// Workspace trust apply (#1834): the handler only signals; the select
+	// below drains HTTP, then the deferred cleanup stops every root and
+	// project process before runServeCLI re-execs.
+	reloadCh := make(chan struct{}, 1)
+	var trustReload func() error
+	if assembled && serveReloadable(opts) {
+		trustReload = func() error {
+			select {
+			case reloadCh <- struct{}{}:
+			default:
+			}
+			return nil
+		}
 	}
 
 	workDir, _ := os.Getwd()
@@ -839,6 +908,7 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		// Cockpit workspace trust card (#1781).
 		WorkspaceTrustPath:      workspacetrust.DefaultPath(config.GlobalRoot()),
 		WorkspaceTrustAssembled: trustAssembly,
+		WorkspaceTrustReload:    trustReload,
 	})
 	if err != nil {
 		return err
@@ -885,6 +955,16 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 			return nil
 		}
 		return err
+	case <-reloadCh:
+		// Drain HTTP first so the apply reply reaches the browser and the
+		// listener is closed before the re-exec binds the same port.
+		shutCtx, cancel := context.WithTimeout(context.Background(), serveShutdownTimeout)
+		defer cancel()
+		_ = srv.Shutdown(shutCtx)
+		if err := <-errCh; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return errServeReload
 	case err := <-errCh:
 		return err
 	}

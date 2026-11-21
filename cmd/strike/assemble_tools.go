@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -467,6 +468,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewTodoRead(todoStore),
 		tools.NewMemoryWriteScoped(memoryStore, globalMemory),
 		tools.NewMemoryReadScoped(memoryStore, globalMemory),
+		tools.NewLessonPropose(memoryStore, wsTrust.trusted),
 		tools.NewKnowledge(projectKnowledge, globalKnowledge),
 		tools.NewIssueWrite(issueStore),
 		tools.NewIssueRead(issueStore),
@@ -744,6 +746,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPriority    bool
 			initialTitled      bool
 			initialAutonomy    protocol.Autonomy
+			initialVerbosity   protocol.Verbosity
 			initialPermMode    = cfg.PermissionMode
 			initialPhaseWF     string
 			initialPhaseIndex  int
@@ -772,6 +775,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPriority = restored.Priority
 			initialTitled = restored.Titled
 			initialAutonomy = restored.Autonomy
+			initialVerbosity = restored.Verbosity
 			// Managed permissionMode wins over session resume (enterprise lock).
 			if !cfg.Managed.PermissionMode {
 				initialPermMode = restored.PermissionMode
@@ -919,8 +923,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			ProjectRoot:    projectRoot,
 			Instructions:   sessionInstructions,
 			Memory: enginebind.CombineMemory(
-				enginebind.Memory(memoryStore),
-				enginebind.Memory(globalMemory),
+				enginebind.MemoryForSession(memoryStore, sid),
+				enginebind.MemoryForSession(globalMemory, sid),
 				enginebind.Knowledge(projectKnowledge),
 				enginebind.Knowledge(globalKnowledge),
 			),
@@ -980,6 +984,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialModel:          initialModel,
 			InitialEffort:         initialEffort,
 			InitialAutonomy:       initialAutonomy,
+			InitialVerbosity:      initialVerbosity,
 			InitialPermissionMode: initialPermMode,
 			SandboxMode:           sandboxMode,
 			SandboxAllowDegrade:   cfg.SandboxAllowDegrade,
@@ -1172,6 +1177,9 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// Admission runs after tools/list and before registry bind.
 	mcpMgr := mcp.NewManager()
 	mcpMgr.SetAdmissionPolicy(admitPol)
+	// Powers attach pack servers after start, so bind the registry even when
+	// no server is configured up front.
+	mcpMgr.SetRegistry(registry)
 	mcpMgr.SetAdmissionHook(func(v admission.Verdict) {
 		admissionVerdicts = append(admissionVerdicts, v)
 		if v.Action != admission.ActionAllow || len(v.Findings) > 0 {
@@ -1286,6 +1294,16 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	services.Sessions = local.NewSessions(sessions, projectIdentity.Key)
 	services.Init = local.NewProjectInit(workDir)
 	services.MCP = local.NewMCP(mcpMgr)
+	// Powers (#1347): capability packs activated per session. Workspace packs
+	// are repo-supplied MCP commands, so they load only in a trusted workspace;
+	// pack servers still run the same admission scan as configured ones.
+	powersWS, powersGlobal := "", filepath.Join(globalRoot, "powers")
+	if wsTrust.trusted {
+		powersWS = filepath.Join(launchDir, ".strike", "powers")
+	}
+	services.Powers = local.NewPowers(powersWS, powersGlobal,
+		mcp.NewPackConnector(mcpMgr, local.PowerServerConfig(powersWS, powersGlobal, launchDir)),
+		local.PowersDeny(basePermLayers))
 	services.LSP = local.NewLSP(lspMgr)
 	services.Plugins = local.NewPlugins(workDir)
 	services.Panes = local.NewPanes(workDir)

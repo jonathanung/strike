@@ -496,14 +496,14 @@ func TestBuildPushPayloadIsGeneric(t *testing.T) {
 		ID: "abc123", Kind: noteChildBlocked, SessionID: "root1", Title: "SECRET title", Body: "SECRET body",
 		Href: "/#session=root1",
 	}
-	b, ok := buildPushPayload(n)
+	b, ok := buildPushPayload(n, NotifyPrefs{})
 	if !ok || strings.Contains(string(b), "SECRET") {
 		t.Fatalf("payload = %s ok=%v", b, ok)
 	}
-	if _, ok := buildPushPayload(Notification{Kind: noteSessionFinished}); ok {
+	if _, ok := buildPushPayload(Notification{Kind: noteSessionFinished}, NotifyPrefs{}); ok {
 		t.Fatal("finished runs must not push by default")
 	}
-	odd, _ := buildPushPayload(Notification{Kind: noteApproval, Href: "https://evil.example/"})
+	odd, _ := buildPushPayload(Notification{Kind: noteApproval, Href: "https://evil.example/"}, NotifyPrefs{})
 	if !strings.Contains(string(odd), `"href":"/"`) {
 		t.Fatalf("off-site href kept: %s", odd)
 	}
@@ -536,5 +536,78 @@ func TestPushClientDoesNotFollowRedirects(t *testing.T) {
 	}
 	if code != http.StatusTemporaryRedirect || hitTarget {
 		t.Fatalf("code = %d, followed = %v", code, hitTarget)
+	}
+}
+
+func TestPushableKindsFollowFinishedPref(t *testing.T) {
+	off, on := NotifyPrefs{}, NotifyPrefs{PushFinished: true}
+	cases := []struct {
+		kind    string
+		off, on bool
+	}{
+		{noteApproval, true, true},
+		{noteChildBlocked, true, true},
+		{noteSessionFinished, false, true},
+		{noteChildFinished, false, true},
+		{noteScriptFinished, false, false},
+		{noteScriptFailed, false, false},
+		{"gateway.disconnected", false, false},
+	}
+	for _, tc := range cases {
+		if got := pushable(tc.kind, off); got != tc.off {
+			t.Errorf("%s with pushFinished off = %v, want %v", tc.kind, got, tc.off)
+		}
+		if got := pushable(tc.kind, on); got != tc.on {
+			t.Errorf("%s with pushFinished on = %v, want %v", tc.kind, got, tc.on)
+		}
+	}
+	n := Notification{ID: "fin1", Kind: noteSessionFinished, Title: "SECRET title", Body: "SECRET body", Href: "/#session=root1"}
+	b, ok := buildPushPayload(n, on)
+	if !ok {
+		t.Fatal("opted-in finished run did not build a payload")
+	}
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 4 || got["kind"] != noteSessionFinished || got["href"] != "/#session=root1" || got["tag"] != "fin1" || got["type"] != "notify" {
+		t.Fatalf("payload not generic: %s", b)
+	}
+}
+
+func TestPushFinishedRunsOnlyWhenOptedIn(t *testing.T) {
+	srv, dir := newPushServer(t)
+	endpoint := newPushEndpoint(t)
+	browser := newPushBrowser(t)
+	if res := notifyCall(t, srv, http.MethodPost, "/v1/notifications/push-subscriptions", browser.subscribeBody(endpoint.srv.URL+"/push/1")); res.code != http.StatusCreated {
+		t.Fatalf("subscribe = %d %s", res.code, res.raw)
+	}
+	steps := []struct {
+		name  string
+		prefs string
+		want  int
+	}{
+		{"default off", `{"enabled":true,"quiet":{"enabled":false,"start":"22:00","end":"07:00"},"mutedSessions":[]}`, 0},
+		{"opted in", `{"enabled":true,"quiet":{"enabled":false,"start":"22:00","end":"07:00"},"mutedSessions":[],"pushFinished":true}`, 1},
+		{"opted out again", `{"enabled":true,"quiet":{"enabled":false,"start":"22:00","end":"07:00"},"mutedSessions":[],"pushFinished":false}`, 0},
+	}
+	sent := 0
+	for i, step := range steps {
+		res := notifyCall(t, srv, http.MethodPut, "/v1/notifications/prefs", step.prefs)
+		if res.code != http.StatusOK {
+			t.Fatalf("%s: prefs = %d", step.name, res.code)
+		}
+		if want := step.want == 1; !strings.Contains(res.raw, fmt.Sprintf(`"pushFinished":%v`, want)) {
+			t.Fatalf("%s: prefs echo = %s", step.name, res.raw)
+		}
+		appendSessionLine(t, dir, "root1", fmt.Sprintf(`{"type":"turn.completed","time":"2026-10-26T12:00:00Z","data":{"sessionId":"root1","turnId":"turn-%d","stopReason":"end_turn"}}`, i))
+		srv.pushTick()
+		sent += step.want
+		if got := len(endpoint.requests()); got != sent {
+			t.Fatalf("%s: pushes = %d, want %d", step.name, got, sent)
+		}
+	}
+	if body := notifyBody(t, srv); body.Prefs.PushFinished {
+		t.Fatal("pushFinished should read back off")
 	}
 }
