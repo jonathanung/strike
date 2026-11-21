@@ -9,6 +9,7 @@
 
 mod api;
 mod appearance;
+mod attachment_honesty;
 mod apps;
 mod approvals;
 mod approvals_ui;
@@ -18,6 +19,7 @@ mod confirm;
 mod composer_triggers;
 mod diag;
 mod draft_size;
+mod drafts;
 mod editor;
 mod load_epoch;
 mod localfiles;
@@ -56,6 +58,7 @@ mod shell;
 mod side_chat;
 mod status;
 mod term;
+mod tool_tail;
 mod terminal;
 mod transcript;
 mod transcript_view;
@@ -1130,6 +1133,22 @@ fn App() -> impl IntoView {
     Effect::new(move |_| {
         let _ = draft.get();
         sync_composer_height_soon();
+    });
+    // Per-session drafts (#1367): the composer text belongs to the
+    // viewed session. Every switch — whichever of the active_root
+    // setters made it — saves the outgoing session's draft and restores
+    // the incoming one; every edit (typing, recall, send clearing it)
+    // is persisted under `strike.draft.<root>`.
+    let draft_book = StoredValue::new_local(drafts::book());
+    Effect::new(move |_| {
+        let root = active_root.get();
+        let text = draft.get();
+        if let Some(restored) = draft_book
+            .try_update_value(|book| book.sync(&root, &text))
+            .flatten()
+        {
+            draft.set(restored);
+        }
     });
     let loading = RwSignal::new(true);
     let meta_epoch = RwSignal::new(LoadEpoch::new());
@@ -3011,6 +3030,9 @@ fn App() -> impl IntoView {
     // confirmation when one was required.
     let on_deleted = Callback::new(move |id: String| {
         let was_live = roots.get_untracked().iter().any(|row| row.id == id);
+        // Drop the deleted session's draft (#1367) before the fallback
+        // switch below, so it is not saved back as the outgoing draft.
+        draft_book.update_value(|book| book.forget(&id));
         pins.update(|list| list.retain(|p| p != &id));
         save(
             "strike.pins",
@@ -5456,6 +5478,22 @@ fn App() -> impl IntoView {
                                         }
                                     }).collect_view()}
                                 </div>
+                                {move || {
+                                    // #1561: say when the engine is known to drop a file
+                                    // before the model sees it. Warn, never block.
+                                    let rows: Vec<(String, String)> = pending_files
+                                        .get()
+                                        .into_iter()
+                                        .filter(|f| f.error.is_empty())
+                                        .map(|f| (f.name, f.mime))
+                                        .collect();
+                                    let lines = attachment_honesty::composer_warnings(&provider_name.get(), &rows);
+                                    (!lines.is_empty()).then(|| view! {
+                                        <div class="attach-warning" role="status" data-attach-warning="true">
+                                            {lines.into_iter().map(|line| view! { <p>{line}</p> }).collect_view()}
+                                        </div>
+                                    })
+                                }}
                             </Show>
                             <input class="file-pick" type="file" data-chat-file="true" data-chat-attach="true" node_ref=file_input multiple=true
                                 accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,image/svg+xml,text/plain,application/zip,application/gzip"
