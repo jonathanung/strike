@@ -92,10 +92,72 @@ func (s *Server) handleDeployWatchCancel(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, watch)
 }
 
+// handoffConfirm is the body of a regression handoff (#1784). Confirm must
+// be true: the cockpit sends it only after the user confirms the action.
+type handoffConfirm struct {
+	Confirm        bool   `json:"confirm"`
+	PermissionMode string `json:"permissionMode,omitempty"`
+}
+
+func (s *Server) decodeHandoff(w http.ResponseWriter, r *http.Request) (handoffConfirm, bool) {
+	var body handoffConfirm
+	if err := decodeBody(w, r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return body, false
+	}
+	if !body.Confirm {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "confirmation required: send {\"confirm\": true}"})
+		return body, false
+	}
+	return body, true
+}
+
+func (s *Server) handleDeployWatchFixSession(w http.ResponseWriter, r *http.Request) {
+	svc := s.requireDeployWatches(w)
+	if svc == nil || !s.allowTriggerWrite(w) {
+		return
+	}
+	body, ok := s.decodeHandoff(w, r)
+	if !ok {
+		return
+	}
+	watch, err := svc.OpenFixSession(r.Context(), r.PathValue("id"), body.PermissionMode)
+	if err != nil {
+		writeJSON(w, deployWatchStatus(err), opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, watch)
+}
+
+func (s *Server) handleDeployWatchRevertPR(w http.ResponseWriter, r *http.Request) {
+	svc := s.requireDeployWatches(w)
+	if svc == nil || !s.allowTriggerWrite(w) {
+		return
+	}
+	body, ok := s.decodeHandoff(w, r)
+	if !ok {
+		return
+	}
+	if body.PermissionMode != "" {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "permissionMode applies to fix-session only"})
+		return
+	}
+	watch, err := svc.DraftRevertPR(r.Context(), r.PathValue("id"))
+	if err != nil {
+		writeJSON(w, deployWatchStatus(err), opErrorResponse{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, watch)
+}
+
 func deployWatchStatus(err error) int {
 	switch {
 	case errors.Is(err, deploywatch.ErrNotFound):
 		return http.StatusNotFound
+	case errors.Is(err, deploywatch.ErrNotRegression):
+		return http.StatusConflict
+	case errors.Is(err, deploywatch.ErrUnavailable):
+		return http.StatusServiceUnavailable
 	case errors.Is(err, deploywatch.ErrInvalid):
 		return http.StatusBadRequest
 	default:

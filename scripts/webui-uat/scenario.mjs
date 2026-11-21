@@ -536,6 +536,24 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     );
     if (settingsUp) {
       await shoot("settings", ["mobile", "desk768", "desk1024", "desk1440"]);
+      // #1584: Settings → Isolation renders the daemon's real posture (host
+      // mode is a supported rung), or a visible error — never an empty panel.
+      const isolation = await waitUntil(
+        `Boolean(document.querySelector('#settings-isolation .container-posture-label, #settings-isolation .banner'))`,
+        20000,
+        "isolation panel",
+      );
+      const posture = await page.evaluate(`(() => {
+        const label = document.querySelector('#settings-isolation .container-posture-label');
+        const rungs = document.querySelectorAll('#settings-isolation .container-ladder .rung.on');
+        return { label: label ? label.textContent.trim() : "", active: rungs.length };
+      })()`);
+      check(Boolean(isolation) && posture.label !== "", "Settings → Isolation did not render a posture");
+      check(posture.active === 1, `isolation ladder has ${posture.active} active rungs, want 1`);
+      if (isolation) {
+        await page.evaluate(`document.querySelector('#settings-isolation')?.scrollIntoView()`);
+        await shoot("settings-isolation", ["mobile", "desk1024", "desk1440"]);
+      }
     }
     await page.evaluate(`document.querySelector('[data-nav="primary"] button')?.click()`);
 

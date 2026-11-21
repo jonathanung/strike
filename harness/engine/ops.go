@@ -109,6 +109,8 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		e.routePermissionReply(op)
 	case protocol.QuestionReply:
 		e.routeQuestionReply(op)
+	case protocol.ElicitationReply:
+		e.routeElicitationReply(op)
 	case protocol.Interrupt:
 		// Parent turn only — non-blocking children keep running until the
 		// engine shuts down or they finish on their own.
