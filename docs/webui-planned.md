@@ -691,3 +691,11 @@ goals/autopilot state, workspaces and their rules, issues, plans and the
 ledger are not in archive version 1; the manifest names them as
 `not-yet-included`. Passphrase encryption is not offered: the file says
 `"encrypted": false` and secrets are excluded regardless.
+
+## Read replies aloud
+
+Assistant replies have a **Read aloud** control (#1384) that uses the
+browser's own `speechSynthesis` (on-device voices when available). Voice and
+speed are in Settings → Voice and stored in the browser. Not in slice 1: a
+gateway-hosted Piper endpoint, auto-play, reading tool output, and stopping
+playback on a gateway disconnect (a page unload stops it).
