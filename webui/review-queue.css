@@ -1,0 +1,95 @@
+/* feature:review-queue begin */
+/* Review queue (#1324): per-hunk accept / reject / comment. */
+.review-queue {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.rq-head,
+.rq-send,
+.rq-hunk-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.rq-body-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.rq-banner,
+.rq-error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+}
+.rq-error { border-color: var(--danger); color: var(--danger); }
+.rq-send {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: var(--space-2);
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+}
+.rq-file {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.rq-file h4 { margin: 0; font-size: var(--type-sm); word-break: break-all; }
+.rq-hunk {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.rq-hunk[data-rq-state="accepted"] { border-color: var(--diff-add); }
+.rq-header { font-size: var(--type-sm); color: var(--muted); }
+.rq-actions { display: inline-flex; gap: var(--space-2); flex-wrap: wrap; }
+/* Large touch targets: the review device may be a phone (#1311). */
+.review-queue button { min-height: var(--control); min-width: 44px; }
+.rq-accept.on { background: var(--diff-add); color: var(--ground); }
+.rq-lines {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--surface-muted);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--type-sm);
+  line-height: 1.35;
+  white-space: pre;
+}
+.rq-lines .add { color: var(--diff-add); }
+.rq-lines .del { color: var(--diff-del); }
+.rq-lines .meta { color: var(--muted); }
+.rq-comments,
+.rq-rejected ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rq-comment {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--type-sm);
+}
+.rq-range { color: var(--muted); white-space: nowrap; }
+.rq-body { flex: 1; white-space: pre-wrap; word-break: break-word; }
+.rq-composer { display: flex; flex-direction: column; gap: var(--space-2); }
+.rq-range-field { display: inline-flex; align-items: center; gap: 6px; font-size: var(--type-sm); }
+.rq-range-field input { width: 5.5em; min-height: var(--control); }
+.rq-draft { min-height: 72px; resize: vertical; }
+/* feature:review-queue end */

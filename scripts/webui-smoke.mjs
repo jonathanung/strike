@@ -2321,7 +2321,7 @@ try {
     `(() => { const w = document.querySelector("[data-attach-warning]"); return !!w && w.offsetParent !== null && w.innerText.includes("honesty-shot.png") && w.innerText.includes("echo provider does not accept attachments"); })()`,
     "composer warns that echo drops the attachment",
   );
-  await evaluate(`(() => { const b = [...document.querySelectorAll(".attach-chip button")].find((x) => x.closest(".attach-chip")?.innerText.includes("honesty-shot.png")); b?.click(); return !!b; })()`);
+  await evaluate(`(() => { const b = [...document.querySelectorAll('.attach-chip button[aria-label="Remove attachment"]')].find((x) => x.closest(".attach-chip")?.innerText.includes("honesty-shot.png")); b?.click(); return !!b; })()`);
   await waitUntil(`!document.querySelector("[data-attach-warning]")`, "attachment warning clears with the file");
   // Office + media classification (#1390): a docx with its real browser
   // MIME is accepted as a document, an mp4 header as video, a plain zip
@@ -2410,8 +2410,82 @@ try {
     `(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); const v = chip && chip.querySelector("video.attach-media"); return !!v && v.controls && v.src.startsWith("blob:"); })()`,
     "mp4 composer chip shows video controls",
   );
-  await evaluate(`(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); chip?.querySelector("button")?.click(); return !!chip; })()`);
+  await evaluate(`(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); chip?.querySelector('button[aria-label="Remove attachment"]')?.click(); return !!chip; })()`);
   await waitUntil(`![...document.querySelectorAll(".attach-chip")].some((c) => c.innerText.includes("smoke-clip.mp4"))`, "mp4 chip removed");
+  // Visual annotate (#1545): attach an image, drop a pin with a note,
+  // send, and the single turn carries the coordinate block; removing an
+  // image with unsent marks asks first.
+  const attachPng = (name) => evaluate(`(() => {
+    const input = document.querySelector('input[data-chat-attach="true"]');
+    const bytes = Uint8Array.from(atob(${JSON.stringify(png)}), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], ${JSON.stringify(name)}, { type: "image/png" }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  const chipFor = (name) => `[...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes(${JSON.stringify(name)}))`;
+  const placePin = async (name, note) => {
+    await waitUntil(`!!(${chipFor(name)})?.querySelector('[data-annotate-open]')`, `annotate action on ${name}`);
+    await evaluate(`(${chipFor(name)}).querySelector('[data-annotate-open]').click()`);
+    await waitUntil(`(() => { const img = document.querySelector('[data-annotate] .annotate-canvas img'); return !!img && img.complete && img.getBoundingClientRect().width > 0; })()`, "annotate overlay image");
+    await evaluate(`(() => {
+      const canvas = document.querySelector('[data-annotate] .annotate-canvas');
+      const r = canvas.querySelector('img').getBoundingClientRect();
+      const at = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0, pointerId: 7, bubbles: true, isPrimary: true };
+      canvas.dispatchEvent(new PointerEvent("pointerdown", at));
+      canvas.dispatchEvent(new PointerEvent("pointerup", at));
+      return true;
+    })()`);
+    await waitUntil(`document.querySelectorAll('[data-annotate-marks] li').length === 1 && document.querySelector('[data-annotate-marks]').innerText.includes("[pin x=50%, y=50%]")`, "pin listed with coordinates");
+    await evaluate(`(() => {
+      const input = document.querySelector('[data-annotate-marks] input');
+      input.value = ${JSON.stringify(note)};
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      document.querySelector('[data-annotate-done]').click();
+      return true;
+    })()`);
+    await waitUntil(`!document.querySelector('[data-annotate]') && (${chipFor(name)})?.querySelector('[data-attach-marks]')?.innerText === "1 mark"`, "overlay closed and chip shows 1 mark");
+  };
+  await attachPng("annotate-discard.png");
+  await placePin("annotate-discard.png", "throwaway");
+  await evaluate(`(${chipFor("annotate-discard.png")}).querySelector('button[aria-label="Remove attachment"]').click()`);
+  await waitUntil(`(() => { const d = document.querySelector(".confirm-dialog"); return !!d && d.innerText.includes("1 mark"); })()`, "removing an annotated image asks first");
+  await evaluate(`document.querySelector('[data-confirm="accept"]').click()`);
+  await waitUntil(`!(${chipFor("annotate-discard.png")})`, "annotated image removed after explicit yes");
+  await attachPng("annotate-shot.png");
+  await placePin("annotate-shot.png", "move this button");
+  await evaluate(`(() => {
+    const ta = document.getElementById("composer-input");
+    const proto = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+    proto.set.call(ta, "annotate smoke 1545");
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    document.getElementById("send-primary").click();
+    return true;
+  })()`);
+  await waitUntil(
+    `(() => {
+      const draft = document.getElementById("composer-input")?.value || "";
+      const chips = document.querySelectorAll(".attach-chip").length;
+      if (draft === "" && chips === 0) return true;
+      return JSON.stringify({ draft, chips, notes: [...document.querySelectorAll(".hint, .queue-note, [role=status]")].map((n) => n.innerText).filter(Boolean).slice(0, 8) });
+    })()`,
+    "annotated send accepted (composer cleared)",
+  );
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+  });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await waitUntil(
+    `(() => {
+      const t = document.body.innerText;
+      const sent = [...document.querySelectorAll("[data-sent-attachments]")].some((el) => el.innerText.includes("annotate-shot-annotated.png"));
+      if (sent && t.includes("annotate smoke 1545") && t.includes("Annotations on annotate-shot.png") && t.includes('[pin x=50%, y=50%] "move this button"')) return true;
+      const msgs = [...document.querySelectorAll(".sx-msg")].slice(-3).map((m) => m.innerText.slice(0, 300));
+      return JSON.stringify({ sent, msgs });
+    })()`,
+    "sent turn carries the composite and the annotation block after reload",
+  );
   await send("Runtime.evaluate", {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
   });
@@ -4252,6 +4326,138 @@ try {
       }
       await rm(join(process.cwd(), stashFile), { force: true });
     }
+  }
+  // Review queue (#1324): seed two separate edits in a tracked file,
+  // accept nothing, reject the first hunk (two taps: Reject, then
+  // "Revert this hunk?") and require it reverted on disk, comment on the
+  // second hunk, then Send review and require exactly one transcript
+  // turn labelled "Review". Runs only when the seed file is unmodified
+  // so a developer's own edits are never touched; restored in finally.
+  const reviewSeed = join(process.cwd(), "AGENTS.md");
+  const reviewOriginal = await readFile(reviewSeed, "utf8");
+  const reviewStatus = await gitStatusPaths();
+  if (reviewStatus.unstaged.includes("AGENTS.md") || reviewStatus.staged.includes("AGENTS.md")) {
+    console.log("review queue smoke: skipped (AGENTS.md already modified)");
+  } else {
+    try {
+      const seeded = reviewOriginal.split("\n");
+      seeded[0] = "# strike-cli (smoke-review-first-1324)";
+      seeded.push("smoke-review-second-1324");
+      await writeFile(reviewSeed, seeded.join("\n"));
+      await clickSideTab("Review", "Review queue");
+      const reviewProbe = async () => {
+        const raw = await evaluate(`(() => {
+          const file = document.querySelector('[data-rq-file="AGENTS.md"]');
+          const hunks = file ? [...file.querySelectorAll("[data-rq-hunk]")] : [];
+          const send = document.querySelector(".rq-send-btn");
+          return JSON.stringify({
+            hunks: hunks.length,
+            first: hunks[0] ? hunks[0].textContent.includes("smoke-review-first-1324") : false,
+            summary: (document.querySelector("[data-rq-summary]") || {}).textContent || "",
+            sendDisabled: send ? send.disabled : null,
+            note: (document.querySelector(".rq-note") || {}).textContent || "",
+          });
+        })()`);
+        return JSON.parse(raw || "{}");
+      };
+      const reviewClick = async (expr, label) => {
+        await waitFor(
+          label,
+          async () => {
+            const v = await evaluate(`(() => { const b = ${expr}; if (!b) return "missing"; if (b.disabled) return "disabled"; b.click(); return "clicked"; })()`);
+            return { ok: v === "clicked", v };
+          },
+          { timeout: WAIT_MS, interval: 250 },
+        );
+      };
+      await waitFor(
+        "review queue lists two AGENTS.md hunks, send disabled",
+        async () => {
+          const p = await reviewProbe();
+          return { ok: p.hunks === 2 && p.first && p.sendDisabled === true && p.summary.includes("0 comments"), ...p };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      const firstHunk = `document.querySelector('[data-rq-file="AGENTS.md"] [data-rq-hunk] .rq-reject')`;
+      await reviewClick(firstHunk, "review reject (first tap)");
+      await waitFor(
+        "review reject asks for confirmation",
+        async () => {
+          const label = await evaluate(`(${firstHunk} || {}).textContent || ""`);
+          return { ok: String(label).includes("Revert this hunk?"), label };
+        },
+        { timeout: STEP_MS, interval: 200 },
+      );
+      await reviewClick(firstHunk, "review reject (confirm)");
+      await waitFor(
+        "rejected hunk reverted on disk and listed",
+        async () => {
+          const disk = await readFile(reviewSeed, "utf8");
+          const p = await reviewProbe();
+          return {
+            ok: !disk.includes("smoke-review-first-1324") && disk.includes("smoke-review-second-1324") && p.hunks === 1 && p.summary.includes("1 rejected hunk"),
+            ...p,
+          };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      await reviewClick(`document.querySelector('[data-rq-file="AGENTS.md"] .rq-comment-open')`, "review comment open");
+      await waitFor(
+        "review comment composer opens with a line range",
+        async () => {
+          const v = await evaluate(`(() => {
+            const ta = document.querySelector(".rq-composer textarea");
+            const start = document.querySelector('.rq-composer input[aria-label="Start line"]');
+            if (!ta || !start || !start.value) return "missing";
+            ta.value = "smoke review comment 1324";
+            ta.dispatchEvent(new Event("input", { bubbles: true }));
+            return "typed";
+          })()`);
+          return { ok: v === "typed", v };
+        },
+        { timeout: STEP_MS, interval: 200 },
+      );
+      await reviewClick(`document.querySelector(".rq-composer .rq-save")`, "review add comment");
+      await waitFor(
+        "review comment listed and send enabled",
+        async () => {
+          const p = await reviewProbe();
+          const listed = await evaluate(`[...document.querySelectorAll(".rq-comment")].some((c) => c.textContent.includes("smoke review comment 1324"))`);
+          return { ok: listed === true && p.summary.includes("1 comment") && p.sendDisabled === false, listed, ...p };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      const reviewTurns = async () =>
+        Number(
+          await evaluate(
+            `[...document.querySelectorAll('article[data-role="you"] .sx-who')].filter((e) => (e.textContent || "").trim() === "Review").length`,
+          ),
+        );
+      const turnsBefore = await reviewTurns();
+      await reviewClick(`document.querySelector(".rq-send-btn")`, "review send");
+      await waitFor(
+        "review arrives as one transcript turn labelled Review and the queue clears",
+        async () => {
+          const turns = await reviewTurns();
+          const p = await reviewProbe();
+          return { ok: turns === turnsBefore + 1 && p.summary.includes("0 comments · 0 rejected hunks"), turns, turnsBefore, ...p };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      // Let the echo turn the review started finish before later sections.
+      await waitFor(
+        "review turn completes",
+        async () => {
+          const res = await fetch(`http://127.0.0.1:${port}/v1/review`, { headers: { Authorization: `Bearer ${token}` } });
+          const body = res.ok ? await res.json() : {};
+          return { ok: res.ok && body.busy === false, status: res.status, busy: body.busy };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+    } finally {
+      await writeFile(reviewSeed, reviewOriginal);
+    }
+    await clickSideTab("Git", "Staged");
   }
   await waitUntil(`(() => {
     if ((document.body.innerText || "").includes("session.childIsolation")) return true;
