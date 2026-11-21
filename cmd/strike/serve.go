@@ -637,6 +637,10 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) (result error) {
 			if sr != nil && sr.cancel != nil {
 				sr.cancel()
 			}
+			// Every way a root leaves the hub unloads its Powers (#1867).
+			if a.services.Powers != nil {
+				a.services.Powers.EndSession(id)
+			}
 			_ = a.sessions.Close(id)
 		})
 

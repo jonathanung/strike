@@ -640,6 +640,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/mcp", s.handleMCPList)
 	s.mux.HandleFunc("POST /v1/mcp/retry", s.handleMCPRetry)
 	s.mux.HandleFunc("POST /v1/mcp/disable", s.handleMCPDisable)
+	// Powers capability packs (#1347 / #1867).
+	s.mux.HandleFunc("GET /v1/powers", s.handlePowersList)
+	s.mux.HandleFunc("POST /v1/powers/activate", s.handlePowersActivate)
+	s.mux.HandleFunc("POST /v1/powers/deactivate", s.handlePowersDeactivate)
+	s.mux.HandleFunc("POST /v1/powers/mute", s.handlePowersMute)
+	s.mux.HandleFunc("POST /v1/powers/suggest", s.handlePowersSuggest)
 	// Plugin lifecycle + pane contributions (web parity #732).
 	// Action paths are body-id based (POST /v1/plugins/disable) so static
 	// segments never collide with plugin ids that contain dots/slashes.
