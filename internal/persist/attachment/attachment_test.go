@@ -1,6 +1,7 @@
 package attachment
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -259,4 +260,106 @@ func encodeSolidPNG(t *testing.T, w, h int, c color.RGBA) []byte {
 func isBlack(c color.Color) bool {
 	r, g, b, a := c.RGBA()
 	return r == 0 && g == 0 && b == 0 && a > 0
+}
+
+// zipWith builds an in-memory zip holding the named (empty) entries.
+func zipWith(t *testing.T, names ...string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, name := range names {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte("<x/>")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestClassifyOfficeAndMedia(t *testing.T) {
+	docx := zipWith(t, "[Content_Types].xml", "_rels/.rels", "word/document.xml")
+	xlsx := zipWith(t, "[Content_Types].xml", "xl/workbook.xml")
+	pptx := zipWith(t, "[Content_Types].xml", "ppt/presentation.xml")
+	plainZip := zipWith(t, "README.md", "src/main.go")
+	noTypes := zipWith(t, "word/document.xml")
+	mixed := zipWith(t, "[Content_Types].xml", "word/document.xml", "xl/workbook.xml")
+	mp3ID3 := append([]byte("ID3\x04\x00\x00\x00\x00\x00\x00"), make([]byte, 16)...)
+	mp3Sync := append([]byte{0xff, 0xfb, 0x90, 0x64}, make([]byte, 16)...)
+	wav := append([]byte("RIFF\x24\x00\x00\x00WAVEfmt "), make([]byte, 16)...)
+	ogg := append([]byte("OggS\x00\x02"), make([]byte, 16)...)
+	mp4 := append([]byte("\x00\x00\x00\x18ftypisom\x00\x00\x02\x00"), make([]byte, 16)...)
+	m4a := append([]byte("\x00\x00\x00\x18ftypM4A \x00\x00\x02\x00"), make([]byte, 16)...)
+	heic := append([]byte("\x00\x00\x00\x18ftypheic\x00\x00\x00\x00"), make([]byte, 16)...)
+	webm := append([]byte{0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81}, make([]byte, 16)...)
+
+	cases := []struct {
+		name     string
+		raw      []byte
+		mime     string
+		wantKind string
+		wantMIME string
+		err      error
+	}{
+		{name: "docx sniffed", raw: docx, wantKind: KindDocument, wantMIME: MIMEDocx},
+		{name: "xlsx sniffed", raw: xlsx, wantKind: KindDocument, wantMIME: MIMEXlsx},
+		{name: "pptx sniffed", raw: pptx, wantKind: KindDocument, wantMIME: MIMEPptx},
+		{name: "docx declared real mime", raw: docx, mime: MIMEDocx, wantKind: KindDocument, wantMIME: MIMEDocx},
+		{name: "docx declared as zip is a document", raw: docx, mime: "application/zip", wantKind: KindDocument, wantMIME: MIMEDocx},
+		{name: "plain zip stays archive", raw: plainZip, wantKind: KindArchive, wantMIME: "application/zip"},
+		{name: "zip without content types stays archive", raw: noTypes, wantKind: KindArchive, wantMIME: "application/zip"},
+		{name: "ambiguous ooxml markers stay archive", raw: mixed, wantKind: KindArchive, wantMIME: "application/zip"},
+		{name: "ooxml declared on markerless zip", raw: plainZip, mime: MIMEXlsx, wantKind: KindDocument, wantMIME: MIMEXlsx},
+		{name: "text renamed docx rejected", raw: []byte("just some notes\n"), mime: MIMEDocx, err: ErrKind},
+		{name: "docx declared pdf rejected", raw: docx, mime: "application/pdf", err: ErrKind},
+		{name: "docx declared as other ooxml rejected", raw: docx, mime: MIMEPptx, err: ErrKind},
+		{name: "mp3 id3", raw: mp3ID3, wantKind: KindAudio, wantMIME: "audio/mpeg"},
+		{name: "mp3 frame sync", raw: mp3Sync, wantKind: KindAudio, wantMIME: "audio/mpeg"},
+		{name: "mp3 declared audio/mp3 alias", raw: mp3ID3, mime: "audio/mp3", wantKind: KindAudio, wantMIME: "audio/mpeg"},
+		{name: "wav", raw: wav, wantKind: KindAudio, wantMIME: "audio/wav"},
+		{name: "wav declared x-wav", raw: wav, mime: "audio/x-wav", wantKind: KindAudio, wantMIME: "audio/wav"},
+		{name: "ogg", raw: ogg, wantKind: KindAudio, wantMIME: "audio/ogg"},
+		{name: "mp4", raw: mp4, wantKind: KindVideo, wantMIME: "video/mp4"},
+		{name: "m4a", raw: m4a, wantKind: KindAudio, wantMIME: "audio/mp4"},
+		{name: "heic brand not guessed", raw: heic, err: ErrUnsupported},
+		{name: "webm", raw: webm, wantKind: KindVideo, wantMIME: "video/webm"},
+		{name: "voice note audio/webm", raw: webm, mime: "audio/webm;codecs=opus", wantKind: KindAudio, wantMIME: "audio/webm"},
+		{name: "mp4 declared as png rejected", raw: mp4, mime: "image/png", err: ErrKind},
+		{name: "wav declared as webm rejected", raw: wav, mime: "video/webm", err: ErrKind},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			kind, mime, err := Classify(tc.raw, tc.mime, "")
+			if tc.err != nil {
+				if !errors.Is(err, tc.err) {
+					t.Fatalf("err = %v, want %v (kind %q mime %q)", err, tc.err, kind, mime)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind != tc.wantKind || mime != tc.wantMIME {
+				t.Fatalf("got (%q, %q), want (%q, %q)", kind, mime, tc.wantKind, tc.wantMIME)
+			}
+		})
+	}
+}
+
+func TestNewKindsAreValidAndNeverProviderImages(t *testing.T) {
+	for _, kind := range []string{KindDocument, KindAudio, KindVideo} {
+		if !ValidKind(kind) {
+			t.Fatalf("ValidKind(%q) = false", kind)
+		}
+	}
+	for _, mime := range []string{MIMEDocx, "audio/mpeg", "video/mp4"} {
+		if err := SelectForProvider(KindFromMIME(mime), mime, Capabilities{Images: true}); !errors.Is(err, ErrUnsupported) {
+			t.Fatalf("SelectForProvider(%s) = %v, want ErrUnsupported", mime, err)
+		}
+	}
 }

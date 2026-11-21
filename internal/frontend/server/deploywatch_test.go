@@ -62,6 +62,9 @@ func TestDeployWatchRoutes(t *testing.T) {
 	if rec := dwDo(t, h, http.MethodPost, "/v1/deploy-watches", `{"repo":"acme","sha":"abc1234","checks":[{"kind":"github_checks"}]}`, true); rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid create = %d %s", rec.Code, rec.Body.String())
 	}
+	if rec := dwDo(t, h, http.MethodPost, "/v1/deploy-watches", `{"repo":"acme/app","sha":"abc1234","failureThreshold":99,"checks":[{"kind":"github_checks"}]}`, true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("out-of-range threshold create = %d %s", rec.Code, rec.Body.String())
+	}
 	if rec := dwDo(t, h, http.MethodPost, "/v1/deploy-watches", `{"repo":"acme/app","bogus":1}`, true); rec.Code != http.StatusBadRequest {
 		t.Fatalf("unknown field create = %d", rec.Code)
 	}
@@ -87,15 +90,29 @@ func TestDeployWatchRoutes(t *testing.T) {
 		t.Fatalf("missing get = %d", rec.Code)
 	}
 
-	rec = dwDo(t, h, http.MethodPost, "/v1/deploy-watches/"+created.ID+"/poll", "", true)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("poll = %d %s", rec.Code, rec.Body.String())
+	if created.FailureThreshold != deploywatch.DefaultFailureThreshold {
+		t.Fatalf("threshold = %d", created.FailureThreshold)
 	}
+
+	// The target always fails; only the third consecutive failure settles.
 	var polled deploywatch.Watch
-	if err := json.Unmarshal(rec.Body.Bytes(), &polled); err != nil {
-		t.Fatal(err)
+	for i := 1; i <= deploywatch.DefaultFailureThreshold; i++ {
+		rec = dwDo(t, h, http.MethodPost, "/v1/deploy-watches/"+created.ID+"/poll", "", true)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("poll %d = %d %s", i, rec.Code, rec.Body.String())
+		}
+		polled = deploywatch.Watch{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &polled); err != nil {
+			t.Fatal(err)
+		}
+		if len(polled.Latest) != 1 || polled.Latest[0].State != deploywatch.StateFailing {
+			t.Fatalf("poll %d latest = %+v", i, polled.Latest)
+		}
+		if i < deploywatch.DefaultFailureThreshold && polled.Verdict != "" {
+			t.Fatalf("poll %d settled early: %+v", i, polled)
+		}
 	}
-	if polled.Verdict != deploywatch.VerdictRegression || len(polled.Latest) != 1 || polled.Latest[0].State != deploywatch.StateFailing {
+	if polled.Verdict != deploywatch.VerdictRegression {
 		t.Fatalf("polled = %+v", polled)
 	}
 
