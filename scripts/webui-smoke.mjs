@@ -13,6 +13,7 @@
 // what the page actually looked like.
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
 import { mdReviewBrowserCheck } from "./webui-md-review-check.mjs";
 import { seedSkillUsage, skillUsageCheck } from "./webui-skill-usage-check.mjs";
@@ -31,6 +32,26 @@ const chromePort = 9222 + (process.pid % 200);
 // ends immediately unless degrade is on before the daemon reads config.
 await mkdir(join(home, ".strike"), { recursive: true });
 await writeFile(join(home, ".strike", "config"), '{"sandboxAllowDegrade":true}\n');
+
+// Plugin lifecycle (#1570): one installed, passive-only global plugin.
+// The cockpit lists it from GET /v1/plugins and remove needs a confirm step.
+const smokePluginId = "smoke.lifecycle";
+await mkdir(join(home, ".strike", "plugins", smokePluginId, "themes"), { recursive: true });
+await writeFile(
+  join(home, ".strike", "plugins", smokePluginId, "plugin.json"),
+  JSON.stringify({
+    schemaVersion: 1,
+    id: smokePluginId,
+    version: "1.0.0",
+    name: "Smoke Lifecycle",
+    strike: { min: "0.1.0" },
+    contributions: { themes: [{ path: "themes/smoke.json" }] },
+  }),
+);
+await writeFile(
+  join(home, ".strike", "plugins", smokePluginId, "themes", "smoke.json"),
+  JSON.stringify({ name: "Smoke Plugin Theme", id: "smoke-plugin-theme", colors: { accent: "#123456" } }),
+);
 
 // Theme catalog (#1529): a user theme the daemon's GET /v1/themes lists.
 // The cockpit picker must offer it, paint it, and keep it across reload.
@@ -465,6 +486,9 @@ try {
     envLine("text.delta", "2026-10-26T06:04:00Z", { text: "slow answer" }) +
     envLine("turn.completed", "2026-10-26T06:04:12Z", { stopReason: "end_turn" }) +
     envLine("user.message", "2026-10-26T06:10:00Z", { text: "quick follow up" }) +
+    // Reasoning visibility (#1372): one reasoning delta before the answer;
+    // hidden until the per-session toggle is switched on.
+    envLine("reasoning.delta", "2026-10-26T06:10:05Z", { text: "weighing the quick reply" }) +
     envLine("text.delta", "2026-10-26T06:10:10Z", { text: "fast answer" }) +
     envLine("turn.completed", "2026-10-26T06:10:20Z", { stopReason: "end_turn" }) +
     // Compaction visibility (#1359): markers between turns (outside any
@@ -2133,6 +2157,7 @@ try {
     token,
     repoDir: process.cwd(),
   });
+  await agentPickerCheck({ send });
   await mdReviewBrowserCheck({
     send,
     port,
@@ -2321,7 +2346,7 @@ try {
     `(() => { const w = document.querySelector("[data-attach-warning]"); return !!w && w.offsetParent !== null && w.innerText.includes("honesty-shot.png") && w.innerText.includes("echo provider does not accept attachments"); })()`,
     "composer warns that echo drops the attachment",
   );
-  await evaluate(`(() => { const b = [...document.querySelectorAll(".attach-chip button")].find((x) => x.closest(".attach-chip")?.innerText.includes("honesty-shot.png")); b?.click(); return !!b; })()`);
+  await evaluate(`(() => { const b = [...document.querySelectorAll('.attach-chip button[aria-label="Remove attachment"]')].find((x) => x.closest(".attach-chip")?.innerText.includes("honesty-shot.png")); b?.click(); return !!b; })()`);
   await waitUntil(`!document.querySelector("[data-attach-warning]")`, "attachment warning clears with the file");
   // Office + media classification (#1390): a docx with its real browser
   // MIME is accepted as a document, an mp4 header as video, a plain zip
@@ -2410,8 +2435,82 @@ try {
     `(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); const v = chip && chip.querySelector("video.attach-media"); return !!v && v.controls && v.src.startsWith("blob:"); })()`,
     "mp4 composer chip shows video controls",
   );
-  await evaluate(`(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); chip?.querySelector("button")?.click(); return !!chip; })()`);
+  await evaluate(`(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); chip?.querySelector('button[aria-label="Remove attachment"]')?.click(); return !!chip; })()`);
   await waitUntil(`![...document.querySelectorAll(".attach-chip")].some((c) => c.innerText.includes("smoke-clip.mp4"))`, "mp4 chip removed");
+  // Visual annotate (#1545): attach an image, drop a pin with a note,
+  // send, and the single turn carries the coordinate block; removing an
+  // image with unsent marks asks first.
+  const attachPng = (name) => evaluate(`(() => {
+    const input = document.querySelector('input[data-chat-attach="true"]');
+    const bytes = Uint8Array.from(atob(${JSON.stringify(png)}), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], ${JSON.stringify(name)}, { type: "image/png" }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  const chipFor = (name) => `[...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes(${JSON.stringify(name)}))`;
+  const placePin = async (name, note) => {
+    await waitUntil(`!!(${chipFor(name)})?.querySelector('[data-annotate-open]')`, `annotate action on ${name}`);
+    await evaluate(`(${chipFor(name)}).querySelector('[data-annotate-open]').click()`);
+    await waitUntil(`(() => { const img = document.querySelector('[data-annotate] .annotate-canvas img'); return !!img && img.complete && img.getBoundingClientRect().width > 0; })()`, "annotate overlay image");
+    await evaluate(`(() => {
+      const canvas = document.querySelector('[data-annotate] .annotate-canvas');
+      const r = canvas.querySelector('img').getBoundingClientRect();
+      const at = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0, pointerId: 7, bubbles: true, isPrimary: true };
+      canvas.dispatchEvent(new PointerEvent("pointerdown", at));
+      canvas.dispatchEvent(new PointerEvent("pointerup", at));
+      return true;
+    })()`);
+    await waitUntil(`document.querySelectorAll('[data-annotate-marks] li').length === 1 && document.querySelector('[data-annotate-marks]').innerText.includes("[pin x=50%, y=50%]")`, "pin listed with coordinates");
+    await evaluate(`(() => {
+      const input = document.querySelector('[data-annotate-marks] input');
+      input.value = ${JSON.stringify(note)};
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      document.querySelector('[data-annotate-done]').click();
+      return true;
+    })()`);
+    await waitUntil(`!document.querySelector('[data-annotate]') && (${chipFor(name)})?.querySelector('[data-attach-marks]')?.innerText === "1 mark"`, "overlay closed and chip shows 1 mark");
+  };
+  await attachPng("annotate-discard.png");
+  await placePin("annotate-discard.png", "throwaway");
+  await evaluate(`(${chipFor("annotate-discard.png")}).querySelector('button[aria-label="Remove attachment"]').click()`);
+  await waitUntil(`(() => { const d = document.querySelector(".confirm-dialog"); return !!d && d.innerText.includes("1 mark"); })()`, "removing an annotated image asks first");
+  await evaluate(`document.querySelector('[data-confirm="accept"]').click()`);
+  await waitUntil(`!(${chipFor("annotate-discard.png")})`, "annotated image removed after explicit yes");
+  await attachPng("annotate-shot.png");
+  await placePin("annotate-shot.png", "move this button");
+  await evaluate(`(() => {
+    const ta = document.getElementById("composer-input");
+    const proto = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+    proto.set.call(ta, "annotate smoke 1545");
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    document.getElementById("send-primary").click();
+    return true;
+  })()`);
+  await waitUntil(
+    `(() => {
+      const draft = document.getElementById("composer-input")?.value || "";
+      const chips = document.querySelectorAll(".attach-chip").length;
+      if (draft === "" && chips === 0) return true;
+      return JSON.stringify({ draft, chips, notes: [...document.querySelectorAll(".hint, .queue-note, [role=status]")].map((n) => n.innerText).filter(Boolean).slice(0, 8) });
+    })()`,
+    "annotated send accepted (composer cleared)",
+  );
+  await send("Runtime.evaluate", {
+    expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
+  });
+  await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
+  await waitUntil(
+    `(() => {
+      const t = document.body.innerText;
+      const sent = [...document.querySelectorAll("[data-sent-attachments]")].some((el) => el.innerText.includes("annotate-shot-annotated.png"));
+      if (sent && t.includes("annotate smoke 1545") && t.includes("Annotations on annotate-shot.png") && t.includes('[pin x=50%, y=50%] "move this button"')) return true;
+      const msgs = [...document.querySelectorAll(".sx-msg")].slice(-3).map((m) => m.innerText.slice(0, 300));
+      return JSON.stringify({ sent, msgs });
+    })()`,
+    "sent turn carries the composite and the annotation block after reload",
+  );
   await send("Runtime.evaluate", {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
   });
@@ -2895,6 +2994,56 @@ try {
     { timeout: WAIT_MS, interval: 250 },
   );
 
+  // Context doctor (#1537): the statusline meter opens the breakdown, the
+  // engine answers inspect.prompt over the live stream, and the dialog lists
+  // real layers with token figures labelled as estimates.
+  await evaluate(`document.querySelector('[data-context-doctor="open"]').click()`);
+  await waitFor(
+    "context doctor lists the live session's layers",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const d = document.querySelector('[data-context-doctor="dialog"]');
+        if (!d) return JSON.stringify({ open: false });
+        return JSON.stringify({
+          open: true,
+          layers: d.querySelectorAll("[data-context-layer]").length,
+          scope: d.querySelector("[data-context-doctor-scope]")?.dataset.contextDoctorScope || "",
+          error: d.querySelector("[data-context-doctor-error]")?.innerText || "",
+          text: d.innerText.slice(0, 600),
+        });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: !!(p.open && p.layers > 0 && p.scope && !p.error && p.text.includes("chars/4") && p.text.includes("~")),
+        ...p,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-context-doctor="refresh"]').click()`);
+  await waitFor(
+    "context doctor refresh settles with layers and no error",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const d = document.querySelector('[data-context-doctor="dialog"]');
+        return JSON.stringify({
+          layers: d ? d.querySelectorAll("[data-context-layer]").length : 0,
+          pending: !!d?.querySelector('[data-context-doctor="refresh"]')?.disabled,
+          error: d?.querySelector("[data-context-doctor-error]")?.innerText || "",
+        });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: p.layers > 0 && !p.pending && !p.error, ...p };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-context-doctor="close"]').click()`);
+  await waitFor(
+    "context doctor closes",
+    async () => ({ ok: (await evaluate(`!!document.querySelector('[data-context-doctor="dialog"]')`)) === false }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+
   // Lessons capture (#1376): "Remember this" on a user message opens a
   // pre-filled draft; Cancel stores nothing; Save stores a tagged lesson
   // through /v1/memory. The entry is removed again so later memory counts
@@ -3080,6 +3229,74 @@ try {
   ).json();
   if (!(persisted.issues || []).some((i) => String(i.ID ?? i.id) === smokeIssueId && (i.Status ?? i.status) === "closed")) {
     throw new Error(`daemon does not list issue ${smokeIssueId} as closed: ${JSON.stringify(persisted)}`);
+  }
+
+  // Ideas inbox (#1323): a producer deposits a suggestion over the authed
+  // API, the palette opens the Ideas page, the row renders with its why and
+  // evidence, and Dismiss records it daemon-side so the list empties.
+  {
+    const ideasUrl = `http://127.0.0.1:${port}/v1/suggestions`;
+    const ideaAuth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const idea = {
+      title: "Smoke idea: tidy the README",
+      why: "The smoke run noticed a stale section.",
+      prompt: "Tidy the README",
+      source: "smoke.producer",
+      kind: "docs",
+      evidenceKey: "smoke:readme",
+      evidence: [{ label: "Smoke evidence", url: "https://example.com/smoke" }],
+    };
+    const ideaNoAuth = await fetch(ideasUrl, { method: "POST", body: JSON.stringify(idea) });
+    if (ideaNoAuth.status !== 401) {
+      throw new Error(`suggestions create without token = ${ideaNoAuth.status}`);
+    }
+    const created = await fetch(ideasUrl, { method: "POST", headers: ideaAuth, body: JSON.stringify(idea) });
+    if (created.status !== 201) {
+      throw new Error(`suggestions create = ${created.status} ${await created.text()}`);
+    }
+    const ideaId = (await created.json()).suggestion.id;
+    const dup = await fetch(ideasUrl, { method: "POST", headers: ideaAuth, body: JSON.stringify(idea) });
+    if (dup.status !== 200 || (await dup.json()).created !== false) {
+      throw new Error(`suggestions dedupe = ${dup.status}`);
+    }
+    await runPalette("Ideas");
+    await waitFor(
+      "ideas page lists the deposited suggestion with its why and evidence",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const row = document.querySelector('[data-idea="${ideaId}"]');
+          return JSON.stringify({
+            root: !!document.querySelector("#ideas-root"),
+            row: !!row,
+            text: row ? row.innerText : "",
+          });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        return {
+          ok: !!(p.root && p.row && p.text.includes("tidy the README") && p.text.includes("stale section") && p.text.includes("Smoke evidence")),
+          ...p,
+        };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await waitFor(
+      "ideas Dismiss empties the list",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const btn = document.querySelector('[data-idea="${ideaId}"] .ideas-dismiss');
+          if (btn && !btn.disabled) btn.click();
+          return JSON.stringify({ empty: !!document.querySelector("[data-ideas-empty]") });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        return { ok: !!p.empty, ...p };
+      },
+      { timeout: WAIT_MS, interval: 400 },
+    );
+    const ideasAfter = await (await fetch(ideasUrl, { headers: ideaAuth })).json();
+    const stored = (ideasAfter.suggestions || []).find((x) => x.id === ideaId);
+    if (!stored || stored.state !== "dismissed" || ideasAfter.open !== 0) {
+      throw new Error(`dismissed idea state = ${JSON.stringify(ideasAfter).slice(0, 400)}`);
+    }
   }
 
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
@@ -3718,6 +3935,63 @@ try {
     stageAllSeeded = false;
   }
   await clickSideTab("Git", "Staged");
+  // Ship to PR (#1340): the preview route answers with an honest state
+  // (CI checks out a detached merge commit, so "blocked" with a detached
+  // blocker is expected there), a create without confirmPush never pushes
+  // or creates (409, or 200 only when it found an already-open PR), and
+  // the Git tab's "Create pull request" panel renders that preview.
+  {
+    const shipHeaders = { Authorization: `Bearer ${token}` };
+    const shipRes = await fetch(`http://127.0.0.1:${port}/v1/git/pr`, { headers: shipHeaders });
+    if (!shipRes.ok) {
+      throw new Error(`ship-to-pr preview: HTTP ${shipRes.status} ${await shipRes.text()}`);
+    }
+    const ship = await shipRes.json();
+    if (!["ok", "blocked"].includes(ship.state) || !Array.isArray(ship.blockers)) {
+      throw new Error(`ship-to-pr preview shape: ${JSON.stringify(ship).slice(0, 300)}`);
+    }
+    const shipCreate = await fetch(`http://127.0.0.1:${port}/v1/git/pr`, {
+      method: "POST",
+      headers: { ...shipHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "smoke must not ship" }),
+    });
+    const shipCreateText = await shipCreate.text();
+    const foundExisting = shipCreate.status === 200 && shipCreateText.includes('"existing":true');
+    if (shipCreate.status !== 409 && !foundExisting) {
+      throw new Error(`ship-to-pr create without confirmPush: HTTP ${shipCreate.status} ${shipCreateText.slice(0, 300)}`);
+    }
+    await evaluate(`(() => { document.querySelector("[data-ship-pr-open]").click(); return true; })()`);
+    await waitFor(
+      `ship-to-pr panel renders preview state ${ship.state}`,
+      async () => {
+        const raw = await evaluate(`JSON.stringify((() => {
+          const panel = document.querySelector("[data-ship-pr-panel]");
+          if (!panel) return null;
+          const create = panel.querySelector("[data-ship-pr-create]");
+          return {
+            branch: !!panel.querySelector("[data-ship-pr-branch]"),
+            blockers: (panel.querySelector("[data-ship-pr-blockers]") || {}).textContent || "",
+            existing: !!panel.querySelector("[data-ship-pr-existing]"),
+            createDisabled: create ? create.disabled : null,
+            error: (panel.querySelector("[data-ship-pr-error]") || {}).textContent || "",
+          };
+        })())`);
+        const got = JSON.parse(raw || "null");
+        let ok = !!got && got.branch && !got.error;
+        if (ok && ship.state === "blocked" && !ship.existing) {
+          ok = got.blockers.length > 0 && got.createDisabled !== false;
+        }
+        if (ok && ship.state === "ok" && !ship.existing) {
+          // Push/dirty confirmations start unticked, so create starts disabled
+          // whenever a push is needed.
+          ok = ship.needsPush ? got.createDisabled === true : got.createDisabled !== null;
+        }
+        return { ok, got };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await evaluate(`(() => { document.querySelector("[data-ship-pr-open]").click(); return true; })()`);
+  }
   // Git panel small wins (#1427/#1432/#1435): the path filter exists,
   // an active no-match query flips every section's empty text to
   // "No files match.", and the log rows carry full-hash copy hooks.
@@ -5136,6 +5410,66 @@ try {
     },
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Reasoning visibility (#1372): off by default the reasoning leaves no
+  // trace in the DOM, only the toggle; switched on, a labelled block sits
+  // directly above the answer it preceded and stays out of the answer's
+  // own text; switched off again, it is gone.
+  const reasoningProbe = `(() => {
+    const toggle = document.querySelector("[data-reasoning-toggle]");
+    const blocks = [...document.querySelectorAll(".sx-reasoning")];
+    const answer = [...document.querySelectorAll("article.sx-msg")].find((a) =>
+      (a.innerText || "").includes("fast answer"),
+    );
+    return {
+      toggle: !!toggle,
+      pressed: toggle ? toggle.getAttribute("aria-pressed") : "",
+      label: toggle ? toggle.textContent.trim() : "",
+      blocks: blocks.length,
+      text: blocks[0] ? blocks[0].innerText : "",
+      aboveAnswer: !!blocks[0] && !!answer && blocks[0].nextElementSibling === answer,
+      inAnswer: answer ? (answer.innerText || "").includes("weighing the quick reply") : true,
+      leaked: !blocks.length && document.body.innerText.includes("weighing the quick reply"),
+    };
+  })()`;
+  await waitFor(
+    "reasoning hidden by default behind its toggle",
+    async () => {
+      const v = await evaluate(reasoningProbe);
+      return {
+        ok: v.toggle && v.pressed === "false" && v.label === "Show reasoning" && v.blocks === 0 && !v.leaked,
+        ...v,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => { document.querySelector("[data-reasoning-toggle]").click(); return true; })()`);
+  await waitFor(
+    "reasoning block above the answer once toggled on",
+    async () => {
+      const v = await evaluate(reasoningProbe);
+      return {
+        ok:
+          v.pressed === "true" &&
+          v.label === "Hide reasoning" &&
+          v.blocks === 1 &&
+          v.text.includes("weighing the quick reply") &&
+          v.text.includes("not part of the answer") &&
+          v.aboveAnswer &&
+          !v.inAnswer,
+        ...v,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`(() => { document.querySelector("[data-reasoning-toggle]").click(); return true; })()`);
+  await waitFor(
+    "reasoning gone again once toggled off",
+    async () => {
+      const v = await evaluate(reasoningProbe);
+      return { ok: v.pressed === "false" && v.blocks === 0 && !v.leaked, ...v };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
   // Turn failure (#1371): the same replay ends its two failing turns with
   // a stop marker each (error, loop_detected), in order, badged failed;
   // the loop guard's own line names the tool; clean turns get none.
@@ -6009,6 +6343,75 @@ try {
     { timeout: STEP_MS, interval: 200 },
   );
 
+  // Prompt sharpen (#1385): Alt+P sends the draft to the daemon's
+  // one-shot rewrite (echo stands in for the model), shows the
+  // original-vs-sharpened preview, and changes nothing until Accept.
+  // Undo restores the original; Esc on the preview rejects untouched.
+  const sharpenDraft = "fix the flaky thing";
+  const composerText = async () =>
+    evaluate(`(() => { const el = document.querySelector("#composer-input"); return el ? el.value : null; })()`);
+  await setDraft(sharpenDraft);
+  await press("p", { altKey: true });
+  await waitFor(
+    "sharpen preview with original and rewrite",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const diff = document.querySelector("[data-sharpen-diff]");
+        return JSON.stringify({
+          accept: !!document.querySelector("[data-sharpen-accept]"),
+          diff: diff ? diff.innerText : "",
+          state: document.querySelector("[data-feature=prompt-sharpen]")?.getAttribute("data-sharpen-state") || "",
+        });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: p.accept && p.diff.includes(sharpenDraft) && p.diff.includes("You said:"), ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if ((await composerText()) !== sharpenDraft) {
+    throw new Error(`sharpen changed the draft before Accept: ${JSON.stringify(await composerText())}`);
+  }
+  await evaluate(`document.querySelector("[data-sharpen-accept]")?.click()`);
+  await waitFor(
+    "accepted rewrite replaces the draft, Undo offered",
+    async () => {
+      const value = (await composerText()) || "";
+      const undo = await evaluate(`!!document.querySelector("[data-sharpen-undo]")`);
+      return { ok: value.startsWith("You said:") && value.includes(sharpenDraft) && undo, value, undo };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector("[data-sharpen-undo]")?.click()`);
+  await waitFor(
+    "undo restores the original draft",
+    async () => {
+      const value = await composerText();
+      return { ok: value === sharpenDraft, value };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await press("p", { altKey: true });
+  await waitFor(
+    "second sharpen preview",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-sharpen-accept]")`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`(() => {
+    const el = document.querySelector("[data-sharpen-accept]");
+    el?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+    return true;
+  })()`);
+  await waitFor(
+    "Esc rejects and leaves the draft byte-identical",
+    async () => {
+      const value = await composerText();
+      const open = await evaluate(`!!document.querySelector("[data-feature=prompt-sharpen]")`);
+      return { ok: !open && value === sharpenDraft, value, open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await setDraft("");
+
   // Session dials (#1572 autonomy, #1569 Fast): both start at the
   // daemon-reported default, flip only after the daemon confirms the
   // op, and skip-all goes through its confirm first.
@@ -6596,6 +6999,56 @@ try {
     throw new Error(`customize catalog missing smoke-note: ${customizeText.slice(0, 500)}`);
   }
   await skillUsageCheck({ send });
+
+  // #1570: Customize > Plugins lifecycle lists GET /v1/plugins, and remove
+  // is a two-step action: arming shows a confirm, Cancel sends nothing.
+  {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/plugins`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status !== 200) throw new Error(`plugins HTTP ${res.status}`);
+    const wireIds = ((await res.json()).plugins || []).map((p) => p.id);
+    if (!wireIds.includes(smokePluginId)) {
+      throw new Error(`seeded plugin missing from GET /v1/plugins: ${JSON.stringify(wireIds)}`);
+    }
+    let last = "";
+    for (let i = 0; i < 60; i++) {
+      last = String(await evalJson(`(() => {
+        document.querySelector('[data-cz-section="plugins"]')?.click();
+        const rows = [...document.querySelectorAll('[data-plugin-lifecycle] li[data-plugin-id]')].map((li) => li.getAttribute("data-plugin-id"));
+        return JSON.stringify(rows);
+      })()`));
+      if (last === JSON.stringify(wireIds)) break;
+      if (i === 59) throw new Error(`plugin lifecycle rows ${last} != GET /v1/plugins ${JSON.stringify(wireIds)}\n${await diagnostics()}`);
+      await delay(250);
+    }
+    const row = `[data-plugin-lifecycle] li[data-plugin-id="${smokePluginId}"]`;
+    const trustText = String(await evalJson(`document.querySelector('${row} [data-plugin-trust]')?.innerText || ""`));
+    if (!trustText.includes("Passive only")) throw new Error(`passive plugin trust label: ${trustText}`);
+    if (await evalJson(`!!document.querySelector('${row} [data-plugin-action="trust-preview"]')`)) {
+      throw new Error("a passive-only plugin must not offer trust");
+    }
+    await evalJson(`document.querySelector('${row} [data-plugin-action="remove"]').click()`);
+    for (let i = 0; i < 40; i++) {
+      const armed = await evalJson(`!!document.querySelector('${row} [data-plugin-remove-confirm]') && !!document.querySelector('${row} [data-plugin-action="confirm"]')`);
+      if (armed === true) break;
+      if (i === 39) throw new Error(`remove did not arm a confirm step\n${await diagnostics()}`);
+      await delay(250);
+    }
+    await evalJson(`document.querySelector('${row} [data-plugin-action="cancel"]').click()`);
+    for (let i = 0; i < 40; i++) {
+      const cleared = await evalJson(`!document.querySelector('[data-plugin-lifecycle] [data-plugin-remove-confirm]') && !!document.querySelector('${row}')`);
+      if (cleared === true) break;
+      if (i === 39) throw new Error("cancel did not clear the remove confirm");
+      await delay(250);
+    }
+    const after = await fetch(`http://127.0.0.1:${port}/v1/plugins`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const afterIds = ((await after.json()).plugins || []).map((p) => p.id);
+    if (!afterIds.includes(smokePluginId)) throw new Error("cancelled remove still removed the plugin");
+    await evalJson(`document.querySelector('[data-cz-section="skills"]')?.click()`);
+  }
 
   await evalJson(`(() => {
     const tabs = document.querySelector('[aria-label="Customize sections"]');

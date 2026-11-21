@@ -93,6 +93,29 @@ self.addEventListener("message", (event) => {
   );
 });
 
+// Web Push (#1564). The daemon sends {type, kind, href, tag} only; the
+// banner text still comes from BANNER_BODIES by kind, so nothing in the
+// payload can put session text on the lock screen. A push must always show
+// a notification (userVisibleOnly), so an unreadable payload still shows
+// the generic one.
+self.addEventListener("push", (event) => {
+  let data = null;
+  try {
+    data = event.data ? event.data.json() : null;
+  } catch (err) {
+    data = null;
+  }
+  const raw = data && typeof data === "object" ? data : {};
+  const note = asNote({ type: "notify", kind: raw.kind, href: raw.href, tag: raw.tag });
+  event.waitUntil(
+    self.registration.showNotification(note.title, {
+      body: note.body,
+      tag: note.tag,
+      data: { href: note.href },
+    }).catch(() => {})
+  );
+});
+
 self.addEventListener("notificationclick", (event) => {
   const href = event.notification && event.notification.data && typeof event.notification.data.href === "string"
     ? event.notification.data.href
