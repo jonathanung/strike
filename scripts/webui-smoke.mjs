@@ -360,7 +360,26 @@ try {
     envLine("tool.begin", null, { callId: "c9", name: "bash", args: { command: "sleep 240" } }) +
     envLine("tool.end", "2026-10-26T06:24:00Z", { callId: "c9", name: "bash", output: "done" }) +
     envLine("text.delta", "2026-10-26T06:24:30Z", { text: "old answer" }) +
-    envLine("turn.completed", "2026-10-26T06:25:00Z", { stopReason: "end_turn" });
+    envLine("turn.completed", "2026-10-26T06:25:00Z", { stopReason: "end_turn" }) +
+    // Turn failure (#1371): an engine-error turn and a loop-guard turn,
+    // both under a minute so the elapsed check above is unchanged. Only
+    // these two may end with a [data-turn-stop] marker; the clean
+    // end_turn turns above must not.
+    envLine("user.message", "2026-10-26T06:30:00Z", { text: "failing replay turn" }) +
+    envLine("turn.started", "2026-10-26T06:30:01Z", { turnId: "tf1" }) +
+    envLine("text.delta", "2026-10-26T06:30:05Z", { text: "half answer" }) +
+    envLine("engine.error", "2026-10-26T06:30:06Z", { turnId: "tf1", message: "provider exploded" }) +
+    envLine("turn.completed", "2026-10-26T06:30:07Z", { turnId: "tf1", stopReason: "error" }) +
+    envLine("user.message", "2026-10-26T06:40:00Z", { text: "looping replay turn" }) +
+    envLine("turn.started", "2026-10-26T06:40:01Z", { turnId: "tf2" }) +
+    envLine("tool.loop_detected", "2026-10-26T06:40:05Z", {
+      turnId: "tf2",
+      reason: "identical_calls",
+      toolName: "bash",
+      count: 3,
+      message: "repeated identical failing tool calls",
+    }) +
+    envLine("turn.completed", "2026-10-26T06:40:06Z", { turnId: "tf2", stopReason: "loop_detected" });
   await writeFile(join(sessionsDir, "elapsed-session.jsonl"), elapsedSession);
   await writeFile(
     join(sessionsDir, "elapsed-session.meta.json"),
@@ -3983,6 +4002,38 @@ try {
         };
       })()`);
       return { ok: v.n === 1 && v.text === "took 4:12" && v.onSlow && v.body, ...v };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Turn failure (#1371): the same replay ends its two failing turns with
+  // a stop marker each (error, loop_detected), in order, badged failed;
+  // the loop guard's own line names the tool; clean turns get none.
+  await waitFor(
+    "turn failure markers on the replayed failing turns only",
+    async () => {
+      const v = await evaluate(`(() => {
+        const marks = [...document.querySelectorAll("article[data-turn-stop]")];
+        const arts = [...document.querySelectorAll("article.sx-msg")];
+        const idx = (el) => arts.indexOf(el);
+        const failing = arts.find((a) => (a.innerText || "").includes("half answer"));
+        const guard = arts.find((a) => (a.innerText || "").includes("Loop guard"));
+        return {
+          reasons: marks.map((m) => m.getAttribute("data-turn-stop")).join(","),
+          titles: marks.map((m) => (m.querySelector(".sx-who")?.textContent || "").trim()).join("|"),
+          afterAnswer: !!failing && marks.length > 0 && idx(marks[0]) > idx(failing),
+          guardText: guard ? guard.innerText : "",
+          engineError: document.body.innerText.includes("provider exploded"),
+        };
+      })()`);
+      return {
+        ok:
+          v.reasons === "error,loop_detected" &&
+          v.titles === "Turn failed|Turn stopped by loop guard" &&
+          v.afterAnswer &&
+          v.guardText.includes("bash, 3 times") &&
+          v.engineError,
+        ...v,
+      };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
