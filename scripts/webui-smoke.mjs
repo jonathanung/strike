@@ -266,6 +266,41 @@ try {
   if (!listedText.includes("markdownFile") || !listedText.includes(".md")) {
     throw new Error(`memory list missing plain-file path body=${listedText.slice(0, 500)}`);
   }
+  // #1339: instance backup. The archive verifies, never carries the
+  // seeded credential, names its exclusions, and a dry-run restore onto
+  // the same gateway skips the identical memory entry. A tampered
+  // archive is refused before anything is planned.
+  const backupRes = await fetch(`http://127.0.0.1:${port}/v1/backup/export`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const backupText = await backupRes.text();
+  if (
+    !backupRes.ok ||
+    !backupText.includes('"format":"strike.instance-backup"') ||
+    backupText.includes(secret) ||
+    !backupText.includes("provider credentials") ||
+    !(backupRes.headers.get("content-disposition") || "").includes("strike-backup.json")
+  ) {
+    throw new Error(`backup export check failed status=${backupRes.status} body=${backupText.slice(0, 400)}`);
+  }
+  const backupPlan = await fetch(`http://127.0.0.1:${port}/v1/backup/restore?dryRun=1`, {
+    method: "POST",
+    headers: auth,
+    body: backupText,
+  });
+  const backupPlanBody = await backupPlan.json().catch(() => ({}));
+  if (!backupPlan.ok || backupPlanBody.dryRun !== true || !(backupPlanBody.counts?.memory?.skip >= 1)) {
+    throw new Error(`backup dry-run check failed status=${backupPlan.status} body=${JSON.stringify(backupPlanBody).slice(0, 400)}`);
+  }
+  const backupTampered = await fetch(`http://127.0.0.1:${port}/v1/backup/restore?dryRun=1`, {
+    method: "POST",
+    headers: auth,
+    body: backupText.replace("smoke likes plain files", "smoke likes tampering"),
+  });
+  const backupTamperedText = await backupTampered.text();
+  if (backupTampered.status !== 400 || !backupTamperedText.includes("integrity check")) {
+    throw new Error(`backup tamper check failed status=${backupTampered.status} body=${backupTamperedText.slice(0, 300)}`);
+  }
   // Seed one knowledge pin for the Knowledge search check (#1469).
   const putPin = await fetch(`http://127.0.0.1:${port}/v1/knowledge`, {
     method: "PUT",
@@ -1662,6 +1697,34 @@ try {
   await waitUntil(
     `document.body.innerText.includes("diagnostic bundle downloaded")`,
     "diag download success confirmation",
+  );
+  // #1339: Settings > Backup. Export downloads the archive; restore reads
+  // a chosen file and previews the plan without writing anything.
+  await waitUntil(
+    `!!document.querySelector('[data-action="backup-export"]') && !document.querySelector('[data-action="backup-export"]').disabled`,
+    "backup export control",
+  );
+  await evaluate(`document.querySelector('[data-action="backup-export"]').click()`);
+  await waitUntil(
+    `!!document.querySelector('[data-backup-export-status]') && document.body.innerText.includes("Downloaded strike-backup.json")`,
+    "backup export confirmation",
+  );
+  await evaluate(`(() => {
+    const input = document.querySelector('[data-action="backup-restore-file"]');
+    const dt = new DataTransfer();
+    dt.items.add(new File([${JSON.stringify(backupText)}], "strike-backup.json", { type: "application/json" }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  await waitUntil(
+    `!!document.querySelector('[data-action="backup-restore-preview"]') && !document.querySelector('[data-action="backup-restore-preview"]').disabled`,
+    "backup restore file read",
+  );
+  await evaluate(`document.querySelector('[data-action="backup-restore-preview"]').click()`);
+  await waitUntil(
+    `!!document.querySelector('[data-backup-report="preview"]') && document.body.innerText.includes("Restore preview") && document.body.innerText.includes("memory:")`,
+    "backup restore preview",
   );
   await evaluate(`document.querySelector('input[data-choice="lg"]').click()`);
   await evaluate(`document.querySelector('input[data-choice="compact"]').click()`);

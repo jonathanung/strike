@@ -26,6 +26,7 @@ mod gateway;
 mod gateway_qr;
 mod git;
 mod goals;
+mod instance_backup;
 mod mobile;
 mod providers;
 mod rule_author;
