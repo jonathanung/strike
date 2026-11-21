@@ -132,6 +132,7 @@ fn report_view(r: RestoreReport) -> impl IntoView {
     let summary = summary_lines(&r);
     let empty = summary.is_empty();
     let (rows, hidden) = report_rows(&r);
+    let has_hidden = hidden > 0;
     let excluded: Vec<String> = r.excluded.iter().map(exclusion_line).collect();
     let kind = if r.dry_run { "preview" } else { "result" };
     view! {
@@ -148,7 +149,7 @@ fn report_view(r: RestoreReport) -> impl IntoView {
                 <ul class="backup-items">
                     {rows.into_iter().map(|line| view! { <li>{line}</li> }).collect_view()}
                 </ul>
-                <Show when=move || hidden > 0>
+                <Show when=move || has_hidden>
                     <p class="hint">{format!("{hidden} more not shown; the counts above include them.")}</p>
                 </Show>
             </details>
