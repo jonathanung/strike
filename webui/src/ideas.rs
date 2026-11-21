@@ -134,7 +134,7 @@ fn later(ms: i32, f: impl FnOnce() + 'static) {
     cb.forget();
 }
 
-/// Open count for the navbar badge. The page and the badge share it.
+// Open count for the rail badge. The page and the badge share it.
 thread_local! {
     static OPEN_COUNT: Cell<Option<RwSignal<usize>>> = const { Cell::new(None) };
 }
@@ -270,7 +270,7 @@ pub fn IdeasPage(
                         ideas_inbox::accept_draft(&idea),
                         now_ms() + DRAFT_WAIT_MS,
                     )));
-                    if let Err(e) = crate::shell::host::new_session() {
+                    if let Err(e) = crate::shell::new_session() {
                         pending.set(None);
                         error.set(format!("Accepted, but a session could not start: {e}"));
                     } else {
