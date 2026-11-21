@@ -161,7 +161,9 @@ func attachmentDisposition(mime, name string) string {
 }
 
 // prepareOp enforces attachment limits on user.input and steer, stores inline
-// bytes, and submits refs only. Text-only ops are unchanged.
+// bytes, and submits refs only. It also clears user.input loopId: only the
+// daemon's /loop registry may mark a firing (#1827), so a client cannot badge
+// its own send as one. Other text-only ops are unchanged.
 func (s *Server) prepareOp(op protocol.Op, sessionID string) (protocol.Op, error) {
 	switch o := op.(type) {
 	case protocol.UserInput:
@@ -170,6 +172,7 @@ func (s *Server) prepareOp(op protocol.Op, sessionID string) (protocol.Op, error
 			return nil, err
 		}
 		o.Images = imgs
+		o.LoopID = ""
 		return o, nil
 	case protocol.Steer:
 		imgs, err := s.prepareImages(o.Images, sessionID)

@@ -4,7 +4,7 @@
 // Unknown event type strings become Event::Unknown.
 // Unknown JSON fields are ignored. Missing fields are defaults.
 // Unknown op type strings return Err.
-// protocol.Version 1.25.0
+// protocol.Version 1.26.0
 
 use std::collections::HashMap;
 
@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "1.25.0";
+pub const PROTOCOL_VERSION: &str = "1.26.0";
 pub const LEGACY_VERSION: &str = "1.0.0";
 
 /// Open string. Known writer values live in the JSON Schema.
@@ -2646,6 +2646,31 @@ pub struct TurnStarted {
     pub depth: i64,
 }
 
+/// TurnSteerAck is the agent's own acknowledgement of a steer it just received: a one-line summary of what changed and, when the steer contradicts the in-flight plan, Conflict with a Reason. Emitted by the steer_ack tool at most once per applied steer; it never blocks the turn.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct TurnSteerAck {
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default, rename = "turnId")]
+    pub turn_id: String,
+    #[serde(default, rename = "providerRequestId")]
+    pub provider_request_id: String,
+    #[serde(default, rename = "attempt")]
+    pub attempt: i64,
+    #[serde(default, rename = "parentSessionId")]
+    pub parent_session_id: String,
+    #[serde(default, rename = "depth")]
+    pub depth: i64,
+    #[serde(default, rename = "targetTurnId")]
+    pub target_turn_id: String,
+    #[serde(default, rename = "summary")]
+    pub summary: String,
+    #[serde(default, rename = "conflict")]
+    pub conflict: bool,
+    #[serde(default, rename = "reason")]
+    pub reason: String,
+}
+
 /// TurnSteered records that active-turn steering was accepted and how it was applied. Emitted into the session log so resume/replay can observe decisions.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct TurnSteered {
@@ -2705,6 +2730,8 @@ pub struct UserInput {
     pub text: String,
     #[serde(default, rename = "images", deserialize_with = "null_as_default")]
     pub images: Vec<ImageAttachment>,
+    #[serde(default, rename = "loopId")]
+    pub loop_id: String,
 }
 
 /// UserMessage echoes accepted user input into the event stream so the transcript is fully reconstructable from events alone.
@@ -2726,6 +2753,8 @@ pub struct UserMessage {
     pub text: String,
     #[serde(default, rename = "images", deserialize_with = "null_as_default")]
     pub images: Vec<ImageAttachment>,
+    #[serde(default, rename = "loopId")]
+    pub loop_id: String,
 }
 
 /// VerbositySelected confirms the session response style, at startup and after each SetVerbosity. Delivery says how it reaches the model (none or instruction) so a frontend never shows a style as active while it does nothing.
@@ -3017,6 +3046,7 @@ pub enum Event {
     ToolRetrying(ToolRetrying),
     TurnCompleted(TurnCompleted),
     TurnStarted(TurnStarted),
+    TurnSteerAck(TurnSteerAck),
     TurnSteered(TurnSteered),
     UsageReported(UsageReported),
     UserMessage(UserMessage),
@@ -3163,6 +3193,7 @@ pub fn decode_event(raw: &str) -> Result<Event, DecodeError> {
         "tool.retrying" => map_event::<ToolRetrying>("tool.retrying", &env.data, Event::ToolRetrying),
         "turn.completed" => map_event::<TurnCompleted>("turn.completed", &env.data, Event::TurnCompleted),
         "turn.started" => map_event::<TurnStarted>("turn.started", &env.data, Event::TurnStarted),
+        "turn.steer_ack" => map_event::<TurnSteerAck>("turn.steer_ack", &env.data, Event::TurnSteerAck),
         "turn.steered" => map_event::<TurnSteered>("turn.steered", &env.data, Event::TurnSteered),
         "usage.reported" => map_event::<UsageReported>("usage.reported", &env.data, Event::UsageReported),
         "user.message" => map_event::<UserMessage>("user.message", &env.data, Event::UserMessage),

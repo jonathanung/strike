@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "a11y-announce"
+version = "0.1.0"
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1330,6 +1334,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "session-ref"
+version = "0.1.0"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1379,6 +1387,7 @@ version = "0.1.0"
 name = "strike-webui"
 version = "0.1.0"
 dependencies = [
+ "a11y-announce",
  "away-briefing",
  "composer-drafts",
  "dashboard-view",
@@ -1396,8 +1405,10 @@ dependencies = [
  "send_wrapper",
  "serde",
  "serde_json",
+ "session-ref",
  "signin-flow",
  "status-card",
+ "table-export",
  "theme-catalog",
  "transcript-window",
  "wasm-bindgen",
@@ -1437,6 +1448,10 @@ dependencies = [
  "quote",
  "syn 3.0.9",
 ]
+
+[[package]]
+name = "table-export"
+version = "0.1.0"
 
 [[package]]
 name = "tachys"
