@@ -9,9 +9,9 @@
 // Skills tab carries a pending-count badge, and the accepted skill is
 // invoked in a fresh session of a fresh daemon. Near-miss handling and
 // model drafting are covered by Go tests.
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 export const PROPOSED_SKILL = "regenerate-smoke-fixtures";
@@ -111,26 +111,25 @@ async function sessionLog(file) {
 }
 
 // invokeInFreshSession (#1958) runs the accepted skill as a slash command in
-// a new session of a freshly started daemon. The smoke workspace starts
-// untrusted, and an untrusted workspace never loads repo skills, so trust is
-// granted for this step and revoked after. The echo provider replies with
-// the text it was sent, so the reply holds the rendered skill.
-async function invokeInFreshSession({ home, port, token }) {
+// a new session of a freshly started daemon, launched in the directory
+// Customize installed the skill into. The smoke workspace starts untrusted,
+// and an untrusted workspace never loads its own skills, so that directory
+// is trusted for this step and the trust file restored after. The echo
+// provider replies with the text it was sent, so the reply holds the
+// rendered skill.
+async function invokeInFreshSession({ home, port, token, dir }) {
   const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
   const api = (p, base, init = {}) => fetch(`http://127.0.0.1:${base}${p}`, { headers: auth, ...init });
-  const trust = await (await api("/v1/workspace/trust", port)).json();
-  let granted = false;
-  if (!trust.trusted) {
-    const grant = await api("/v1/workspace/trust", port, { method: "POST", body: JSON.stringify({ action: "grant" }) });
-    if (!grant.ok) throw new Error(`skill proposals: trust grant ${grant.status} ${await grant.text()}`);
-    granted = true;
-  }
+  const bin = resolve(process.cwd(), process.env.STRIKE_BIN || "./strike");
+  const trustFile = join(home, ".strike", "workspace-trust.json");
+  const trustBefore = await readFile(trustFile, "utf8").catch(() => null);
+  execFileSync(bin, ["trust", "grant", "--dir", dir], { env: { ...process.env, HOME: home }, stdio: "pipe" });
   const freshPort = port + 2000;
   let log = "";
   const fresh = spawn(
-    process.env.STRIKE_BIN || "./strike",
+    bin,
     ["serve", "--addr", `127.0.0.1:${freshPort}`, "--provider", "echo", "--auth", "--token", token],
-    { env: { ...process.env, HOME: home }, stdio: ["ignore", "pipe", "pipe"] },
+    { cwd: dir, env: { ...process.env, HOME: home }, stdio: ["ignore", "pipe", "pipe"] },
   );
   fresh.stdout.on("data", (b) => (log += b.toString()));
   fresh.stderr.on("data", (b) => (log += b.toString()));
@@ -177,7 +176,8 @@ async function invokeInFreshSession({ home, port, token }) {
     fresh.kill("SIGTERM");
     await Promise.race([exited, delay(4000)]);
     if (fresh.exitCode == null && !fresh.signalCode) fresh.kill("SIGKILL");
-    if (granted) await api("/v1/workspace/trust", port, { method: "POST", body: JSON.stringify({ action: "revoke" }) });
+    if (trustBefore === null) await rm(trustFile, { force: true });
+    else await writeFile(trustFile, trustBefore);
   }
 }
 
@@ -280,6 +280,7 @@ export async function skillProposalsCheck({ send, repoDir, port, token, home }) 
     "Accept is ready",
   );
   await evalValue(send, `(${cardSel(PROPOSED_SKILL)}).querySelector('[data-cz-proposal-accept]').click()`);
+  let installDir = repoDir;
   try {
     await waitFor(
       send,
@@ -296,10 +297,18 @@ export async function skillProposalsCheck({ send, repoDir, port, token, home }) 
       if (!settled || settled.state !== "accepted") {
         throw new Error(`skill proposals: Ideas row after accept = ${JSON.stringify(settled || null).slice(0, 400)}`);
       }
-      if (home) await invokeInFreshSession({ home, port, token });
+      if (home) {
+        // Customize installs into the active root's directory, which is
+        // not always the repo the smoke runs from.
+        const cat = await (await fetch(`http://127.0.0.1:${port}/v1/customize`, { headers: { Authorization: `Bearer ${token}` } })).json();
+        installDir = cat.workDir || repoDir;
+        await invokeInFreshSession({ home, port, token, dir: installDir });
+      }
     }
   } finally {
-    await rm(join(repoDir, ".strike", "skills", `${PROPOSED_SKILL}.md`), { force: true });
-    await rm(join(repoDir, ".strike", "skills", PROPOSED_SKILL), { recursive: true, force: true });
+    for (const d of new Set([repoDir, installDir])) {
+      await rm(join(d, ".strike", "skills", `${PROPOSED_SKILL}.md`), { force: true });
+      await rm(join(d, ".strike", "skills", PROPOSED_SKILL), { recursive: true, force: true });
+    }
   }
 }
