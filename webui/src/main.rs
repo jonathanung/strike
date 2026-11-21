@@ -65,6 +65,7 @@ mod transcript;
 mod transcript_view;
 mod triggers;
 mod turn_elapsed;
+mod turn_failure;
 mod turn_usage;
 mod workspaces;
 use crate::shell::icon;
