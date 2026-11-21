@@ -103,6 +103,8 @@ pub struct Message {
     /// the envelope carried one. Empty for legacy log lines. Used by the
     /// orphan sweep (#1506) to scope a `turn.completed` to its own turn.
     pub turn_id: String,
+    /// Attachments sent with a `user.message` (#1389). Empty elsewhere.
+    pub attachments: Vec<crate::transcript_attachments::SentAttachment>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -536,6 +538,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: field_str(&data, "turnId"),
+                    attachments: crate::transcript_attachments::parse_images(&data),
                 });
                 self.turn_start = Some(id);
                 self.absorb();
@@ -590,6 +593,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "turn.completed" => {
@@ -669,6 +673,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: field_str(&data, "turnId"),
+                    attachments: Vec::new(),
                 });
             }
             "tool.output" => {
@@ -750,6 +755,7 @@ impl Transcript {
                         reconnect: String::new(),
                         at_ms,
                         turn_id: field_str(&data, "turnId"),
+                        attachments: Vec::new(),
                     });
                 }
             }
@@ -776,6 +782,42 @@ impl Transcript {
                 );
                 card.at_ms = at_ms;
                 self.upsert_child(card);
+            }
+            "child.escalated" => {
+                // #1375: a child tripped a budget/stall/loop. One persistent
+                // line names the child, the trip and the action taken; the
+                // later child.completed card still carries the outcome.
+                let session = field_str(&data, "sessionId");
+                let mut name = field_str(&data, "name");
+                if name.is_empty() {
+                    name = session.chars().take(8).collect();
+                }
+                if name.is_empty() {
+                    name = "A child".into();
+                }
+                let body = crate::child_signals::escalation_sentence(
+                    &field_str(&data, "kind"),
+                    &field_str(&data, "reason"),
+                    &field_str(&data, "action"),
+                );
+                self.push(Message {
+                    id: 0,
+                    role: Role::Notice,
+                    title: format!("{name} escalated"),
+                    body: body.clone(),
+                    badge: "escalated".into(),
+                    detail: String::new(),
+                    key: String::new(),
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: body,
+                    reconnect: String::new(),
+                    at_ms,
+                    turn_id: field_str(&data, "turnId"),
+                });
             }
             "artifact.updated" => self.artifact_updates = self.artifact_updates.wrapping_add(1),
             "compaction.started"
@@ -823,6 +865,7 @@ impl Transcript {
                         reconnect: provider,
                         at_ms,
                         turn_id: String::new(),
+                        attachments: Vec::new(),
                     });
                     return;
                 }
@@ -843,6 +886,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "permission.asked" => {
@@ -881,6 +925,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "permission.resolved" => {
@@ -986,6 +1031,7 @@ impl Transcript {
             reconnect: String::new(),
             at_ms,
             turn_id,
+            attachments: Vec::new(),
         });
     }
 
@@ -1321,6 +1367,7 @@ impl Transcript {
             reconnect: String::new(),
             at_ms,
             turn_id: String::new(),
+            attachments: Vec::new(),
         });
     }
 }
@@ -2937,6 +2984,42 @@ mod tests {
         t.apply_envelope(&env("turn.completed", serde_json::json!({"turnId": "t1"})));
         let row = t.messages.iter().find(|m| m.call_id == "a").expect("row");
         assert_eq!(row.badge, "no result");
+    }
+
+    #[test]
+    fn child_escalated_renders_a_line() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "child.escalated",
+            serde_json::json!({
+                "sessionId": "abcd1234ef",
+                "name": "scout",
+                "kind": "stall",
+                "reason": "no progress for 300s",
+                "action": "finalizing",
+                "terminalStatus": "blocked"
+            }),
+        ));
+        let line = t
+            .messages
+            .iter()
+            .find(|m| m.badge == "escalated")
+            .expect("escalation line");
+        assert_eq!(line.role, Role::Notice);
+        assert_eq!(line.title, "scout escalated");
+        assert_eq!(
+            line.body,
+            "Stalled: no progress for 300s. Action: finishing with a handoff."
+        );
+
+        // No name: fall back to the short session id.
+        t.apply_envelope(&env(
+            "child.escalated",
+            serde_json::json!({"sessionId": "abcd1234ef", "kind": "tokens", "reason": "", "action": "interrupted"}),
+        ));
+        let last = t.messages.last().unwrap();
+        assert_eq!(last.title, "abcd1234 escalated");
+        assert_eq!(last.body, "Token budget. Action: stopped.");
     }
 
     #[test]
