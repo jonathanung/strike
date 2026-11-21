@@ -568,6 +568,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /v1/memory/mode", s.handleMemoryModePut)
 	s.mux.HandleFunc("PUT /v1/memory/{key}", s.handleMemoryPut)
 	s.mux.HandleFunc("DELETE /v1/memory/{key}", s.handleMemoryDelete)
+	// Lessons loop (#1874): pending proposals + "lesson used" provenance.
+	s.mux.HandleFunc("GET /v1/memory/proposals", s.handleLessonProposals)
+	s.mux.HandleFunc("POST /v1/memory/proposals", s.handleLessonPropose)
+	s.mux.HandleFunc("PATCH /v1/memory/proposals/{id}", s.handleLessonProposalEdit)
+	s.mux.HandleFunc("POST /v1/memory/proposals/{id}/approve", s.handleLessonProposalApprove)
+	s.mux.HandleFunc("DELETE /v1/memory/proposals/{id}", s.handleLessonProposalDismiss)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/lessons-used", s.handleSessionLessonsUsed)
 	s.mux.HandleFunc("GET /v1/knowledge", s.handleKnowledgeList)
 	s.mux.HandleFunc("PUT /v1/knowledge", s.handleKnowledgePut)
 	s.mux.HandleFunc("DELETE /v1/knowledge", s.handleKnowledgeDelete)

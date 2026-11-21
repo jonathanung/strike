@@ -5809,6 +5809,14 @@ fn App() -> impl IntoView {
                             panel_drawer.update(|v| *v = !*v);
                         }>"Panel"</button>
                     </div>
+                    // #1874: "N lessons used — view" for the active session.
+                    <lessons::LessonsUsedMarker
+                        base=base
+                        token=token
+                        session=active_root
+                        busy=live_busy
+                        storage_rev=storage_rev
+                    />
                     <Show when=move || !load_error.get().is_empty()>
                         <div class="notice" role="alert">
                             <span>{move || load_error.get()}</span>

@@ -1152,6 +1152,12 @@ Permission asks appear as `permission.asked` events; resolve with
 | `DELETE` | `/v1/memory/{key}` | **yes** | Delete entry (`?scope=`); blocked in attach-only |
 | `GET` | `/v1/memory/mode` | mode | Session memory mode (`normal`, `incognito`, `temporary`) for `?root=`. `wired:false` when no live engine is bound. |
 | `PUT` | `/v1/memory/mode` | **yes** | Set that mode (`{mode}`) for `?root=`. Persists on the session meta sidecar. |
+| `GET` | `/v1/memory/proposals` | mode | Pending lesson proposals (#1874), oldest first. A pending proposal is never auto-loaded. |
+| `POST` | `/v1/memory/proposals` | **yes** | Propose a lesson (`{key,value,scope?}`; scope `project` default or `global`). Text is credential-scrubbed. The proposing session is the live root's. 403 for an incognito/temporary session or an untrusted workspace. |
+| `PATCH` | `/v1/memory/proposals/{id}` | **yes** | Edit a pending proposal (`{key,value,scope}`). |
+| `POST` | `/v1/memory/proposals/{id}/approve` | **yes** | Store it as a `lesson`-tagged entry in its scope and drop it from pending. 409 when the key exists unless `{replace:true}`. |
+| `DELETE` | `/v1/memory/proposals/{id}` | **yes** | Dismiss a pending proposal; stores nothing. |
+| `GET` | `/v1/sessions/{id}/lessons-used` | mode | Memory entries recorded as auto-loaded into that session (`{sessionId, entries:[{scope,key,value,tags,injectedAt}]}`); the "lessons used" marker. Display-only. |
 | `GET` | `/v1/knowledge` | mode | Pinned paths for `?scope=project` or `global`. |
 | `PUT` | `/v1/knowledge` | **yes** | Pin (`{path,note?,author?,scope?}`). Notes are scrubbed. Blocked in attach-only. |
 | `DELETE` | `/v1/knowledge` | **yes** | Unpin (`{path,scope?}`). Blocked in attach-only. |

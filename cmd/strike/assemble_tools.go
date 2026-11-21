@@ -467,6 +467,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 		tool.NewTodoRead(todoStore),
 		tools.NewMemoryWriteScoped(memoryStore, globalMemory),
 		tools.NewMemoryReadScoped(memoryStore, globalMemory),
+		tools.NewLessonPropose(memoryStore, wsTrust.trusted),
 		tools.NewKnowledge(projectKnowledge, globalKnowledge),
 		tools.NewIssueWrite(issueStore),
 		tools.NewIssueRead(issueStore),
@@ -919,8 +920,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			ProjectRoot:    projectRoot,
 			Instructions:   sessionInstructions,
 			Memory: enginebind.CombineMemory(
-				enginebind.Memory(memoryStore),
-				enginebind.Memory(globalMemory),
+				enginebind.MemoryForSession(memoryStore, sid),
+				enginebind.MemoryForSession(globalMemory, sid),
 				enginebind.Knowledge(projectKnowledge),
 				enginebind.Knowledge(globalKnowledge),
 			),

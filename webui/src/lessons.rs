@@ -1,15 +1,19 @@
 //! Lessons capture, slice 1 (#1376): "Remember this" on the user's own
 //! transcript messages opens a lesson draft, pre-filled from the message,
 //! that is stored through the existing `/v1/memory` route (#1271, which
-//! redacts on write) only when the user confirms it. Agent-proposed
-//! lessons and the "lesson used" marker need daemon provenance and are a
-//! follow-up slice. feature:lessons
+//! redacts on write) only when the user confirms it.
+//!
+//! Slice 2 (#1874): agent-proposed lessons wait, pending, in the Memory
+//! panel (`/v1/memory/proposals`) until the operator approves, edits, or
+//! dismisses them; and a quiet session-header marker lists exactly the
+//! memory entries the daemon recorded as auto-loaded into this session
+//! (`/v1/sessions/{id}/lessons-used`). feature:lessons
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 
-use crate::api::{get_json, put_json};
+use crate::api::{delete_json, get_json, patch_json, post_json_value, put_json};
 
 /// Tag every captured lesson carries, so the Memory panel filter finds it.
 pub const LESSON_TAG: &str = "lesson";
@@ -271,6 +275,367 @@ pub fn LessonDraftDialog(
     }
 }
 
+/// One pending proposal from `GET /v1/memory/proposals`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct Proposal {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub value: String,
+    #[serde(default)]
+    pub scope: String,
+    #[serde(default)]
+    pub session: String,
+}
+
+#[derive(Deserialize, Default)]
+struct ProposalList {
+    #[serde(default)]
+    proposals: Option<Vec<Proposal>>,
+}
+
+/// Route for one proposal; `action` is "" (edit/dismiss) or "approve".
+pub fn proposal_path(id: &str, action: &str) -> String {
+    let base = format!("/v1/memory/proposals/{}", crate::api::js_encode(id));
+    if action.is_empty() {
+        base
+    } else {
+        format!("{base}/{action}")
+    }
+}
+
+/// Validated PATCH body for an edited proposal.
+pub fn edit_body(key: &str, value: &str, global: bool) -> Result<serde_json::Value, String> {
+    if key.trim().is_empty() {
+        return Err("A key is required.".into());
+    }
+    if value.trim().is_empty() {
+        return Err("The lesson text is empty.".into());
+    }
+    Ok(serde_json::json!({
+        "key": key.trim(),
+        "value": value.trim(),
+        "scope": scope_param(global),
+    }))
+}
+
+/// Copy for a failed approve/edit/dismiss. A 409 means the key is taken:
+/// a second Approve replaces it.
+pub fn action_error_text(err: &str) -> String {
+    if err.starts_with("HTTP 409") {
+        return "A memory entry with this key already exists. Approve again to replace it, or Edit the key.".into();
+    }
+    if err.starts_with("HTTP 404") {
+        return "That proposal is no longer pending.".into();
+    }
+    save_error_text(err)
+}
+
+fn scope_label(scope: &str) -> &'static str {
+    if scope == "global" {
+        "Global"
+    } else {
+        "Workspace"
+    }
+}
+
+/// Pending lesson proposals in the Memory panel: visually distinct from
+/// stored entries, each with Approve / Edit / Dismiss. Nothing here is in
+/// any prompt until approved.
+#[component]
+pub fn PendingLessons(
+    base: RwSignal<String>,
+    token: RwSignal<String>,
+    status: RwSignal<String>,
+    storage_rev: RwSignal<u32>,
+) -> impl IntoView {
+    let rows = RwSignal::new(Vec::<Proposal>::new());
+    let error = RwSignal::new(String::new());
+    let busy = RwSignal::new(String::new());
+    let confirm_replace = RwSignal::new(String::new());
+    // Edit state is split so typing never re-renders the row.
+    let editing_id = RwSignal::new(String::new());
+    let edit_draft = RwSignal::new(Draft::default());
+
+    let load = move || {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match get_json::<ProposalList>(&b, &t, "/v1/memory/proposals").await {
+                Ok(list) => {
+                    rows.set(list.proposals.unwrap_or_default());
+                }
+                Err(e) if e.starts_with("HTTP 501") => rows.set(Vec::new()),
+                Err(e) => error.set(format!("Could not load pending lessons: {e}")),
+            }
+        });
+    };
+    Effect::new(move |_| {
+        let _ = storage_rev.get();
+        load();
+    });
+    let changed = move |msg: String| {
+        status.set(msg);
+        error.set(String::new());
+        storage_rev.update(|r| *r = r.wrapping_add(1));
+    };
+    let approve = move |id: String| {
+        if !busy.get_untracked().is_empty() {
+            return;
+        }
+        let replace = confirm_replace.get_untracked() == id;
+        busy.set(id.clone());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let body = serde_json::json!({ "replace": replace });
+            match post_json_value(&b, &t, &proposal_path(&id, "approve"), body).await {
+                Ok(_) => {
+                    confirm_replace.set(String::new());
+                    changed("Lesson approved".into());
+                }
+                Err(e) => {
+                    if e.starts_with("HTTP 409") {
+                        confirm_replace.set(id.clone());
+                    }
+                    error.set(action_error_text(&e));
+                }
+            }
+            busy.set(String::new());
+        });
+    };
+    let dismiss = move |id: String| {
+        if !busy.get_untracked().is_empty() {
+            return;
+        }
+        busy.set(id.clone());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match delete_json(&b, &t, &proposal_path(&id, ""), None).await {
+                Ok(()) => changed("Lesson proposal dismissed".into()),
+                Err(e) => error.set(action_error_text(&e)),
+            }
+            busy.set(String::new());
+        });
+    };
+    let save_edit = move |id: String| {
+        if !busy.get_untracked().is_empty() {
+            return;
+        }
+        let d = edit_draft.get_untracked();
+        let body = match edit_body(&d.key, &d.value, d.global) {
+            Ok(body) => body,
+            Err(e) => {
+                error.set(e);
+                return;
+            }
+        };
+        busy.set(id.clone());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            match patch_json(&b, &t, &proposal_path(&id, ""), body).await {
+                Ok(()) => {
+                    editing_id.set(String::new());
+                    confirm_replace.set(String::new());
+                    changed("Lesson proposal updated".into());
+                }
+                Err(e) => error.set(action_error_text(&e)),
+            }
+            busy.set(String::new());
+        });
+    };
+
+    view! {
+        <Show when=move || !rows.get().is_empty() || !error.get().is_empty()>
+            <section class="lesson-pending" data-lesson-pending="section" aria-label="Pending lessons">
+                <h3>{move || format!("Pending lessons ({})", rows.get().len())}</h3>
+                <p class="hint">"Proposed by a session. None of these load into a prompt until you approve them."</p>
+                <Show when=move || !error.get().is_empty()>
+                    <p class="hint storage-error" role="alert" data-lesson-pending="error">{move || error.get()}</p>
+                </Show>
+                <ul class="lesson-pending-list">
+                    {move || rows.get().into_iter().map(|p| {
+                        let id = p.id.clone();
+                        view! {
+                            <li class="lesson-pending-row" data-proposal-id=id.clone()>
+                                {move || {
+                                    let p = p.clone();
+                                    if editing_id.get() == p.id {
+                                        let id_save = p.id.clone();
+                                        view! {
+                                            <div class="lesson-pending-edit">
+                                                <label class="lesson-field">"Lesson"
+                                                    <textarea rows="3" data-lesson-pending="value"
+                                                        prop:value=move || edit_draft.get().value
+                                                        on:input=move |ev| {
+                                                            let v = event_target_value(&ev);
+                                                            edit_draft.update(|d| d.value = v);
+                                                        }></textarea>
+                                                </label>
+                                                <label class="lesson-field">"Key"
+                                                    <input type="text" data-lesson-pending="key"
+                                                        prop:value=move || edit_draft.get().key
+                                                        on:input=move |ev| {
+                                                            let v = event_target_value(&ev);
+                                                            edit_draft.update(|d| d.key = v);
+                                                        } />
+                                                </label>
+                                                <div class="chips" role="radiogroup" aria-label="Lesson scope">
+                                                    <button type="button"
+                                                        aria-pressed=move || (!edit_draft.get().global).to_string()
+                                                        class=move || if edit_draft.get().global { "chip" } else { "chip on" }
+                                                        on:click=move |_| edit_draft.update(|d| d.global = false)>"This workspace"</button>
+                                                    <button type="button"
+                                                        aria-pressed=move || edit_draft.get().global.to_string()
+                                                        class=move || if edit_draft.get().global { "chip on" } else { "chip" }
+                                                        on:click=move |_| edit_draft.update(|d| d.global = true)>"Global"</button>
+                                                </div>
+                                                <div class="confirm-actions">
+                                                    <button type="button" class="secondary" data-lesson-pending="cancel-edit"
+                                                        on:click=move |_| editing_id.set(String::new())>"Cancel"</button>
+                                                    <button type="button" data-lesson-pending="save"
+                                                        disabled=move || !busy.get().is_empty()
+                                                        on:click=move |_| save_edit(id_save.clone())>"Save"</button>
+                                                </div>
+                                            </div>
+                                        }.into_any()
+                                    } else {
+                                        let (id_a, id_e, id_d) = (p.id.clone(), p.id.clone(), p.id.clone());
+                                        let id_r = p.id.clone();
+                                        let draft = Draft {
+                                            key: p.key.clone(),
+                                            value: p.value.clone(),
+                                            global: p.scope == "global",
+                                        };
+                                        let meta = if p.session.is_empty() {
+                                            scope_label(&p.scope).to_string()
+                                        } else {
+                                            format!("{} \u{b7} from {}", scope_label(&p.scope), p.session.chars().take(8).collect::<String>())
+                                        };
+                                        view! {
+                                            <div class="lesson-pending-view">
+                                            <div class="lesson-pending-head">
+                                                <span class="lesson-pending-key">{p.key.clone()}</span>
+                                                <span class="hint">{meta}</span>
+                                            </div>
+                                            <p class="lesson-pending-text">{p.value.clone()}</p>
+                                            <div class="lesson-pending-actions">
+                                                <button type="button" data-lesson-pending="approve"
+                                                    disabled=move || !busy.get().is_empty()
+                                                    on:click=move |_| approve(id_a.clone())>
+                                                    {move || if confirm_replace.get() == id_r { "Approve and replace" } else { "Approve" }}
+                                                </button>
+                                                <button type="button" class="secondary" data-lesson-pending="edit"
+                                                    on:click=move |_| {
+                                                        edit_draft.set(draft.clone());
+                                                        error.set(String::new());
+                                                        editing_id.set(id_e.clone());
+                                                    }>"Edit"</button>
+                                                <button type="button" class="secondary" data-lesson-pending="dismiss"
+                                                    disabled=move || !busy.get().is_empty()
+                                                    on:click=move |_| dismiss(id_d.clone())>"Dismiss"</button>
+                                            </div>
+                                            </div>
+                                        }.into_any()
+                                    }
+                                }}
+                            </li>
+                        }
+                    }).collect_view()}
+                </ul>
+            </section>
+        </Show>
+    }
+}
+
+/// One entry from `GET /v1/sessions/{id}/lessons-used`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct UsedEntry {
+    #[serde(default)]
+    pub scope: String,
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub value: String,
+}
+
+#[derive(Deserialize, Default)]
+struct UsedList {
+    #[serde(default)]
+    entries: Option<Vec<UsedEntry>>,
+}
+
+/// Marker copy: "1 lesson used" / "3 lessons used".
+pub fn used_label(n: usize) -> String {
+    if n == 1 {
+        "1 lesson used".into()
+    } else {
+        format!("{n} lessons used")
+    }
+}
+
+/// Quiet session-header marker listing exactly the memory entries the
+/// daemon recorded as auto-loaded into this session. Titles first; each
+/// expands to its full text. Display-only; hidden when nothing was used.
+#[component]
+pub fn LessonsUsedMarker(
+    base: RwSignal<String>,
+    token: RwSignal<String>,
+    session: RwSignal<String>,
+    busy: RwSignal<bool>,
+    storage_rev: RwSignal<u32>,
+) -> impl IntoView {
+    let used = RwSignal::new(Vec::<UsedEntry>::new());
+    let epoch = RwSignal::new(0u32);
+    // Refetch on session switch, at each turn edge (the record is written
+    // while a turn's prompt is built), and after memory changes.
+    Effect::new(move |_| {
+        let sid = session.get();
+        let _ = (busy.get(), storage_rev.get());
+        let gen = epoch.get_untracked().wrapping_add(1);
+        epoch.set(gen);
+        if sid.is_empty() {
+            used.set(Vec::new());
+            return;
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let path = format!("/v1/sessions/{}/lessons-used", crate::api::js_encode(&sid));
+            let rows = get_json::<UsedList>(&b, &t, &path)
+                .await
+                .ok()
+                .and_then(|l| l.entries)
+                .unwrap_or_default();
+            if epoch.get_untracked() == gen {
+                used.set(rows);
+            }
+        });
+    });
+    view! {
+        <Show when=move || !used.get().is_empty()>
+            <details class="lessons-used" data-lessons-used="marker">
+                <summary data-lessons-used="summary">{move || format!("{} \u{2014} view", used_label(used.get().len()))}</summary>
+                <ul class="lessons-used-list">
+                    {move || used.get().into_iter().map(|e| {
+                        view! {
+                            <li data-lesson-used-key=e.key.clone()>
+                                <details>
+                                    <summary>
+                                        <span class="lessons-used-key">{e.key.clone()}</span>
+                                        " "
+                                        <span class="hint">{scope_label(&e.scope)}</span>
+                                    </summary>
+                                    <p class="lessons-used-text">{e.value.clone()}</p>
+                                </details>
+                            </li>
+                        }
+                    }).collect_view()}
+                </ul>
+            </details>
+        </Show>
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,5 +696,40 @@ mod tests {
     fn key_list_tolerates_null_entries() {
         let l: KeyList = serde_json::from_str(r#"{"entries":null}"#).unwrap();
         assert!(l.entries.unwrap_or_default().is_empty());
+    }
+    #[test]
+    fn proposal_routes_and_edit_body() {
+        assert_eq!(proposal_path("prop-1", ""), "/v1/memory/proposals/prop-1");
+        assert_eq!(proposal_path("prop-1", "approve"), "/v1/memory/proposals/prop-1/approve");
+        assert_eq!(
+            edit_body(" k ", " v ", true).unwrap(),
+            serde_json::json!({"key": "k", "value": "v", "scope": "global"})
+        );
+        assert_eq!(edit_body("k", "v", false).unwrap()["scope"], "project");
+        assert!(edit_body(" ", "v", false).is_err());
+        assert!(edit_body("k", " ", false).is_err());
+    }
+
+    #[test]
+    fn action_errors_explain_conflict_and_gone() {
+        assert!(action_error_text(r#"HTTP 409 {"error":"exists"}"#).contains("Approve again to replace"));
+        assert_eq!(action_error_text("HTTP 404 {}"), "That proposal is no longer pending.");
+        assert_eq!(action_error_text(r#"HTTP 400 {"error":"bad scope"}"#), "Not saved: bad scope");
+    }
+
+    #[test]
+    fn used_label_counts() {
+        assert_eq!(used_label(1), "1 lesson used");
+        assert_eq!(used_label(2), "2 lessons used");
+    }
+
+    #[test]
+    fn lists_tolerate_null() {
+        let p: ProposalList = serde_json::from_str(r#"{"proposals":null}"#).unwrap();
+        assert!(p.proposals.unwrap_or_default().is_empty());
+        let u: UsedList = serde_json::from_str(r#"{"sessionId":"s","entries":[{"scope":"global","key":"k","value":"v","injectedAt":"x"}]}"#).unwrap();
+        assert_eq!(u.entries.unwrap()[0], UsedEntry { scope: "global".into(), key: "k".into(), value: "v".into() });
+        assert_eq!(scope_label("global"), "Global");
+        assert_eq!(scope_label("project"), "Workspace");
     }
 }

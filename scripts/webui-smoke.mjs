@@ -3259,6 +3259,104 @@ try {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
+  // Lessons slice 2 (#1874): an untrusted workspace refuses a proposal; a
+  // proposal then waits pending in the Memory panel (nothing stored);
+  // Dismiss stores nothing; Approve stores a lesson-tagged entry; the next
+  // turn auto-loads it and the session marker lists exactly that entry.
+  {
+    const authed = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const api = (path, init = {}) => fetch(`http://127.0.0.1:${port}${path}`, { headers: authed, ...init });
+    const proposedKey = "lesson-smoke-proposed";
+    const propose = (key, value) =>
+      api("/v1/memory/proposals", { method: "POST", body: JSON.stringify({ key, value, scope: "project" }) });
+    const trust = await (await api("/v1/workspace/trust")).json();
+    let granted = false;
+    if (!trust.trusted) {
+      const refused = await propose("lesson-smoke-untrusted", "refused while untrusted");
+      if (refused.status !== 403) throw new Error(`untrusted propose ${refused.status} ${await refused.text()}`);
+      const grant = await api("/v1/workspace/trust", { method: "POST", body: JSON.stringify({ action: "grant" }) });
+      if (!grant.ok) throw new Error(`lessons smoke: trust grant ${grant.status} ${await grant.text()}`);
+      granted = true;
+    }
+    try {
+      const dismissRes = await propose("lesson-smoke-dismissed", "dismiss me");
+      if (dismissRes.status !== 201) throw new Error(`propose ${dismissRes.status} ${await dismissRes.text()}`);
+      const proposedRes = await propose(proposedKey, "Run make test-fast before pushing.");
+      if (proposedRes.status !== 201) throw new Error(`propose ${proposedRes.status} ${await proposedRes.text()}`);
+      if ((await memoryKeys()).some((r) => r.key === proposedKey)) throw new Error("a pending proposal was stored");
+      await runPalette("Memory");
+      const pendingRow = (key) =>
+        `[...document.querySelectorAll('[data-lesson-pending="section"] .lesson-pending-row')].find((r) => r.innerText.includes(${JSON.stringify(key)}))`;
+      await waitFor(
+        "pending lessons section lists both proposals",
+        async () => ({
+          ok: (await evaluate(`!!(${pendingRow(proposedKey)}) && !!(${pendingRow("lesson-smoke-dismissed")})`)) === true,
+        }),
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      await evaluate(`(${pendingRow("lesson-smoke-dismissed")}).querySelector('[data-lesson-pending="dismiss"]').click()`);
+      await waitFor(
+        "dismissed proposal leaves the list and stores nothing",
+        async () => ({
+          ok:
+            (await evaluate(`!(${pendingRow("lesson-smoke-dismissed")})`)) === true &&
+            !(await memoryKeys()).some((r) => r.key === "lesson-smoke-dismissed"),
+        }),
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      await evaluate(`(${pendingRow(proposedKey)}).querySelector('[data-lesson-pending="approve"]').click()`);
+      await waitFor(
+        "approved proposal is stored lesson-tagged and leaves pending",
+        async () => {
+          const row = (await memoryKeys()).find((r) => r.key === proposedKey);
+          const pending = await evaluate(`!!(${pendingRow(proposedKey)})`);
+          return { ok: !!row && row.tags.includes("lesson") && pending === false, body: JSON.stringify(row) };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      // The next turn's prompt auto-loads the approved lesson.
+      const turn = await api("/v1/ops", {
+        method: "POST",
+        body: JSON.stringify({ type: "user.input", data: { text: "lessons smoke turn" } }),
+      });
+      if (!turn.ok) throw new Error(`lessons smoke turn ${turn.status} ${await turn.text()}`);
+      const st = await (await api("/v1/status")).json();
+      if (!st.sessionId) throw new Error(`lessons smoke: no live session id ${JSON.stringify(st)}`);
+      await waitFor(
+        "daemon records the approved lesson as used by this session",
+        async () => {
+          const used = await (await api(`/v1/sessions/${encodeURIComponent(st.sessionId)}/lessons-used`)).json();
+          return { ok: (used.entries || []).some((e) => e.key === proposedKey), body: JSON.stringify(used).slice(0, 400) };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      const usedSel = `[data-lessons-used="marker"] [data-lesson-used-key="${proposedKey}"]`;
+      await waitFor(
+        "session header marker lists the approved lesson",
+        async () => ({
+          ok: (await evaluate(`(() => {
+            const m = document.querySelector('[data-lessons-used="marker"]');
+            if (!m || !m.querySelector('${usedSel}')) return false;
+            return /\\d+ lessons? used/.test(m.querySelector('[data-lessons-used="summary"]').innerText);
+          })()`)) === true,
+        }),
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      await evaluate(`(() => {
+        document.querySelector('[data-lessons-used="marker"]').open = true;
+        document.querySelector('${usedSel} details').open = true;
+        return true;
+      })()`);
+      const usedText = String(await evaluate(`document.querySelector('${usedSel}').innerText`));
+      if (!usedText.includes("Run make test-fast before pushing.")) {
+        throw new Error(`marker entry does not expand to the lesson text: ${usedText}`);
+      }
+      await evaluate(`document.querySelector('[data-lessons-used="marker"]').open = false`);
+    } finally {
+      await api(`/v1/memory/${proposedKey}?scope=project`, { method: "DELETE" });
+      if (granted) await api("/v1/workspace/trust", { method: "POST", body: JSON.stringify({ action: "revoke" }) });
+    }
+  }
   // Local issues (#1500): create → listed under Open → close → listed under
   // Closed → still closed after the panel remounts (fresh daemon read) and
   // in the daemon's own list. An empty title is refused inline.
