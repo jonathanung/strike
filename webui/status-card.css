@@ -1,0 +1,92 @@
+/* feature:status-card begin (#1397) */
+/* Zero-turn status card: record-derived buckets, figures and one recorded
+   next step. Agent-sourced values carry the "agent-reported" chip; an
+   unmeasured figure is a dash (data-measured="false"). Existing tokens only. */
+.status-card {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 8px;
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--type-sm);
+}
+.status-card .sc-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+.status-card .sc-label {
+  color: var(--muted);
+  margin: 0;
+}
+.status-card p { margin: 0; }
+.status-card .sc-buckets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.status-card .sc-bucket {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: var(--border-width) solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  min-width: 0;
+}
+.status-card .sc-bucket[data-bucket="running"] { border-color: var(--accent-alt); }
+.status-card .sc-bucket[data-bucket="waiting"] { border-color: var(--warning); }
+.status-card .sc-bucket[data-bucket="finished"] { border-color: var(--success); }
+.status-card .sc-count {
+  font-size: var(--type-md);
+  font-variant-numeric: tabular-nums;
+}
+.status-card .sc-names {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+.status-card .sc-goal,
+.status-card .sc-state,
+.status-card .sc-next {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+}
+.status-card .sc-next .sc-label { color: var(--warning); }
+.status-card .sc-figs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 4px 8px;
+  margin: 0;
+}
+.status-card .sc-fig { min-width: 0; }
+.status-card .sc-fig dt { color: var(--muted); }
+.status-card .sc-fig dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.status-card .sc-fig[data-source="agent"] { grid-column: 1 / -1; }
+.status-card .sc-fig[data-measured="false"] .sc-val { color: var(--muted); }
+.status-card .sc-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: var(--border-width) solid var(--warning);
+  border-radius: var(--radius-sm);
+  color: var(--warning);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.status-card .sc-list { margin: 0; }
+@media (max-width: 480px) {
+  .status-card .sc-buckets { grid-template-columns: 1fr; }
+}
+/* feature:status-card end */

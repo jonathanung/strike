@@ -2195,3 +2195,44 @@ func TestKeepAwakeIsGlobalOnly(t *testing.T) {
 		t.Fatalf("global keepAwake = %q, want on", cfg.KeepAwake)
 	}
 }
+
+func TestLoadSandboxRuntime(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		want    string
+		wantErr bool
+	}{
+		{"default omitted", `{}`, "", false},
+		{"process", `{"sandboxRuntime":"process"}`, "process", false},
+		{"microvm normalized", `{"sandboxRuntime":" MicroVM "}`, "microvm", false},
+		{"unknown rejected", `{"sandboxRuntime":"vm"}`, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			work := t.TempDir()
+			global := filepath.Join(home, ".strike", "config")
+			if err := os.MkdirAll(filepath.Dir(global), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(global, []byte(tc.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(work)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("Load accepted unknown sandboxRuntime")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.SandboxRuntime != tc.want {
+				t.Fatalf("SandboxRuntime = %q, want %q", cfg.SandboxRuntime, tc.want)
+			}
+		})
+	}
+}
