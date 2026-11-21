@@ -233,8 +233,8 @@ func TestSessionPRStatusFailingOpenPR(t *testing.T) {
 		t.Fatalf("checks = %+v", st.Checks)
 	}
 	// gh is asked for the PR by URL with the rollup fields.
-	if gh.count("pr view "+prURL+" --json number,url,state,reviewDecision,statusCheckRollup") != 1 {
-		t.Fatalf("gh calls = %v", gh.calls)
+	if gh.count("pr view "+prURL+" --json number,url,state,reviewDecision,statusCheckRollup") != 1 || gh.dirs[0] != "" {
+		t.Fatalf("gh calls = %v dirs = %v", gh.calls, gh.dirs)
 	}
 	// Second poll inside the cache TTL does not run gh again.
 	if code, _ := prGet(t, srv, "/v1/sessions/s1/pr"); code != http.StatusOK {

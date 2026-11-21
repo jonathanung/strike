@@ -201,10 +201,14 @@ func (s *Server) prWatchStatusFor(ctx context.Context, id string, refresh bool) 
 
 	// A bare number resolves against gh's working directory, so it must
 	// run in the session's own repo, never the daemon's cwd.
-	dir := strings.TrimSpace(meta.ProjectKey)
-	if base.URL == "" && dir == "" {
-		base.Reason = "PR tracking unavailable: this session recorded a PR number without a link or project directory."
-		return base, nil
+	// A URL needs no working directory (a stale one would only break gh).
+	dir := ""
+	if base.URL == "" {
+		dir = strings.TrimSpace(meta.ProjectKey)
+		if dir == "" {
+			base.Reason = "PR tracking unavailable: this session recorded a PR number without a link or project directory."
+			return base, nil
+		}
 	}
 
 	key := id + "\n" + base.URL + "\n" + strconv.Itoa(base.Number)
