@@ -330,6 +330,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1731451909bde27714eacba19c2566362a7f35224f52b153d3f42cf60f72472"
 
 [[package]]
+name = "error-copy"
+version = "0.1.0"
+
+[[package]]
 name = "event-listener"
 version = "5.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1405,6 +1409,7 @@ dependencies = [
  "dashboard-view",
  "debug-mode",
  "edit-resend",
+ "error-copy",
  "gloo-net",
  "ideas-inbox",
  "js-sys",

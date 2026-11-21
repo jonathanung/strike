@@ -11,6 +11,7 @@ use std::rc::Rc;
 use gloo_net::http::Request;
 use leptos::callback::{Callable, UnsyncCallback};
 use leptos::prelude::*;
+use crate::error_notice::{humanize, ErrorNotice};
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::closure::Closure;
@@ -1657,14 +1658,9 @@ pub fn NotificationBell(
                                             <button class="secondary" on:click=move |_| open_settings.run(())>"Settings"</button>
                                         </div>
                                     </div>
-                                    <Show when=move || !load_error.get().is_empty()>
-                                        <div class="notify-error" role="alert">
-                                            <span>{move || load_error.get()}</span>
-                                            <button class="secondary" on:click=move |_| refresh.run(())>"Retry"</button>
-                                        </div>
-                                    </Show>
+                                    <ErrorNotice message=load_error on_retry=refresh />
                                     <Show when=move || !form_error.get().is_empty()>
-                                        <p class="notify-error" role="alert">{move || form_error.get()}</p>
+                                        <p class="notify-error" role="alert">{move || humanize(&form_error.get())}</p>
                                     </Show>
                                     <div class="notify-list" aria-live="polite">
                                         {move || {
@@ -1731,7 +1727,7 @@ pub fn NotificationBell(
                                     <button class="secondary" on:click=move |_| settings.set(false)>"Back"</button>
                                 </div>
                                 <Show when=move || !form_error.get().is_empty()>
-                                    <p class="notify-error" role="alert">{move || form_error.get()}</p>
+                                    <p class="notify-error" role="alert">{move || humanize(&form_error.get())}</p>
                                 </Show>
                                 <label class="notify-check">
                                     <input type="checkbox" prop:checked=move || draft_enabled.get() on:change=move |_| draft_enabled.update(|v| *v = !*v) />

@@ -7,6 +7,8 @@ use std::rc::Rc;
 
 use gloo_net::http::Request;
 use leptos::prelude::*;
+use leptos::callback::UnsyncCallback;
+use crate::error_notice::{humanize, ErrorNotice};
 use leptos::task::spawn_local;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -761,10 +763,7 @@ pub fn AppsPane(
                         return view! {
                             <div class="apps-launch">
                                 <h2 class="panel-title">"Apps"</h2>
-                                <div class="notice" role="alert">
-                                    <span>{err}</span>
-                                    <button class="secondary" on:click=move |_| retry()>"Retry"</button>
-                                </div>
+                                <ErrorNotice message=catalog_error on_retry=UnsyncCallback::new(move |_: ()| retry()) />
                             </div>
                         }.into_any();
                     }
@@ -849,10 +848,7 @@ pub fn AppsPane(
                     ().into_any()
                 } else {
                     view! {
-                        <div class="notice" role="alert">
-                            <span>{err}</span>
-                            <button class="secondary" on:click=move |_| reload.update(|n| *n = n.wrapping_add(1))>"Retry"</button>
-                        </div>
+                        <ErrorNotice message=list_error on_retry=UnsyncCallback::new(move |_: ()| reload.update(|n| *n = n.wrapping_add(1))) />
                     }.into_any()
                 };
                 view! {
@@ -913,7 +909,7 @@ pub fn AppsPane(
                                 if phase == Reading::Error {
                                     let derr = detail_error.get();
                                     return view! {
-                                        <div class="notice" role="alert"><span>{derr}</span></div>
+                                        <div class="notice" role="alert"><span>{humanize(&derr)}</span></div>
                                     }.into_any();
                                 }
                                 if phase == Reading::Empty {
@@ -997,7 +993,7 @@ pub fn AppsPane(
                                         </div>
                                         <div class="apps-actions">
                                             <Show when=move || !action_error.get().is_empty()>
-                                                <div class="notice" role="alert"><span>{move || action_error.get()}</span></div>
+                                                <div class="notice" role="alert"><span>{move || humanize(&action_error.get())}</span></div>
                                             </Show>
                                             <Show when=move || needs_body>
                                                 <textarea

@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use leptos::prelude::*;
+use crate::error_notice::humanize;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -910,7 +911,7 @@ pub fn SchedulePage(
             </div>
             <p class="hint">"A clock in the daemon. Unattended runs use the workspace permission mode, or plan when the workspace has none. Plan denies writes."</p>
             <Show when=move || !error.get().is_empty()>
-                <p class="sched-error" role="alert">{move || error.get()}</p>
+                <p class="sched-error" role="alert">{move || humanize(&error.get())}</p>
             </Show>
             <Show when=move || !retry_open.get().is_empty()>
                 <button type="button" class="secondary" data-sched-retry="true" on:click=move |_| open_session(retry_open.get())>"Retry"</button>
@@ -1130,7 +1131,7 @@ pub fn SchedulePage(
                                 return view! { <p class="hint">"Loading history…"</p> }.into_any();
                             }
                             if !history_error.get().is_empty() {
-                                return view! { <p class="hint" role="alert">{history_error.get()}</p> }.into_any();
+                                return view! { <p class="hint" role="alert">{humanize(&history_error.get())}</p> }.into_any();
                             }
                             if rows.is_empty() {
                                 return view! { <p class="hint">"No runs yet."</p> }.into_any();

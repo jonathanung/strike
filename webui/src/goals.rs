@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use leptos::prelude::*;
+use crate::error_notice::humanize;
 use leptos::task::spawn_local;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -756,7 +757,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                                 </Show>
                                 <p class="goals-rel">"A schedule fires on a clock. A task runner walks a plan section by section. This page is neither: one loop, one verification command, and the guards above. A future schedule may start a goal. It cannot skip these stops."</p>
                                 <Show when=move || !form_error.get().is_empty()>
-                                    <p class="goals-error" role="alert">{move || form_error.get()}</p>
+                                    <p class="goals-error" role="alert">{move || humanize(&form_error.get())}</p>
                                 </Show>
                                 <div class="goals-actions">
                                     <button id="goals-run" class="primary" type="submit" disabled=move || busy.get()>"Run goal"</button>
@@ -825,7 +826,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                                         </div>
                                     }.into_any()
                                 } else if !reason.is_empty() {
-                                    view! { <p class="goals-error" role="alert">{reason}</p> }.into_any()
+                                    view! { <p class="goals-error" role="alert">{humanize(&reason)}</p> }.into_any()
                                 } else {
                                     view! { <span></span> }.into_any()
                                 }
@@ -928,7 +929,7 @@ pub fn GoalsPane(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoVi
                     }.into_any()
                 }}
                 <Show when=move || !note.get().is_empty()>
-                    <p class="goals-error" role="alert">{move || note.get()}</p>
+                    <p class="goals-error" role="alert">{move || humanize(&note.get())}</p>
                 </Show>
             </section>
         </div>

@@ -15,6 +15,7 @@
 //! exactly what lands on disk, and nothing is logged or cached here.
 
 use leptos::prelude::*;
+use crate::error_notice::humanize;
 use leptos::task::spawn_local;
 
 use crate::api::{api, auth_header};
@@ -112,7 +113,7 @@ pub fn DiagDownload(
                 <p class="hint" role="status">"diagnostic bundle downloaded"</p>
             </Show>
             <Show when=move || !error.get().is_empty()>
-                <p class="banner" role="alert">{move || error.get()}</p>
+                <p class="banner" role="alert">{move || humanize(&error.get())}</p>
                 <button
                     type="button"
                     class="secondary"
