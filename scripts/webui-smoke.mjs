@@ -14,6 +14,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
+import { createServer } from "node:http";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
 import { seedRepeatedWorkflow, skillProposalsCheck } from "./webui-skill-proposals-check.mjs";
 import {
@@ -3949,6 +3950,119 @@ try {
     "read-aloud explains when no voice is available",
   );
 
+  // Mermaid diagrams (#1368). A seeded message with a flowchart (one
+  // label carrying HTML/script markup), a sequence diagram and a broken
+  // block: the valid ones render as SVG with the markup as inert text, the
+  // broken one falls back to its source with the note, and the source
+  // toggle and zoom controls round-trip.
+  const fence = "```";
+  const mermaidText = [
+    "Mermaid smoke",
+    "",
+    `${fence}mermaid`,
+    "flowchart TD",
+    "  A[Start] --> B{Ok?}",
+    "  B -->|yes| C[\"<img src=x onerror=alert(1)><b>inert</b>\"]",
+    fence,
+    "",
+    `${fence}mermaid`,
+    "sequenceDiagram",
+    "  Alice->>Bob: ping",
+    "  Bob-->>Alice: pong",
+    fence,
+    "",
+    `${fence}mermaid`,
+    "flowchart TD",
+    "  A ?? B",
+    fence,
+  ].join("\n");
+  const mermaidSeed = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ type: "user.input", data: { text: mermaidText } }),
+  });
+  if (!mermaidSeed.ok) {
+    throw new Error(`seed mermaid user.input ${mermaidSeed.status} ${await mermaidSeed.text()}`);
+  }
+  const mermaidProbe = async () => {
+    const raw = await evaluate(`(() => {
+      const flow = document.querySelector('[data-mermaid="flowchart"]');
+      const seq = document.querySelector('[data-mermaid="sequence"]');
+      const failed = document.querySelector("[data-mermaid-failed]");
+      const svg = flow ? flow.querySelector("svg") : null;
+      return JSON.stringify({
+        flow: !!svg,
+        flowText: svg ? svg.textContent : "",
+        injected: flow ? !!flow.querySelector("svg img, svg b, svg script, svg foreignObject") : false,
+        seq: seq ? (seq.querySelector("svg") || {}).textContent || "" : "",
+        failNote: failed ? (failed.querySelector(".mmd-fail-note") || {}).textContent || "" : "",
+        failSource: failed ? !!failed.querySelector("pre.sx-code") : false,
+        canvasHidden: flow ? flow.querySelector(".mmd-canvas").hidden : null,
+        sourceHidden: flow ? flow.querySelector(".mmd-source").hidden : null,
+        width: svg ? svg.getAttribute("width") : "",
+        fit: flow ? flow.querySelector(".mmd-canvas").classList.contains("mmd-z2") : null,
+        shown: svg ? Math.round(svg.getBoundingClientRect().width) : 0,
+        styleAttr: svg ? svg.getAttribute("style") : null,
+      });
+    })()`);
+    return JSON.parse(raw || "{}");
+  };
+  const mermaidShown = await waitFor(
+    "mermaid flowchart, sequence and fallback in the transcript",
+    async () => {
+      const p = await mermaidProbe();
+      return {
+        ok: p.flow && p.flowText.includes("Start") && p.flowText.includes("<b>inert</b>") && !p.injected
+          && p.seq.includes("ping") && p.seq.includes("pong")
+          && p.failNote.includes("Diagram didn't parse") && p.failSource
+          && p.canvasHidden === false && p.sourceHidden === true,
+        ...p,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  if (!mermaidShown.flow || mermaidShown.injected) {
+    throw new Error(`mermaid render check failed ${JSON.stringify(mermaidShown)}`);
+  }
+  await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-toggle]').click()`);
+  await waitFor(
+    "mermaid source toggle shows the code block",
+    async () => {
+      const p = await mermaidProbe();
+      return { ok: p.canvasHidden === true && p.sourceHidden === false, ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-toggle]').click()`);
+  await waitFor(
+    "mermaid toggle back to the diagram",
+    async () => {
+      const p = await mermaidProbe();
+      return { ok: p.canvasHidden === false && p.sourceHidden === true && p.fit === true && p.styleAttr === null, ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const fitWidth = (await mermaidProbe()).shown;
+  // The message row can re-render when its turn finishes (elapsed/usage
+  // land), which remounts the block at Fit; click again while still at
+  // Fit so the check measures zoom, not that remount.
+  await waitFor(
+    "mermaid zoom in sizes the diagram explicitly",
+    async () => {
+      let p = await mermaidProbe();
+      if (p.fit) {
+        await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-zoom="in"]').click()`);
+        p = await mermaidProbe();
+      }
+      return { ok: p.fit === false && p.shown > fitWidth, ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-zoom="fit"]').click()`);
+
   // Find in transcript (#1342). The seed above sent "read the makefile"
   // to the open session, so the transcript holds that word in the user
   // bubble and in the echo reply. Keyboard path only: Ctrl+F opens,
@@ -4119,6 +4233,63 @@ try {
   } catch {
     stageAllSeeded = false;
   }
+  // #1341: Preview tab. A real loopback fixture server is picked by
+  // typing its port. The pane labels the proxied destination, the
+  // daemon proxies the fixture under the pane's sandboxed path, and a
+  // port with no listener is reported in the pane, not left blank.
+  {
+    const fixture = createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end("<h1>smoke preview fixture</h1>");
+    });
+    await new Promise((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+    const fixturePort = fixture.address().port;
+    const closedServer = createServer();
+    await new Promise((resolve) => closedServer.listen(0, "127.0.0.1", resolve));
+    const closedPort = closedServer.address().port;
+    await new Promise((resolve) => closedServer.close(resolve));
+    try {
+      await clickSideTab("Preview", "Listening on this gateway");
+      const pickPort = async (n) => {
+        await evaluate(`(() => {
+          const input = document.querySelector('[data-preview-manual]');
+          const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+          set.call(input, ${JSON.stringify(String(n))});
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          document.querySelector('[data-action="preview-open"]').click();
+          return true;
+        })()`);
+      };
+      await pickPort(fixturePort);
+      await waitUntil(
+        `!!document.querySelector('[data-preview-destination="127.0.0.1:${fixturePort}"]') && !!document.querySelector('iframe.preview-frame')`,
+        "preview frame for the fixture port",
+      );
+      const frame = await evaluate(`JSON.stringify({
+        src: document.querySelector('iframe.preview-frame').getAttribute("src"),
+        sandbox: document.querySelector('iframe.preview-frame').getAttribute("sandbox"),
+      })`);
+      const { src, sandbox } = JSON.parse(frame);
+      if (!sandbox || sandbox.includes("allow-same-origin") || !src.includes("/preview/")) {
+        throw new Error(`preview frame attributes src=${src} sandbox=${sandbox}`);
+      }
+      const proxied = await fetch(new URL(src, `http://127.0.0.1:${port}`));
+      const proxiedText = await proxied.text();
+      const proxiedCSP = proxied.headers.get("content-security-policy") || "";
+      if (!proxied.ok || !proxiedText.includes("smoke preview fixture") || !proxiedCSP.includes("sandbox")) {
+        throw new Error(`preview proxy status=${proxied.status} csp=${proxiedCSP} body=${proxiedText.slice(0, 200)}`);
+      }
+      await pickPort(closedPort);
+      await waitUntil(
+        `!!document.querySelector('[data-preview-unreachable]') && document.body.innerText.includes("127.0.0.1:${closedPort}") && !document.querySelector('iframe.preview-frame')`,
+        "preview reports a port with no listener",
+      );
+      await evaluate(`document.querySelector('[data-action="preview-stop"]').click()`);
+      await waitUntil(`!!document.querySelector('[data-preview-empty]')`, "preview stopped");
+    } finally {
+      await new Promise((resolve) => fixture.close(resolve));
+    }
+  }
   await clickSideTab("Git", "Staged");
   // Pre-push review (#1487): the preview route sizes the diff and names the
   // read-only reviewer profile, a start without confirm never spawns (400),
@@ -4167,6 +4338,45 @@ try {
       { timeout: STEP_MS, interval: 250 },
     );
     await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+    // Security mode (#1620): the toggle re-sizes with two turns (reviewer +
+    // verifier) and names the verifier; the suppressions route answers for
+    // the current branch (CI's detached checkout gets a plain 409). No
+    // reviewer or verifier is spawned here.
+    {
+      const secRes = await fetch(`http://127.0.0.1:${port}/v1/git/review?mode=security`, { headers: revHeaders });
+      const sec = await secRes.json();
+      if (!secRes.ok || sec.mode !== "security" || sec.turns !== 2) {
+        throw new Error(`security review preview: HTTP ${secRes.status} ${JSON.stringify(sec).slice(0, 300)}`);
+      }
+      const supRes = await fetch(`http://127.0.0.1:${port}/v1/git/review-suppressions`, { headers: revHeaders });
+      if (![200, 409].includes(supRes.status)) {
+        throw new Error(`review suppressions: HTTP ${supRes.status} ${await supRes.text()}`);
+      }
+      const noReason = await fetch(`http://127.0.0.1:${port}/v1/git/review-suppressions`, {
+        method: "POST",
+        headers: { ...revHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "a.go", cwe: "CWE-89", line: 1, reason: " " }),
+      });
+      if (![400, 409].includes(noReason.status)) {
+        throw new Error(`suppression without a reason accepted: HTTP ${noReason.status}`);
+      }
+      await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+      await evaluate(`(() => { document.querySelector("[data-review-mode-security]").click(); return true; })()`);
+      await waitFor(
+        "security review notice names the verifier",
+        async () => {
+          const raw = await evaluate(`JSON.stringify((() => {
+            const n = document.querySelector("[data-review-notice]");
+            return n ? { text: n.textContent || "", state: n.getAttribute("data-review-state") } : null;
+          })())`);
+          const got = JSON.parse(raw || "null");
+          return { ok: !!got && got.text.includes("independent verifier") && got.text.includes("2 model turns") && got.state === sec.state, got };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await evaluate(`(() => { document.querySelector("[data-review-mode-general]").click(); return true; })()`);
+      await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+    }
   }
   // Ship to PR (#1340): the preview route answers with an honest state
   // (CI checks out a detached merge commit, so "blocked" with a detached

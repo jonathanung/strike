@@ -1514,6 +1514,7 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                     }
                 }
                 Block::Code { lang, text } => {
+                    let mermaid = crate::mermaid::is_mermaid(&lang).then(|| text.clone());
                     let copy = text.clone();
                     // #1575: known fence languages get the file viewer's
                     // `ev-*` token spans; unknown/empty stay plain text.
@@ -1521,7 +1522,7 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                     // Same honest per-button feedback as the message
                     // Copy button (#1582).
                     let copy_state = RwSignal::new(None::<bool>);
-                    view! {
+                    let fence = view! {
                         <div class="sx-fence">
                             <div class="sx-fence-bar">
                                 <span class="sx-lang">{lang}</span>
@@ -1536,7 +1537,16 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                             </div>
                             <pre class="sx-code">{code}</pre>
                         </div>
-                    }.into_any()
+                    };
+                    // Mermaid fence → diagram, with this code block as the
+                    // source view and the parse-failure fallback (#1368).
+                    match mermaid {
+                        Some(source) => view! {
+                            <crate::mermaid::MermaidBlock source=source>{fence}</crate::mermaid::MermaidBlock>
+                        }
+                        .into_any(),
+                        None => fence.into_any(),
+                    }
                 }
             }
         })

@@ -30,6 +30,7 @@ import (
 	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/server/terminal"
+	"github.com/jonathanung/strike/internal/integrate/container"
 	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/persist/suggestion"
@@ -110,6 +111,10 @@ type Options struct {
 	Sandbox *SandboxSnapshot
 	// ReadOnly rejects mutating protocol ops (POST /v1/ops and WS op frames).
 	ReadOnly bool
+	// ContainerRuntime builds the engine CLI behind GET /v1/container/status
+	// (#1584) for a configured binary ("" auto-detects docker, then podman).
+	// Nil uses container.NewCLI; tests inject a fake exec/lookPath.
+	ContainerRuntime func(binary string) *container.CLI
 	// WorkspaceTrustPath is the workspace trust store file
 	// (~/.strike/workspace-trust.json) behind GET/POST /v1/workspace/trust
 	// (#1781). Empty disables the routes (501).
@@ -206,6 +211,9 @@ type Server struct {
 	opsLimit *opLimiter
 	// terms is the side-panel PTY manager.
 	terms *terminal.Manager
+
+	// preview is the selected live-preview target (#1341).
+	preview previewState
 
 	seenOnce sync.Once
 	seen     *SeenStore
@@ -520,6 +528,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/git/review", s.handleGitReviewPreview)
 	s.mux.HandleFunc("POST /v1/git/review", s.handleGitReviewStart)
 	s.mux.HandleFunc("GET /v1/git/review/{id}", s.handleGitReviewResult)
+	s.mux.HandleFunc("POST /v1/git/review/{id}/verify", s.handleGitReviewVerify)
+	s.mux.HandleFunc("GET /v1/git/review-suppressions", s.handleReviewSuppressions)
+	s.mux.HandleFunc("POST /v1/git/review-suppressions", s.handleReviewSuppressions)
+	s.mux.HandleFunc("DELETE /v1/git/review-suppressions", s.handleReviewSuppressions)
 	s.mux.HandleFunc("GET /v1/git/show", s.handleGitShow)
 	s.mux.HandleFunc("POST /v1/git/stage", s.handleGitStage)
 	s.mux.HandleFunc("POST /v1/git/unstage", s.handleGitUnstage)
@@ -711,6 +723,8 @@ func (s *Server) routes() {
 	// Project init (#1581): AGENTS.md bootstrap via host.ProjectInit.
 	s.mux.HandleFunc("GET /v1/init", s.handleProjectInitGet)
 	s.mux.HandleFunc("POST /v1/init", s.handleProjectInitPost)
+	// Container posture (#1584): read-only isolation ladder + engine status.
+	s.mux.HandleFunc("GET /v1/container/status", s.handleContainerStatus)
 	s.mux.HandleFunc("GET /v1/workspace/trust", s.handleWorkspaceTrustGet)
 	s.mux.HandleFunc("POST /v1/workspace/trust", s.handleWorkspaceTrustPost)
 	s.mux.HandleFunc("POST /v1/attachments", s.handleAttachmentIngest)
@@ -742,6 +756,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/terminals/{id}/ticket", s.handleTerminalTicket)
 	s.mux.HandleFunc("GET /v1/terminals/{id}/stream", s.handleTerminalStream)
 	s.mux.HandleFunc("DELETE /v1/terminals/{id}", s.handleTerminalDelete)
+	// Live preview (#1341): user-selected loopback port, proxied under an
+	// unguessable per-port path. See preview.go for the boundary rules.
+	s.mux.HandleFunc("GET /v1/preview/ports", s.handlePreviewPorts)
+	s.mux.HandleFunc("GET /v1/preview", s.handlePreviewGet)
+	s.mux.HandleFunc("PUT /v1/preview", s.handlePreviewPut)
+	s.mux.HandleFunc("DELETE /v1/preview", s.handlePreviewDelete)
+	s.mux.HandleFunc(previewPathPrefix, s.handlePreviewProxy)
 	// Unknown API routes (#1452): these method-less patterns are less
 	// specific than every registered /v1 route, so they only answer paths
 	// no handler claimed (the handler itself synthesises a JSON 405 for a
@@ -773,7 +794,11 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if stateChanging(r.Method) {
+		// /preview/<key>/ is the user's own app behind an unguessable key
+		// (#1341). Its sandboxed frame posts with Origin: null, and the
+		// gateway cookie is never honoured there, so the CSRF origin check
+		// for gateway routes does not apply to it.
+		if stateChanging(r.Method) && !strings.HasPrefix(r.URL.Path, previewPathPrefix) {
 			if origin := r.Header.Get("Origin"); origin != "" && !requestOriginAllowed(r) {
 				http.Error(w, "origin not allowed", http.StatusForbidden)
 				return
