@@ -27,6 +27,10 @@ const (
 	noteChildFinished   = "child.finished"
 	noteChildBlocked    = "child.blocked"
 	noteSessionFinished = "session.finished"
+	// Script schedule runs emit no protocol events; the daemon builds these
+	// directly (ScriptRunNote). Skipped and missed runs produce none.
+	noteScriptFinished = "schedule_script_finished"
+	noteScriptFailed   = "schedule_script_failed"
 )
 
 const (
@@ -75,6 +79,10 @@ type notificationsResponse struct {
 	Notifications []Notification `json:"notifications"`
 	Prefs         NotifyPrefs    `json:"prefs"`
 	Latest        int64          `json:"latest"`
+	// Seen is the daemon-side read state shared by every browser (#1392).
+	Seen NotifySeen `json:"seen"`
+	// Push is the Web Push delivery state for the prefs UI (#1564).
+	Push PushStatus `json:"push"`
 }
 
 type notifyState struct {
@@ -89,6 +97,7 @@ type notifyLog struct {
 	sessionDir string
 	state      notifyState
 	prefs      NotifyPrefs
+	seen       NotifySeen
 	items      []Notification
 	ids        map[string]struct{}
 	now        func() time.Time
@@ -122,6 +131,7 @@ func openNotifyLog(dir, sessionDir string) *notifyLog {
 		_ = os.Chmod(dir, 0o700)
 	}
 	n.load()
+	n.loadSeen()
 	return n
 }
 
@@ -184,10 +194,16 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, prefs, latest := log.snapshot(since)
+	var push PushStatus
+	if p := s.pushes(); p != nil {
+		push = p.status()
+	}
 	writeJSON(w, http.StatusOK, notificationsResponse{
 		Notifications: items,
 		Prefs:         prefs,
 		Latest:        latest,
+		Seen:          log.seenState(),
+		Push:          push,
 	})
 }
 
@@ -489,6 +505,12 @@ func (n *notifyLog) snapshot(since int64) ([]Notification, NotifyPrefs, int64) {
 	return items, prefs, latest
 }
 
+func (n *notifyLog) seenState() NotifySeen {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.seenSnapshotLocked()
+}
+
 func (n *notifyLog) savePrefs(prefs NotifyPrefs) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -770,6 +792,76 @@ func firstSafe(ids ...string) string {
 	return ""
 }
 
+// ScriptRunNote builds the centre record for a finished or failed script
+// schedule run. Its inputs are the two opaque ids, the schedule's name and
+// the exit code: the command and its output are not parameters, so a banner
+// on a shared screen cannot reveal them. Title comes from the kind; body is
+// "<name>: exit <code>" with the name through safeLabel. The subject is the
+// schedule id, so muting that id silences its banners. ok is false when an
+// id is not a safe opaque token.
+func ScriptRunNote(scheduleID, runID, name string, exitCode *int, failed bool, at time.Time) (Notification, bool) {
+	sch, ok := safeID(scheduleID)
+	if !ok {
+		return Notification{}, false
+	}
+	run, ok := safeID(runID)
+	if !ok {
+		return Notification{}, false
+	}
+	kind := noteScriptFinished
+	if failed {
+		kind = noteScriptFailed
+	}
+	label := safeLabel(name, 60)
+	if label == "" {
+		label = "Script schedule"
+	}
+	code := "no exit code"
+	if exitCode != nil {
+		code = fmt.Sprintf("exit %d", *exitCode)
+	}
+	return Notification{
+		ID:        noteID(kind, sch, run),
+		Kind:      kind,
+		SubjectID: sch,
+		Title:     fallbackTitle(kind),
+		Body:      label + ": " + code,
+		Href:      "/#schedule=" + sch + "&run=" + run,
+		At:        at,
+	}, true
+}
+
+// NotifyScriptRun records a finished or failed script schedule run in the
+// notification centre. Banner prefs (enabled, quiet hours, mute) apply at
+// read time as for every other record.
+func (s *Server) NotifyScriptRun(scheduleID, runID, name string, exitCode *int, failed bool) {
+	if s == nil {
+		return
+	}
+	log := s.notifications()
+	note, ok := ScriptRunNote(scheduleID, runID, name, exitCode, failed, log.clock())
+	if !ok {
+		return
+	}
+	_ = log.add(note)
+}
+
+func (n *notifyLog) clock() time.Time {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.now()
+}
+
+// add appends one daemon-built record and persists the log.
+func (n *notifyLog) add(item Notification) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if !n.appendLocked(item) {
+		return nil
+	}
+	return n.persistLocked()
+}
+
 func noteID(kind, subject, extra string) string {
 	sum := sha256.Sum256([]byte(kind + "\n" + subject + "\n" + extra))
 	return hex.EncodeToString(sum[:16])
@@ -796,6 +888,10 @@ func fallbackTitle(kind string) string {
 		return "Delegated child finished"
 	case noteSessionFinished:
 		return "Session finished"
+	case noteScriptFinished:
+		return "Script schedule finished"
+	case noteScriptFailed:
+		return "Script schedule failed"
 	default:
 		return "Notice"
 	}
