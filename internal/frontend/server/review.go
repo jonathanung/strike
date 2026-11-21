@@ -613,11 +613,17 @@ func (s *Server) handleReviewReject(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	kept := hunk.Lines
+	if len(kept) > reviewHunkLinesMax {
+		// The turn shows at most reviewTurnLinesMax lines; never store a
+		// giant hunk whole.
+		kept = append(kept[:reviewHunkLinesMax:reviewHunkLinesMax], "… (hunk truncated)")
+	}
 	rejected := reviewRejectedJSON{
 		ID:     hunk.ID,
 		Path:   rel,
 		Header: hunk.Header,
-		Lines:  hunk.Lines,
+		Lines:  kept,
 		At:     time.Now().UTC().Format(time.RFC3339),
 	}
 	err = s.review.update(live.SessionID(), func(doc *reviewDoc) error {
