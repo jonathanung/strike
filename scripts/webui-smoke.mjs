@@ -4619,6 +4619,90 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+  // Markdown table actions (#1505): a seeded GFM table in the transcript
+  // renders through the shared Markdown view with its action row — three
+  // explicit Copy buttons and a Widen toggle, real <button>s with text
+  // labels. Widen flips aria-pressed and the block class and back; a copy
+  // must end in an honest outcome label (headless Chrome may refuse the
+  // clipboard, so "Copy failed" is acceptable, silence is not).
+  const tableSeed = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      type: "user.input",
+      data: { text: "Smoke table\n\n| Name | Count | Note |\n| :--- | ---: | :---: |\n| alpha | 1 | has, comma |\n| beta | 22 | `code` |" },
+    }),
+  });
+  if (!tableSeed.ok) {
+    throw new Error(`seed table user.input ${tableSeed.status} ${await tableSeed.text()}`);
+  }
+  const tableProbe = async () => {
+    const raw = await evaluate(`(() => {
+      const block = document.querySelector("[data-md-table]");
+      if (!block) return "{}";
+      const bar = block.querySelector("[data-md-table-actions]");
+      const widen = block.querySelector("[data-md-table-widen]");
+      return JSON.stringify({
+        bar: !!bar,
+        role: bar ? bar.getAttribute("role") : "",
+        buttons: bar ? [...bar.querySelectorAll("button")].map((b) => b.textContent.trim()) : [],
+        th: block.querySelectorAll("table.md-table th[scope=col]").length,
+        rows: block.querySelectorAll("table.md-table tbody tr").length,
+        wide: block.classList.contains("md-table-wide"),
+        pressed: widen ? widen.getAttribute("aria-pressed") : "",
+        csv: (block.querySelector("[data-md-table-copy=csv]") || {}).textContent || "",
+        note: (block.querySelector(".md-table-note") || {}).textContent || "",
+      });
+    })()`);
+    return JSON.parse(raw || "{}");
+  };
+  const tableShown = await waitFor(
+    "seeded markdown table with its action row",
+    async () => {
+      const p = await tableProbe();
+      const want = ["Copy Markdown", "Copy CSV", "Copy TSV", "Widen"];
+      return {
+        ok: p.bar && p.role === "toolbar" && p.th === 3 && p.rows === 2
+          && want.every((w) => (p.buttons || []).includes(w)) && p.pressed === "false" && !p.wide,
+        ...p,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  if (!tableShown.bar) {
+    throw new Error(`markdown table action row missing ${JSON.stringify(tableShown)}`);
+  }
+  await evaluate(`document.querySelector("[data-md-table] [data-md-table-widen]").click()`);
+  await waitFor(
+    "Widen to widen the table and press the toggle",
+    async () => {
+      const p = await tableProbe();
+      return { ok: p.wide === true && p.pressed === "true" && (p.buttons || []).includes("Unwiden"), ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector("[data-md-table] [data-md-table-widen]").click()`);
+  await waitFor(
+    "Unwiden to restore the table",
+    async () => {
+      const p = await tableProbe();
+      return { ok: p.wide === false && p.pressed === "false", ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector("[data-md-table] [data-md-table-copy=csv]").click()`);
+  await waitFor(
+    "Copy CSV to report an honest outcome",
+    async () => {
+      const p = await tableProbe();
+      const failed = p.csv === "Copy failed" && p.note.includes("Copy didn't work");
+      return { ok: p.csv === "Copied" || failed, ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
   // Git and Worktrees side tabs (#1270): click each tab and wait for its
   // panel's own marker — "Staged" section for Git, the displayed
   // session.childIsolation value for Worktrees. Condition-based waits,

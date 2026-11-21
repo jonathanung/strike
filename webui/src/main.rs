@@ -42,6 +42,7 @@ mod markdown_review;
 mod local_issues;
 mod mermaid;
 mod localfiles;
+mod md_table;
 mod customize;
 mod dashboards;
 mod delegation_board;

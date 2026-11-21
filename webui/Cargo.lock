@@ -1398,6 +1398,7 @@ dependencies = [
  "serde_json",
  "signin-flow",
  "status-card",
+ "table-export",
  "theme-catalog",
  "transcript-window",
  "wasm-bindgen",
@@ -1437,6 +1438,10 @@ dependencies = [
  "quote",
  "syn 3.0.9",
 ]
+
+[[package]]
+name = "table-export"
+version = "0.1.0"
 
 [[package]]
 name = "tachys"
