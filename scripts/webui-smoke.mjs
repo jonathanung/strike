@@ -207,6 +207,37 @@ try {
       `terminal auth statuses missing=${termMissing} wrong=${termWrong} right=${termRight} query=${termQuery}`,
     );
   }
+  // #1392: notification read state is daemon-side. Two clients (browser A
+  // posting a read, browser B polling) must agree, and the route needs auth.
+  {
+    const seenUrl = `http://127.0.0.1:${port}/v1/notifications/seen`;
+    const seenNoAuth = await fetch(seenUrl, { method: "POST", body: '{"upTo":1}' });
+    if (seenNoAuth.status !== 401) {
+      throw new Error(`notifications/seen without token = ${seenNoAuth.status}`);
+    }
+    const before = await (
+      await fetch(`http://127.0.0.1:${port}/v1/notifications`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    ).json();
+    const latest = Number(before.latest || 0);
+    const marked = await fetch(seenUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ upTo: Math.max(latest, 1) }),
+    });
+    if (marked.status !== 200) {
+      throw new Error(`notifications/seen mark-all = ${marked.status} ${await marked.text()}`);
+    }
+    const other = await (
+      await fetch(`http://127.0.0.1:${port}/v1/notifications`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    ).json();
+    if (!other.seen || other.seen.upTo !== latest || !Array.isArray(other.seen.ids)) {
+      throw new Error(`second client read state = ${JSON.stringify(other.seen)} latest=${latest}`);
+    }
+  }
   const healthBody = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
   if (!healthBody.ok || !(healthBody.now > 0)) {
     throw new Error(`health missing now: ${JSON.stringify(healthBody)}`);
@@ -360,11 +391,69 @@ try {
     envLine("tool.begin", null, { callId: "c9", name: "bash", args: { command: "sleep 240" } }) +
     envLine("tool.end", "2026-10-26T06:24:00Z", { callId: "c9", name: "bash", output: "done" }) +
     envLine("text.delta", "2026-10-26T06:24:30Z", { text: "old answer" }) +
-    envLine("turn.completed", "2026-10-26T06:25:00Z", { stopReason: "end_turn" });
+    envLine("turn.completed", "2026-10-26T06:25:00Z", { stopReason: "end_turn" }) +
+    // Turn failure (#1371): an engine-error turn and a loop-guard turn,
+    // both under a minute so the elapsed check above is unchanged. Only
+    // these two may end with a [data-turn-stop] marker; the clean
+    // end_turn turns above must not.
+    envLine("user.message", "2026-10-26T06:30:00Z", { text: "failing replay turn" }) +
+    envLine("turn.started", "2026-10-26T06:30:01Z", { turnId: "tf1" }) +
+    envLine("text.delta", "2026-10-26T06:30:05Z", { text: "half answer" }) +
+    envLine("engine.error", "2026-10-26T06:30:06Z", { turnId: "tf1", message: "provider exploded" }) +
+    envLine("turn.completed", "2026-10-26T06:30:07Z", { turnId: "tf1", stopReason: "error" }) +
+    envLine("user.message", "2026-10-26T06:40:00Z", { text: "looping replay turn" }) +
+    envLine("turn.started", "2026-10-26T06:40:01Z", { turnId: "tf2" }) +
+    envLine("tool.loop_detected", "2026-10-26T06:40:05Z", {
+      turnId: "tf2",
+      reason: "identical_calls",
+      toolName: "bash",
+      count: 3,
+      message: "repeated identical failing tool calls",
+    }) +
+    envLine("turn.completed", "2026-10-26T06:40:06Z", { turnId: "tf2", stopReason: "loop_detected" });
   await writeFile(join(sessionsDir, "elapsed-session.jsonl"), elapsedSession);
   await writeFile(
     join(sessionsDir, "elapsed-session.meta.json"),
     JSON.stringify({ title: "Elapsed replay" }) + "\n",
+  );
+  // Live tool tail (#1374) fixture: turn 1's call streams a chunk and
+  // then ends (the final output replaces the tail); turn 2's chatty call
+  // streams 250 lines and never ends, so it keeps a tail bounded to the
+  // last 200 lines with the truncation hint.
+  let tailSession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-27T06:00:00Z" }) +
+    "\n" +
+    envLine("user.message", "2026-10-27T06:00:00Z", { text: "quick command" }) +
+    envLine("turn.started", "2026-10-27T06:00:01Z", { turnId: "tt1" }) +
+    envLine("tool.begin", "2026-10-27T06:00:02Z", {
+      turnId: "tt1",
+      callId: "tc1",
+      name: "bash",
+      args: { command: "echo early" },
+    }) +
+    envLine("tool.output", "2026-10-27T06:00:03Z", { turnId: "tt1", callId: "tc1", data: "early tail chunk\n" }) +
+    envLine("tool.end", "2026-10-27T06:00:04Z", { turnId: "tt1", callId: "tc1", name: "bash", output: "final output" }) +
+    envLine("text.delta", "2026-10-27T06:00:05Z", { text: "quick done" }) +
+    envLine("turn.completed", "2026-10-27T06:00:06Z", { turnId: "tt1", stopReason: "end_turn" }) +
+    envLine("user.message", "2026-10-27T06:01:00Z", { text: "chatty command" }) +
+    envLine("turn.started", "2026-10-27T06:01:01Z", { turnId: "tt2" }) +
+    envLine("tool.begin", "2026-10-27T06:01:02Z", {
+      turnId: "tt2",
+      callId: "tc2",
+      name: "bash",
+      args: { command: "for i in $(seq 0 249); do echo tail line $i; sleep 1; done" },
+    });
+  for (let i = 0; i < 250; i++) {
+    tailSession += envLine("tool.output", "2026-10-27T06:01:03Z", {
+      turnId: "tt2",
+      callId: "tc2",
+      data: `tail line ${i}\n`,
+    });
+  }
+  await writeFile(join(sessionsDir, "tail-session.jsonl"), tailSession);
+  await writeFile(
+    join(sessionsDir, "tail-session.meta.json"),
+    JSON.stringify({ title: "Tool tail replay" }) + "\n",
   );
   const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
@@ -1700,7 +1789,28 @@ try {
     return false;
   })()`, "bad gateway command");
   await evaluate(`[...document.querySelectorAll("[data-command-id]")].find((el) => (el.textContent || "").includes("Switch to gateway: bad"))?.click()`);
+  // #1523: switching to an unreachable gateway is probe-first — the
+  // switch is refused, the form shows the error, and the working
+  // gateway stays Connected instead of being stranded as Unreachable.
+  await waitUntil(`(() => {
+    const pop = document.querySelector(".gw-pop");
+    if (!pop) return false;
+    const note = pop.querySelector(".gw-form-note");
+    // The panel detail line is the working gateway's live describe
+    // (host · loopback · auth on · host token · grants); the header
+    // gateway chip is gone (#1590 A6), so connected-ness is read here:
+    // the working gateway's detail never flips to "Could not reach
+    // this daemon".
+    const txt = pop.innerText || "";
+    return !!note && (note.textContent || "").includes("Could not reach")
+      && txt.includes("loopback") && !txt.includes("Could not reach this daemon");
+  })()`, "guarded switch keeps the working gateway connected with a form error");
+  await evaluate(`document.querySelector(".gw-back")?.click()`);
   await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
+  // The settings error path below still needs a genuinely unreachable
+  // base: persist one directly (the pre-#1523 stranded state a user
+  // could be left in) and reload into it.
+  await evaluate(`(() => { localStorage.setItem("strike.base", "http://127.0.0.1:1"); location.reload(); return true; })()`);
   // The gateway status chip is no longer rendered in the header (#1590 A6):
   // gateway health lives in the Gateways panel, so read "Unreachable" there.
   await waitUntil(`(() => {
@@ -1882,6 +1992,113 @@ try {
   if (rejected.status !== 400) {
     throw new Error(`empty attachment status ${rejected.status}`);
   }
+  // Attachment honesty (#1561): on the echo provider the engine drops
+  // every attachment, so the composer must say so before send (warn,
+  // not block). Removing the file clears the warning.
+  await evaluate(`(() => {
+    const input = document.querySelector('input[data-chat-attach="true"]');
+    const bytes = Uint8Array.from(atob(${JSON.stringify(png)}), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], "honesty-shot.png", { type: "image/png" }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  await waitUntil(
+    `(() => { const w = document.querySelector("[data-attach-warning]"); return !!w && w.offsetParent !== null && w.innerText.includes("honesty-shot.png") && w.innerText.includes("echo provider does not accept attachments"); })()`,
+    "composer warns that echo drops the attachment",
+  );
+  await evaluate(`(() => { const b = [...document.querySelectorAll(".attach-chip button")].find((x) => x.closest(".attach-chip")?.innerText.includes("honesty-shot.png")); b?.click(); return !!b; })()`);
+  await waitUntil(`!document.querySelector("[data-attach-warning]")`, "attachment warning clears with the file");
+  // Office + media classification (#1390): a docx with its real browser
+  // MIME is accepted as a document, an mp4 header as video, a plain zip
+  // stays an archive, and text renamed to .docx is rejected honestly.
+  const crc32 = (buf) => {
+    let c = ~0;
+    for (const b of buf) {
+      c ^= b;
+      for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+    }
+    return ~c >>> 0;
+  };
+  const zipStored = (entries) => {
+    const locals = [];
+    const centrals = [];
+    let offset = 0;
+    for (const [name, body] of entries) {
+      const nameBuf = Buffer.from(name);
+      const data = Buffer.from(body);
+      const crc = crc32(data);
+      const local = Buffer.alloc(30);
+      local.writeUInt32LE(0x04034b50, 0);
+      local.writeUInt16LE(20, 4);
+      local.writeUInt32LE(crc, 14);
+      local.writeUInt32LE(data.length, 18);
+      local.writeUInt32LE(data.length, 22);
+      local.writeUInt16LE(nameBuf.length, 26);
+      locals.push(local, nameBuf, data);
+      const central = Buffer.alloc(46);
+      central.writeUInt32LE(0x02014b50, 0);
+      central.writeUInt16LE(20, 4);
+      central.writeUInt16LE(20, 6);
+      central.writeUInt32LE(crc, 16);
+      central.writeUInt32LE(data.length, 20);
+      central.writeUInt32LE(data.length, 24);
+      central.writeUInt16LE(nameBuf.length, 28);
+      central.writeUInt32LE(offset, 42);
+      centrals.push(central, nameBuf);
+      offset += 30 + nameBuf.length + data.length;
+    }
+    const cd = Buffer.concat(centrals);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0);
+    end.writeUInt16LE(entries.length, 8);
+    end.writeUInt16LE(entries.length, 10);
+    end.writeUInt32LE(cd.length, 12);
+    end.writeUInt32LE(offset, 16);
+    return Buffer.concat([...locals, cd, end]);
+  };
+  const docxMIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const ingest = async (name, mime, buf) => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/attachments`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name, mime, data: Buffer.from(buf).toString("base64") }),
+    });
+    return { status: res.status, body: await res.text() };
+  };
+  const docxFixture = zipStored([["[Content_Types].xml", "<Types/>"], ["word/document.xml", "<w:document/>"]]);
+  const mp4Fixture = Buffer.concat([Buffer.from("\x00\x00\x00\x18ftypisom\x00\x00\x02\x00", "latin1"), Buffer.alloc(32)]);
+  const classified = [
+    ["smoke.docx", docxMIME, docxFixture, 200, "document"],
+    ["smoke.docx", "", docxFixture, 200, "document"],
+    ["smoke.zip", "application/zip", zipStored([["README.md", "hi"]]), 200, "archive"],
+    ["smoke.mp4", "video/mp4", mp4Fixture, 200, "video"],
+    ["fake.docx", docxMIME, Buffer.from("just text, not a document\n"), 400, ""],
+  ];
+  for (const [name, mime, buf, wantStatus, wantKind] of classified) {
+    const got = await ingest(name, mime, buf);
+    const kind = got.status === 200 ? JSON.parse(got.body).kind : "";
+    if (got.status !== wantStatus || kind !== wantKind) {
+      throw new Error(`classify ${name} (${mime || "no mime"}): ${got.status} kind=${kind} body=${got.body.slice(0, 200)}`);
+    }
+  }
+  // Composer: an mp4 chip gets a <video controls> preview; removing it clears it.
+  await evaluate(`(() => {
+    const input = document.querySelector('input[data-chat-attach="true"]');
+    const bytes = Uint8Array.from(atob(${JSON.stringify(mp4Fixture.toString("base64"))}), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], "smoke-clip.mp4", { type: "video/mp4" }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  await waitUntil(
+    `(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); const v = chip && chip.querySelector("video.attach-media"); return !!v && v.controls && v.src.startsWith("blob:"); })()`,
+    "mp4 composer chip shows video controls",
+  );
+  await evaluate(`(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); chip?.querySelector("button")?.click(); return !!chip; })()`);
+  await waitUntil(`![...document.querySelectorAll(".attach-chip")].some((c) => c.innerText.includes("smoke-clip.mp4"))`, "mp4 chip removed");
   await send("Runtime.evaluate", {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
   });
@@ -2405,6 +2622,119 @@ try {
     async () => ({ ok: (await evaluate(`!!document.querySelector('[data-context-doctor="dialog"]')`)) === false }),
     { timeout: STEP_MS, interval: 200 },
   );
+  // Local issues (#1500): create → listed under Open → close → listed under
+  // Closed → still closed after the panel remounts (fresh daemon read) and
+  // in the daemon's own list. An empty title is refused inline.
+  const issuesBoot = await (
+    await fetch(`http://127.0.0.1:${port}/v1/bootstrap`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (!issuesBoot.capabilities?.issues) {
+    throw new Error(`bootstrap does not advertise the issues capability: ${JSON.stringify(issuesBoot.capabilities)}`);
+  }
+  const issueRows = async () =>
+    (await evaluate(`[...document.querySelectorAll("[data-local-issues] .local-issue-row")].map((r) => [
+      r.dataset.issueId,
+      r.dataset.issueStatus,
+      r.innerText,
+    ])`)) || [];
+  const smokeIssueTitle = "smoke local issue";
+  await runPalette("Local issues");
+  await waitFor(
+    "issues panel mounts with the create form",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-local-issues] [data-issues-form]")`)) === true,
+    }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-action="issues-create"]').click()`);
+  await waitFor(
+    "empty title is refused inline",
+    async () => {
+      const t = await evaluate(`document.querySelector("[data-issues-action-error]")?.innerText || ""`);
+      return { ok: String(t).includes("Title is required"), body: t };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const fillIssue = await evaluate(`(() => {
+    const set = (sel, value) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      el.value = value;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    };
+    if (!set("[data-issues-title]", ${JSON.stringify(smokeIssueTitle)})) return "missing title";
+    if (!set("[data-issues-body]", "filed by webui-smoke")) return "missing body";
+    document.querySelector('[data-action="issues-create"]').click();
+    return "sent";
+  })()`);
+  if (fillIssue !== "sent") throw new Error(`issues create form: ${fillIssue}`);
+  let smokeIssueId = "";
+  await waitFor(
+    "created issue appears under Open",
+    async () => {
+      const rows = await issueRows();
+      const row = rows.find((r) => String(r[2]).includes(smokeIssueTitle));
+      if (row) smokeIssueId = row[0];
+      return { ok: !!row && row[1] === "open", body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-issue-id="${smokeIssueId}"] .link').click()`);
+  await waitFor(
+    "issue body expands",
+    async () => {
+      const t = await evaluate(`document.querySelector('[data-issue-body="${smokeIssueId}"]')?.innerText || ""`);
+      return { ok: String(t).includes("filed by webui-smoke"), body: t };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector('[data-issue-id="${smokeIssueId}"] [data-action="issues-close"]').click()`);
+  await waitFor(
+    "closed issue leaves the Open filter",
+    async () => {
+      const rows = await issueRows();
+      return { ok: !rows.some((r) => r[0] === smokeIssueId), body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-issues-filter="closed"]').click()`);
+  await waitFor(
+    "closed issue listed under Closed",
+    async () => {
+      const rows = await issueRows();
+      return { ok: rows.some((r) => r[0] === smokeIssueId && r[1] === "closed"), body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Remount: leave the tab and come back; the panel re-reads the daemon.
+  await runPalette("Memory");
+  await waitFor(
+    "issues panel unmounts on another tab",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-local-issues]")`)) === false }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await runPalette("Local issues");
+  await waitFor(
+    "issues panel remounts",
+    async () => ({ ok: (await evaluate(`!!document.querySelector('[data-issues-filter="closed"]')`)) === true }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-issues-filter="closed"]').click()`);
+  await waitFor(
+    "closed issue persists after the panel remounts",
+    async () => {
+      const rows = await issueRows();
+      return { ok: rows.some((r) => r[0] === smokeIssueId && r[1] === "closed"), body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const persisted = await (
+    await fetch(`http://127.0.0.1:${port}/v1/issues?status=closed`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (!(persisted.issues || []).some((i) => String(i.ID ?? i.id) === smokeIssueId && (i.Status ?? i.status) === "closed")) {
+    throw new Error(`daemon does not list issue ${smokeIssueId} as closed: ${JSON.stringify(persisted)}`);
+  }
 
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
   // that predates Goals has no palette command and fails here.
@@ -3798,6 +4128,84 @@ try {
     }),
     { timeout: STEP_MS, interval: 250 },
   );
+  // Per-session drafts (#1367): a draft typed in session A is absent in
+  // session B, back on return to A, persisted under strike.draft.<A>,
+  // and still there after a reload. Clearing it removes the stored key
+  // so later composer checks start from an empty draft.
+  const openRow = async (id) => {
+    await evaluate(
+      `(() => { const row = document.querySelector(${JSON.stringify(rowSel(id))}); const btn = row && row.querySelector(".ss-main"); if (btn) btn.click(); return !!btn; })()`,
+    );
+    await waitFor(`session ${id} selected`, async () => ({ ok: (await selectedID()) === id }), {
+      timeout: STEP_MS,
+      interval: 200,
+    });
+  };
+  const composerValue = async () =>
+    evaluate(`(() => { const el = document.querySelector("#composer-input"); return el ? el.value : null; })()`);
+  const typeComposer = async (value) => {
+    const ok = await evaluate(`(() => {
+      const el = document.querySelector("#composer-input");
+      if (!el) return false;
+      el.focus();
+      const proto = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+      proto.set.call(el, ${JSON.stringify(value)});
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, data: ${JSON.stringify(value)} }));
+      return el.value === ${JSON.stringify(value)};
+    })()`);
+    if (ok !== true) throw new Error(`draft check: composer did not accept ${JSON.stringify(value)}`);
+  };
+  const storedDraft = async (id) =>
+    evaluate(`localStorage.getItem(${JSON.stringify("strike.draft." + id)})`);
+  const draftA = "half-written prompt for session A (#1367)";
+  await waitFor(
+    "draft check: session A row",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector(${JSON.stringify(rowSel(restoreFallback))})`)) === true,
+    }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await openRow(restoreFallback);
+  await typeComposer(draftA);
+  await waitFor(
+    "draft check: A's draft persisted",
+    async () => ({ ok: (await storedDraft(restoreFallback)) === draftA, stored: await storedDraft(restoreFallback) }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await openRow(restoreTarget);
+  await waitFor(
+    "draft check: session B composer is empty",
+    async () => {
+      const value = await composerValue();
+      return { ok: value === "", value };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await openRow(restoreFallback);
+  await waitFor(
+    "draft check: A's draft restored on return",
+    async () => {
+      const value = await composerValue();
+      return { ok: value === draftA, value };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await reloadCockpit("cockpit reload for draft persistence");
+  await waitFor(
+    "draft check: A's draft restored after reload",
+    async () => {
+      const selected = await selectedID();
+      const value = await composerValue();
+      return { ok: selected === restoreFallback && value === draftA, selected, value };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await typeComposer("");
+  await waitFor(
+    "draft check: cleared draft removes its stored key",
+    async () => ({ ok: (await storedDraft(restoreFallback)) === null }),
+    { timeout: STEP_MS, interval: 200 },
+  );
   // Open session B (the target) through its row, like a user switch.
   await evaluate(
     `(() => { const row = document.querySelector(${JSON.stringify(rowSel(restoreTarget))}); const btn = row && row.querySelector(".ss-main"); if (btn) btn.click(); return !!btn; })()`,
@@ -4033,6 +4441,95 @@ try {
         };
       })()`);
       return { ok: v.n === 1 && v.text === "took 4:12" && v.onSlow && v.body, ...v };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Turn failure (#1371): the same replay ends its two failing turns with
+  // a stop marker each (error, loop_detected), in order, badged failed;
+  // the loop guard's own line names the tool; clean turns get none.
+  await waitFor(
+    "turn failure markers on the replayed failing turns only",
+    async () => {
+      const v = await evaluate(`(() => {
+        const marks = [...document.querySelectorAll("article[data-turn-stop]")];
+        const arts = [...document.querySelectorAll("article.sx-msg")];
+        const idx = (el) => arts.indexOf(el);
+        const failing = arts.find((a) => (a.innerText || "").includes("half answer"));
+        const guard = arts.find((a) => (a.innerText || "").includes("Loop guard"));
+        return {
+          reasons: marks.map((m) => m.getAttribute("data-turn-stop")).join(","),
+          titles: marks.map((m) => (m.querySelector(".sx-who")?.textContent || "").trim()).join("|"),
+          afterAnswer: !!failing && marks.length > 0 && idx(marks[0]) > idx(failing),
+          guardText: guard ? guard.innerText : "",
+          engineError: document.body.innerText.includes("provider exploded"),
+        };
+      })()`);
+      return {
+        ok:
+          v.reasons === "error,loop_detected" &&
+          v.titles === "Turn failed|Turn stopped by loop guard" &&
+          v.afterAnswer &&
+          v.guardText.includes("bash, 3 times") &&
+          v.engineError,
+        ...v,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // Live tool tail (#1374): resume the seeded tail session. The call that
+  // ended shows no tail (tool.end replaced it); the call that never ended
+  // keeps exactly the last 200 streamed lines plus the truncation hint.
+  let tailClicked = "missing";
+  try {
+    await waitFor(
+      "tool-tail resume row",
+      async () => {
+        tailClicked = await evaluate(`(() => {
+          const row = document.querySelector('[data-session-id="tail-session"]');
+          const btn = row && row.querySelector(".ss-main");
+          if (!btn) return "missing";
+          btn.click();
+          return "clicked";
+        })()`);
+        return { ok: tailClicked === "clicked", clicked: tailClicked };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  } catch {
+    // reported below with the last observed state
+  }
+  if (tailClicked !== "clicked") {
+    throw new Error(`tool-tail resume click -> ${tailClicked}`);
+  }
+  await waitFor(
+    "bounded live tool tail on the unfinished call only",
+    async () => {
+      const v = await evaluate(`(() => {
+        const tails = [...document.querySelectorAll("[data-tool-tail]")];
+        const t = tails[0];
+        const pre = t ? (t.querySelector("pre")?.textContent || "") : "";
+        return {
+          n: tails.length,
+          lines: t ? t.getAttribute("data-tool-tail") : "",
+          note: Boolean(t && t.querySelector("[data-tool-tail-truncated]")),
+          first: pre.split("\\n")[0],
+          last: pre.trimEnd().split("\\n").pop(),
+          early: document.body.innerText.includes("early tail chunk"),
+          quick: document.body.innerText.includes("quick done"),
+        };
+      })()`);
+      return {
+        ok:
+          v.n === 1 &&
+          v.lines === "200" &&
+          v.note &&
+          v.first === "tail line 50" &&
+          v.last === "tail line 249" &&
+          !v.early &&
+          v.quick,
+        ...v,
+      };
     },
     { timeout: WAIT_MS, interval: 250 },
   );

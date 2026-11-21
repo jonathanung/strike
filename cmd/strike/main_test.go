@@ -46,6 +46,7 @@ Options:
   --auto                             skip configured permission prompts; network.allow and OS sandbox still apply
   --dangerously-skip-permissions     skip permission prompts and bypass network.allow (OS sandbox still applies)
   --sandbox <mode>                   OS process sandbox for bash (off|read-only|workspace-write); overrides config
+  --sandbox-runtime <runtime>        what isolates bash and the terminal (process|microvm); microvm never falls back to the host; overrides config
   --i-know                           allow permissionMode yolo when sandbox is off (explicit override)
   --continue                         resume the most recent root session (model history + selections)
   --session <id>                     resume a specific session by id (model history + selections)
@@ -725,5 +726,49 @@ func TestResolveRootTurnTimeout(t *testing.T) {
 	)
 	if d != 10*time.Second {
 		t.Fatalf("cli 10s override = %v", d)
+	}
+}
+
+func TestSandboxRuntimeFlag(t *testing.T) {
+	opts, err := parseCLIOptions([]string{"--sandbox-runtime", "microvm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.sandboxRuntime != "microvm" {
+		t.Fatalf("sandboxRuntime = %q", opts.sandboxRuntime)
+	}
+	if _, err := parseCLIOptions([]string{"--sandbox-runtime", "vm"}); err == nil {
+		t.Fatal("want unknown sandbox runtime error")
+	}
+}
+
+func TestResolveSandboxRuntime(t *testing.T) {
+	cases := []struct {
+		name    string
+		cfg     string
+		cli     string
+		mode    string
+		managed bool
+		want    string
+		wantErr bool
+	}{
+		{"default process", "", "", "workspace-write", false, "process", false},
+		{"config microvm", "microvm", "", "workspace-write", false, "microvm", false},
+		{"cli overrides config", "microvm", "process", "workspace-write", false, "process", false},
+		{"managed ignores cli", "microvm", "process", "workspace-write", true, "microvm", false},
+		{"microvm with sandbox off is a config error", "", "microvm", "off", false, "", true},
+		{"process with sandbox off ok", "", "", "off", false, "process", false},
+		{"unknown config rejected", "vm", "", "workspace-write", false, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := resolveSandboxRuntime(tc.cfg, tc.cli, tc.mode, tc.managed)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Fatalf("runtime = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

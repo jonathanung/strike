@@ -1,0 +1,35 @@
+/* feature:live-tool-tail begin (#1374) */
+/* Live tool output tail: streamed tool.output chunks inside the running
+   tool card, muted, bounded (200 lines / 32 KiB, see tool_tail.rs).
+   column-reverse keeps the scroller pinned to the newest line. */
+.sx-msg .tool-tail {
+  margin-top: var(--space-2);
+}
+.sx-msg .tool-tail-note {
+  margin: 0 0 var(--space-1);
+  font-size: var(--type-sm);
+  color: var(--muted);
+  font-style: italic;
+}
+.sx-msg .tool-tail-scroll {
+  display: flex;
+  flex-direction: column-reverse;
+  max-height: 14em;
+  overflow: auto;
+  background: var(--surface-muted);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius);
+}
+.sx-msg .tool-tail-scroll:focus-visible {
+  outline: var(--border-width) solid var(--border-focus);
+}
+.sx-msg .tool-tail-scroll pre {
+  margin: 0;
+  padding: var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--type-sm);
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* feature:live-tool-tail end */

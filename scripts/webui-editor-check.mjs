@@ -1,6 +1,6 @@
 // Browser check for the document viewer. Called from webui-smoke after the
 // shell text check. Uses the same DevTools session and the auth'd daemon.
-import { rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
@@ -29,6 +29,11 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
   const long = join(repoDir, "editor-long.txt");
   const outlineMd = join(repoDir, "editor-outline.md");
   const md = join(repoDir, "editor-md.md");
+  // Quick-open (#1396) target: several directories deep.
+  const qoDir = join(repoDir, "qo-deep");
+  const qoRel = "qo-deep/inner/most/quickopen-target.txt";
+  await mkdir(join(qoDir, "inner", "most"), { recursive: true });
+  await writeFile(join(repoDir, qoRel), "quick open target\n");
   await writeFile(sample, "alpha beta\nsecond line\nthird line\nfourth line\nfifth line\n");
   await writeFile(
     md,
@@ -489,6 +494,101 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       send,
       `(() => document.querySelector(".ev-editor") ? "ok" : "no editor")()`,
       "editor textarea (re-entered)",
+    );
+
+    // Find and replace (#1401): the replace row shows only while
+    // editing; Replace (Enter) rewrites the current hit in the draft
+    // and advances, Replace all rewrites the rest and reports a count,
+    // and Cancel restores the loaded content (replace never saves).
+    const replaceOrig = await evalValue(
+      send,
+      `(() => { const ta = document.querySelector(".ev-editor"); return ta ? ta.value : "no editor"; })()`,
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        ta.value = "line one\\nline two\\nline three\\n";
+        ta.dispatchEvent(new Event("input", { bubbles: true }));
+        const q = document.getElementById("ev-search");
+        q.value = "line";
+        q.dispatchEvent(new Event("input", { bubbles: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        if (!document.querySelector("[data-ev-replace-row]")) return "no replace row while editing";
+        const n = document.querySelector(".ev-count");
+        return n && n.textContent.trim() === "1/3" ? "ok" : (n ? n.textContent : "no count");
+      })()`,
+      "replace row and three hits",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const r = document.getElementById("ev-replace");
+        r.value = "row";
+        r.dispatchEvent(new Event("input", { bubbles: true }));
+        r.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        if (!ta) return "edit mode lost on Replace";
+        if (ta.value !== "row one\\nline two\\nline three\\n") return "draft = " + JSON.stringify(ta.value);
+        const n = document.querySelector(".ev-count");
+        return n && n.textContent.trim() === "1/2" ? "ok" : "count = " + (n ? n.textContent : "none");
+      })()`,
+      "Replace rewrites the current hit and advances",
+    );
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-replace-all]"); if (!b || b.disabled) return "replace all disabled"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        if (!ta || ta.value !== "row one\\nrow two\\nrow three\\n") return "draft = " + (ta ? JSON.stringify(ta.value) : "no editor");
+        const note = document.querySelector("[data-ev-replace-note]");
+        return note && note.textContent.includes("Replaced 2 matches.") ? "ok" : "note = " + (note ? note.textContent : "none");
+      })()`,
+      "Replace all rewrites every hit with a count",
+    );
+    await evalValue(
+      send,
+      `(() => { const b = document.querySelector("[data-ev-cancel]"); if (!b) return "no cancel"; b.click(); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => document.querySelector("[data-ev-replace-row]") ? "replace row still shown after Cancel" : "ok")()`,
+      "replace row hidden outside edit mode",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const q = document.getElementById("ev-search");
+        q.value = "";
+        q.dispatchEvent(new Event("input", { bubbles: true }));
+        const b = document.querySelector("[data-ev-edit]");
+        if (!b || b.disabled) return "edit disabled";
+        b.click();
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const ta = document.querySelector(".ev-editor");
+        if (!ta) return "no editor";
+        return ta.value === ${JSON.stringify(replaceOrig)} ? "ok" : "Cancel did not restore: " + JSON.stringify(ta.value);
+      })()`,
+      "Cancel restores the content after replace",
     );
 
     // Dirty guard (#1394): an unsaved draft must block navigation.
@@ -1185,8 +1285,68 @@ export async function editorBrowserCheck({ send, port, token, repoDir }) {
       })()`,
       "blame off restores the viewer",
     );
+    // Quick-open (#1396): Ctrl+P opens the palette on Open file…; a
+    // query with no match shows the empty state, a partial name lists
+    // the nested file, and Enter (keyboard only) opens it in the viewer.
+    const qoType = async (text) => {
+      await evalValue(
+        send,
+        `(() => {
+          const input = document.querySelector('[data-nav="palette-dialog"] input');
+          if (!input) return "no palette input";
+          input.value = ${JSON.stringify(text)};
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          return "ok";
+        })()`,
+      );
+    };
+    await evalValue(
+      send,
+      `(() => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "p", ctrlKey: true, bubbles: true, cancelable: true })); return "ok"; })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        const input = document.querySelector('[data-nav="palette-dialog"] input');
+        return input && input.placeholder === "Type part of a file name" ? "ok" : (input ? "placeholder = " + input.placeholder : "no palette");
+      })()`,
+      "Ctrl+P opens Open file…",
+    );
+    await qoType("zzzz-no-such-file-qq");
+    await waitFor(
+      send,
+      `(() => {
+        const d = document.querySelector('[data-nav="palette-dialog"]');
+        return d && d.innerText.includes("Nothing matches.") ? "ok" : (d ? d.innerText.slice(0, 160) : "no palette");
+      })()`,
+      "quick-open empty state",
+    );
+    await qoType("quickopen-targ");
+    await waitFor(
+      send,
+      `(() => document.querySelector('[data-nav="palette-dialog"] [data-choice-id=${JSON.stringify(qoRel)}]') ? "ok" : ((document.querySelector('[data-nav="palette-dialog"]') || {}).innerText || "no palette").slice(0, 200))()`,
+      "quick-open lists the nested file",
+    );
+    await evalValue(
+      send,
+      `(() => {
+        const input = document.querySelector('[data-nav="palette-dialog"] input');
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        return "ok";
+      })()`,
+    );
+    await waitFor(
+      send,
+      `(() => {
+        if (document.querySelector('[data-nav="palette-dialog"]')) return "palette still open";
+        const root = document.querySelector("[data-ev-root]");
+        return root && root.getAttribute("data-ev-path") === ${JSON.stringify(qoRel)} ? "ok" : (root ? "path = " + root.getAttribute("data-ev-path") : "no viewer");
+      })()`,
+      "quick-open opens the file in the viewer",
+    );
     console.log("webui-editor-check ok");
   } finally {
+    await rm(qoDir, { recursive: true, force: true });
     await rm(sample, { force: true });
     await rm(other, { force: true });
     await rm(long, { force: true });
