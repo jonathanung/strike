@@ -219,6 +219,9 @@ type Server struct {
 	notifyOnce sync.Once
 	notifyLog  *notifyLog
 
+	// prWatch caches PR/check polls per session (#1356, prwatch.go).
+	prWatch prWatchState
+
 	// tokenHash is the sha256 of the daemon token file last observed.
 	// A change appends a token-rotation audit entry. The token is not stored.
 	tokenMu   sync.Mutex
@@ -443,6 +446,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sandbox", s.handleSandboxGet)
 	s.mux.HandleFunc("PATCH /v1/sandbox", s.handleSandboxPatch)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/children", s.handleSessionChildren)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/pr", s.handleSessionPR)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/pr/fix-draft", s.handleSessionPRFixDraft)
 	s.mux.HandleFunc("GET /v1/session-lifecycle", s.handleSessionLifecycleCapabilities)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.handleSessionFork)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork_at", s.handleSessionForkAt)

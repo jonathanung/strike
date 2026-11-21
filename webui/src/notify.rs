@@ -523,6 +523,7 @@ fn kind_label(kind: &str) -> &'static str {
         "child.blocked" => "Blocked",
         "session.finished" => "Session",
         "gateway.disconnected" => "Gateway",
+        "pr.attention" => "PR",
         _ => "Notice",
     }
 }
@@ -591,6 +592,7 @@ fn banner_text(kind: &str) -> (&'static str, &'static str) {
         "child.blocked" => "A delegated run is blocked",
         "session.finished" => "A run finished",
         "gateway.disconnected" => "The gateway disconnected",
+        "pr.attention" => "A pull request needs attention",
         _ => "Something needs your attention",
     };
     ("Strike", body)

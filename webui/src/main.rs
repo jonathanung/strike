@@ -39,6 +39,7 @@ mod project_init;
 mod onboarding;
 mod park;
 mod permissions_explain;
+mod pr_watch;
 mod steer_queue;
 mod model_menu;
 mod model_menu_view;
@@ -5879,6 +5880,7 @@ fn App() -> impl IntoView {
                         </div>
                     </Show>
                     <div hidden=move || !git_active.get()>
+                        <pr_watch::PrWatch base=base token=token session=active_root active=git_active />
                         <git::GitPanel base=base token=token status_line=status active=git_active />
                     </div>
                     <div hidden=move || !worktree_active.get()>

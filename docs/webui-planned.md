@@ -410,6 +410,27 @@ transcript folds away) are not searched and find does not expand
 collapsed cards to reveal a match; a case-sensitive toggle is likewise
 deferred until someone asks for it.
 
+## PR watch
+
+The Git tab shows the open session's linked pull request (#1356): a chip
+with the PR number, state and check rollup, an expandable per-check list
+(queued / running / passed / failed / skipped), and "Open on GitHub". Data
+comes from `GET /v1/sessions/{id}/pr`, which runs the host's own `gh pr view`
+(the browser never sees a token; gh stderr is never returned). `/v1/sessions`
+also carries `prUrl` / `prNumber` / `prState`. The cockpit polls every 60s
+while the PR is open and a client is connected; the daemon caches a poll for
+30s, stops on merged/closed, and stops on errors retrying cannot fix (gh not
+installed, gh signed out, no GitHub remote, non-GitHub PR) with an actionable
+"PR tracking unavailable" line. A failed check or a changes-requested review
+raises a `pr.attention` notification once per distinct failure set.
+
+"Fix in this session" asks `POST /v1/sessions/{id}/pr/fix-draft` for a
+draft (failing check names, the last 100 lines of each failed Actions job
+log via `gh run view --log-failed`, redacted), shows it, and only after the
+user confirms posts it as a normal `user.input` op. No automatic fix turns,
+push or merge. Not in this slice: the chip on session-list rows, marking
+checks that also fail on the base branch, and any autonomous fix loop.
+
 ## Not planned as a copy
 
 Stall is already a real badge when the team roster sets `budget.stall`.
