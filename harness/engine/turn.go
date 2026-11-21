@@ -1970,8 +1970,10 @@ func (e *Engine) failTurn(ctx context.Context, err error, corr protocol.Correlat
 // ctx so cancelAndJoinTurn / turn timeout can abort a hung cmd gate.
 func (e *Engine) completeTurn(ctx context.Context, finishing chan struct{}, corr protocol.Correlation, stopReason string) {
 	// A fallback answers one turn only (#1350); the next turn tries the
-	// primary again.
-	e.restorePrimary()
+	// primary again. After a refusal the session stays on it (#1922).
+	if !e.fallbackSticky {
+		e.restorePrimary()
+	}
 	close(finishing)
 	files := turnFileChanges(e.turnDiff.Snapshot())
 	e.checkpoints.CommitTurn()

@@ -235,7 +235,7 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 				}
 			}
 		}
-		done := provider.StreamEvent{Type: provider.EventDone, StopReason: resp.StopReason}
+		done := provider.StreamEvent{Type: provider.EventDone, StopReason: anthropicStopReason(resp.StopReason)}
 		if resp.Usage != nil {
 			done.Usage = &provider.Usage{
 				InputTokens:         resp.Usage.InputTokens,
@@ -433,4 +433,14 @@ func rawBlocks(blocks ...apiBlock) ([]json.RawMessage, error) {
 		out = append(out, data)
 	}
 	return out, nil
+}
+
+// anthropicStopReason normalizes the Messages API stop_reason. "refusal"
+// (the model declined for safety reasons) maps onto the typed
+// provider.StopReasonRefusal; everything else passes through.
+func anthropicStopReason(raw string) string {
+	if raw == "refusal" {
+		return provider.StopReasonRefusal
+	}
+	return raw
 }

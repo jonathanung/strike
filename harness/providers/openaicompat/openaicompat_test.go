@@ -913,3 +913,68 @@ func TestResponsesStreamSendsPromptCacheKeyOnWire(t *testing.T) {
 		t.Fatalf("usage = %+v, want cacheRead=80 creation=10 input=10", usage)
 	}
 }
+
+// TestStreamClassifiesRefusals pins #1922: a structured refusal or a
+// content_filter stop is the typed refusal stop reason, and the refusal
+// prose still reaches the transcript.
+func TestStreamClassifiesRefusals(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		wantStop string
+		wantText string
+	}{
+		{
+			name:     "structured refusal",
+			body:     `{"choices":[{"message":{"role":"assistant","content":null,"refusal":"I can't help with that."},"finish_reason":"stop"}]}`,
+			wantStop: provider.StopReasonRefusal,
+			wantText: "I can't help with that.",
+		},
+		{
+			name:     "content filter",
+			body:     `{"choices":[{"message":{"role":"assistant","content":""},"finish_reason":"content_filter"}]}`,
+			wantStop: provider.StopReasonRefusal,
+		},
+		{
+			name:     "plain stop passes through",
+			body:     `{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`,
+			wantStop: "stop",
+			wantText: "ok",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, tt.body)
+			}))
+			defer srv.Close()
+			p := NewOpenAI(func(context.Context) (string, error) { return "k", nil })
+			p.baseURL = srv.URL
+			stream, err := p.Stream(context.Background(), provider.Request{
+				Model:    "gpt-5.5",
+				Messages: []provider.Message{{Role: provider.RoleUser, Text: "hi"}},
+			})
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+			var text, stop string
+			for ev := range stream {
+				switch ev.Type {
+				case provider.EventTextDelta:
+					text += ev.Text
+				case provider.EventDone:
+					stop = ev.StopReason
+				case provider.EventError:
+					t.Fatalf("stream error: %v", ev.Err)
+				}
+			}
+			if stop != tt.wantStop || text != tt.wantText {
+				t.Errorf("stop=%q text=%q, want stop=%q text=%q", stop, text, tt.wantStop, tt.wantText)
+			}
+			if provider.IsRefusal(stop) != (tt.wantStop == provider.StopReasonRefusal) {
+				t.Errorf("IsRefusal(%q) mismatch", stop)
+			}
+		})
+	}
+}

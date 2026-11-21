@@ -540,7 +540,11 @@ type Engine struct {
 	// primaryHold is the primary model while the current turn runs on the
 	// fallback; nil otherwise. restorePrimary puts it back.
 	primaryHold *modelSlot
-	messages    []provider.Message
+	// fallbackSticky keeps primaryHold across turns after the primary
+	// refused (#1922); ReturnToPrimary, a model switch or a new fallback
+	// pick ends it.
+	fallbackSticky bool
+	messages       []provider.Message
 
 	// turnCancel/turnDone/turnFinishing are owned exclusively by Run (reap,
 	// start, interrupt, shutdown). The worker only closes the done and

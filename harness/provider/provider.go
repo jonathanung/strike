@@ -106,6 +106,15 @@ type Request struct {
 
 type StreamEventType int
 
+// StopReasonRefusal is the normalized EventDone.StopReason for a request the
+// model declined (#1922). Adapters map vendor refusal signals onto it
+// (Anthropic stop_reason "refusal"; chat-completions message.refusal or
+// finish_reason "content_filter") so the engine never parses vendor shapes.
+const StopReasonRefusal = "refusal"
+
+// IsRefusal reports whether a stream ended because the model refused.
+func IsRefusal(stopReason string) bool { return stopReason == StopReasonRefusal }
+
 const (
 	EventTextDelta StreamEventType = iota
 	EventToolCall

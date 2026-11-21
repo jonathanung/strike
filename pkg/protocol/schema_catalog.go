@@ -91,6 +91,7 @@ func opPrototypes() []Op {
 		InputQueueSendNow{},
 		SelectModel{},
 		SetFallbackModel{},
+		ReturnToPrimary{},
 		SelectAgent{},
 		SetEffort{},
 		SetAutonomy{},

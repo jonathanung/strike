@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -40,6 +41,9 @@ func (e *Engine) handleSetFallback(op protocol.SetFallbackModel) {
 	}
 	name := strings.TrimSpace(op.Provider)
 	if name == "" {
+		// A clear (or, below, a new pick) ends a session-sticky fallback
+		// (#1922); the primary answers the next turn.
+		e.endStickyFallback()
 		e.fallback = nil
 		e.emitSelected(protocol.FallbackModelSelected{Correlation: e.sessionCorr()})
 		return
@@ -61,6 +65,7 @@ func (e *Engine) handleSetFallback(op protocol.SetFallbackModel) {
 		return
 	}
 	model := stripMatchingProviderPrefixes(name, resolveSelectModel(name, op.Model, defaultModel))
+	e.endStickyFallback()
 	e.fallback = &modelSlot{name: name, prov: p, model: model}
 	e.emitSelected(protocol.FallbackModelSelected{
 		Correlation: e.sessionCorr(),
@@ -91,8 +96,15 @@ func (e *Engine) fallbackEligible(ctx context.Context, err error) bool {
 // use the fallback, so cost is attributed to the model that answered. No
 // ModelSelected is emitted: this is not a user model switch.
 func (e *Engine) switchToFallback(corr protocol.Correlation, primaryErr error) {
+	e.switchToFallbackFor(corr, protocol.ModelFallbackReasonUnavailable, primaryErr, false)
+}
+
+// switchToFallbackFor moves onto the fallback for reason. sticky keeps the
+// session there after this turn until ReturnToPrimary (refusals, #1922).
+func (e *Engine) switchToFallbackFor(corr protocol.Correlation, reason string, primaryErr error, sticky bool) {
 	primary := &modelSlot{name: e.provName, prov: e.prov, model: e.model}
 	e.primaryHold = primary
+	e.fallbackSticky = sticky
 	e.prov, e.provName, e.model = e.fallback.prov, e.fallback.name, e.fallback.model
 	e.refreshContextWindow()
 	msg := ""
@@ -105,9 +117,46 @@ func (e *Engine) switchToFallback(corr protocol.Correlation, primaryErr error) {
 		PrimaryModel:     primary.model,
 		FallbackProvider: e.fallback.name,
 		FallbackModel:    e.fallback.model,
-		Reason:           protocol.ModelFallbackReasonUnavailable,
+		Reason:           reason,
 		Error:            msg,
+		Sticky:           sticky,
 	})
+}
+
+// endStickyFallback puts the primary back if the session was held on the
+// fallback after a refusal, and reports whether it was.
+func (e *Engine) endStickyFallback() bool {
+	if !e.fallbackSticky {
+		return false
+	}
+	e.fallbackSticky = false
+	e.restorePrimary()
+	return true
+}
+
+// handleReturnToPrimary ends a session-sticky fallback (#1922) and confirms
+// the fallback setting with Active false. Already on the primary, it still
+// confirms so a stale client view converges.
+func (e *Engine) handleReturnToPrimary() {
+	if e.turnActive() {
+		e.emit(protocol.EngineError{
+			Correlation: e.sessionCorr(),
+			Message:     "cannot return to the primary model while a turn is running",
+		})
+		return
+	}
+	e.endStickyFallback()
+	e.emitFallbackSelected()
+}
+
+// emitFallbackSelected confirms the current fallback setting and whether
+// the session is running on it.
+func (e *Engine) emitFallbackSelected() {
+	sel := protocol.FallbackModelSelected{Correlation: e.sessionCorr(), Active: e.fallbackSticky}
+	if e.fallback != nil {
+		sel.Provider, sel.Model = e.fallback.name, e.fallback.model
+	}
+	e.emitSelected(sel)
 }
 
 // restorePrimary puts the primary back after a fallback turn; the next turn
@@ -128,10 +177,30 @@ func bothFailed(primary *modelSlot, primaryErr error, fallback *modelSlot, fallb
 	return fmt.Errorf("primary %s failed: %v; fallback %s failed: %w", primary.label(), primaryErr, fallback.label(), fallbackErr)
 }
 
+// errPrimaryRefused is the primary's "failure" when it declined the request.
+var errPrimaryRefused = errors.New("refused the request")
+
 // streamWithFallback wraps streamModel: when the primary request fails and
-// a fallback is eligible, the fallback answers this turn.
+// a fallback is eligible, the fallback answers this turn. When the primary
+// refuses (provider.StopReasonRefusal, no tool calls), the fallback answers
+// and the session stays on it until ReturnToPrimary (#1922).
 func (e *Engine) streamWithFallback(ctx context.Context, turnID string) (streamOutcome, protocol.Correlation, error) {
 	outcome, corr, err := e.streamModel(ctx, turnID)
+	if err == nil && provider.IsRefusal(outcome.stopReason) && len(outcome.calls) == 0 &&
+		e.fallbackEligible(ctx, errPrimaryRefused) {
+		e.switchToFallbackFor(corr, protocol.ModelFallbackReasonRefused, nil, true)
+		fbOutcome, fbCorr, fbErr := e.streamModel(ctx, turnID)
+		if fbErr != nil {
+			// The fallback could not answer either: do not hold the session
+			// on a model that just failed.
+			e.fallbackSticky = false
+			if ctx.Err() != nil {
+				return streamOutcome{}, fbCorr, fbErr
+			}
+			return streamOutcome{}, fbCorr, bothFailed(e.primaryHold, errPrimaryRefused, e.fallback, fbErr)
+		}
+		return fbOutcome, fbCorr, nil
+	}
 	if err == nil || !e.fallbackEligible(ctx, err) {
 		return outcome, corr, err
 	}

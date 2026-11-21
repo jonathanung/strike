@@ -164,6 +164,9 @@ pub struct LiveStatus {
     pub fallback_provider: String,
     #[serde(default, rename = "fallbackModel")]
     pub fallback_model: String,
+    /// True while the session runs on the fallback after a refusal (#1922).
+    #[serde(default, rename = "fallbackActive")]
+    pub fallback_active: bool,
     /// Session response style (#1369): "" default | concise | detailed,
     /// and how it reaches the model (none | instruction).
     #[serde(default)]

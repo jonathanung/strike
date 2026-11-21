@@ -88,11 +88,12 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `wait.resolved` → `WaitResolved`
 - `wait.started` → `WaitStarted`
 
-## Op types (34)
+## Op types (35)
 
 - `compact` → `Compact`
 - `context.controls` → `SetContextControls`
 - `elicitation.reply` → `ElicitationReply`
+- `fallback.return` → `ReturnToPrimary`
 - `files.changed` → `FilesChanged`
 - `input.queue_cancel` → `InputQueueCancel`
 - `input.queue_edit` → `InputQueueEdit`

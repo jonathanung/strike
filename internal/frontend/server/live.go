@@ -482,6 +482,9 @@ type StatusSnapshot struct {
 	// (#1350); empty when none is set.
 	FallbackProvider string `json:"fallbackProvider,omitempty"`
 	FallbackModel    string `json:"fallbackModel,omitempty"`
+	// FallbackActive is true while the session runs on the fallback after
+	// the primary refused (#1922), until fallback.return.
+	FallbackActive bool `json:"fallbackActive,omitempty"`
 	// Verbosity is the session response style (#1369; empty = default) and
 	// VerbosityDelivery how it reaches the model (none|instruction).
 	Verbosity         string `json:"verbosity,omitempty"`
@@ -1038,6 +1041,11 @@ func (l *Live) applyStatus(ev protocol.Event) {
 	case protocol.FallbackModelSelected:
 		l.status.FallbackProvider = e.Provider
 		l.status.FallbackModel = e.Model
+		l.status.FallbackActive = e.Active
+	case protocol.ModelFallback:
+		if e.Depth == 0 && e.Sticky {
+			l.status.FallbackActive = true
+		}
 	case protocol.VerbositySelected:
 		l.status.Verbosity = string(e.Level)
 		l.status.VerbosityDelivery = e.Delivery

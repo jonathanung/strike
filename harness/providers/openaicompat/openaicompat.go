@@ -100,6 +100,9 @@ type chatMessage struct {
 	ReasoningContent string         `json:"reasoning_content,omitempty"`
 	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
+	// Refusal is the model's refusal text on a response (OpenAI structured
+	// refusals). Never sent on requests.
+	Refusal string `json:"refusal,omitempty"`
 }
 
 type chatContentPart struct {
@@ -172,7 +175,12 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 		if choice.Message.ReasoningContent != "" {
 			ch <- provider.StreamEvent{Type: provider.EventReasoning, Text: choice.Message.ReasoningContent}
 		}
-		if text := chatContentText(choice.Message.Content); text != "" {
+		text := chatContentText(choice.Message.Content)
+		if text == "" {
+			// A structured refusal carries its prose here instead of content.
+			text = choice.Message.Refusal
+		}
+		if text != "" {
 			ch <- provider.StreamEvent{Type: provider.EventTextDelta, Text: text}
 		}
 		for _, call := range choice.Message.ToolCalls {
@@ -186,7 +194,7 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 				Args: args,
 			}}
 		}
-		done := provider.StreamEvent{Type: provider.EventDone, StopReason: choice.FinishReason}
+		done := provider.StreamEvent{Type: provider.EventDone, StopReason: chatStopReason(choice.FinishReason, choice.Message.Refusal)}
 		if resp.Usage != nil {
 			done.Usage = chatUsageToProvider(resp.Usage)
 		}
@@ -338,4 +346,14 @@ func chatContentText(content any) string {
 		}
 		return b
 	}
+}
+
+// chatStopReason normalizes chat-completions finish_reason. A structured
+// refusal or a content_filter stop is the typed provider.StopReasonRefusal
+// (#1922); everything else passes through.
+func chatStopReason(finish, refusal string) string {
+	if refusal != "" || finish == "content_filter" {
+		return provider.StopReasonRefusal
+	}
+	return finish
 }

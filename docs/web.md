@@ -219,6 +219,7 @@ JSON objects with a `type` and optional `data`:
 | `set.permission_mode` | `{ "mode": "default\|plan\|accept-edits\|yolo" }` |
 | `set.autonomy` | `{ "mode": "supervised\|agent\|checks\|skip-all" }` |
 | `set.fallback_model` | `{ "provider", "model?" }` — session fallback model (#1350); empty provider clears. Confirmed by `fallback.selected`; a turn the fallback answered emits `model.fallback` `{ primaryProvider, primaryModel, fallbackProvider, fallbackModel, reason: "unavailable", error? }`. Status: `fallbackProvider` / `fallbackModel` |
+| `fallback.return` | _(empty)_ — end a session-sticky fallback (#1922): after the primary refused, the session stays on the fallback until this op. Confirmed by `fallback.selected` with `active: false`; while sticky, `fallback.selected.active` and status `fallbackActive` are true and `model.fallback` carries `reason: "refused"`, `sticky: true`. |
 | `set.verbosity` | `{ "level": "default\|concise\|detailed" }` — response style (#1369); confirmed by `verbosity.selected` `{ level, delivery: "none\|instruction" }`, reported on status as `verbosity` / `verbosityDelivery` |
 | `team.spawn` | `{ "idempotencyKey", "objective", "agent?", "name?", "isolation?", "budget?", "rootSessionId?" }` |
 | `team.message` | `{ "idempotencyKey", "to", "body", "kind?", "urgency?", "taskId?" }` |
