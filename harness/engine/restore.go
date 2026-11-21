@@ -47,6 +47,9 @@ type Restored struct {
 	FolderGrants []permission.FolderGrant
 	// PlanHandoff is the last protocol.PlanHandoff (approved plan identity).
 	PlanHandoff PlanHandoffState
+	// Debug is the last successful protocol.DebugUpdated (Error empty), or
+	// nil when the log never used debug mode.
+	Debug *protocol.DebugUpdated
 }
 
 // reqAccum collects one provider-request's stream into an assistant message
@@ -208,6 +211,11 @@ func restoreEvents(events []protocol.Event, keep func(protocol.Event) bool) Rest
 			r.Effort = e.Level
 		case protocol.FastSelected:
 			r.Priority = e.Enabled
+		case protocol.DebugUpdated:
+			if e.Error == "" {
+				ev := e
+				r.Debug = &ev
+			}
 		case protocol.AutonomySelected:
 			r.Autonomy = e.Mode.Normalize()
 		case protocol.PermissionModeSelected:
@@ -342,6 +350,8 @@ func restoreCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.EffortSelected:
 		return e.Correlation, true
 	case protocol.FastSelected:
+		return e.Correlation, true
+	case protocol.DebugUpdated:
 		return e.Correlation, true
 	case protocol.AutonomySelected:
 		return e.Correlation, true

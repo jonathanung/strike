@@ -753,6 +753,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialAlways      permission.Ruleset
 			initialFolder      []permission.FolderGrant
 			initialPlanHandoff engine.PlanHandoffState
+			initialDebug       *protocol.DebugUpdated
 			initialMemoryMode  string
 			quietStartup       bool
 			resuming           bool
@@ -784,6 +785,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialAlways = restored.AlwaysGrants
 			initialFolder = restored.FolderGrants
 			initialPlanHandoff = restored.PlanHandoff
+			initialDebug = restored.Debug
 			if !(applyCLI && opts.providerSet) && restored.Provider != "" {
 				initialProvider = restored.Provider
 			}
@@ -1010,6 +1012,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			InitialAlwaysGrants:        initialAlways,
 			InitialFolderGrants:        initialFolder,
 			InitialPlanHandoff:         initialPlanHandoff,
+			InitialDebug:               initialDebug,
 			PlanStore:                  enginebind.Plan(planStore),
 			QuietStartup:               quietStartup,
 			DangerouslySkipPermissions: bypass,

@@ -1312,6 +1312,23 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 		return e.canceledOrTimeoutToolResult(ctx, call.ID, corr, tool.Result{})
 	}
 
+	// Debug phase gate (#1345): during the hypothesis phase only
+	// marker-tagged instrumentation edits pass. Deny before hooks and
+	// Execute so a fix edit has no side effects; the reason reaches the
+	// transcript and the model as blocked tool feedback.
+	if ge := e.checkDebugGate(call); ge != nil {
+		return e.settleToolFeedback(toolFeedback{
+			Corr:      corr,
+			CallID:    call.ID,
+			Output:    protocol.ToolFeedbackBlocked(ge.Error()),
+			IsError:   true,
+			EmitEnd:   true,
+			ErrorCode: protocol.ErrorCodeBlocked,
+			Retryable: false,
+			Title:     call.Name,
+		})
+	}
+
 	// Declarative rules first (cheap, no process). Block skips shell + Execute.
 	if d := e.fireHookRules(corr, permission.HookEventPreToolUse, call.Name, call.ID); d.Block {
 		return e.settleToolFeedback(toolFeedback{

@@ -163,6 +163,7 @@ type (
 	SetAutonomy             = pub.SetAutonomy
 	SetPermissionMode       = pub.SetPermissionMode
 	SetFast                 = pub.SetFast
+	DebugControl            = pub.DebugControl
 	StartWorkflow           = pub.StartWorkflow
 	StopWorkflow            = pub.StopWorkflow
 	FilesChanged            = pub.FilesChanged
@@ -225,6 +226,10 @@ type (
 	AutonomySelected        = pub.AutonomySelected
 	PermissionModeSelected  = pub.PermissionModeSelected
 	FastSelected            = pub.FastSelected
+	DebugUpdated            = pub.DebugUpdated
+	DebugHypothesis         = pub.DebugHypothesis
+	DebugEvidence           = pub.DebugEvidence
+	DebugHit                = pub.DebugHit
 	FilesInvalidated        = pub.FilesInvalidated
 	PathOverlap             = pub.PathOverlap
 	PathOverlapHolder       = pub.PathOverlapHolder

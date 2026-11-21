@@ -346,3 +346,59 @@ func TestMarkerNotInOwnSource(t *testing.T) {
 		}
 	}
 }
+
+func TestRestore(t *testing.T) {
+	hs := []Hypothesis{
+		{ID: "h1", Rank: 1, Statement: "a", Status: StatusConfirmed, Evidence: []Evidence{{Source: "log", Text: "seen"}}},
+		{ID: "h2", Rank: 2, Statement: "b", Status: StatusOpen},
+	}
+	tests := []struct {
+		name      string
+		snap      Snapshot
+		wantNil   bool
+		wantPhase Phase
+		wantFixed bool
+	}{
+		{name: "empty phase", snap: Snapshot{}, wantNil: true},
+		{name: "closed", snap: Snapshot{Phase: PhaseClosed, Hypotheses: hs}, wantNil: true},
+		{name: "unknown phase", snap: Snapshot{Phase: "bogus"}, wantNil: true},
+		{name: "hypothesis", snap: Snapshot{Phase: PhaseHypothesis, Hypotheses: hs}, wantPhase: PhaseHypothesis},
+		{name: "hypothesis drops fixed", snap: Snapshot{Phase: PhaseHypothesis, Fixed: true}, wantPhase: PhaseHypothesis},
+		{name: "fix fixed", snap: Snapshot{Phase: PhaseFix, Hypotheses: hs, Override: "why", Fixed: true}, wantPhase: PhaseFix, wantFixed: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := Restore(tc.snap)
+			if tc.wantNil {
+				if s != nil {
+					t.Fatalf("Restore = %+v, want nil", s.Snapshot())
+				}
+				return
+			}
+			if s == nil {
+				t.Fatal("Restore = nil")
+			}
+			got := s.Snapshot()
+			if got.Phase != tc.wantPhase || got.Fixed != tc.wantFixed || got.Override != tc.snap.Override {
+				t.Fatalf("snapshot = %+v", got)
+			}
+			if len(got.Hypotheses) != len(tc.snap.Hypotheses) {
+				t.Fatalf("hypotheses = %d, want %d", len(got.Hypotheses), len(tc.snap.Hypotheses))
+			}
+		})
+	}
+}
+
+func TestRestoreDeepCopiesAndGates(t *testing.T) {
+	hs := []Hypothesis{{ID: "h1", Statement: "a", Evidence: []Evidence{{Text: "e"}}}, {ID: "h2", Statement: "b"}}
+	s := Restore(Snapshot{Phase: PhaseHypothesis, Hypotheses: hs})
+	hs[0].Evidence[0].Text = "mutated"
+	if got := s.Snapshot().Hypotheses[0].Evidence[0].Text; got != "e" {
+		t.Fatalf("evidence aliased caller slice: %q", got)
+	}
+	args, _ := json.Marshal(map[string]string{"oldString": "a", "newString": "b"})
+	var ge *GateError
+	if err := s.CheckToolCall("edit", args); !errors.As(err, &ge) {
+		t.Fatalf("restored hypothesis phase must gate untagged edits, got %v", err)
+	}
+}
