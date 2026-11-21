@@ -9,6 +9,7 @@
 
 mod agent_picker;
 mod annotate;
+mod announce;
 mod api;
 mod appearance;
 mod attachment_honesty;
@@ -138,6 +139,7 @@ mod spec_authoring;
 mod workflows;
 mod workflow_run;
 use crate::shell::icon;
+use crate::announce::LiveRegions;
 use crate::team_message::TeamMessageComposer;
 use crate::identity::IdentityDisc;
 use crate::delegation_board::DelegationBoard;
@@ -3850,6 +3852,10 @@ fn App() -> impl IntoView {
         roots.get().iter().any(|r| r.id == root && r.busy)
             || (live_busy.get() && live_busy_root.get() == root)
     });
+    // #1337: approvals and turn endings reach screen readers.
+    let announcer = announce::Announcer::new();
+    announce::watch_asks(announcer, asks);
+    announce::watch_turns(announcer, active_root, session_busy_now, transcript);
     // Prompt sharpen (#1385): App-owned so the binding outlives the
     // chat view's remounts.
     let sharpen = prompt_sharpen::Sharpen::new(
@@ -5617,6 +5623,7 @@ fn App() -> impl IntoView {
     });
 
     view! {
+        <LiveRegions announcer=announcer />
         <ApprovalHost
             base=base
             token=token
