@@ -125,10 +125,13 @@ ssh -L 8787:127.0.0.1:8787 user@strike-host
 | `GET` | `/v1/sessions` | **yes** | Session list + `liveId` |
 | `GET` | `/v1/sessions/{id}/events` | **yes** | SSE tail of a session JSONL log |
 | `GET` | `/v1/sessions/{id}/children` | **yes** | Child/subagent sessions under a root |
+| `GET` | `/v1/sessions/{id}/pr` | **yes** | PR watch (#1356): linked PR state, review decision and CI checks (queued/running/pass/fail/skipped) via the host's `gh`; `poll`/`pollAfterSec` tell the client when to ask again. Cached 30s (`?refresh=1` floor 5s). Never returns tokens or gh stderr; unavailable states carry an actionable `reason` |
+| `POST` | `/v1/sessions/{id}/pr/fix-draft` | **yes** | PR watch: redacted "fix these checks" draft (failing check names + last 100 log lines per failed Actions job). No side effects; the cockpit posts it as `user.input` only after the user confirms. **409** when nothing needs fixing or tracking is unavailable |
 | `POST` | `/v1/sessions/{id}/fork` | **yes** | Fork durable session → new id |
 | `GET` | `/v1/sessions/{id}/rewind_preview` | **yes** | Rewind preview (#1336): `?keep=` a turn's fork keep-count → `{turn, turns, totalTurns, prompt, files[{path,kind}], checkpointSkipped, uncovered[], beyondCheckpoints, disabled?}` summing what rewinding that turn and every later one would undo, from the record's `turn.completed` facts. Read-only; the cockpit applies the rewind with one `rewind` op per undone turn. `disabled` states why on `--read-only` cockpits and delegated child sessions. **400** bad `keep`; **409** turn no longer in history; **404** unknown session |
 | `POST` | `/v1/sessions/{id}/report` | **yes** | Generate a `session_report` artifact from the session record (#1444) → **201** artifact. Facts only (turns, asks, tool counts, files, approvals, children, tokens, errors); tool args/output never copied; redacted. **404** unknown session; **501** without sessions or artifact store |
 | `PATCH` | `/v1/sessions/{id}` | **yes** | Rename (`{ "title" }`) |
+| `POST` | `/v1/sessions/{id}/title/propose` | **yes** | Regenerate title (#1370): re-derives a title from the newest substantive user message with the creation-time titling logic and returns `{title, current, manual, unchanged, messages}` **without storing it** — the cockpit writes a confirmed proposal through `PATCH`. **422** `title_session_empty` / `title_single_message`; **404** unknown session; **501** without sessions |
 | `DELETE` | `/v1/sessions/{id}` | **yes** | Delete durable session (`?force=true` optional) |
 | `GET` | `/v1/sessions/{id}/loops` | **yes** | Session `/loop` jobs (see [Session loops](#session-loops)) |
 | `POST` | `/v1/sessions/{id}/loops` | **yes** | Start a loop (`{ "interval", "job" }`) |

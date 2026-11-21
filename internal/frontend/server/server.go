@@ -272,6 +272,8 @@ type Server struct {
 	suggestOnce  sync.Once
 	suggestStore *suggestion.Store
 	suggestErr   error
+	// prWatch caches PR/check polls per session (#1356, prwatch.go).
+	prWatch prWatchState
 
 	// tokenHash is the sha256 of the daemon token file last observed.
 	// A change appends a token-rotation audit entry. The token is not stored.
@@ -501,6 +503,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /v1/sandbox", s.handleSandboxPatch)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/children", s.handleSessionChildren)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/reference", s.handleSessionReference)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/pr", s.handleSessionPR)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/pr/fix-draft", s.handleSessionPRFixDraft)
 	s.mux.HandleFunc("GET /v1/session-lifecycle", s.handleSessionLifecycleCapabilities)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.handleSessionFork)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork_at", s.handleSessionForkAt)
@@ -513,6 +517,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/dashboards", s.handleDashboardCreate)
 	s.mux.HandleFunc("GET /v1/dashboards/{id}", s.handleDashboardGet)
 	s.mux.HandleFunc("PATCH /v1/sessions/{id}", s.handleSessionRename)
+	s.mux.HandleFunc("POST /v1/sessions/{id}/title/propose", s.handleSessionTitlePropose)
 	s.mux.HandleFunc("DELETE /v1/sessions/{id}", s.handleSessionDelete)
 	// Session-scoped /loop jobs (#1588): ephemeral, die with the session.
 	s.mux.HandleFunc("GET /v1/sessions/{id}/loops", s.handleSessionLoopsList)

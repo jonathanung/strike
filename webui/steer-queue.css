@@ -247,4 +247,5 @@ button.confirming {
   line-height: 1.4;
 }
 .steer-ack[data-steer-state="missed"] { border-left-color: var(--muted); }
+.steer-ack[data-steer-state="conflict"] { border-left-color: var(--danger); color: var(--ink); }
 /* feature:steer-ack end */

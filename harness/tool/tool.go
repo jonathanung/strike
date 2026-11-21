@@ -861,6 +861,10 @@ type Context struct {
 	// autonomy gate once, records approval source + plan identity, advances
 	// the plan→implement workflow, and routes to build/orchestrator.
 	HandoffPlan func(ctx context.Context, req PlanHandoffRequest) (PlanHandoffResult, error)
+	// AckSteer records the agent's acknowledgement of the oldest steer
+	// applied in this turn and not yet acknowledged (turn.steer_ack, #1860).
+	// It errors when no such steer exists. Nil disables steer_ack.
+	AckSteer func(ack SteerAck) error
 	// ReportOutput streams retained output chunks (already size-capped by the
 	// tool) for live UI. Nil disables streaming; tools must still return the
 	// full Result.Output at the end.

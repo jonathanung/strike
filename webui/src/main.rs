@@ -9,6 +9,7 @@
 
 mod agent_picker;
 mod annotate;
+mod announce;
 mod api;
 mod appearance;
 mod attachment_honesty;
@@ -42,6 +43,7 @@ mod markdown_review;
 mod local_issues;
 mod mermaid;
 mod localfiles;
+mod md_table;
 mod customize;
 mod dashboards;
 mod delegation_board;
@@ -74,6 +76,7 @@ mod model;
 mod notify;
 mod outcome;
 mod project_init;
+mod prompt_library;
 mod prompt_sharpen;
 mod onboarding;
 mod outbox;
@@ -83,6 +86,7 @@ mod permissions_explain;
 mod plugin_flow;
 mod plugin_lifecycle;
 mod plan_card;
+mod pr_watch;
 mod steer_queue;
 mod steer_ack;
 mod model_menu;
@@ -101,6 +105,7 @@ mod file_history;
 mod quick_open;
 mod transcript_find;
 mod usage_audit;
+mod regenerate_title;
 mod rewind;
 mod session_delete;
 mod session_restore;
@@ -134,6 +139,7 @@ mod spec_authoring;
 mod workflows;
 mod workflow_run;
 use crate::shell::icon;
+use crate::announce::LiveRegions;
 use crate::team_message::TeamMessageComposer;
 use crate::identity::IdentityDisc;
 use crate::delegation_board::DelegationBoard;
@@ -3846,6 +3852,10 @@ fn App() -> impl IntoView {
         roots.get().iter().any(|r| r.id == root && r.busy)
             || (live_busy.get() && live_busy_root.get() == root)
     });
+    // #1337: approvals and turn endings reach screen readers.
+    let announcer = announce::Announcer::new();
+    announce::watch_asks(announcer, asks);
+    announce::watch_turns(announcer, active_root, session_busy_now, transcript);
     // Prompt sharpen (#1385): App-owned so the binding outlives the
     // chat view's remounts.
     let sharpen = prompt_sharpen::Sharpen::new(
@@ -5613,6 +5623,7 @@ fn App() -> impl IntoView {
     });
 
     view! {
+        <LiveRegions announcer=announcer />
         <ApprovalHost
             base=base
             token=token
@@ -5638,6 +5649,7 @@ fn App() -> impl IntoView {
         />
         <shell::Chrome />
         {gateway_qr::phone_view()}
+        <prompt_library::PromptLibrary draft=draft />
         <session_delete::SessionDeleteDialog
             target=delete_target
             base=base
@@ -6222,6 +6234,20 @@ fn App() -> impl IntoView {
                                 <button type="button" class="palette-row" on:click=move |_| open_composer_catalog("skills", &ui)>
                                     <span class="name">"Use a skill"</span>
                                     <span class="path">"Skills loaded for this daemon"</span>
+                                </button>
+                                <button type="button" class="palette-row" data-prompts-open-menu="true" on:click=move |_| {
+                                    plus_open.set(false);
+                                    let _ = crate::shell::dispatch(prompt_library::INSERT_ID, "");
+                                }>
+                                    <span class="name">"Insert saved prompt"</span>
+                                    <span class="path">"Search your prompt library"</span>
+                                </button>
+                                <button type="button" class="palette-row" data-prompts-save-menu="true" on:click=move |_| {
+                                    plus_open.set(false);
+                                    let _ = crate::shell::dispatch(prompt_library::SAVE_ID, "");
+                                }>
+                                    <span class="name">"Save draft as prompt"</span>
+                                    <span class="path">"Keep this draft in the prompt library"</span>
                                 </button>
                                 <button type="button" class="palette-row" data-sharpen-menu="true" on:click=move |_| {
                                     plus_open.set(false);
@@ -7136,6 +7162,7 @@ fn App() -> impl IntoView {
                     <div hidden=move || !git_active.get()>
                         <ship_pr::ShipPr base=base token=token status_line=status active=git_active />
                         <review_branch::ReviewBranch base=base token=token active=git_active doc_path=doc_path doc_line=doc_line doc_diff=doc_diff />
+                        <pr_watch::PrWatch base=base token=token session=active_root active=git_active />
                         <git::GitPanel base=base token=token status_line=status active=git_active />
                     </div>
                     <div hidden=move || !review_active.get()>

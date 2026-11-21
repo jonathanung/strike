@@ -593,13 +593,18 @@ survives reload because the event is in the JSONL. Pending (sent, not yet
 applied) is the composer's steer note: the steer has no transcript line
 until the engine applies it.
 
-Planned, not drawn: the agent's own one-line "now doing X instead of Y"
-summary and a conflict state ("this steer conflicts with my plan"). Both
-need an agent-emitted event, for example `turn.steer_ack {targetTurnId,
-summary, conflict, reason}` emitted by a model-facing acknowledgement tool,
-that does not exist yet. The cockpit's protocol gate drops unknown events,
-so nothing renders them until the engine and schema carry the event. The
-marker never derives a summary or a conflict from timing or a plan diff.
+Shipped (#1860): the agent's own words. A deferred `steer_ack` tool is
+activated while a steer applied this turn is unanswered; the agent calls it
+once per steer with a one-line `summary` and, when the steer contradicts its
+in-flight plan, `conflict: true` plus a `reason`. The engine emits the
+durable `turn.steer_ack {targetTurnId, summary, conflict, reason}`, pairing
+acks with applied steers oldest first and dropping unanswered ones at turn
+end; the cockpit pairs them the same way, so replay matches live. The marker
+adds "Now: …" to the acknowledged text, or switches to a distinct
+`conflict` state showing the reason. Stop and queue stay the actions; the
+call never blocks the turn. With no event the marker stays at plain
+"acknowledged". Not drawn: a browser-level smoke for the summary/conflict
+states (UAT evidence owed).
 
 ## Container actions (#1584 follow-up)
 
@@ -722,6 +727,27 @@ lines) on later security reviews of the same branch
 listed and removable. Not in this slice: SARIF/JSONL export, PR-scoped
 suppressions (#1356 follow-up), an authoring UI for security rules.
 
+## PR watch
+
+The Git tab shows the open session's linked pull request (#1356): a chip
+with the PR number, state and check rollup, an expandable per-check list
+(queued / running / passed / failed / skipped), and "Open on GitHub". Data
+comes from `GET /v1/sessions/{id}/pr`, which runs the host's own `gh pr view`
+(the browser never sees a token; gh stderr is never returned). `/v1/sessions`
+also carries `prUrl` / `prNumber` / `prState`. The cockpit polls every 60s
+while the PR is open and a client is connected; the daemon caches a poll for
+30s, stops on merged/closed, and stops on errors retrying cannot fix (gh not
+installed, gh signed out, no GitHub remote, non-GitHub PR) with an actionable
+"PR tracking unavailable" line. A failed check or a changes-requested review
+raises a `pr.attention` notification once per distinct failure set.
+
+"Fix in this session" asks `POST /v1/sessions/{id}/pr/fix-draft` for a
+draft (failing check names, the last 100 lines of each failed Actions job
+log via `gh run view --log-failed`, redacted), shows it, and only after the
+user confirms posts it as a normal `user.input` op. No automatic fix turns,
+push or merge. Not in this slice: the chip on session-list rows, marking
+checks that also fail on the base branch, and any autonomous fix loop.
+
 ## Not planned as a copy
 
 Stall is already a real badge when the team roster sets `budget.stall`.
@@ -746,6 +772,20 @@ browser's own `speechSynthesis` (on-device voices when available). Voice and
 speed are in Settings → Voice and stored in the browser. Not in slice 1: a
 gateway-hosted Piper endpoint, auto-play, reading tool output, and stopping
 playback on a gateway disconnect (a page unload stops it).
+
+## Accessibility
+
+Shipped (#1337 slice 1): two global `aria-live` regions at the shell root
+(`webui/src/announce.rs`, wording in `webui/a11y-announce`) — new
+permission asks are announced assertively and focus moves to the new
+approval card unless the user is typing; a turn ending is announced
+politely. `webui/a11y.css` honours `prefers-reduced-motion` and lifts
+accent-role text on the default Strike theme to AA.
+
+Planned (#1878): agent-question announcements (the cockpit has no
+`question.asked` handler yet, so there is nothing to announce), focus
+trap and return for dialogs and the palette, a keyboard-only UAT loop, an
+automated a11y scan, and accent-text contrast for non-default themes.
 
 ## Live preview
 
