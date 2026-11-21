@@ -111,6 +111,9 @@ pub fn DebugPanel(
         crate::shell::bind(
             "debug-mode.start",
             Rc::new(move |_args: &str| {
+                if root.get_untracked().is_empty() {
+                    return Err("No live session to debug.".into());
+                }
                 if !debug_mode::can(debug.get_untracked().as_ref(), Action::Start) {
                     return Err("A debug session is already running.".into());
                 }
