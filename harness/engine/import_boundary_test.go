@@ -17,6 +17,7 @@ func TestProductionImportsAreKernelOnly(t *testing.T) {
 		"github.com/jonathanung/strike/harness/permission": true,
 		"github.com/jonathanung/strike/harness/provider":   true,
 		"github.com/jonathanung/strike/harness/question":   true,
+		"github.com/jonathanung/strike/harness/elicit":     true,
 		"github.com/jonathanung/strike/harness/sandbox":    true,
 		"github.com/jonathanung/strike/harness/scheduler":  true,
 		"github.com/jonathanung/strike/harness/tool":       true,

@@ -25,6 +25,10 @@ func TestHelperProcess(t *testing.T) {
 		return
 	}
 	mode := os.Getenv("MCP_FAKE_MODE")
+	if mode == "elicit" {
+		runElicitFixture()
+		os.Exit(0)
+	}
 	runFakeMCP(mode)
 	os.Exit(0)
 }
