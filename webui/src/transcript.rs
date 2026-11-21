@@ -831,7 +831,6 @@ impl Transcript {
                     at_ms,
                     attachments: Vec::new(),
                     turn_id: field_str(&data, "turnId"),
-                    attachments: Vec::new(),
                 });
             }
             "artifact.updated" => self.artifact_updates = self.artifact_updates.wrapping_add(1),
@@ -991,7 +990,6 @@ impl Transcript {
                     at_ms,
                     attachments: Vec::new(),
                     turn_id: String::new(),
-                    attachments: Vec::new(),
                 });
             }
             _ => {}
