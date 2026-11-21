@@ -30,6 +30,7 @@ import (
 	"github.com/jonathanung/strike/internal/daemon/trigger"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/server/terminal"
+	"github.com/jonathanung/strike/internal/integrate/container"
 	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/persist/suggestion"
@@ -110,6 +111,10 @@ type Options struct {
 	Sandbox *SandboxSnapshot
 	// ReadOnly rejects mutating protocol ops (POST /v1/ops and WS op frames).
 	ReadOnly bool
+	// ContainerRuntime builds the engine CLI behind GET /v1/container/status
+	// (#1584) for a configured binary ("" auto-detects docker, then podman).
+	// Nil uses container.NewCLI; tests inject a fake exec/lookPath.
+	ContainerRuntime func(binary string) *container.CLI
 	// WorkspaceTrustPath is the workspace trust store file
 	// (~/.strike/workspace-trust.json) behind GET/POST /v1/workspace/trust
 	// (#1781). Empty disables the routes (501).
@@ -715,6 +720,8 @@ func (s *Server) routes() {
 	// Project init (#1581): AGENTS.md bootstrap via host.ProjectInit.
 	s.mux.HandleFunc("GET /v1/init", s.handleProjectInitGet)
 	s.mux.HandleFunc("POST /v1/init", s.handleProjectInitPost)
+	// Container posture (#1584): read-only isolation ladder + engine status.
+	s.mux.HandleFunc("GET /v1/container/status", s.handleContainerStatus)
 	s.mux.HandleFunc("GET /v1/workspace/trust", s.handleWorkspaceTrustGet)
 	s.mux.HandleFunc("POST /v1/workspace/trust", s.handleWorkspaceTrustPost)
 	s.mux.HandleFunc("POST /v1/attachments", s.handleAttachmentIngest)

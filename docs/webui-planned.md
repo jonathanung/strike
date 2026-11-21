@@ -583,6 +583,16 @@ that does not exist yet. The cockpit's protocol gate drops unknown events,
 so nothing renders them until the engine and schema carry the event. The
 marker never derives a summary or a conflict from timing or a plan diff.
 
+## Container actions (#1584 follow-up)
+
+Settings → Isolation (`GET /v1/container/status`) is read-only: posture
+ladder, engine probe, workspace container (`strike container status`),
+ejected-Dockerfile drift and detected manifests. Not drawn: eject,
+drift fix, and container start/stop/build from the web, and the
+`strike container ls --all` list of every managed container on the engine.
+Host mode stays a first-class posture (#1290); nothing here changes a
+default.
+
 ## Run with N models
 
 Orchestration core shipped, card not drawn (#1346).

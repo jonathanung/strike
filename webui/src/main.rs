@@ -21,6 +21,7 @@ mod child_signals;
 mod clipboard;
 mod compaction_marks;
 mod confirm;
+mod container_panel;
 mod context_doctor;
 mod composer_triggers;
 mod config_sources;
@@ -1196,6 +1197,8 @@ fn App() -> impl IntoView {
     let token = RwSignal::new(gateway::initial_token());
     provide_context(transcript_attachments::AttachmentAuth { base, token });
     let status = RwSignal::new("connecting…".to_string());
+    // Bootstrap capability `container` (#1584): gates Settings → Isolation.
+    let container_capable = RwSignal::new(false);
     // Bootstrap capability `workspaceTrust` (#1781): gates the untrusted
     // workspace badge and trust card.
     let workspace_trust_capable = RwSignal::new(false);
@@ -1975,6 +1978,7 @@ fn App() -> impl IntoView {
                                         }
                                     });
                                 }
+                                container_capable.set(boot.capabilities.container);
                                 workspace_trust_capable.set(boot.capabilities.workspace_trust);
                                 diag_capable.set(boot.capabilities.diag);
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
@@ -5524,6 +5528,7 @@ fn App() -> impl IntoView {
                 status=status
                 diag_capable=diag_capable
                 project_init_capable=project_init_capable
+                container_capable=container_capable
                 config_files_capable=config_files_capable
                 root=active_root
                 theme=theme_id
