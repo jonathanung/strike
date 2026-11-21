@@ -655,6 +655,7 @@ fn event_relevant(message: &str) -> bool {
         || m.contains("fast")
         || m.contains("autonomy")
         || m.contains("workflow")
+        || m.contains("phase")
 }
 
 fn under_warn_ratio(used: i64, limit: i64) -> bool {

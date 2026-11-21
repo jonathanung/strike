@@ -112,6 +112,16 @@ pub fn replace_confirm(active: &WorkflowRun, target: &str) -> Option<ConfirmRequ
         return None;
     }
     let target = target.trim();
+    if target == active.workflow {
+        return Some(ConfirmRequest {
+            title: format!("Restart \"{target}\"?"),
+            body: format!(
+                "\"{target}\" is already active. Starting it again stops {} and starts \"{target}\" over at its first phase.",
+                active.named()
+            ),
+            confirm_label: format!("Restart {target}"),
+        });
+    }
     Some(ConfirmRequest {
         title: format!("Replace \"{}\" with \"{target}\"?", active.workflow),
         body: format!(
@@ -288,6 +298,13 @@ mod tests {
         assert!(req.title.contains("plan-implement") && req.title.contains("review-fix"));
         assert!(req.body.contains("phase \"plan\""));
         assert!(req.body.contains("stays active"));
+    }
+
+    #[test]
+    fn replace_confirm_same_name_is_a_restart() {
+        let req = replace_confirm(&WorkflowRun::from_status("w", "p2"), "w").expect("confirm");
+        assert!(req.title.starts_with("Restart"));
+        assert!(req.body.contains("first phase"));
     }
 
     #[test]
