@@ -638,6 +638,22 @@ Not in this slice: non-GitHub forges, pushing to a remote other than
 origin, and the live checks chip (PR watch, #1356, reads the same session
 fields).
 
+## Pre-push review
+
+"Review this branch" in the Git tab (#1487) sizes the branch diff first
+(`GET /v1/git/review`: committed `base...HEAD` plus uncommitted changes,
+untracked file names, one model turn, warn above 60 KB, refuse above the
+200 KB diff cap). "Run review" (`POST /v1/git/review {confirm:true}`) spawns
+a fresh-context child through the normal `team.spawn` path with the
+built-in `branch-reviewer` agent, whose denies (write, edit, bash, task,
+verify, browser, web, MCP, store writes) the engine enforces for children,
+fed the diff, the repo's AGENTS.md and the findings format. The daemon parses
+`FINDING | severity | path:line | scenario` lines and the `VERDICT:` line from
+the child's transcript (`GET /v1/git/review/{id}`); each finding opens its
+file at the line. No review store, no autofix, no merge gate. Not in this
+slice: the `/review` composer trigger (#1275), a cross-model reviewer (team
+spawn has no per-child model), and Ship to PR's warn-on-blocking hook.
+
 ## Not planned as a copy
 
 Stall is already a real badge when the team roster sets `budget.stall`.
@@ -654,6 +670,14 @@ goals/autopilot state, workspaces and their rules, issues, plans and the
 ledger are not in archive version 1; the manifest names them as
 `not-yet-included`. Passphrase encryption is not offered: the file says
 `"encrypted": false` and secrets are excluded regardless.
+
+## Read replies aloud
+
+Assistant replies have a **Read aloud** control (#1384) that uses the
+browser's own `speechSynthesis` (on-device voices when available). Voice and
+speed are in Settings → Voice and stored in the browser. Not in slice 1: a
+gateway-hosted Piper endpoint, auto-play, reading tool output, and stopping
+playback on a gateway disconnect (a page unload stops it).
 
 ## Live preview
 
