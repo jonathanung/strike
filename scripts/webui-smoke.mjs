@@ -14,6 +14,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
+import { seedSkillUsage, skillUsageCheck } from "./webui-skill-usage-check.mjs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,6 +30,25 @@ const chromePort = 9222 + (process.pid % 200);
 // ends immediately unless degrade is on before the daemon reads config.
 await mkdir(join(home, ".strike"), { recursive: true });
 await writeFile(join(home, ".strike", "config"), '{"sandboxAllowDegrade":true}\n');
+
+// Theme catalog (#1529): a user theme the daemon's GET /v1/themes lists.
+// The cockpit picker must offer it, paint it, and keep it across reload.
+const smokeTheme = {
+  id: "smoke-sunset",
+  name: "Smoke Sunset",
+  accent: { dark: "#fb923c", light: "#c2410c" },
+  background: { dark: "#1b1020", light: "#fff8f0" },
+  text: { dark: "#ffe8d0", light: "#2a1a10" },
+};
+await mkdir(join(home, ".strike", "themes"), { recursive: true });
+await writeFile(
+  join(home, ".strike", "themes", `${smokeTheme.id}.json`),
+  JSON.stringify({
+    name: smokeTheme.name,
+    id: smokeTheme.id,
+    colors: { accent: smokeTheme.accent, background: smokeTheme.background, text: smokeTheme.text },
+  }),
+);
 
 // Decision ledger seed (#1485). There is no ledger write route, and the
 // store loads its file once at open, so the file must exist before the
@@ -237,6 +257,30 @@ try {
     if (!other.seen || other.seen.upTo !== latest || !Array.isArray(other.seen.ids)) {
       throw new Error(`second client read state = ${JSON.stringify(other.seen)} latest=${latest}`);
     }
+  }
+  // #1564: Web Push registry. No real push service is contacted: the https
+  // endpoint below is never reachable and is removed straight away.
+  {
+    const authed = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const base = `http://127.0.0.1:${port}/v1/notifications`;
+    const keyRes = await fetch(`${base}/push-key`, { headers: authed });
+    const key = keyRes.status === 200 ? (await keyRes.json()).publicKey : "";
+    if (!/^[A-Za-z0-9_-]{86,88}$/.test(key || "")) throw new Error(`push-key ${keyRes.status} ${key}`);
+    const noAuth = await fetch(`${base}/push-key`);
+    if (noAuth.status !== 401) throw new Error(`push-key without token = ${noAuth.status}`);
+    // A real browser key pair is not needed for registry checks; reuse the
+    // daemon's own public key as a valid P-256 point.
+    const sub = (endpoint) => JSON.stringify({ endpoint, expirationTime: null, keys: { p256dh: key, auth: "BTBZMqHH6r4Tts7J_aSIgg" } });
+    const plain = await fetch(`${base}/push-subscriptions`, { method: "POST", headers: authed, body: sub("http://push.invalid/x") });
+    if (plain.status !== 400) throw new Error(`plain-http push endpoint accepted: ${plain.status}`);
+    const added = await fetch(`${base}/push-subscriptions`, { method: "POST", headers: authed, body: sub("https://push.invalid/smoke") });
+    if (added.status !== 201) throw new Error(`push subscribe ${added.status} ${await added.text()}`);
+    const status = await (await fetch(base, { headers: authed })).json();
+    if (!status.push || status.push.subscriptions !== 1 || JSON.stringify(status).includes("push.invalid")) {
+      throw new Error(`push status ${JSON.stringify(status.push)}`);
+    }
+    const removed = await fetch(`${base}/push-subscriptions`, { method: "DELETE", headers: authed, body: JSON.stringify({ endpoint: "https://push.invalid/smoke" }) });
+    if (removed.status !== 204) throw new Error(`push unsubscribe ${removed.status}`);
   }
   const healthBody = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
   if (!healthBody.ok || !(healthBody.now > 0)) {
@@ -1875,6 +1919,29 @@ try {
     [...document.querySelectorAll(".gw-pop button")].find((b) => b.textContent === "Save").click();
     return true;
   })()`);
+  // #1539: the saved profile shows up as a read-only peek group in the
+  // Sessions list, under a Local label, badged from a real probe — here
+  // unreachable, never a fake count. The Sessions rail lives in the
+  // chat view (settings was open above), so go there first; mounting
+  // the list is itself one of the peek's refresh triggers.
+  await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
+  await waitUntil(`!!document.querySelector(".ss-panel")`, "sessions list for the peek");
+  await waitUntil(`(() => {
+    const group = [...document.querySelectorAll(".ss-peek [data-peek-gateway]")]
+      .find((el) => (el.textContent || "").includes("bad"));
+    if (!group) return false;
+    return group.getAttribute("data-peek-state") === "unreachable"
+      && (group.textContent || "").includes("Unreachable")
+      && !(group.textContent || "").includes(" running · ")
+      && !!document.querySelector(".ss-peek-local");
+  })()`, "cross-gateway peek group for the saved bad gateway");
+  // Manual refresh re-probes and lands on the same honest badge.
+  await evaluate(`document.querySelector('[data-action="peek-refresh"]')?.click()`);
+  await waitUntil(`(() => {
+    const group = [...document.querySelectorAll(".ss-peek [data-peek-gateway]")]
+      .find((el) => (el.textContent || "").includes("bad"));
+    return !!group && group.getAttribute("data-peek-state") === "unreachable";
+  })()`, "peek refresh keeps the unreachable badge");
   await waitUntil(`(() => {
     const hit = [...document.querySelectorAll("[data-command-id]")].some((el) => (el.textContent || "").includes("Switch to gateway: bad"));
     if (hit) return true;
@@ -2088,6 +2155,47 @@ try {
   if (rejected.status !== 400) {
     throw new Error(`empty attachment status ${rejected.status}`);
   }
+  // Sent attachments in the transcript (#1389): GET serves the stored
+  // blob with its stored MIME, and a user.input carrying an image + PDF
+  // renders both chips under the "you" bubble after a reload, with the
+  // image thumbnail loaded from the GET route.
+  const pngRef = JSON.parse(uploadedBody).ref;
+  const pdfB64 = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n").toString("base64");
+  const pdfUp = await fetch(`http://127.0.0.1:${port}/v1/attachments`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "smoke-spec.pdf", mime: "application/pdf", data: pdfB64 }),
+  });
+  const pdfBody = await pdfUp.text();
+  if (pdfUp.status !== 200) throw new Error(`pdf ingest failed ${pdfUp.status} ${pdfBody.slice(0, 300)}`);
+  const pdfRef = JSON.parse(pdfBody).ref;
+  const gotPng = await fetch(`http://127.0.0.1:${port}/v1/attachments/${encodeURIComponent(pngRef)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (gotPng.status !== 200 || gotPng.headers.get("content-type") !== "image/png") {
+    throw new Error(`attachment GET ${gotPng.status} ${gotPng.headers.get("content-type")}`);
+  }
+  const noAuth = await fetch(`http://127.0.0.1:${port}/v1/attachments/${encodeURIComponent(pngRef)}`);
+  if (noAuth.status !== 401) throw new Error(`attachment GET without token = ${noAuth.status}`);
+  const missingAtt = await fetch(`http://127.0.0.1:${port}/v1/attachments/att%3Asha256%3A${"0".repeat(64)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (missingAtt.status !== 404) throw new Error(`attachment GET unknown ref = ${missingAtt.status}`);
+  const sentWithFiles = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "user.input",
+      data: {
+        text: "transcript attachments smoke 1389",
+        images: [
+          { ref: pngRef, mime: "image/png", name: "smoke-shot.png" },
+          { ref: pdfRef, mime: "application/pdf", name: "smoke-spec.pdf" },
+        ],
+      },
+    }),
+  });
+  if (!sentWithFiles.ok) throw new Error(`user.input with attachments ${sentWithFiles.status} ${await sentWithFiles.text()}`);
   // Attachment honesty (#1561): on the echo provider the engine drops
   // every attachment, so the composer must say so before send (warn,
   // not block). Removing the file clears the warning.
@@ -2203,6 +2311,15 @@ try {
     "cockpit reload after attachment checks (Run a command, Terminal)",
     textProbe((t) => t.includes("Run a command") && t.includes("Terminal")),
     { timeout: WAIT_MS, interval: 250 },
+  );
+  await waitUntil(
+    `(() => {
+      const box = [...document.querySelectorAll("[data-sent-attachments]")].find((el) => el.innerText.includes("smoke-shot.png"));
+      if (!box) return false;
+      const img = box.querySelector(".sx-attach-chip img");
+      return box.innerText.includes("smoke-spec.pdf") && !!img && img.src.startsWith("blob:") && img.complete && img.naturalWidth > 0;
+    })()`,
+    "sent image + PDF chips render after reload with a loaded thumbnail",
   );
 
   // Usage + Audit (#1286): open each view and confirm its controls
@@ -2669,6 +2786,79 @@ try {
     { timeout: WAIT_MS, interval: 250 },
   );
 
+  // Lessons capture (#1376): "Remember this" on a user message opens a
+  // pre-filled draft; Cancel stores nothing; Save stores a tagged lesson
+  // through /v1/memory. The entry is removed again so later memory counts
+  // are unaffected.
+  const lessonKey = "lesson-smoke-capture";
+  const memoryKeys = async () => {
+    const r = await fetch(`http://127.0.0.1:${port}/v1/memory?scope=project`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const j = await r.json();
+    return (j.entries || []).map((e) => ({ key: e.key, tags: e.tags || [], value: e.value }));
+  };
+  const openLessonDraft = async () => {
+    const clicked = await evaluate(`(() => {
+      const btn = [...document.querySelectorAll('[data-role="you"] [data-action="lesson-remember"]')].pop();
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+    if (clicked !== "clicked") throw new Error(`no Remember this action on a user message (${clicked})`);
+    await waitFor(
+      "lesson draft opens pre-filled from the message",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const d = document.querySelector('[data-lesson="draft"]');
+          if (!d) return JSON.stringify({ open: false });
+          return JSON.stringify({
+            open: true,
+            value: d.querySelector('[data-lesson="value"]').value,
+            key: d.querySelector('[data-lesson="key"]').value,
+            scope: d.querySelector('[data-lesson-scope="project"]').getAttribute("aria-pressed"),
+          });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        return { ok: !!(p.open && p.value.trim() && p.key.startsWith("lesson-") && p.scope === "true"), ...p };
+      },
+      { timeout: STEP_MS, interval: 200 },
+    );
+  };
+  const lessonBefore = (await memoryKeys()).length;
+  await openLessonDraft();
+  await evaluate(`document.querySelector('[data-lesson="cancel"]').click()`);
+  await waitFor(
+    "lesson draft cancel closes without storing",
+    async () => ({
+      ok:
+        (await evaluate(`!!document.querySelector('[data-lesson="draft"]')`)) === false &&
+        (await memoryKeys()).length === lessonBefore,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await openLessonDraft();
+  await evaluate(`(() => {
+    const el = document.querySelector('[data-lesson="key"]');
+    el.value = ${JSON.stringify(lessonKey)};
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector('[data-lesson="save"]').click();
+    return true;
+  })()`);
+  await waitFor(
+    "saved lesson is stored with the lesson tag and the draft closes",
+    async () => {
+      const rows = await memoryKeys();
+      const row = rows.find((r) => r.key === lessonKey);
+      const open = await evaluate(`!!document.querySelector('[data-lesson="draft"]')`);
+      return { ok: !!row && row.tags.includes("lesson") && !!row.value && open === false, body: JSON.stringify(row) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await fetch(`http://127.0.0.1:${port}/v1/memory/${lessonKey}?scope=project`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
   // Local issues (#1500): create → listed under Open → close → listed under
   // Closed → still closed after the panel remounts (fresh daemon read) and
   // in the daemon's own list. An empty title is refused inline.
@@ -3160,11 +3350,16 @@ try {
   };
 
   await ask("what is the agent doing?");
+  // The question shows on a pending card while the side turn runs (#1363),
+  // so wait for the settled answer before the next ask.
   const answered = await waitFor(
     "side chat to echo the asked question",
     async () => {
       const t = await panelText();
-      return { ok: t.includes("what is the agent doing?"), text: t };
+      const settled = await evaluate(
+        `document.querySelectorAll("[data-side-chat-answer]").length > 0 && !document.querySelector("[data-side-chat-pending]")`,
+      );
+      return { ok: t.includes("what is the agent doing?") && settled === true, text: t };
     },
     { timeout: STEP_MS, interval: 250 },
   );
@@ -4928,6 +5123,72 @@ try {
     throw new Error(`schedule duplicate saved state copy=${JSON.stringify(schedCopy)} orig=${JSON.stringify(schedOrig)}`);
   }
 
+  // Script schedules (#1777): Script is an explicit choice, the first
+  // submit only shows the confirm step (full command, mode, sandbox dial)
+  // and writes nothing; "Confirm and arm" creates it armed.
+  const scriptCmd = "echo smoke-script-1777";
+  await evaluate(`document.querySelector(".sched .section-head button.secondary").click()`);
+  await evaluate(`(() => {
+    const name = document.getElementById("schedule-name");
+    name.value = "Smoke script";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    const src = document.getElementById("schedule-source");
+    src.value = "script";
+    src.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  await waitFor(
+    "script command field after choosing Script",
+    async () => ({ ok: (await evaluate(`!!document.getElementById("schedule-command")`)) === true }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    const cmd = document.getElementById("schedule-command");
+    cmd.value = ${JSON.stringify(scriptCmd)};
+    cmd.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector(".sched-form .sched-actions .primary").click();
+  })()`);
+  await waitFor(
+    "script confirm step repeats the command, mode, and sandbox dial",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        cmd: (document.getElementById("schedule-confirm-command") || {}).textContent || "",
+        text: (document.querySelector(".sched-confirm") || {}).innerText || "",
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: p.cmd === scriptCmd && (p.text || "").includes("Mode:") && (p.text || "").includes("Sandbox:"),
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const schedBeforeArm = await (
+    await fetch(`http://127.0.0.1:${port}/v1/schedules`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (schedBeforeArm.schedules.some((s) => s.name === "Smoke script")) {
+    throw new Error("script schedule was written before the confirm step");
+  }
+  await evaluate(`document.getElementById("schedule-confirm").click()`);
+  await waitFor(
+    "script schedule armed notice and script badge",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        text: document.body ? document.body.innerText : "",
+        badge: [...document.querySelectorAll(".sched-row")].some((r) => r.textContent.includes("Smoke script") && !!r.querySelector(".sched-script-badge")),
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: (p.text || "").includes("Script schedule armed") && p.badge === true, badge: p.badge };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const schedAfterArm = await (
+    await fetch(`http://127.0.0.1:${port}/v1/schedules`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  const armed = schedAfterArm.schedules.find((s) => s.name === "Smoke script");
+  if (!armed || armed.source !== "script" || armed.command !== scriptCmd || !armed.armedAt || armed.overlap !== "skip") {
+    throw new Error(`script schedule armed state ${JSON.stringify(armed)}`);
+  }
+
   // Scheduler presets (#1495): the section lists the daemon catalog, Apply
   // round-trips the checked ids through POST /v1/scheduler/presets, and the
   // selection survives a reload (it is the daemon's persisted global state).
@@ -5710,6 +5971,7 @@ try {
     join(home, ".strike", "skills", "smoke-note.md"),
     "---\nname: smoke-note\ndescription: seeded note\n---\nSay hello from smoke.\n",
   );
+  await seedSkillUsage(home);
   await writeFile(
     join(home, ".strike", "mcp.json"),
     JSON.stringify({
@@ -5724,6 +5986,56 @@ try {
     }
     return ev.result?.result?.value;
   };
+  // #1529: pick the seeded user theme from the catalog-backed picker
+  // before the reload below, then prove it survived the reload.
+  const themeProbe = `(() => {
+    const el = document.documentElement;
+    const cs = getComputedStyle(el);
+    return JSON.stringify({
+      theme: el.getAttribute("data-theme") || "",
+      scheme: el.getAttribute("data-scheme") || "",
+      acid: cs.getPropertyValue("--acid").trim().toLowerCase(),
+      ground: cs.getPropertyValue("--ground").trim().toLowerCase(),
+      saved: localStorage.getItem("strike.theme") || "",
+      note: document.querySelector("[data-theme-catalog-note]")?.innerText || "",
+    });
+  })()`;
+  const themePainted = async (label, wantId) => {
+    let last = {};
+    for (let i = 0; i < 60; i++) {
+      last = JSON.parse(String(await evalJson(themeProbe)));
+      const side = last.scheme === "light" ? "light" : "dark";
+      const ok =
+        wantId === smokeTheme.id
+          ? last.theme === wantId &&
+            last.saved === wantId &&
+            last.acid === smokeTheme.accent[side] &&
+            last.ground === smokeTheme.background[side]
+          : last.theme === wantId && last.saved === wantId && last.acid !== smokeTheme.accent[side];
+      if (ok) return last;
+      await delay(250);
+    }
+    throw new Error(`${label}: ${JSON.stringify(last)}\n${await diagnostics()}`);
+  };
+  await evalJson(`document.querySelector('[data-action="open-settings"]')?.click()`);
+  for (let i = 0; i < 60; i++) {
+    const ready = await evalJson(`(() => {
+      const input = document.querySelector('.settings-page input[data-theme-choice="${smokeTheme.id}"]');
+      return !!input && !input.disabled && !document.querySelector("[data-theme-catalog-note]");
+    })()`);
+    if (ready === true) break;
+    if (i === 59) {
+      throw new Error(`catalog user theme missing from the settings picker: ${String(await evalJson(themeProbe))}\n${await diagnostics()}`);
+    }
+    await delay(250);
+  }
+  const pickerText = String(await evalJson(`document.querySelector(".settings-page .theme-grid")?.innerText || ""`));
+  if (!pickerText.includes(smokeTheme.name) || !pickerText.includes("User theme") || !pickerText.includes("Nord")) {
+    throw new Error(`theme picker should list the user theme beside bundled themes: ${pickerText.slice(0, 600)}`);
+  }
+  await evalJson(`document.querySelector('.settings-page input[data-theme-choice="${smokeTheme.id}"]').click()`);
+  await themePainted("user theme applied from the catalog", smokeTheme.id);
+
   await evalJson(`localStorage.setItem("strike.token", ${JSON.stringify(token)})`);
   await send("Page.reload", { ignoreCache: true });
   for (let i = 0; i < 40; i++) {
@@ -5735,6 +6047,20 @@ try {
     if (i === 39) throw new Error(`reload did not show the cockpit: ${String(body).slice(0, 300)}`);
     await delay(250);
   }
+  await themePainted("user theme persisted across reload", smokeTheme.id);
+  await evalJson(`document.querySelector('[data-action="open-settings"]')?.click()`);
+  for (let i = 0; i < 60; i++) {
+    const clicked = await evalJson(`(() => {
+      const input = document.querySelector('.settings-page input[data-theme-choice="strike"]');
+      if (!input) return false;
+      input.click();
+      return true;
+    })()`);
+    if (clicked === true) break;
+    if (i === 59) throw new Error("settings picker did not return after reload");
+    await delay(250);
+  }
+  await themePainted("back to Strike after the user theme", "strike");
 
   let customizeText = "";
   for (let i = 0; i < 40; i++) {
@@ -5749,6 +6075,7 @@ try {
   if (!customizeText.includes("smoke-note")) {
     throw new Error(`customize catalog missing smoke-note: ${customizeText.slice(0, 500)}`);
   }
+  await skillUsageCheck({ send });
 
   await evalJson(`(() => {
     const tabs = document.querySelector('[aria-label="Customize sections"]');

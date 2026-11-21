@@ -568,3 +568,28 @@ func itoa(i int) string {
 	}
 	return string(b[pos:])
 }
+
+func TestPermissionExpiredIsCanceledNotCompleted(t *testing.T) {
+	base := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	corr := protocol.Correlation{SessionID: "sess", TurnID: "turn-x"}
+	events := []timeline.TimedEvent{
+		{Time: base, Event: protocol.TurnStarted{Correlation: corr}},
+		{Time: base.Add(10 * time.Millisecond), Event: protocol.PermissionAsked{Correlation: corr, RequestID: "perm_9", Permission: "bash", Patterns: []string{"make"}}},
+		{Time: base.Add(20 * time.Millisecond), Event: protocol.PermissionResolved{Correlation: corr, RequestID: "perm_9", Decision: protocol.DecisionExpired}},
+		{Time: base.Add(30 * time.Millisecond), Event: protocol.PermissionDecided{Correlation: corr, RequestID: "perm_9", Permission: "bash", Patterns: []string{"make"}, Action: "ask", Decision: protocol.DecisionExpired}},
+	}
+	tr := timeline.Build(events, timeline.Options{SessionID: "sess"})
+	var found bool
+	for _, ent := range tr.Entries {
+		if ent.Kind != timeline.KindPermission || ent.CallID != "perm_9" {
+			continue
+		}
+		found = true
+		if ent.State != timeline.StateCanceled {
+			t.Fatalf("expired ask state = %q, want %q", ent.State, timeline.StateCanceled)
+		}
+	}
+	if !found {
+		t.Fatalf("no entry for perm_9: %+v", tr.Entries)
+	}
+}
