@@ -821,6 +821,21 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
         check(Boolean(closed), "team message composer did not close");
       }
 
+      // #1381: when the daemon's /v1/team carries delegations, the
+      // Activity tab renders them as the Delegations board.
+      const teamNow = await fetch(`${baseURL}/v1/team?root=${encodeURIComponent(root)}`).then((r) => r.json());
+      const delegationIds = Object.keys(teamNow.delegations || {});
+      log(`team delegations: ${delegationIds.length}`);
+      if (delegationIds.length > 0) {
+        const board = await waitUntil(
+          `document.querySelectorAll("[data-delegation-board] .delegation-row").length >= ${delegationIds.length}`,
+          10000,
+          "delegation board rows",
+        );
+        check(Boolean(board), `daemon has ${delegationIds.length} delegation(s) but the board did not render them`);
+        await shoot("shell-delegations", ["desk1024"]);
+      }
+
       // #1375: a lead -> child message the daemon accepts is aggregated
       // into /v1/team messages and must appear in the Activity feed.
       const team = await fetch(`${baseURL}/v1/team?root=${encodeURIComponent(root)}`).then((r) => r.json());

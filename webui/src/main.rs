@@ -16,6 +16,7 @@ mod apps;
 mod approval_outcome;
 mod approvals;
 mod approvals_ui;
+mod away_briefing_view;
 mod chat_mode;
 mod child_signals;
 mod clipboard;
@@ -30,6 +31,7 @@ mod diagnostics;
 mod draft_size;
 mod drafts;
 mod editor;
+mod files_invalidated;
 mod lessons;
 mod elicitation;
 mod elicitation_ui;
@@ -40,11 +42,13 @@ mod local_issues;
 mod mermaid;
 mod localfiles;
 mod customize;
+mod delegation_board;
 mod deploy_watch;
 mod gateway;
 mod gateway_peek;
 mod gateway_qr;
 mod git;
+mod global_search;
 mod goals;
 mod ideas;
 mod instance_backup;
@@ -122,6 +126,7 @@ mod workflows;
 mod workflow_run;
 use crate::shell::icon;
 use crate::team_message::TeamMessageComposer;
+use crate::delegation_board::DelegationBoard;
 use crate::child_signals::TeamMessagesFeed;
 
 
@@ -162,6 +167,7 @@ use crate::approvals_ui::{
     apply_perm_notes, commit_autonomy, commit_session_mode, ApprovalCards, ApprovalHost,
     ApprovalMenu, AutonomyMenu,
 };
+use crate::away_briefing_view::AwayBriefing;
 use crate::status_card_view::{ChildStatusCard, SessionStatusCard};
 use crate::transcript::Transcript;
 use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
@@ -1219,6 +1225,8 @@ fn App() -> impl IntoView {
     let team_control_capable = RwSignal::new(false);
     let team_live = RwSignal::new(false);
     let message_target = RwSignal::new(None::<team_message::Target>);
+    // #1381: delegation board rows from the /v1/team poll.
+    let delegation_rows = RwSignal::new(Vec::<delegation_board::BoardRow>::new());
     // Bootstrap capability `plugins` (#1570): gates plugin lifecycle.
     let plugins_capable = RwSignal::new(false);
     // Typed config-source list (#1493), from bootstrap `configFiles`.
@@ -1499,6 +1507,11 @@ fn App() -> impl IntoView {
     let memory_mode_known = RwSignal::new(false);
     let memory_menu = RwSignal::new(false);
     let storage_rev = RwSignal::new(0u32);
+    // files.invalidated (#1380): bumped (debounced) when the daemon says
+    // files changed underneath the session; the Files/Changes load Effect
+    // observes it so the open panel refetches.
+    let files_rev = RwSignal::new(0u32);
+    let files_debounce: Rc<Cell<files_invalidated::Debounce>> = Rc::new(Cell::new(Default::default()));
     // Lessons capture (#1376): rows show "Remember this" only while the
     // confirmed memory mode allows storing; the draft is page-owned.
     let lesson_gate = Signal::derive(move || {
@@ -1516,6 +1529,12 @@ fn App() -> impl IntoView {
     let tf_match_case = RwSignal::new(false);
     let tf_whole_word = RwSignal::new(false);
     let tf_idx = RwSignal::new(0usize);
+    // Global transcript search (#1355): overlay state and the pending
+    // jump (session id, query) handed to find-in-transcript once that
+    // session's lines have loaded.
+    let gs_open = RwSignal::new(false);
+    let gs_query = RwSignal::new(String::new());
+    let gs_jump = RwSignal::new(None::<(String, String)>);
     let tf_saved_scroll = RwSignal::new(0.0f64);
     let doc_path = RwSignal::new(String::new());
     let doc_line = RwSignal::new(0u32);
@@ -1649,6 +1668,10 @@ fn App() -> impl IntoView {
                     let prev = activity.get_untracked();
                     let rows = rows_from_team(&prev, &team, now);
                     team_live.set(team.available && !rows.is_empty());
+                    let board = delegation_board::board_rows(&team);
+                    if delegation_rows.get_untracked() != board {
+                        delegation_rows.set(board);
+                    }
                     let (names, escalations) = team_signal_maps(&team);
                     if team_names.get_untracked() != names {
                         team_names.set(names);
@@ -2125,6 +2148,7 @@ fn App() -> impl IntoView {
     let wipe_on_replay = RwSignal::new(false);
     let tail_fx = tail.clone();
     let cursor_fx = live_cursor.clone();
+    let debounce_fx = files_debounce.clone();
     Effect::new(move |_| {
         let root = active_root.get();
         let b = base.get();
@@ -2229,6 +2253,7 @@ fn App() -> impl IntoView {
         let epoch_msg = epoch;
         let epochs_msg = stream_epoch;
         let cursor_msg = cursor_fx.clone();
+        let debounce_msg = debounce_fx.clone();
         let on_msg =
             Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |ev: web_sys::MessageEvent| {
                 if epochs_msg.get_untracked() != epoch_msg {
@@ -2318,6 +2343,9 @@ fn App() -> impl IntoView {
                     let artifact_rev = transcript_cb.with_untracked(|t| t.artifact_updates);
                     if artifact_rev != storage_rev.get_untracked() {
                         storage_rev.set(artifact_rev);
+                    }
+                    if files_invalidated::is_event(&data) {
+                        files_invalidated::refresh_soon(debounce_msg.clone(), files_rev);
                     }
                     let prev = LiveModelState {
                         provider: provider_name.get_untracked(),
@@ -3578,6 +3606,12 @@ fn App() -> impl IntoView {
     // is filed separately; this PR only composes the two existing
     // endpoints, in delete-then-close order, after the user's force
     // confirmation when one was required.
+    // Global search pick (#1355): open the session through the shared
+    // live/resume path and queue the find-in-transcript handoff.
+    let on_gs_pick = Callback::new(move |(id, q): (String, String)| {
+        gs_jump.set(Some((id.clone(), q)));
+        open_session_page(id);
+    });
     let on_deleted = Callback::new(move |id: String| {
         let was_live = roots.get_untracked().iter().any(|row| row.id == id);
         // Drop the deleted session's draft (#1367) before the fallback
@@ -3707,6 +3741,7 @@ fn App() -> impl IntoView {
     Effect::new(move |_| {
         let tab = side_tab.get();
         let _ = files_path.get();
+        let _ = files_rev.get();
         if tab == "files" {
             load_files();
         } else if tab == "changes" {
@@ -4855,6 +4890,43 @@ fn App() -> impl IntoView {
         }
     });
 
+    // Global search handoff (#1355): once the picked session is open and
+    // its lines contain the query, open the find bar on it; the scroll
+    // effect above then brings the first match into view. A session whose
+    // loaded lines do not contain the query (e.g. the match is only in an
+    // older page) leaves the jump pending until the next pick.
+    Effect::new(move |_| {
+        let list = lines.get();
+        let active = active_root.get();
+        let Some((id, q)) = gs_jump.get() else {
+            return;
+        };
+        if active != id || list.is_empty() {
+            return;
+        }
+        let hits = transcript_matches(&list, &q, crate::editor::FindOptions::new(false, false));
+        if hits.is_empty() {
+            return;
+        }
+        gs_jump.set(None);
+        if !tf_open.get_untracked() {
+            tf_saved_scroll.set(transcript_find::transcript_scroll());
+        }
+        tf_match_case.set(false);
+        tf_whole_word.set(false);
+        tf_query.set(q);
+        tf_idx.set(0);
+        tf_open.set(true);
+    });
+    shell::bind(
+        "search.global",
+        Rc::new(move |args: &str| {
+            gs_query.set(args.trim().to_string());
+            gs_open.set(true);
+            Ok(())
+        }),
+    );
+
     // Find-in-transcript view state for the readable pane (#1310 union):
     // the matches over the ChatLine mirror — which is transcript.chat_lines(),
     // index-aligned with Transcript::messages — plus the current match,
@@ -5519,6 +5591,14 @@ fn App() -> impl IntoView {
             token=token
             on_deleted=on_deleted
         />
+        <global_search::GlobalSearch
+            open=gs_open
+            query=gs_query
+            base=base
+            token=token
+            workspaces=workspaces
+            on_pick=on_gs_pick
+        />
         <Show when=move || mode.get() == "providers" fallback=move || ()>
             <providers::ProvidersPage base=base token=token />
         </Show>
@@ -5781,6 +5861,7 @@ fn App() -> impl IntoView {
                     // to the conversation. Visually hidden; the status tabs
                     // and chat-mode bar already show the session name.
                     <h1 id="chat-heading" class="sr-only">{move || chat_title.get()}</h1>
+                    <AwayBriefing base=base token=token roots=roots on_focus=on_notify />
                     // #1781: persistent untrusted-workspace badge + trust card.
                     <workspace_trust::WorkspaceTrust
                         base=base
@@ -6692,6 +6773,7 @@ fn App() -> impl IntoView {
                         <p class="hint" data-children-note="true">{move || children_note.get()}</p>
                     </Show>
                     <TeamMessageComposer base=base token=token root=active_root activity=activity target=message_target />
+                    <DelegationBoard rows=delegation_rows />
                     <Show when=move || activity.get().is_empty()>
                         {move || {
                             let failed = !children_note.get().is_empty();
