@@ -42,6 +42,8 @@ pub struct TranscriptHandlers {
     /// preview dialog owned by `crate::rewind`; never rewinds directly.
     pub rewind: Callback<(i32,)>,
     pub open_file: Callback<(String, u32)>,
+    /// Attach message `id` to the composer as a quote (#1362).
+    pub quote: Callback<(u32,)>,
     /// "Edit & resend" on the newest user message (#1361).
     pub edit_last: Callback<(u32,)>,
 }
@@ -324,6 +326,7 @@ pub fn TranscriptPane(
     let open_file = handlers.open_file;
     let retry = handlers.retry;
     let fork = handlers.fork;
+    let quote = handlers.quote;
     let rewind = handlers.rewind;
     let edit_last = handlers.edit_last;
     // Only the newest user message offers Edit & resend (#1361).
@@ -421,6 +424,15 @@ pub fn TranscriptPane(
                         let ok = crate::clipboard::copy_text(&text).await.is_ok();
                         note.set(crate::clipboard::transcript_copy_feedback(ok).to_string());
                     });
+                }
+            }
+            "q" => {
+                // #1362: quote the cursor line into the composer.
+                if let Some(id) = cursor.get_untracked() {
+                    if cursor_session.get_untracked() == session.get_untracked() {
+                        ev.prevent_default();
+                        quote.run((id,));
+                    }
                 }
             }
             "t" => {
@@ -732,7 +744,7 @@ pub fn TranscriptPane(
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
                                     {above.map(|text| reasoning_block(text, false))}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, rewind, edit_last, last_you, r.hits, r.current, r.elapsed, r.usage, r.verify, r.files, r.steer, r.tail, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, quote, r.quotable, r.quote, rewind, edit_last, last_you, r.hits, r.current, r.elapsed, r.usage, r.verify, r.files, r.steer, r.tail, fold_open, folds)}
                                     {after.map(|text| reasoning_block(text, false))}
                                 }
                             })
@@ -888,6 +900,10 @@ struct RowData {
     current: Option<crate::transcript_find::TMatch>,
     elapsed: Option<String>,
     usage: Option<(String, String)>,
+    /// The line can be quoted now (settled, has text) (#1362).
+    quotable: bool,
+    /// Quote this message carries and the loaded line it resolves to.
+    quote: Option<(quote_message::Quote, Option<u32>)>,
     reasoning: Option<String>,
     verify: Option<crate::turn_verify::TurnVerify>,
     files: Option<crate::turn_files::TurnFiles>,
@@ -920,6 +936,10 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
         usage: t
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
+        quotable: t.quotable_at(idx),
+        quote: t
+            .quote_for(msg.id)
+            .map(|q| (q.clone(), t.resolve_quote(q))),
         reasoning: t.reasoning.for_message(msg.id).map(str::to_owned),
         verify: t.verify_for(msg.id).cloned(),
         files: t.files_for(msg.id).cloned(),
@@ -958,6 +978,38 @@ fn after_render(f: impl FnOnce() + 'static) {
 
 /// Scrolls to message `id` after render, so a row just mounted by
 /// `reveal_row` exists when the lookup runs.
+/// Quote card above a user message that quoted a line (#1362). Click
+/// (or Enter) jumps back to the original through the same path as the
+/// palette's jump, which mounts a windowed-out row and puts the cursor
+/// highlight on it. When the original is not in the loaded transcript
+/// the card keeps the excerpt and says so instead of jumping nowhere.
+fn quote_card_view(q: &quote_message::Quote, target: Option<u32>) -> impl IntoView {
+    let label = quote_message::label(&q.role, &q.text);
+    match target {
+        Some(id) => view! {
+            <button
+                type="button"
+                class="sx-quote-card"
+                data-quote-target=id.to_string()
+                title="Jump to the quoted message"
+                on:click=move |_| {
+                    let _ = crate::shell::dispatch("transcript.jump", &id.to_string());
+                }
+            >
+                <span class="sx-quote-text">{label}</span>
+            </button>
+        }
+        .into_any(),
+        None => view! {
+            <div class="sx-quote-card sx-quote-missing" data-quote-target="">
+                <span class="sx-quote-text">{label}</span>
+                <span class="sx-quote-note">"The original message is not in this view."</span>
+            </div>
+        }
+        .into_any(),
+    }
+}
+
 fn scroll_message(id: u32) {
     after_render(move || scroll_message_now(id));
 }
@@ -1145,6 +1197,9 @@ fn message_view(
     open_file: Callback<(String, u32)>,
     retry: Callback<(String,)>,
     _fork: Callback<(i32,)>,
+    quote: Callback<(u32,)>,
+    quotable: bool,
+    quote_card: Option<(quote_message::Quote, Option<u32>)>,
     rewind: Callback<(i32,)>,
     edit_last: Callback<(u32,)>,
     last_you: Memo<Option<u32>>,
@@ -1321,6 +1376,14 @@ fn message_view(
                             crate::clipboard::after_ms(2_000, move || copy_state.set(None));
                         });
                     }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
+                    {(quotable && use_context::<crate::share::ReadOnlyTranscript>().is_none()).then(|| view! {
+                        <button
+                            type="button"
+                            class="sx-quiet sx-quote-btn"
+                            title="Quote this message in your next send (q)"
+                            on:click=move |_| quote.run((id,))
+                        >"Quote"</button>
+                    })}
                     {is_you.then(|| {
                         // Prompt library (#1357): keep a sent message as a
                         // reusable prompt; opens the save dialog prefilled.
@@ -1332,7 +1395,6 @@ fn message_view(
                             }>"Save as prompt"</button>
                         }
                     })}
-||||||| base
                     {can_rewind.then(|| view! {
                         <button
                             type="button"
@@ -1365,6 +1427,7 @@ fn message_view(
                     {speak.map(|text| view! { <crate::tts::ReadAloud id=id text=text /> })}
                 </span>
             </header>
+            {quote_card.map(|(q, target)| quote_card_view(&q, target))}
             {if find_body {
                 view! { <crate::transcript_find::MarkedText text=body.clone() kind="prose" ranges=body_ranges current=cur_body /> }.into_any()
             } else if prose && crate::editor::has_markdown_table(&body) {

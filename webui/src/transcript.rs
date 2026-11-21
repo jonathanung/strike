@@ -172,6 +172,15 @@ const SUGGESTIONS: [Suggestion; 6] = [
     },
 ];
 
+/// The text a quote carries: what Copy copies, else the body.
+fn quote_text(m: &Message) -> &str {
+    if m.copy_text.trim().is_empty() {
+        &m.body
+    } else {
+        &m.copy_text
+    }
+}
+
 pub fn suggestions() -> &'static [Suggestion] {
     &SUGGESTIONS
 }
@@ -312,6 +321,13 @@ pub struct Transcript {
     /// `sessionId` of the turn in progress (from `turn.started`), so a
     /// child session's streams are not counted on the parent's turn.
     turn_session: String,
+    /// Event ordinal that created each message, keyed by message id
+    /// (#1362). Deterministic for a given log, so a quote's anchor
+    /// survives a reload; jump-back still verifies the text.
+    origin: HashMap<u32, usize>,
+    /// Quote carried by a user message (#1362), keyed by message id,
+    /// parsed from the stored text so it renders after a reload.
+    quotes: HashMap<u32, quote_message::Quote>,
     /// Opt-in reasoning (#1372), kept out of `messages` entirely; the
     /// pane renders it only while its per-session toggle is on.
     pub reasoning: crate::reasoning::ReasoningLog,
@@ -355,6 +371,8 @@ impl Transcript {
             turn_usage: HashMap::new(),
             usage_acc: crate::turn_usage::TurnUsage::default(),
             turn_session: String::new(),
+            origin: HashMap::new(),
+            quotes: HashMap::new(),
             reasoning: crate::reasoning::ReasoningLog::default(),
             turn_verify: HashMap::new(),
             turn_files: HashMap::new(),
@@ -443,8 +461,59 @@ impl Transcript {
         self.messages
             .iter()
             .find(|m| m.role == Role::You && !m.retry_text.trim().is_empty())
-            .map(|m| title_from_text(&m.retry_text))
+            .map(|m| title_from_text(&quote_message::split(&m.retry_text).1))
             .unwrap_or_default()
+    }
+
+    /// The quote a user message carries, if any (#1362).
+    pub fn quote_for(&self, id: u32) -> Option<&quote_message::Quote> {
+        self.quotes.get(&id)
+    }
+
+    /// What quoting message `id` attaches: its role class, anchor
+    /// ordinal and full text. `None` for a line that is still running
+    /// or streaming (only settled lines can be quoted) or has no text.
+    pub fn quote_source(&self, id: u32) -> Option<(String, usize, String)> {
+        let idx = self.messages.iter().position(|m| m.id == id)?;
+        if !self.quotable_at(idx) {
+            return None;
+        }
+        let m = &self.messages[idx];
+        let ordinal = *self.origin.get(&m.id)?;
+        Some((m.role.class().to_string(), ordinal, quote_text(m).to_string()))
+    }
+
+    /// Cheap per-row check the view runs on every render: the message
+    /// at `idx` is settled, has text and a recorded origin.
+    pub fn quotable_at(&self, idx: usize) -> bool {
+        let Some(m) = self.messages.get(idx) else {
+            return false;
+        };
+        let streaming =
+            m.role == Role::Strike && self.assistant_open && idx + 1 == self.messages.len();
+        m.badge != "running"
+            && !streaming
+            && !quote_text(m).trim().is_empty()
+            && self.origin.contains_key(&m.id)
+    }
+
+    /// The loaded message a quote points at, or `None` when the
+    /// original is not in this transcript (#1362).
+    pub fn resolve_quote(&self, quote: &quote_message::Quote) -> Option<u32> {
+        let candidates: Vec<quote_message::Candidate<'_>> = self
+            .messages
+            .iter()
+            .filter_map(|m| {
+                let ordinal = *self.origin.get(&m.id)?;
+                Some(quote_message::Candidate {
+                    id: m.id,
+                    ordinal,
+                    role: m.role.class(),
+                    text: quote_text(m),
+                })
+            })
+            .collect();
+        quote_message::resolve(quote, &candidates)
     }
 
     /// Every message as a shell `ChatLine` (the side chat and the activity
@@ -539,7 +608,9 @@ impl Transcript {
                 self.trigger_note.clear();
                 self.attach_reasoning_to_last();
                 let text = field_str(&data, "text");
-                let shown = display_user_text(&strip_echo_progress(&text));
+                // #1362: a leading quote block renders as a card, not text.
+                let (quote, own) = quote_message::split(&text);
+                let shown = display_user_text(&strip_echo_progress(&own));
                 // #1324: a review-queue turn is labelled as a review, not
                 // shown as if the operator had typed it.
                 let review = crate::review_queue::is_review_turn(&text);
@@ -566,6 +637,9 @@ impl Transcript {
                     turn_id: field_str(&data, "turnId"),
                     attachments: crate::transcript_attachments::parse_images(&data),
                 });
+                if let Some(quote) = quote {
+                    self.quotes.insert(id, quote);
+                }
                 self.steer_acks.on_user_message(id, &ack_text, &ack_shown);
                 self.turn_start = Some(id);
                 self.absorb();
@@ -1285,6 +1359,7 @@ impl Transcript {
             self.reasoning.attach_live(id);
         }
         self.messages.push(message);
+        self.origin.insert(id, self.event_count);
         id
     }
 
@@ -3925,6 +4000,58 @@ mod tests {
         assert!(t.messages[0].body.contains("**world**"));
         let blocks = parse_markdown(&t.messages[0].body);
         assert!(matches!(blocks[0], Block::Paragraph(_)));
+    }
+
+    #[test]
+    fn quoted_user_message_renders_card_not_block() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "why does it fail"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "The bug is in parse()."})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        let strike = t.messages[1].id;
+        let (role, anchor, text) = t.quote_source(strike).expect("settled reply is quotable");
+        assert_eq!(role, "strike");
+        assert_eq!(text, "The bug is in parse().");
+        let sent = quote_message::compose(&role, anchor, &text, "fix it");
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": sent.clone()})));
+        let you = t.messages.last().unwrap();
+        assert_eq!(you.body, "fix it");
+        assert_eq!(you.retry_text, sent);
+        let quote = t.quote_for(you.id).expect("quote parsed").clone();
+        assert_eq!(t.resolve_quote(&quote), Some(strike));
+
+        // Reload: the same log replayed into a fresh transcript renders
+        // the card from the stored text and still resolves the jump.
+        let mut again = Transcript::new();
+        for raw in [
+            env("user.message", serde_json::json!({"text": "why does it fail"})),
+            env("text.delta", serde_json::json!({"text": "The bug is in parse()."})),
+            env("turn.completed", serde_json::json!({})),
+            env("user.message", serde_json::json!({"text": sent})),
+        ] {
+            again.apply_envelope(&raw);
+        }
+        let you = again.messages.last().unwrap();
+        let quote = again.quote_for(you.id).expect("quote after reload").clone();
+        assert_eq!(again.resolve_quote(&quote), Some(again.messages[1].id));
+    }
+
+    #[test]
+    fn streaming_reply_is_not_quotable() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "go"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "partial"})));
+        assert!(t.quote_source(t.messages[1].id).is_none());
+        assert!(t.quote_source(t.messages[0].id).is_some());
+    }
+
+    #[test]
+    fn quote_of_a_missing_line_does_not_resolve() {
+        let mut t = Transcript::new();
+        let sent = quote_message::compose("strike", 99, "gone from this log", "and?");
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": sent})));
+        let quote = t.quote_for(t.messages[0].id).unwrap().clone();
+        assert_eq!(t.resolve_quote(&quote), None);
     }
 
     #[test]
