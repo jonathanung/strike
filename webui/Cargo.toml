@@ -10,8 +10,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 protocol-schema = { path = "protocol-schema" }
 load-guard = { path = "load-guard" }
+md-review = { path = "md-review" }
 status-card = { path = "status-card" }
 composer-drafts = { path = "composer-drafts" }
+signin-flow = { path = "signin-flow" }
 transcript-window = { path = "transcript-window" }
 theme-catalog = { path = "theme-catalog" }
 table-export = { path = "table-export" }
@@ -20,7 +22,7 @@ send_wrapper = "0.6"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
-web-sys = { version = "0.3", features = ["AbortController", "AbortSignal", "BeforeUnloadEvent", "Blob", "BlobPropertyBag", "Clipboard", "ClipboardEvent", "CloseEvent", "CssStyleDeclaration", "CustomEvent", "CustomEventInit", "DataTransfer", "Document", "DomRect", "DomRectReadOnly", "DragEvent", "Element", "Event", "EventSource", "EventTarget", "File", "FileList", "FileReader", "History", "HtmlAnchorElement", "HtmlButtonElement", "HtmlDocument", "HtmlElement", "HtmlHeadElement", "HtmlInputElement", "HtmlTextAreaElement", "HtmlVideoElement", "KeyboardEvent", "Location", "MediaDevices", "MediaQueryList", "MediaStream", "MediaStreamConstraints", "MediaStreamTrack", "MessageEvent", "MouseEvent", "Navigator", "Node", "NodeList", "Notification", "NotificationOptions", "NotificationPermission", "RequestCredentials", "ResizeObserver", "ResizeObserverEntry", "ServiceWorker", "ServiceWorkerContainer", "Storage", "SubmitEvent", "Touch", "TouchEvent", "TouchList", "Url", "VisualViewport", "WebSocket", "Window"] }
+web-sys = { version = "0.3", features = ["AbortController", "AbortSignal", "BeforeUnloadEvent", "Blob", "BlobPropertyBag", "Clipboard", "ClipboardEvent", "CloseEvent", "CssStyleDeclaration", "CustomEvent", "CustomEventInit", "DataTransfer", "Document", "DomRect", "DomRectReadOnly", "DragEvent", "Element", "Event", "EventSource", "EventTarget", "File", "FileList", "FileReader", "History", "HtmlAnchorElement", "HtmlButtonElement", "HtmlDocument", "HtmlElement", "HtmlHeadElement", "HtmlInputElement", "HtmlTextAreaElement", "HtmlVideoElement", "KeyboardEvent", "Location", "MediaDevices", "MediaQueryList", "MediaStream", "MediaStreamConstraints", "MediaStreamTrack", "MessageEvent", "MouseEvent", "Navigator", "Node", "NodeList", "Notification", "NotificationOptions", "NotificationPermission", "RequestCredentials", "ResizeObserver", "ResizeObserverEntry", "Selection", "ServiceWorker", "ServiceWorkerContainer", "Storage", "SubmitEvent", "Touch", "TouchEvent", "TouchList", "Url", "VisualViewport", "WebSocket", "Window"] }
 
 [profile.release]
 opt-level = 2

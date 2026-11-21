@@ -1,0 +1,8 @@
+[package]
+name = "signin-flow"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Provider sign-in flow state for the cockpit: device code (#1533) and paste-assisted OAuth (#1538). Pure logic; the Providers page owns the HTTP calls."
+
+[dependencies]

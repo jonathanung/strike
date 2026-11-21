@@ -392,3 +392,22 @@
   .ev-replace { width: 100%; }
 }
 /* feature:editor-find-replace end */
+/* feature:workspace-image-viewer begin */
+.ev-binary { display: flex; flex-direction: column; gap: var(--space-2); padding: 8px; min-height: 0; }
+.ev-binary-meta { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.ev-image-btn {
+  display: block;
+  padding: 0;
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  cursor: zoom-in;
+  max-width: 100%;
+  overflow: auto;
+  align-self: flex-start;
+}
+.ev-image-btn:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.ev-image { display: block; max-width: 100%; max-height: 70vh; height: auto; object-fit: contain; }
+.ev-image-btn.full { cursor: zoom-out; max-height: none; }
+.ev-image-btn.full .ev-image { max-width: none; max-height: none; }
+/* feature:workspace-image-viewer end */
