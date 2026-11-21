@@ -7262,7 +7262,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Forward-compatible Op/Event wire schema generated from pkg/protocol. The root schema is one event envelope: unknown type strings and unknown fields are valid. $defs/KnownEvent lists types this version writes. $defs/KnownOp is fail-closed: unknown op type strings are not valid. required is the writer contract; readers treat missing fields as zero values. See schemas/protocol/v1/COMPAT.md.",
   "title": "Strike event envelope",
-  "x-strike-event-count": 65,
+  "x-strike-event-count": 66,
   "x-strike-legacy-version": "1.0.0",
   "x-strike-op-count": 32,
   "x-strike-protocol-version": "1.25.0",
