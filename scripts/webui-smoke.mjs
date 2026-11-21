@@ -4167,6 +4167,45 @@ try {
       { timeout: STEP_MS, interval: 250 },
     );
     await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+    // Security mode (#1620): the toggle re-sizes with two turns (reviewer +
+    // verifier) and names the verifier; the suppressions route answers for
+    // the current branch (CI's detached checkout gets a plain 409). No
+    // reviewer or verifier is spawned here.
+    {
+      const secRes = await fetch(`http://127.0.0.1:${port}/v1/git/review?mode=security`, { headers: revHeaders });
+      const sec = await secRes.json();
+      if (!secRes.ok || sec.mode !== "security" || sec.turns !== 2) {
+        throw new Error(`security review preview: HTTP ${secRes.status} ${JSON.stringify(sec).slice(0, 300)}`);
+      }
+      const supRes = await fetch(`http://127.0.0.1:${port}/v1/git/review-suppressions`, { headers: revHeaders });
+      if (![200, 409].includes(supRes.status)) {
+        throw new Error(`review suppressions: HTTP ${supRes.status} ${await supRes.text()}`);
+      }
+      const noReason = await fetch(`http://127.0.0.1:${port}/v1/git/review-suppressions`, {
+        method: "POST",
+        headers: { ...revHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "a.go", cwe: "CWE-89", line: 1, reason: " " }),
+      });
+      if (![400, 409].includes(noReason.status)) {
+        throw new Error(`suppression without a reason accepted: HTTP ${noReason.status}`);
+      }
+      await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+      await evaluate(`(() => { document.querySelector("[data-review-mode-security]").click(); return true; })()`);
+      await waitFor(
+        "security review notice names the verifier",
+        async () => {
+          const raw = await evaluate(`JSON.stringify((() => {
+            const n = document.querySelector("[data-review-notice]");
+            return n ? { text: n.textContent || "", state: n.getAttribute("data-review-state") } : null;
+          })())`);
+          const got = JSON.parse(raw || "null");
+          return { ok: !!got && got.text.includes("independent verifier") && got.text.includes("2 model turns") && got.state === sec.state, got };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await evaluate(`(() => { document.querySelector("[data-review-mode-general]").click(); return true; })()`);
+      await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+    }
   }
   // Ship to PR (#1340): the preview route answers with an honest state
   // (CI checks out a detached merge commit, so "blocked" with a detached

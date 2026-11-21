@@ -654,6 +654,24 @@ file at the line. No review store, no autofix, no merge gate. Not in this
 slice: the `/review` composer trigger (#1275), a cross-model reviewer (team
 spawn has no per-child model), and Ship to PR's warn-on-blocking hook.
 
+## Security review mode
+
+"Review this branch" has a Security mode (#1620): the same read-only
+`branch-reviewer` child, fed a security instruction set (injection, authn/
+authz bypass, committed secrets, SSRF/redirects, unsafe deserialization,
+vulnerable dependency changes, entry→sink tracing), the repo's AGENTS.md and
+an optional `.strike/security-rules.md`. Findings carry an ID, CWE, severity,
+confidence, attack path, file:line and a draft fix. When the reviewer
+finishes, a second fresh child (`POST /v1/git/review/{id}/verify`) tries to
+refute each finding; only confirmed findings render as confirmed, refuted
+ones collapse under "Not verified" with the reason, and only a confirmed
+critical/high finding makes the verdict blocking. Dismissing a finding
+requires a one-line reason and suppresses it (same file + CWE, anchor ±3
+lines) on later security reviews of the same branch
+(`/v1/git/review-suppressions`, stored in the session dir); suppressions are
+listed and removable. Not in this slice: SARIF/JSONL export, PR-scoped
+suppressions (#1356 follow-up), an authoring UI for security rules.
+
 ## Not planned as a copy
 
 Stall is already a real badge when the team roster sets `budget.stall`.
