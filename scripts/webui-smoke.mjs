@@ -3137,11 +3137,16 @@ try {
   };
 
   await ask("what is the agent doing?");
+  // The question shows on a pending card while the side turn runs (#1363),
+  // so wait for the settled answer before the next ask.
   const answered = await waitFor(
     "side chat to echo the asked question",
     async () => {
       const t = await panelText();
-      return { ok: t.includes("what is the agent doing?"), text: t };
+      const settled = await evaluate(
+        `document.querySelectorAll("[data-side-chat-answer]").length > 0 && !document.querySelector("[data-side-chat-pending]")`,
+      );
+      return { ok: t.includes("what is the agent doing?") && settled === true, text: t };
     },
     { timeout: STEP_MS, interval: 250 },
   );
