@@ -10,6 +10,8 @@
 //! outside the subset — shows the original code block plus a short
 //! "Diagram didn't parse" note; never an error box, never a blank region.
 
+use std::sync::Arc;
+
 use leptos::prelude::*;
 use mermaid_lite::{Scene, Shape, Stroke};
 
@@ -138,14 +140,34 @@ pub fn MermaidBlock(source: String, children: Children) -> impl IntoView {
     let (w, h) = (scene.width, scene.height);
     let kind = scene.kind;
     let label = scene_label(&scene);
-    let shapes = scene.shapes.into_iter().map(shape_view).collect_view();
+    let shapes: Arc<Vec<Shape>> = Arc::new(scene.shapes);
     // Sizing goes through the width/height attributes and a class, never
     // a `style` attribute: the server CSP is `style-src 'self'`. Fit uses
     // the natural size and `.mmd-fit` caps it at the column width (never
     // upscaled); other steps size explicitly and the canvas scrolls.
-    let width = move || format!("{:.0}", w * ZOOMS[zoom.get()]);
-    let height = move || format!("{:.0}", h * ZOOMS[zoom.get()]);
-    let svg_class = move || if zoom.get() == FIT { "mmd-svg mmd-fit" } else { "mmd-svg" };
+    // The <svg> is rebuilt per zoom step with static attributes: SVG
+    // `className`/`width`/`height` are read-only animated properties, so
+    // reactive attribute updates on the element itself are avoided.
+    let diagram = move || {
+        let z = zoom.get();
+        let class = if z == FIT { "mmd-svg mmd-fit" } else { "mmd-svg" };
+        let width = format!("{:.0}", w * ZOOMS[z]);
+        let height = format!("{:.0}", h * ZOOMS[z]);
+        let body = shapes.iter().cloned().map(shape_view).collect_view();
+        view! {
+            <svg
+                class=class
+                role="img"
+                aria-label=label.clone()
+                viewBox=format!("0 0 {w:.1} {h:.1}")
+                preserveAspectRatio="xMinYMin meet"
+                width=width
+                height=height
+            >
+                {body}
+            </svg>
+        }
+    };
     view! {
         <div class="mmd" data-mermaid=kind>
             <div class="sx-fence-bar mmd-bar" role="toolbar" aria-label="Diagram controls">
@@ -169,17 +191,7 @@ pub fn MermaidBlock(source: String, children: Children) -> impl IntoView {
                 </button>
             </div>
             <div class="mmd-canvas" tabindex="0" aria-label="Diagram canvas; scroll to pan" hidden=move || source_on.get()>
-                <svg
-                    class=svg_class
-                    role="img"
-                    aria-label=label
-                    viewBox=format!("0 0 {w:.1} {h:.1}")
-                    preserveAspectRatio="xMinYMin meet"
-                    width=width
-                    height=height
-                >
-                    {shapes}
-                </svg>
+                {diagram}
             </div>
             <div class="mmd-source" hidden=move || !source_on.get()>{code}</div>
         </div>
