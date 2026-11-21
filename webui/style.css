@@ -3672,6 +3672,17 @@ button.context-doctor-open { background: transparent; border: 0; padding: 0; fon
 .sx-attach-state { color: var(--signal); }
 .sx-attach-missing { border-style: dashed; }
 .sx-attach-chip button { min-height: 28px; }
+/* #1814: per-attachment delivery. Dropped chips strike the name through
+   and name the reason; the reason wraps inside the chip so a 360px
+   bubble never overflows. */
+.sx-attach-delivery {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.sx-attach-dropped { border-color: var(--signal); }
+.sx-attach-dropped .name { text-decoration: line-through; }
+.sx-attach-dropped .sx-attach-delivery { color: var(--signal); }
 /* feature:transcript-attachments end */
 /* feature:update-check begin */
 .update-mode { border: 0; padding: 0; margin: 0 0 var(--space-2); }

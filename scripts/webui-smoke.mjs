@@ -2739,9 +2739,18 @@ try {
       const box = [...document.querySelectorAll("[data-sent-attachments]")].find((el) => el.innerText.includes("smoke-shot.png"));
       if (!box) return false;
       const img = box.querySelector(".sx-attach-chip img");
-      return box.innerText.includes("smoke-spec.pdf") && !!img && img.src.startsWith("blob:") && img.complete && img.naturalWidth > 0;
+      // #1814: the engine's per-attachment delivery decision survives the
+      // reload. A PDF is never sent as a provider image; the PNG carries
+      // a reported state (sent or dropped), never "not reported".
+      const chips = [...box.querySelectorAll(".sx-attach-chip")];
+      const pdf = chips.find((c) => c.innerText.includes("smoke-spec.pdf"));
+      const png = chips.find((c) => c.innerText.includes("smoke-shot.png"));
+      const pdfDropped = !!pdf && pdf.dataset.attachDelivery === "dropped" && pdf.innerText.includes("Not sent");
+      const pngReported = !!png && ["sent", "dropped"].includes(png.dataset.attachDelivery || "");
+      const ok = box.innerText.includes("smoke-spec.pdf") && !!img && img.src.startsWith("blob:") && img.complete && img.naturalWidth > 0 && pdfDropped && pngReported;
+      return ok || JSON.stringify({ pdf: pdf?.dataset.attachDelivery, png: png?.dataset.attachDelivery, text: box.innerText.slice(0, 300) });
     })()`,
-    "sent image + PDF chips render after reload with a loaded thumbnail",
+    "sent image + PDF chips render after reload with a loaded thumbnail and delivery state",
   );
 
   // Usage + Audit (#1286): open each view and confirm its controls
