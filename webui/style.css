@@ -3384,6 +3384,73 @@ rect.mmd-edge-label { fill: var(--surface-muted); stroke: none; }
 }
 .files-head .hint, .changes-head .hint { margin: 0; }
 /* feature:files-refresh end */
+/* feature:global-search begin */
+/* Global transcript search (#1355): palette-launched overlay. Tokens only. */
+.gs-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: color-mix(in srgb, var(--overlay) 45%, transparent);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 10vh var(--space-4) var(--space-4);
+}
+.gs-dialog {
+  width: min(680px, 96vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: var(--space-3);
+}
+.gs-form { display: flex; gap: var(--space-2); }
+.gs-input { flex: 1 1 auto; min-width: 0; }
+.gs-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+.gs-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gs-hit {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  padding: var(--space-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--ink);
+}
+.gs-hit:hover,
+.gs-hit.on { border-color: var(--acid); }
+.gs-title { font-size: var(--type-md); font-weight: 600; }
+.gs-meta { font-size: 11px; color: var(--muted); }
+.gs-snippet {
+  font-size: var(--type-sm);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.gs-snippet mark {
+  background: color-mix(in srgb, var(--acid) 30%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+/* feature:global-search end */
 /* feature:search-in-files begin */
 /* #1406: Files-pane search box; matches marked with .tf-mark (transcript-find.css). */
 .sif {
@@ -3579,3 +3646,13 @@ button.context-doctor-open { background: transparent; border: 0; padding: 0; fon
   cursor: pointer;
 }
 /* feature:diagnostics end */
+/* feature:files-invalidated begin */
+/* #1380: a freshness signal, not a warning — muted system line. */
+.sx-notice[data-kind="files.invalidated"] {
+  border-left-color: var(--border-muted);
+  color: var(--muted);
+}
+.sx-notice[data-kind="files.invalidated"] .sx-who {
+  color: var(--muted);
+}
+/* feature:files-invalidated end */
