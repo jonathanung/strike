@@ -2247,6 +2247,40 @@ type ContextControlsSelected struct {
 	PinnedKinds   []string `json:"pinnedKinds,omitempty"`
 }
 
+// LoopsChanged is the full list of a live session's /loop jobs after one change (start, stop, a firing, a failed firing, session close). It rides the live event stream only and is never persisted as a turn (#1944).
+//
+// Reason is one of the LoopsChanged* constants. LoopID names the loop that
+// changed and is empty for a stop-all and for session close. Loops is the
+// whole active set, so a reader replaces its list rather than patching it.
+type LoopsChanged struct {
+	Correlation
+	Reason string      `json:"reason"`
+	LoopID string      `json:"loopId,omitempty"`
+	Loops  []LoopState `json:"loops"`
+}
+
+// LoopsChanged reasons.
+const (
+	LoopsChangedStart = "start"
+	LoopsChangedStop  = "stop"
+	LoopsChangedFire  = "fire"
+	LoopsChangedError = "error"
+	LoopsChangedClose = "close"
+)
+
+// LoopState is one active session /loop on LoopsChanged, the same JSON as a row of GET /v1/sessions/{id}/loops.
+type LoopState struct {
+	ID         string    `json:"id"`
+	Interval   string    `json:"interval"`
+	IntervalMs int64     `json:"intervalMs"`
+	Job        string    `json:"job"`
+	Runs       int       `json:"runs"`
+	CreatedAt  time.Time `json:"createdAt"`
+	NextAt     time.Time `json:"nextAt"`
+	LastRunAt  time.Time `json:"lastRunAt,omitzero"`
+	LastError  string    `json:"lastError,omitempty"`
+}
+
 // EffectivePrompt is the inspectable composition of the system prompt for the
 // last Stream (or the current composition when no stream has run yet).
 type EffectivePrompt struct {
@@ -2418,4 +2452,5 @@ func (DiagnosticBundle) isEvent()        {}
 func (ContextFitWarning) isEvent()       {}
 func (SessionBudgetWarning) isEvent()    {}
 func (ContextControlsSelected) isEvent() {}
+func (LoopsChanged) isEvent()            {}
 func (UnknownEvent) isEvent()            {}

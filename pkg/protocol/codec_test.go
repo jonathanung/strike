@@ -225,6 +225,18 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 			ExcludedKinds: []string{PromptLayerMemory},
 			PinnedKinds:   []string{PromptLayerPersona},
 		},
+		LoopsChanged{
+			Correlation: Correlation{SessionID: "session-1"},
+			Reason:      LoopsChangedFire,
+			LoopID:      "l1",
+			Loops: []LoopState{{
+				ID: "l1", Interval: "15m", IntervalMs: 900_000, Job: "check ci", Runs: 2,
+				CreatedAt: time.Date(2026, 11, 21, 9, 0, 0, 0, time.UTC),
+				NextAt:    time.Date(2026, 11, 21, 9, 45, 0, 0, time.UTC),
+				LastRunAt: time.Date(2026, 11, 21, 9, 30, 0, 0, time.UTC),
+			}},
+		},
+		LoopsChanged{Correlation: Correlation{SessionID: "session-1"}, Reason: LoopsChangedStop, Loops: []LoopState{}},
 		DiagnosticBundle{
 			Correlation:     corr,
 			SchemaVersion:   "1.0.0",
@@ -983,6 +995,7 @@ func TestEventTypeCoverage(t *testing.T) {
 		"context.fit_warning":    ContextFitWarning{},
 		"session.budget_warning": SessionBudgetWarning{},
 		"context.controls":       ContextControlsSelected{},
+		"loops.changed":          LoopsChanged{},
 	}
 	for typ, ev := range want {
 		env, err := Wrap(ev)
@@ -1315,5 +1328,41 @@ func TestGoldenUnknownHarnessExtensionTypes(t *testing.T) {
 		if !IsUnknown(ev) {
 			t.Fatalf("%q: got %T, want UnknownEvent", env.Type, ev)
 		}
+	}
+}
+
+// #1944: a loop that has not fired omits lastRunAt, and an empty set is
+// [] (never null) so readers replace their list with an empty one.
+func TestLoopsChangedJSONShape(t *testing.T) {
+	b, err := json.Marshal(LoopsChanged{
+		Correlation: Correlation{SessionID: "s1"},
+		Reason:      LoopsChangedStart,
+		LoopID:      "l1",
+		Loops: []LoopState{{
+			ID: "l1", Interval: "1h", IntervalMs: 3_600_000, Job: "x",
+			CreatedAt: time.Date(2026, 11, 21, 9, 0, 0, 0, time.UTC),
+			NextAt:    time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	for _, want := range []string{`"sessionId":"s1"`, `"reason":"start"`, `"loopId":"l1"`, `"intervalMs":3600000`, `"runs":0`, `"nextAt":"2026-11-21T10:00:00Z"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %s in %s", want, got)
+		}
+	}
+	for _, absent := range []string{"lastRunAt", "lastError"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("unexpected %s in %s", absent, got)
+		}
+	}
+	empty, err := json.Marshal(LoopsChanged{Reason: LoopsChangedClose, Loops: []LoopState{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(empty), `"loops":[]`) || strings.Contains(string(empty), "loopId") {
+		t.Fatalf("close = %s", empty)
 	}
 }

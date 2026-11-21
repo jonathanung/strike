@@ -93,6 +93,7 @@ additive fields on all of them.
 | `context.fit_warning` | `ContextFitWarning` | Context budget warn/critical |
 | `input.queued` | `InputQueued` | Pending `user.input` FIFO snapshot (`items` empty when clear). Wire 1.20+. Ops `input.queue_edit`, `input.queue_cancel`, `input.queue_reorder` mutate that FIFO; `input.queue_send_now` (wire 1.21+) promotes one item out of it — as a steer into the running turn, or as an immediate turn when idle. Leaving the FIFO is the claim, so a promoted item is never delivered twice |
 | `context.controls` | `ContextControlsSelected` | Exclude/pin context kinds |
+| `loops.changed` | `LoopsChanged` | **Stream-only, never in the session log.** The whole active `/loop` list of a live session after a start, stop, firing (`reason` `fire`), failed firing (`error`), or session close. `GET /v1/live/events` sends it with no SSE `id:` line, so `Last-Event-ID` stays on the last persisted line; a client that reconnects rereads `GET /v1/sessions/{id}/loops` (#1944, wire 1.28+) |
 | `scheduler.queued` / `admitted` / `canceled` | `Scheduler*` | Admission pool wait/admit/cancel |
 | `tool.loop_detected` / `tool.retrying` | `ToolLoopDetected` / `ToolRetrying` | Tool reliability signals |
 | `provider.retrying` | `ProviderRetrying` | Provider backoff (`delayMs`, `fromProvider` when Retry-After honored) |

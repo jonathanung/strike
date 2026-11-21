@@ -2402,6 +2402,7 @@ fn App() -> impl IntoView {
                     apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
                     elicitation_ui::apply_elicitation_notes(&data, elicitations);
                     debug_mode_ui::apply_debug_envelope(&data, debug_state);
+                    session_loops::apply_loops_envelope(&data, &titled_root, active_root, loop_rows);
                     questions_ui::apply_question_notes(&data, questions);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
@@ -6469,7 +6470,7 @@ fn App() -> impl IntoView {
                                 </p>
                             </Show>
                             <OutboxList outbox=outbox root=active_root gateway=gateway />
-                            <session_loops::LoopRows base=base token=token root=active_root capable=loops_capable loops=loop_rows note=loop_note />
+                            <session_loops::LoopRows base=base token=token root=active_root capable=loops_capable stream_up=stream_up loops=loop_rows note=loop_note />
                             <Show when=move || !steer_note.get().is_empty()>
                                 <p class="steer-note" role="status">{move || steer_note.get()}</p>
                             </Show>

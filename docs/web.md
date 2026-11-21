@@ -1086,10 +1086,13 @@ and guardrails. `GET /v1/status` carries `loops`, the active count.
 `/loop` or `/loop list`, `/loop stop [id]` (no id stops all). The line is
 handled against these routes and is never sent as a prompt; the daemon's
 error sentence shows under the composer. Active loops show as rows in the
-queue pane (id, interval, job, run count, next fire, Stop). The rows poll
-the list route every 5 s, since loop state is not on the event stream yet.
-Firings appear in the transcript as plain user prompts: `user.input` carries
-no loop id, so there is no per-firing loop badge.
+queue pane (id, interval, job, run count, next fire, Stop). The rows follow
+`loops.changed` on `GET /v1/live/events`: after every start, stop, firing,
+and failed firing the daemon sends the whole list, which the rows replace.
+The event is stream-only (never in the session log, no SSE `id:`), so the
+rows read the list route once when the session opens and again whenever the
+stream reconnects. There is no polling (#1944). A firing's user line carries
+a `loop l1` badge from `loopId` (#1827).
 
 ### Schedules
 

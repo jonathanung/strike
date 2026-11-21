@@ -1,15 +1,18 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jonathanung/strike/internal/persist/session"
 	"github.com/jonathanung/strike/internal/protocol"
 	"github.com/jonathanung/strike/internal/schedule/sessionloop"
 )
@@ -321,5 +324,135 @@ func TestZeroLiveLoopsNil(t *testing.T) {
 	z := &Live{}
 	if z.Loops() != nil || z.Status().Loops != 0 {
 		t.Fatal("zero Live")
+	}
+}
+
+// TestLiveEventsCarryLoopsChanged (#1944): a start and a stop through the
+// loops routes each push loops.changed on GET /v1/live/events with the
+// whole list, and nothing is written to the session log.
+func TestLiveEventsCarryLoopsChanged(t *testing.T) {
+	ops := make(chan protocol.Op, 4)
+	live := NewLive("s1", "/cwd", nil, ops)
+	defer live.Close()
+	dir := t.TempDir()
+	srv := mustServer(t, Options{SessionDir: dir, Live: live, PollInterval: 20 * time.Millisecond})
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/live/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", res.StatusCode)
+	}
+
+	steps := []struct {
+		method, path, body string
+		code               int
+		reason, loopID     string
+		ids                []any
+	}{
+		{http.MethodPost, "/v1/sessions/s1/loops", `{"interval":"1h","job":"check ci"}`, http.StatusCreated, "start", "l1", []any{"l1"}},
+		{http.MethodPost, "/v1/sessions/s1/loops", `{"interval":"2h","job":"triage"}`, http.StatusCreated, "start", "l2", []any{"l1", "l2"}},
+		{http.MethodDelete, "/v1/sessions/s1/loops/l1", "", http.StatusOK, "stop", "l1", []any{"l2"}},
+		{http.MethodDelete, "/v1/sessions/s1/loops", "", http.StatusOK, "stop", "", []any{}},
+	}
+	for _, st := range steps {
+		if rr := loopReq(t, srv, st.method, st.path, st.body); rr.Code != st.code {
+			t.Fatalf("%s %s = %d %s", st.method, st.path, rr.Code, rr.Body.String())
+		}
+		ev := readSSEData(t, res.Body, 1, 2*time.Second)[0]
+		if ev["type"] != "loops.changed" {
+			t.Fatalf("%s %s: event %v", st.method, st.path, ev)
+		}
+		data, _ := ev["data"].(map[string]any)
+		if data["sessionId"] != "s1" || data["reason"] != st.reason || (data["loopId"] != nil && data["loopId"] != st.loopID) || (data["loopId"] == nil && st.loopID != "") {
+			t.Fatalf("%s %s: data %v", st.method, st.path, data)
+		}
+		loops, ok := data["loops"].([]any)
+		if !ok {
+			t.Fatalf("loops not a list: %v", data["loops"])
+		}
+		ids := make([]any, 0, len(loops))
+		for _, l := range loops {
+			ids = append(ids, l.(map[string]any)["id"])
+		}
+		if fmt.Sprint(ids) != fmt.Sprint(st.ids) {
+			t.Fatalf("%s %s: ids %v, want %v", st.method, st.path, ids, st.ids)
+		}
+	}
+	if _, err := os.Stat(session.LogPath(dir, "s1")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("loops.changed must not be persisted; log stat err = %v", err)
+	}
+}
+
+// TestLiveEphemeralFanout: PublishEphemeral reaches SubscribeEphemeral
+// readers only, never the persisted-event subscribers, and Close ends it.
+func TestLiveEphemeralFanout(t *testing.T) {
+	live := NewLive("s1", "/cwd", nil, make(chan protocol.Op, 1))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	eph := live.SubscribeEphemeral(ctx)
+	sub := live.Subscribe(ctx)
+	if _, err := live.Loops().Start("1h", "x"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case ev := <-eph:
+		lc, ok := ev.(protocol.LoopsChanged)
+		if !ok || lc.Reason != protocol.LoopsChangedStart || lc.LoopID != "l1" || len(lc.Loops) != 1 || lc.Loops[0].Job != "x" {
+			t.Fatalf("ephemeral = %#v", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no loops.changed on the ephemeral stream")
+	}
+	select {
+	case ev := <-sub:
+		t.Fatalf("persisted subscribers must not see stream-only events: %#v", ev)
+	default:
+	}
+	live.Close()
+	select {
+	case ev, ok := <-eph:
+		// Close stops the loop (reason close) before the bridge closes.
+		if ok {
+			if lc, isLC := ev.(protocol.LoopsChanged); !isLC || lc.Reason != protocol.LoopsChangedClose || len(lc.Loops) != 0 {
+				t.Fatalf("close event = %#v", ev)
+			}
+			if _, open := <-eph; open {
+				t.Fatal("ephemeral channel still open after Close")
+			}
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ephemeral channel not closed by Close")
+	}
+	if ch := live.SubscribeEphemeral(context.Background()); ch != nil {
+		if _, open := <-ch; open {
+			t.Fatal("subscribe after Close must return a closed channel")
+		}
+	}
+}
+
+// TestWriteEphemeralEventHasNoID: a stream-only event must not move the
+// client's Last-Event-ID, which is a byte offset into the session log.
+func TestWriteEphemeralEventHasNoID(t *testing.T) {
+	rec := httptest.NewRecorder()
+	if err := writeEphemeralEvent(rec, rec, protocol.LoopsChanged{Reason: protocol.LoopsChangedStop, Loops: []protocol.LoopState{}}); err != nil {
+		t.Fatal(err)
+	}
+	body := rec.Body.String()
+	if !strings.HasPrefix(body, "data: ") || !strings.HasSuffix(body, "\n\n") || strings.Contains(body, "id:") {
+		t.Fatalf("frame = %q", body)
+	}
+	if !strings.Contains(body, `"type":"loops.changed"`) || !strings.Contains(body, `"loops":[]`) {
+		t.Fatalf("frame = %q", body)
 	}
 }

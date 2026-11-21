@@ -27,6 +27,15 @@ var (
 	IsolationShort    = pub.IsolationShort
 )
 
+// LoopsChanged reasons (#1944).
+const (
+	LoopsChangedStart = pub.LoopsChangedStart
+	LoopsChangedStop  = pub.LoopsChangedStop
+	LoopsChangedFire  = pub.LoopsChangedFire
+	LoopsChangedError = pub.LoopsChangedError
+	LoopsChangedClose = pub.LoopsChangedClose
+)
+
 // Effort ladder.
 type Effort = pub.Effort
 
@@ -288,6 +297,8 @@ type (
 	ContextFitWarning       = pub.ContextFitWarning
 	SessionBudgetWarning    = pub.SessionBudgetWarning
 	ContextControlsSelected = pub.ContextControlsSelected
+	LoopsChanged            = pub.LoopsChanged
+	LoopState               = pub.LoopState
 	UnknownEvent            = pub.UnknownEvent
 )
 

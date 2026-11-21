@@ -18,6 +18,7 @@ import { bestOfNCheck } from "./webui-best-of-n-check.mjs";
 import { createServer } from "node:http";
 import { debugModeCheck } from "./webui-debug-mode-check.mjs";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
+import { sessionLoopsCheck } from "./webui-session-loops-check.mjs";
 import { sessionRefCheck } from "./webui-session-ref-check.mjs";
 import { seedRepeatedWorkflow, skillProposalsCheck } from "./webui-skill-proposals-check.mjs";
 import {
@@ -9204,6 +9205,8 @@ try {
   await seedRepeatedWorkflow({ home, port, token });
   await skillProposalsCheck({ send, repoDir: process.cwd(), port, token });
   await debugModeCheck({ send, port, token });
+  // #1944: loop rows follow loops.changed on the live stream, no polling.
+  await sessionLoopsCheck({ send, port, token });
   // Last: the comparison card it leaves in the chat column stays put.
   await bestOfNCheck({ send });
 
