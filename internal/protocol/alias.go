@@ -86,6 +86,7 @@ const (
 	DecisionProject = pub.DecisionProject
 	DecisionFolder  = pub.DecisionFolder
 	DecisionReject  = pub.DecisionReject
+	DecisionExpired = pub.DecisionExpired
 )
 
 // MCP elicitation modes and actions (#1353).

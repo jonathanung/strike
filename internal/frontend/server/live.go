@@ -24,6 +24,9 @@ type RootSummary struct {
 	HasRecentEvent    bool   `json:"hasRecentEvent"`
 	PermissionPending bool   `json:"permissionPending,omitempty"`
 	QuestionPending   bool   `json:"questionPending,omitempty"`
+	// AskOutcome is the last approval outcome this turn (allowed | denied |
+	// expired); empty once the next turn starts (#1387).
+	AskOutcome string `json:"askOutcome,omitempty"`
 	// Status is the canonical id from protocol.ClassifyLive. Empty on a raw
 	// hub list; HTTP handlers fill it.
 	Status string `json:"status,omitempty"`
@@ -315,6 +318,7 @@ func (h *LiveHub) List() []RootSummary {
 			HasRecentEvent:    time.Since(e.activeAt) < 5*time.Minute,
 			PermissionPending: s.PermissionPending,
 			QuestionPending:   s.QuestionPending,
+			AskOutcome:        s.AskOutcome,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -496,6 +500,10 @@ type StatusSnapshot struct {
 	NetworkAllow      []string `json:"networkAllow,omitempty"`
 	PermissionPending bool     `json:"permissionPending,omitempty"`
 	QuestionPending   bool     `json:"questionPending,omitempty"`
+	// AskOutcome is the last approval outcome since the turn started
+	// (allowed | denied | expired), so a row does not keep a stale
+	// "Permission required" after the ask ends (#1387).
+	AskOutcome string `json:"askOutcome,omitempty"`
 	// ElicitationPending is set while an MCP tool is paused on an
 	// elicitation request (#1353); the root reads as waiting on the user.
 	ElicitationPending bool `json:"elicitationPending,omitempty"`
@@ -546,6 +554,18 @@ type TeamMemberSnapshot struct {
 	BlockReason     string         `json:"blockReason,omitempty"`
 	Budget          map[string]any `json:"budget,omitempty"`
 	Terminal        bool           `json:"terminal,omitempty"`
+	// Escalation is the member's latest child.escalated (#1375). It
+	// survives later roster/completion upserts so a late join still sees
+	// why a child stopped.
+	Escalation *TeamEscalationSnapshot `json:"escalation,omitempty"`
+}
+
+// TeamEscalationSnapshot is one child budget/stall/loop trip.
+type TeamEscalationSnapshot struct {
+	Kind           string `json:"kind"`
+	Reason         string `json:"reason,omitempty"`
+	Action         string `json:"action,omitempty"`
+	TerminalStatus string `json:"terminalStatus,omitempty"`
 }
 
 // DelegationSnapshot is one delegation/task board row.
@@ -809,6 +829,20 @@ func (l *Live) Status() StatusSnapshot {
 	return out
 }
 
+// askOutcome folds a terminal permission decision into the row outcome.
+func askOutcome(d protocol.Decision) string {
+	switch d {
+	case protocol.DecisionReject:
+		return "denied"
+	case protocol.DecisionExpired:
+		return "expired"
+	case "":
+		return ""
+	default:
+		return "allowed"
+	}
+}
+
 func childAttention(team TeamSnapshot) (running, waiting, blocked bool) {
 	for _, m := range team.Members {
 		if strings.EqualFold(m.Role, "lead") {
@@ -1002,6 +1036,7 @@ func (l *Live) applyStatus(ev protocol.Event) {
 		l.noteActivityLocked()
 	case protocol.TurnStarted:
 		l.status.Busy = true
+		l.status.AskOutcome = ""
 		l.status.StopReason = ""
 		l.status.ProviderAuthFailed = false
 		l.status.TurnSince = time.Now().UnixMilli()
@@ -1021,6 +1056,7 @@ func (l *Live) applyStatus(ev protocol.Event) {
 		l.noteActivityLocked()
 	case protocol.PermissionResolved:
 		l.status.PermissionPending = false
+		l.status.AskOutcome = askOutcome(e.Decision)
 		l.status.TurnSince = time.Now().UnixMilli()
 		l.noteActivityLocked()
 	case protocol.QuestionAsked:
@@ -1068,6 +1104,8 @@ func (l *Live) applyStatus(ev protocol.Event) {
 	case protocol.ChildCompleted:
 		l.noteActivityLocked()
 		l.applyChildCompleted(e)
+	case protocol.ChildEscalated:
+		l.applyChildEscalated(e)
 	case protocol.DelegationChanged:
 		l.applyDelegation(e)
 	case protocol.AgentMessage:
@@ -1127,6 +1165,9 @@ func (l *Live) upsertMember(m TeamMemberSnapshot) {
 	}
 	if m.Agent == "" {
 		m.Agent = prev.Agent
+	}
+	if m.Escalation == nil {
+		m.Escalation = prev.Escalation
 	}
 	l.team.Members[m.SessionID] = m
 	l.team.Available = true
@@ -1213,6 +1254,35 @@ func (l *Live) applyChildCompleted(e protocol.ChildCompleted) {
 			l.team.Verifications = l.team.Verifications[len(l.team.Verifications)-40:]
 		}
 	}
+}
+
+// applyChildEscalated records a child's budget/stall/loop trip on its
+// member row without changing state; child.completed follows with the
+// terminal status.
+func (l *Live) applyChildEscalated(e protocol.ChildEscalated) {
+	sid := strings.TrimSpace(e.SessionID)
+	if sid == "" {
+		return
+	}
+	if l.team.Members == nil {
+		l.team.Members = map[string]TeamMemberSnapshot{}
+	}
+	m, ok := l.team.Members[sid]
+	if !ok {
+		m = TeamMemberSnapshot{SessionID: sid, State: "running"}
+	}
+	if m.Name == "" {
+		m.Name = e.Name
+	}
+	m.Escalation = &TeamEscalationSnapshot{
+		Kind:           e.Kind,
+		Reason:         e.Reason,
+		Action:         e.Action,
+		TerminalStatus: string(e.TerminalStatus),
+	}
+	l.team.Members[sid] = m
+	l.team.Available = true
+	l.team.UnavailableReason = ""
 }
 
 func (l *Live) applyDelegation(e protocol.DelegationChanged) {

@@ -315,6 +315,10 @@ const (
 	// Older daemons treat it as an approve-once reply and record nothing.
 	DecisionFolder Decision = "folder"
 	DecisionReject Decision = "reject"
+	// DecisionExpired is never sent by a client. The permission service
+	// stamps it on the terminal PermissionResolved / PermissionDecided when
+	// an ask dies with no reply (turn stopped, session closed) (#1387).
+	DecisionExpired Decision = "expired"
 )
 
 // Op is a client -> engine submission.

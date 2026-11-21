@@ -879,20 +879,41 @@ func TestLivePermissionQuestionPendingOnStatus(t *testing.T) {
 	}
 }
 
-func TestLiveElicitationPendingReadsAsWaiting(t *testing.T) {
-	live := NewLive("s1", "/tmp", nil, make(chan protocol.Op, 1))
-	live.Publish(protocol.TurnStarted{})
-	live.Publish(protocol.ElicitationRequested{RequestID: "e1", Server: "fixture", Mode: protocol.ElicitationModeForm})
-	st := live.Status()
-	if !st.ElicitationPending {
-		t.Fatal("elicitation pending after requested")
+func TestLiveAskOutcomeUntilNextTurn(t *testing.T) {
+	cases := []struct {
+		decision protocol.Decision
+		want     string
+	}{
+		{protocol.DecisionOnce, "allowed"},
+		{protocol.DecisionAlways, "allowed"},
+		{protocol.DecisionFolder, "allowed"},
+		{protocol.DecisionReject, "denied"},
+		{protocol.DecisionExpired, "expired"},
 	}
-	if st.TurnState != protocol.ClassifyLive(protocol.LiveStatusInput{Busy: true, QuestionPending: true}) {
-		t.Fatalf("turn state = %q, want the waiting state", st.TurnState)
-	}
-	live.Publish(protocol.ElicitationResolved{RequestID: "e1", Action: protocol.ElicitationDecline})
-	if live.Status().ElicitationPending {
-		t.Fatal("elicitation cleared after resolved")
+	for _, tc := range cases {
+		t.Run(string(tc.decision), func(t *testing.T) {
+			live := NewLive("s1", "/tmp", nil, make(chan protocol.Op, 1))
+			hub := NewLiveHub(nil, nil)
+			hub.Add("s1", live)
+			live.Publish(protocol.TurnStarted{})
+			live.Publish(protocol.PermissionAsked{RequestID: "p1", Permission: "bash"})
+			if got := live.Status().AskOutcome; got != "" {
+				t.Fatalf("outcome while pending = %q, want empty", got)
+			}
+			live.Publish(protocol.PermissionResolved{RequestID: "p1", Decision: tc.decision})
+			st := live.Status()
+			if st.PermissionPending || st.AskOutcome != tc.want {
+				t.Fatalf("after resolve: pending=%v outcome=%q, want %q", st.PermissionPending, st.AskOutcome, tc.want)
+			}
+			live.Publish(protocol.TurnCompleted{StopReason: "interrupted"})
+			if got := hub.List()[0].AskOutcome; got != tc.want {
+				t.Fatalf("row outcome after turn end = %q, want %q", got, tc.want)
+			}
+			live.Publish(protocol.TurnStarted{})
+			if got := live.Status().AskOutcome; got != "" {
+				t.Fatalf("outcome after next turn = %q, want empty", got)
+			}
+		})
 	}
 }
 
@@ -924,5 +945,22 @@ func TestLiveDoneUnblocksOnClose(t *testing.T) {
 	case <-live.Done():
 	case <-time.After(time.Second):
 		t.Fatal("Done still open after Close")
+	}
+}
+
+func TestLiveElicitationPendingReadsAsWaiting(t *testing.T) {
+	live := NewLive("s1", "/tmp", nil, make(chan protocol.Op, 1))
+	live.Publish(protocol.TurnStarted{})
+	live.Publish(protocol.ElicitationRequested{RequestID: "e1", Server: "fixture", Mode: protocol.ElicitationModeForm})
+	st := live.Status()
+	if !st.ElicitationPending {
+		t.Fatal("elicitation pending after requested")
+	}
+	if st.TurnState != protocol.ClassifyLive(protocol.LiveStatusInput{Busy: true, QuestionPending: true}) {
+		t.Fatalf("turn state = %q, want the waiting state", st.TurnState)
+	}
+	live.Publish(protocol.ElicitationResolved{RequestID: "e1", Action: protocol.ElicitationDecline})
+	if live.Status().ElicitationPending {
+		t.Fatal("elicitation cleared after resolved")
 	}
 }

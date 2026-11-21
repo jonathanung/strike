@@ -54,7 +54,9 @@ type opErrorResponse struct {
 }
 
 type opOKResponse struct {
-	OK              bool   `json:"ok"`
+	OK bool `json:"ok"`
+	// Duplicate: the client message id was already delivered (#1325).
+	Duplicate       bool   `json:"duplicate,omitempty"`
 	ChildSessionID  string `json:"childSessionId,omitempty"`
 	Name            string `json:"name,omitempty"`
 	DelegationID    string `json:"delegationId,omitempty"`
@@ -1552,12 +1554,36 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 		s.handleTeamControlOp(w, r, live, env.Type, sessionID, op)
 		return
 	}
+	// Outbox retries carry a client message id (#1325): a delivered id is
+	// acknowledged without submitting again; one mid-delivery is a 409 the
+	// client retries.
+	clientID, ok := clientMessageID(r)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "invalid client message id"})
+		return
+	}
+	if clientID != "" {
+		switch s.clientMsgs().reserve(sessionID, clientID) {
+		case clientMsgDelivered:
+			writeJSON(w, http.StatusOK, opOKResponse{OK: true, Duplicate: true})
+			return
+		case clientMsgInFlight:
+			writeJSON(w, http.StatusConflict, opErrorResponse{Error: "message already in flight"})
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	if err := live.Submit(ctx, op); err != nil {
+		if clientID != "" {
+			s.clientMsgs().finish(sessionID, clientID, false)
+		}
 		s.recordServeOpError(r, "http", env.Type, sessionID)
 		writeJSON(w, http.StatusConflict, opErrorResponse{Error: err.Error()})
 		return
+	}
+	if clientID != "" {
+		s.clientMsgs().finish(sessionID, clientID, true)
 	}
 	s.auditOpOK(r, "http", env.Type, sessionID)
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})

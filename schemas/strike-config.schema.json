@@ -155,6 +155,14 @@
         "workspace-write"
       ]
     },
+    "sandboxRuntime": {
+      "type": "string",
+      "description": "What isolates bash and the terminal panel: process (default; bwrap / sandbox-exec) or microvm (KVM microVM, Linux only). microvm never falls back to the host and ignores sandboxAllowDegrade.",
+      "enum": [
+        "process",
+        "microvm"
+      ]
+    },
     "sandboxAllowDegrade": {
       "type": "boolean",
       "description": "When true, permit bash to run unsandboxed if the OS backend is missing. Default false is fail-closed (sandbox_denied)."
