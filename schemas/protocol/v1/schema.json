@@ -1903,6 +1903,12 @@
         "data": {
           "type": "string"
         },
+        "delivery": {
+          "type": "string"
+        },
+        "deliveryReason": {
+          "type": "string"
+        },
         "kind": {
           "type": "string"
         },

@@ -11,6 +11,7 @@ serde_json = "1"
 a11y-announce = { path = "a11y-announce" }
 protocol-schema = { path = "protocol-schema" }
 error-copy = { path = "error-copy" }
+session-ref = { path = "session-ref" }
 load-guard = { path = "load-guard" }
 away-briefing = { path = "away-briefing" }
 dashboard-view = { path = "dashboard-view" }
@@ -22,6 +23,7 @@ composer-drafts = { path = "composer-drafts" }
 prompt-library = { path = "prompt-library" }
 signin-flow = { path = "signin-flow" }
 transcript-window = { path = "transcript-window" }
+quote-message = { path = "quote-message" }
 edit-resend = { path = "edit-resend" }
 theme-catalog = { path = "theme-catalog" }
 table-export = { path = "table-export" }

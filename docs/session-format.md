@@ -235,6 +235,8 @@ Go `UserMessage`.
 | `images[].bytes` | number | yes |
 | `images[].kind` | string | yes |
 | `images[].name` | string | yes |
+| `images[].delivery` | string | yes |
+| `images[].deliveryReason` | string | yes |
 | `loopId` | string | yes |
 
 #### `session.titled`

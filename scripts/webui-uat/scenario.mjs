@@ -156,6 +156,12 @@ async function composerAt(page, check, viewport, grab) {
         })
         .map((el) => (el.innerText || el.getAttribute("aria-label") || "").trim());
       const s = send.getBoundingClientRect();
+      const shown = [...chips.children].filter((el) => el.getBoundingClientRect().width > 0);
+      const underSend = shown
+        .filter((el) => el.getBoundingClientRect().right > s.left + 1)
+        .map((el) => (el.innerText || el.getAttribute("aria-label") || "").trim());
+      const tops = shown.map((el) => Math.round(el.getBoundingClientRect().top));
+      const safety = chips.querySelector("[data-safety-status]");
       const t = document.querySelector(".chat .transcript");
       const tb = t ? t.getBoundingClientRect() : null;
       return {
@@ -164,20 +170,25 @@ async function composerAt(page, check, viewport, grab) {
         barScroll: bar.scrollWidth > bar.clientWidth + 1,
         chipScroll: chips.scrollWidth > chips.clientWidth + 1,
         clipped,
+        underSend,
+        safetyShown: Boolean(safety && safety.getBoundingClientRect().width > 0),
+        oneLine: tops.length === 0 || Math.max(...tops) - Math.min(...tops) <= 4,
         sendOnScreen: s.width > 0 && s.left >= 0 && s.right <= window.innerWidth + 1 && s.bottom <= window.innerHeight + 1,
         overlap: tb && tb.height > 0 ? Math.round(tb.bottom - box.top) : 0,
       };
     })()`);
     check(Boolean(fit), `composer missing at ${width}x${height}`);
     if (!fit || fit.hidden) continue;
-    // Phones keep the #1332 chip scroller (wrapping would push the
-    // composer out of a keyboard-open viewport); Send must still be on
-    // screen there. Desktop layouts must not scroll or clip at all.
-    if (!fit.phone) {
-      check(!fit.barScroll && !fit.chipScroll, `composer row scrolls sideways at ${width}x${height}`);
-      check(fit.clipped.length === 0, `composer chip clipped at ${width}x${height}: ${fit.clipped.join(", ")}`);
-    } else {
-      check(!fit.barScroll, `composer bar (Send column) scrolls sideways at ${width}x${height}`);
+    // No layout may scroll the chip row sideways or clip a chip. Phones
+    // fit one line by folding Approval and Autonomy into the safety chip
+    // (#1924) rather than wrapping (wrapping pushes the composer out of a
+    // keyboard-open viewport, phone-keyboard-390).
+    check(!fit.barScroll && !fit.chipScroll, `composer row scrolls sideways at ${width}x${height}`);
+    check(fit.clipped.length === 0, `composer chip clipped at ${width}x${height}: ${fit.clipped.join(", ")}`);
+    check(fit.underSend.length === 0, `composer chip runs under Send at ${width}x${height}: ${fit.underSend.join(", ")}`);
+    if (fit.phone) {
+      check(fit.safetyShown, `phone safety chip missing at ${width}x${height}`);
+      check(fit.oneLine, `phone composer chips wrap past one line at ${width}x${height}`);
     }
     check(fit.sendOnScreen, `Send is off screen at ${width}x${height}`);
     // Phones use a sticky composer over a scrolling pane (#1332); the

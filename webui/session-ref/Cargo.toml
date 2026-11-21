@@ -1,0 +1,8 @@
+[package]
+name = "session-ref"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Pure logic for @session references in the composer: token parsing, the @ menu Sessions section, and chip text (#1550, #1906)."
+
+[dependencies]
