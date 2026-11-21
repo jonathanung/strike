@@ -6,7 +6,7 @@ and organisational folders, search across titles and recent transcript
 text, delegated children nested in the conductor view), a transcript over
 `/v1/live/events`, a composer that can steer or queue (split send,
 visible engine queue, stop, context hold) and set the real
-permission mode, and a side panel with Activity, Files, Changes, Git, Worktrees,
+permission mode, and a side panel with Activity, Files, Changes, Git, Review, Worktrees,
 Memory, Knowledge, and Artifacts.
 Apps is a separate surface: a launcher and one queue, GitHub triage
 (`docs/webui-apps.md`).
@@ -308,6 +308,32 @@ page. Plugin install and removal stay on `/v1/plugins`. The composer expands
 `$skill` through the daemon (see Composer triggers); this page is where those
 files are inspected and edited.
 
+## Powers
+
+The daemon side is in place but no chip is drawn yet (#1347).
+`internal/integrate/powers` loads packs from
+`<workspace>/.strike/powers/<pack>/` and `~/.strike/powers/<pack>/`, and
+the workspace copy wins on a name clash. Each pack is an Agent Plugins
+package: `plugin.json` holds `name` and `keywords`, `mcp.json` holds
+`mcpServers`, and `skills/<name>/SKILL.md` holds skills. These are
+references by name, not copies.
+
+A pack is suggested when a keyword appears in the prompt as a whole word
+or phrase. Packs that are muted or already active are not suggested, and
+nothing activates on its own. Activation is per session and
+reference-counted: packs that share a server keep it until the last one is
+deactivated, and ending one session never disconnects another session's
+servers. If a server fails to connect, it is listed as failed and left
+out of the session, and the chip and the tool set read the same result.
+If a pack names a deny-listed server, the whole pack stays inactive and
+the reason is shown.
+
+Not built yet:
+- a `Connector` connected to the MCP session manager, and the daemon routes for it;
+- the composer chip row with context cost (#1259);
+- pack membership on Customize;
+- goal-declared Powers (#1284).
+
 ## Composer triggers
 
 `user.input` and `steer` expand in the daemon (`internal/composer/triggers`,
@@ -401,11 +427,66 @@ pruned to the 200-row window. Each browser keeps its own copy in
 load. Dismissing a row ("Clear read") stays per-browser. Not built yet:
 collapsing consecutive same-kind, same-session rows into one counted row.
 
-Not built: a third-party web-push service, and an operating-system banner
-while the browser process is quit. Nothing can wake a quit browser without
-that push service. The next open replays the daemon log into the centre.
+Web Push (#1564): Notification settings has a "Turn on push" toggle that
+asks the browser for permission, subscribes through `PushManager` (helper in
+`register.js`), and registers the subscription with
+`POST /v1/notifications/push-subscriptions` (`DELETE` removes it;
+`GET /v1/notifications/push-key` is the VAPID public key). When a new centre
+row would banner (same enabled / quiet hours / mute policy) and needs you —
+an approval or a blocked run — the daemon encrypts `{type, kind, href, tag}`
+(RFC 8291 aes128gcm, VAPID RFC 8292, standard library only) and posts it to
+each subscription. `sw.js` shows fixed text by kind; names, summaries, prompts
+and tool text are never sent. 404/410 from the push service prunes the
+subscription; `GET /v1/notifications` reports `push.lastResult` so the
+toggle can say a push failed. The VAPID key is `push/vapid.json` beside the
+session dir (0600). Unsupported browsers, blocked permission, and iOS
+without Home Screen install are named in the toggle. Not built yet:
+opt-in push for finished or failed runs.
 A gateway drop is detected by the page (the daemon cannot deliver "I am
 gone"); it is not a JSONL record.
+
+## Share a session by link
+
+Shipped (#1565, first slice of #1056): the transcript header's Share button
+opens a dialog that mints a read-only link for the root session
+(`POST /v1/sessions/{id}/shares`, expiry 24h / 7 days (default) / 30 days,
+optional label), lists live links (`GET`), and revokes one
+(`DELETE /v1/sessions/{id}/shares/{shareId}`). The link is
+`<origin>/#share=<token>`: the token rides in the fragment, so it never
+reaches server logs or a Referer header. A browser opening it mounts only a
+read-only transcript shell, which posts the token in a JSON body to
+`POST /share/v1/transcript` (outside `/v1`; the token is not a gateway
+credential and every `/v1` route refuses it). It reads exactly the session
+bound at mint, live as it grows; no composer, approvals, panels, session list,
+or attachment downloads. Tokens are stored as SHA-256 hashes
+(`shares.json`, 0600); mint, revoke, and each first read are audit-logged
+without the token. Expired, revoked, unknown links and deleted sessions get
+one identical dead end. Children are not included (root only).
+
+Not built: redaction or selective disclosure, snapshot (frozen) links,
+accounts or comments — all stay with #1056. Links only work for someone who
+can reach the gateway (same as pairing links).
+
+## Offline outbox
+
+Shipped (#1325, first slice): when the gateway is unreachable, a text send
+from the composer is queued in a per-gateway `localStorage` outbox (survives
+a tab close or PWA restart) and shown above the composer as "Queued — will
+send when reconnected", with Edit and Delete. On reconnect items flush one at
+a time in the order written, before any new send for the same session. Each
+send carries `X-Strike-Client-Message-Id`; `POST /v1/ops` remembers delivered
+ids per live root (memory, 24h, bounded) and answers a repeat with
+`{"ok":true,"duplicate":true}` without submitting, or 409 while the first
+attempt is still in flight. A send that loses its connection mid-request is
+queued under the same id, so a half-open retry cannot post twice. The op
+(`user.input` or `steer`) is fixed at send time. Approvals are never queued.
+Items older than 24h are held for confirmation (Send) instead of auto-sent;
+a refused send (4xx) holds that session's later items until it is retried or
+deleted.
+
+Not built: queuing attachments (they need an upload while online), a
+daemon-restart-proof dedupe (ids are memory-only), and a hold for sessions
+that finished while the message was queued.
 
 ## Find in transcript
 
@@ -418,6 +499,52 @@ collapsed content (child-card details and long tool dumps the
 transcript folds away) are not searched and find does not expand
 collapsed cards to reveal a match; a case-sensitive toggle is likewise
 deferred until someone asks for it.
+
+## Review queue
+
+The Review side tab (`webui/src/review_queue.rs`, daemon routes in
+`internal/frontend/server/review.go`, #1324) lists the live session's
+unstaged working-tree changes as files and hunks from the same `git diff`
+the Git panel reads. Each hunk can be accepted (a mark kept with the
+session), rejected (reverted at once with `git apply -R` of that one hunk,
+after a second confirming tap), or commented on with a file + line range.
+Comments, accept marks, and rejections are stored per session under
+`<session dir>/review/<id>.json` until **Send review** delivers every
+comment and rejection as one user turn. That turn opens with a fixed
+header, and the transcript labels it "Review" instead of showing it as
+typed text. Reject and Send wait for the session to be idle; read-only
+attach shows the queue disabled with the daemon's reason.
+
+Not in this slice:
+
+- Untracked (new) files and staged changes: the queue reads unstaged
+  `git diff` only. Review a new file in the Git panel.
+- Delegated children's worktrees: the queue follows the open root's
+  working tree. Reviewing a child's isolated worktree needs a child-scoped
+  cwd on these routes.
+- Binary, mode-only, and git-quoted paths are listed with a note and no
+  hunk actions.
+- Accept is a review mark only; it does not stage the hunk.
+
+## Markdown Review
+
+The document pane's rendered Markdown view takes anchored comments
+(#1366, `webui/src/markdown_review.rs`; anchor logic in the
+`webui/md-review` crate). Select a passage and the composer quotes it.
+The comment is stored with its anchor: the quoted text (whitespace
+normalised), the nearest heading, and an offset hint. Line numbers are not
+used because they go wrong on the first edit. Comments list under their headings in
+document order, can be edited or deleted, and live in browser storage per
+session + file (`strike.mdReview.v1:<session>:<path>`), so a reload keeps
+them. **Send N to agent** sends every unsent comment for the file as one
+`user.input` turn (path, section, quoted passage, comment). Sent comments
+clear on success and stay with the error shown on failure. Sending is
+refused while a turn runs. When the file changes and a quoted passage no
+longer appears, that comment is marked "Anchor moved/lost" and is sent
+flagged as such. It is never re-attached to another passage.
+
+Not in this slice: comments on code files or diffs (see the review queue),
+daemon-side storage for cross-device review, multi-user comments (#1056).
 
 ## Debug mode
 
@@ -437,6 +564,123 @@ Not drawn yet: the session flag in the engine turn loop, the protocol
 events, and the cockpit Debug panel (hypothesis card, instrumentation
 list, reproduce checklist, mobile chip). Bash is not inspected by the
 gate; the permission layer still governs it.
+## Steer acknowledgement
+
+Shipped (#1343): a steered message carries a marker driven only by the
+engine's durable `turn.steered` event (`webui/src/steer_ack.rs`). `boundary`
+reads "Steer acknowledged. The agent has it from its next step.",
+`cancel_restart` reads "The reply restarted with it.", and a
+`queued_fallback` steer marks the later message it was sent as. The marker
+survives reload because the event is in the JSONL. Pending (sent, not yet
+applied) is the composer's steer note: the steer has no transcript line
+until the engine applies it.
+
+Planned, not drawn: the agent's own one-line "now doing X instead of Y"
+summary and a conflict state ("this steer conflicts with my plan"). Both
+need an agent-emitted event, for example `turn.steer_ack {targetTurnId,
+summary, conflict, reason}` emitted by a model-facing acknowledgement tool,
+that does not exist yet. The cockpit's protocol gate drops unknown events,
+so nothing renders them until the engine and schema carry the event. The
+marker never derives a summary or a conflict from timing or a plan diff.
+
+## Container actions (#1584 follow-up)
+
+Settings → Isolation (`GET /v1/container/status`) is read-only: posture
+ladder, engine probe, workspace container (`strike container status`),
+ejected-Dockerfile drift and detected manifests. Not drawn: eject,
+drift fix, and container start/stop/build from the web, and the
+`strike container ls --all` list of every managed container on the engine.
+Host mode stays a first-class posture (#1290); nothing here changes a
+default.
+
+## Run with N models
+
+Orchestration core shipped, card not drawn (#1346).
+`internal/daemon/bestofn` validates a comparison (2–4 distinct
+model/effort pairs, non-empty prompt, non-negative per-run budget), shows
+the N× cost multiplier, and builds one spawn spec per model: same prompt,
+the parent's permission mode passed through (never widened), and a
+worktree per candidate when the prompt may edit files (shared otherwise).
+A candidate whose spawn fails, fails mid-run, or is cancelled is recorded
+as such and the comparison completes with the rest; cancelling all
+interrupts only running children. Picking a winner is a separate call
+that requires every candidate to have stopped and the winner to have
+finished; it returns which child to keep and which to archive. "Keep
+none" archives all. A run is decided once.
+
+Not drawn yet: the Spawner wired to `team.spawn` (a per-child model and
+effort field on the spawn op), worktree merge/cleanup on adopt, parent
+commentary, the comparison card and model picker, and verification
+reuse (#780).
+
+## MCP elicitation
+
+Shipped (#1353): `elicitation.requested` renders a card above the composer
+(`webui/src/elicitation.rs`, `elicitation_ui.rs`) with the server name, its
+message, and fields from the requested schema, or a URL with Open / Done.
+Answers go back as one `elicitation.reply` (accept with content, decline,
+cancel) and are never posted as chat text.
+
+Not built yet:
+
+- The card sits with the approval cards above the composer, not inline in
+  the tool timeline where the call paused.
+- Streamable HTTP MCP servers: the capability is declared on stdio only;
+  HTTP does not route server requests yet.
+- TUI and ACP rendering: both cancel with a note.
+- Property order follows the field names (the cockpit's JSON maps are
+  sorted), not the server's key order.
+
+## Ship to PR
+
+The Git tab's "Create pull request" action (#1340) previews the current
+branch against its base (`GET /v1/git/pr`: commits, diffstat, uncommitted
+changes, whether a push is needed, an existing open PR, and an editable
+title/body drafted from the session title and commits). `POST /v1/git/pr`
+pushes `refs/heads/<branch>` to origin only with `confirmPush` (never a
+force-push), needs `allowDirty` when the tree has uncommitted changes, then
+runs the host's `gh pr create` (draft by default) and links the PR to the
+session (`prUrl` / `prNumber` / `prState` in the session meta). It refuses a
+detached HEAD, the default branch / main / master, and a non-GitHub origin
+with a plain message; an existing open PR is returned (the action becomes
+"Open pull request"), never duplicated. No token crosses to the browser.
+Not in this slice: non-GitHub forges, pushing to a remote other than
+origin, and the live checks chip (PR watch, #1356, reads the same session
+fields).
+
+## Pre-push review
+
+"Review this branch" in the Git tab (#1487) sizes the branch diff first
+(`GET /v1/git/review`: committed `base...HEAD` plus uncommitted changes,
+untracked file names, one model turn, warn above 60 KB, refuse above the
+200 KB diff cap). "Run review" (`POST /v1/git/review {confirm:true}`) spawns
+a fresh-context child through the normal `team.spawn` path with the
+built-in `branch-reviewer` agent, whose denies (write, edit, bash, task,
+verify, browser, web, MCP, store writes) the engine enforces for children,
+fed the diff, the repo's AGENTS.md and the findings format. The daemon parses
+`FINDING | severity | path:line | scenario` lines and the `VERDICT:` line from
+the child's transcript (`GET /v1/git/review/{id}`); each finding opens its
+file at the line. No review store, no autofix, no merge gate. Not in this
+slice: the `/review` composer trigger (#1275), a cross-model reviewer (team
+spawn has no per-child model), and Ship to PR's warn-on-blocking hook.
+
+## Security review mode
+
+"Review this branch" has a Security mode (#1620): the same read-only
+`branch-reviewer` child, fed a security instruction set (injection, authn/
+authz bypass, committed secrets, SSRF/redirects, unsafe deserialization,
+vulnerable dependency changes, entry→sink tracing), the repo's AGENTS.md and
+an optional `.strike/security-rules.md`. Findings carry an ID, CWE, severity,
+confidence, attack path, file:line and a draft fix. When the reviewer
+finishes, a second fresh child (`POST /v1/git/review/{id}/verify`) tries to
+refute each finding; only confirmed findings render as confirmed, refuted
+ones collapse under "Not verified" with the reason, and only a confirmed
+critical/high finding makes the verdict blocking. Dismissing a finding
+requires a one-line reason and suppresses it (same file + CWE, anchor ±3
+lines) on later security reviews of the same branch
+(`/v1/git/review-suppressions`, stored in the session dir); suppressions are
+listed and removable. Not in this slice: SARIF/JSONL export, PR-scoped
+suppressions (#1356 follow-up), an authoring UI for security rules.
 
 ## Not planned as a copy
 
@@ -444,3 +688,40 @@ Stall is already a real badge when the team roster sets `budget.stall`.
 Retry is `team.spawn` of the same objective, which starts a new child; it
 does not resume the old session. Stop is `team.child_interrupt`. None of
 these need a new panel.
+
+## Instance backup
+
+Settings → Backup ships export and dry-run-first restore for sessions,
+memory, schedules and non-secret settings (#1339, see
+`docs/instance-backup.md`). Knowledge pins, artifacts, attachments,
+goals/autopilot state, workspaces and their rules, issues, plans and the
+ledger are not in archive version 1; the manifest names them as
+`not-yet-included`. Passphrase encryption is not offered: the file says
+`"encrypted": false` and secrets are excluded regardless.
+
+## Read replies aloud
+
+Assistant replies have a **Read aloud** control (#1384) that uses the
+browser's own `speechSynthesis` (on-device voices when available). Voice and
+speed are in Settings → Voice and stored in the browser. Not in slice 1: a
+gateway-hosted Piper endpoint, auto-play, reading tool output, and stopping
+playback on a gateway disconnect (a page unload stops it).
+
+## Live preview
+
+The side panel **Preview** tab (#1341) proxies one user-picked loopback port
+through the daemon (`/preview/<key>/`, see `docs/web.md`). Known limits of
+slice 1:
+
+- Apps that load assets from absolute paths (`/src/main.ts`) need their base
+  path set to the prefix shown in the pane (Vite `base`, Next `basePath`).
+  The prefix stays the same for a given port for the life of the daemon.
+- The frame runs in an opaque origin (sandbox without `allow-same-origin`).
+  Apps that need cookies, `localStorage`, or a same-origin HMR websocket may
+  partly fail. Websocket upgrades are proxied, but a dev server that checks
+  `Origin` sees `null`.
+- An app that refuses framing (`X-Frame-Options: DENY`, `frame-ancestors
+  'none'`) is reported in the pane with an open-in-browser link. The pane
+  does not strip those headers.
+- The chosen port is not persisted per workspace yet. The agent cannot
+  navigate the pane or read it.

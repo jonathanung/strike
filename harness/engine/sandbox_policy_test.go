@@ -32,3 +32,20 @@ func TestBashSandboxPolicyRecompilesForWorkspace(t *testing.T) {
 		t.Fatalf("bash policy = %+v", same)
 	}
 }
+
+func TestBashSandboxPolicyRuntime(t *testing.T) {
+	cases := []struct {
+		in   string
+		want sandbox.Runtime
+	}{
+		{"", sandbox.RuntimeProcess},
+		{"process", sandbox.RuntimeProcess},
+		{"microvm", sandbox.RuntimeMicroVM},
+	}
+	for _, tc := range cases {
+		e := &Engine{opts: Options{SandboxMode: "workspace-write", WorkDir: "/ws", SandboxRuntime: tc.in}}
+		if got := e.BashSandboxPolicy("/ws").Runtime; got != tc.want {
+			t.Errorf("SandboxRuntime %q -> %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}

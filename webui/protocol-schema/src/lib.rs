@@ -4,7 +4,7 @@
 // Unknown event type strings become Event::Unknown.
 // Unknown JSON fields are ignored. Missing fields are defaults.
 // Unknown op type strings return Err.
-// protocol.Version 1.23.0
+// protocol.Version 1.25.0
 
 use std::collections::HashMap;
 
@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "1.23.0";
+pub const PROTOCOL_VERSION: &str = "1.25.0";
 pub const LEGACY_VERSION: &str = "1.0.0";
 
 /// Open string. Known writer values live in the JSON Schema.
@@ -854,6 +854,67 @@ pub struct EffortSelected {
     pub depth: i64,
     #[serde(default, rename = "level")]
     pub level: Effort,
+}
+
+/// ElicitationReply answers a pending ElicitationRequested. Action is accept, decline, or cancel; Content carries the form values (a JSON object) on accept and is ignored otherwise.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct ElicitationReply {
+    #[serde(default, rename = "requestId")]
+    pub request_id: String,
+    #[serde(default, rename = "action")]
+    pub action: String,
+    #[serde(default, rename = "content")]
+    pub content: Value,
+}
+
+/// ElicitationRequested pauses an in-flight MCP tool call until an ElicitationReply arrives. Server names the MCP server that asked. Mode is form (RequestedSchema holds the flat JSON Schema to fill) or url (URL is the page the user opens themselves).
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct ElicitationRequested {
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default, rename = "turnId")]
+    pub turn_id: String,
+    #[serde(default, rename = "providerRequestId")]
+    pub provider_request_id: String,
+    #[serde(default, rename = "attempt")]
+    pub attempt: i64,
+    #[serde(default, rename = "parentSessionId")]
+    pub parent_session_id: String,
+    #[serde(default, rename = "depth")]
+    pub depth: i64,
+    #[serde(default, rename = "requestId")]
+    pub request_id: String,
+    #[serde(default, rename = "server")]
+    pub server: String,
+    #[serde(default, rename = "message")]
+    pub message: String,
+    #[serde(default, rename = "mode")]
+    pub mode: String,
+    #[serde(default, rename = "requestedSchema")]
+    pub requested_schema: Value,
+    #[serde(default, rename = "url")]
+    pub url: String,
+}
+
+/// ElicitationResolved closes a pending ElicitationRequested with the action the server received (accept, decline, or cancel).
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct ElicitationResolved {
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default, rename = "turnId")]
+    pub turn_id: String,
+    #[serde(default, rename = "providerRequestId")]
+    pub provider_request_id: String,
+    #[serde(default, rename = "attempt")]
+    pub attempt: i64,
+    #[serde(default, rename = "parentSessionId")]
+    pub parent_session_id: String,
+    #[serde(default, rename = "depth")]
+    pub depth: i64,
+    #[serde(default, rename = "requestId")]
+    pub request_id: String,
+    #[serde(default, rename = "action")]
+    pub action: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
@@ -2820,6 +2881,8 @@ pub enum Event {
     DelegationChanged(DelegationChanged),
     DiagnosticBundle(DiagnosticBundle),
     EffortSelected(EffortSelected),
+    ElicitationRequested(ElicitationRequested),
+    ElicitationResolved(ElicitationResolved),
     EngineError(EngineError),
     FastSelected(FastSelected),
     FilesInvalidated(FilesInvalidated),
@@ -2874,6 +2937,7 @@ pub enum Event {
 pub enum Op {
     Compact(Compact),
     SetContextControls(SetContextControls),
+    ElicitationReply(ElicitationReply),
     FilesChanged(FilesChanged),
     InputQueueCancel(InputQueueCancel),
     InputQueueEdit(InputQueueEdit),
@@ -2958,6 +3022,8 @@ pub fn decode_event(raw: &str) -> Result<Event, DecodeError> {
         "delegation.changed" => map_event::<DelegationChanged>("delegation.changed", &env.data, Event::DelegationChanged),
         "diagnostic.bundle" => map_event::<DiagnosticBundle>("diagnostic.bundle", &env.data, Event::DiagnosticBundle),
         "effort.selected" => map_event::<EffortSelected>("effort.selected", &env.data, Event::EffortSelected),
+        "elicitation.requested" => map_event::<ElicitationRequested>("elicitation.requested", &env.data, Event::ElicitationRequested),
+        "elicitation.resolved" => map_event::<ElicitationResolved>("elicitation.resolved", &env.data, Event::ElicitationResolved),
         "engine.error" => map_event::<EngineError>("engine.error", &env.data, Event::EngineError),
         "fast.selected" => map_event::<FastSelected>("fast.selected", &env.data, Event::FastSelected),
         "files.invalidated" => map_event::<FilesInvalidated>("files.invalidated", &env.data, Event::FilesInvalidated),
@@ -3043,6 +3109,7 @@ pub fn decode_op(raw: &str) -> Result<Op, DecodeError> {
     match env.r#type.as_str() {
         "compact" => map_op::<Compact>("compact", data.clone(), Op::Compact),
         "context.controls" => map_op::<SetContextControls>("context.controls", data.clone(), Op::SetContextControls),
+        "elicitation.reply" => map_op::<ElicitationReply>("elicitation.reply", data.clone(), Op::ElicitationReply),
         "files.changed" => map_op::<FilesChanged>("files.changed", data.clone(), Op::FilesChanged),
         "input.queue_cancel" => map_op::<InputQueueCancel>("input.queue_cancel", data.clone(), Op::InputQueueCancel),
         "input.queue_edit" => map_op::<InputQueueEdit>("input.queue_edit", data.clone(), Op::InputQueueEdit),

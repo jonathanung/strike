@@ -33,6 +33,8 @@ type tickResult struct {
 	LastError   string
 	Run         *Run
 	Req         *rootstart.Request
+	// Script is set instead of Req when a script schedule fires.
+	Script *ScriptRequest
 	// ClearNext is set when a one-shot has no further fire.
 	ClearNext bool
 }
@@ -112,6 +114,10 @@ func fire(sch Schedule, in tickInput, res tickResult, jump, force bool) tickResu
 		}
 	}
 
+	if sch.Source == SourceScript {
+		return fireScript(sch, in, res, mode, jump)
+	}
+
 	prompt, wf, goalID, errText := promptFor(sch, in)
 	if errText != "" {
 		return finish(sch, in, res, "error", StatusError, errText, jump)
@@ -139,6 +145,54 @@ func fire(sch Schedule, in tickInput, res tickResult, jump, force bool) tickResu
 	}
 	applyAdvance(&res, sch, in.Now, jump)
 	return res
+}
+
+// fireScript is fire for source script: the arming guard, then a
+// ScriptRequest instead of a session request. The run is recorded started
+// with no session; the script fire path owns the rest of its lifecycle.
+func fireScript(sch Schedule, in tickInput, res tickResult, mode string, jump bool) tickResult {
+	if errText := scriptGuard(sch); errText != "" {
+		return finish(sch, in, res, "error", StatusError, errText, jump)
+	}
+	timeout, err := parseScriptTimeout(sch.Timeout)
+	if err != nil {
+		return finish(sch, in, res, "error", StatusError, err.Error(), jump)
+	}
+	res.Action = "start"
+	res.LastStatus = StatusStarted
+	res.LastError = ""
+	res.Script = &ScriptRequest{
+		ScheduleID:     sch.ID,
+		Name:           sch.Name,
+		Command:        sch.Command,
+		CommandHash:    sch.CommandHash,
+		Dir:            sch.Dir,
+		Timeout:        timeout,
+		SecretRefs:     append([]string(nil), sch.SecretRefs...),
+		WorkspaceID:    sch.WorkspaceID,
+		PermissionMode: mode,
+	}
+	res.Run = &Run{
+		ScheduleID:     sch.ID,
+		FiredAt:        in.Now,
+		ScheduledFor:   sch.NextFire,
+		Status:         StatusStarted,
+		PermissionMode: mode,
+	}
+	applyAdvance(&res, sch, in.Now, jump)
+	return res
+}
+
+// scriptGuard refuses a script schedule that was never armed or whose
+// stored command no longer matches the hash pinned at arming time.
+func scriptGuard(sch Schedule) string {
+	if sch.ArmedAt.IsZero() {
+		return "script schedule is not armed"
+	}
+	if sch.CommandHash == "" || HashCommand(sch.Command) != sch.CommandHash {
+		return "script command does not match the armed command hash; re-arm the schedule"
+	}
+	return ""
 }
 
 func promptFor(sch Schedule, in tickInput) (prompt, workflow, goalID, errText string) {
