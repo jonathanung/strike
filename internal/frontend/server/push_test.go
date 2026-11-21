@@ -508,3 +508,33 @@ func TestBuildPushPayloadIsGeneric(t *testing.T) {
 		t.Fatalf("off-site href kept: %s", odd)
 	}
 }
+
+func TestPushClientDoesNotFollowRedirects(t *testing.T) {
+	var hitTarget bool
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitTarget = true
+		w.WriteHeader(http.StatusCreated)
+	}))
+	t.Cleanup(target.Close)
+	redirect := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(redirect.Close)
+
+	srv, _ := newPushServer(t)
+	browser := newPushBrowser(t)
+	p := srv.pushes()
+	sub := pushSub{
+		ID:       "push_x",
+		Endpoint: redirect.URL + "/push",
+		P256dh:   b64.EncodeToString(browser.priv.PublicKey().Bytes()),
+		Auth:     b64.EncodeToString(browser.auth),
+	}
+	code, err := p.deliver(sub, []byte(`{"type":"notify"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != http.StatusTemporaryRedirect || hitTarget {
+		t.Fatalf("code = %d, followed = %v", code, hitTarget)
+	}
+}

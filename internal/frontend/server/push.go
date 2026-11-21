@@ -100,11 +100,23 @@ func (s *Server) pushes() *pushStore {
 		s.pushStore = &pushStore{
 			path:    filepath.Join(dir, "notifications", "push.json"),
 			keyPath: filepath.Join(filepath.Dir(filepath.Clean(dir)), "push", "vapid.json"),
-			client:  &http.Client{Timeout: 10 * time.Second},
+			client:  newPushClient(),
 			now:     time.Now,
 		}
 	})
 	return s.pushStore
+}
+
+// newPushClient never follows redirects: a push service answers directly,
+// and a redirect could steer the daemon's POST to a host the subscription
+// did not name (or to plain http).
+func newPushClient() *http.Client {
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 func (p *pushStore) loadLocked() {
