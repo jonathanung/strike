@@ -24,6 +24,9 @@ type RootSummary struct {
 	HasRecentEvent    bool   `json:"hasRecentEvent"`
 	PermissionPending bool   `json:"permissionPending,omitempty"`
 	QuestionPending   bool   `json:"questionPending,omitempty"`
+	// AskOutcome is the last approval outcome this turn (allowed | denied |
+	// expired); empty once the next turn starts (#1387).
+	AskOutcome string `json:"askOutcome,omitempty"`
 	// Status is the canonical id from protocol.ClassifyLive. Empty on a raw
 	// hub list; HTTP handlers fill it.
 	Status string `json:"status,omitempty"`
@@ -315,6 +318,7 @@ func (h *LiveHub) List() []RootSummary {
 			HasRecentEvent:    time.Since(e.activeAt) < 5*time.Minute,
 			PermissionPending: s.PermissionPending,
 			QuestionPending:   s.QuestionPending,
+			AskOutcome:        s.AskOutcome,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -496,6 +500,10 @@ type StatusSnapshot struct {
 	NetworkAllow      []string `json:"networkAllow,omitempty"`
 	PermissionPending bool     `json:"permissionPending,omitempty"`
 	QuestionPending   bool     `json:"questionPending,omitempty"`
+	// AskOutcome is the last approval outcome since the turn started
+	// (allowed | denied | expired), so a row does not keep a stale
+	// "Permission required" after the ask ends (#1387).
+	AskOutcome string `json:"askOutcome,omitempty"`
 	// StopReason is the last TurnCompleted reason. Empty after a new turn starts.
 	StopReason string `json:"stopReason,omitempty"`
 	// TurnSince is unix milliseconds when the current turn state began.
@@ -806,6 +814,20 @@ func (l *Live) Status() StatusSnapshot {
 	return out
 }
 
+// askOutcome folds a terminal permission decision into the row outcome.
+func askOutcome(d protocol.Decision) string {
+	switch d {
+	case protocol.DecisionReject:
+		return "denied"
+	case protocol.DecisionExpired:
+		return "expired"
+	case "":
+		return ""
+	default:
+		return "allowed"
+	}
+}
+
 func childAttention(team TeamSnapshot) (running, waiting, blocked bool) {
 	for _, m := range team.Members {
 		if strings.EqualFold(m.Role, "lead") {
@@ -999,6 +1021,7 @@ func (l *Live) applyStatus(ev protocol.Event) {
 		l.noteActivityLocked()
 	case protocol.TurnStarted:
 		l.status.Busy = true
+		l.status.AskOutcome = ""
 		l.status.StopReason = ""
 		l.status.ProviderAuthFailed = false
 		l.status.TurnSince = time.Now().UnixMilli()
@@ -1018,6 +1041,7 @@ func (l *Live) applyStatus(ev protocol.Event) {
 		l.noteActivityLocked()
 	case protocol.PermissionResolved:
 		l.status.PermissionPending = false
+		l.status.AskOutcome = askOutcome(e.Decision)
 		l.status.TurnSince = time.Now().UnixMilli()
 		l.noteActivityLocked()
 	case protocol.QuestionAsked:

@@ -1545,6 +1545,48 @@ select.mode, .daemon select {
 .ss-folder-cleanup button { height: 24px; padding: 0 8px; font-size: var(--type-sm); }
 .ss-list { display: flex; flex-direction: column; gap: 2px; }
 .ss-older { margin: 6px 0; }
+/* feature:cross-gateway-peek begin */
+.ss-peek-local { margin: 0 0 4px; font-size: var(--type-sm); color: var(--muted); }
+.ss-peek { margin: var(--space-2) 0 0; padding-top: var(--space-2); border-top: 1px solid var(--border-muted); }
+.ss-peek-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: 0 0 4px; }
+.ss-peek-title { font-size: var(--type-sm); color: var(--muted); }
+.ss-peek-head button,
+.ss-peek-body button { height: 24px; padding: 0 8px; font-size: var(--type-sm); }
+.ss-peek-group { display: flex; flex-direction: column; }
+.ss-peek-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font-size: var(--type-sm);
+  cursor: pointer;
+}
+.ss-peek-row:hover { background: var(--surface-muted); }
+.ss-peek-row:focus-visible { outline: 1px solid var(--border-focus); }
+.ss-peek-caret { width: 1em; color: var(--muted); }
+.ss-peek-name { font-weight: 600; }
+.ss-peek-badge {
+  padding: 0 6px;
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  font-size: var(--type-sm);
+}
+.ss-peek-badge.connected { color: var(--success); border-color: var(--success); }
+.ss-peek-badge.reconnecting { color: var(--muted); }
+.ss-peek-badge.unreachable,
+.ss-peek-badge.unauthorized { color: var(--warning); border-color: var(--warning); }
+.ss-peek-summary { color: var(--muted); }
+.ss-peek-body { padding: 0 6px 6px 22px; }
+.ss-peek-body .hint { margin: 2px 0 4px; }
+/* feature:cross-gateway-peek end */
 .ss-folder-row {
   display: flex;
   align-items: center;
@@ -2016,6 +2058,22 @@ select.mode, .daemon select {
 }
 .side-chat-you,
 .side-chat-answer { margin: 0; white-space: pre-wrap; }
+/* feature:sidechat-promote begin */
+.side-chat-turn-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: 4px;
+}
+.side-chat-turn-actions button { min-height: 32px; }
+.side-chat-pending { border-style: dashed; }
+.side-chat-stopped { margin: 0; font-style: italic; }
+.side-chat-note { margin: 0; }
+@media (max-width: 720px) {
+  .side-chat-turn-actions button { min-height: 44px; }
+}
+/* feature:sidechat-promote end */
 .side-chat-you { color: var(--user); margin-bottom: var(--space-2); }
 .side-chat form { display: flex; flex-direction: column; gap: var(--space-2); }
 .side-chat textarea {
@@ -2574,6 +2632,37 @@ select.mode, .daemon select {
   border-top: 1px solid var(--border-muted);
 }
 .sched-history h3 { margin: 0 0 var(--space-2); font-size: var(--type-md); }
+/* Script schedules (#1777): explicit type badge, confirm step, and the
+   exit-code / output-tail run rows. Tokens only; no new modal kinds. */
+.sched-row .sched-script-badge { justify-self: start; }
+.sched-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border-focus);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+.sched-confirm h3 { margin: 0; font-size: var(--type-md); }
+.sched-confirm .meta { margin: 0; color: var(--muted); font-size: var(--type-sm); }
+.sched-command { font-family: var(--mono, monospace); }
+.sched-output {
+  flex-basis: 100%;
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-family: var(--mono, monospace);
+  font-size: var(--type-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.sched-output-full { max-height: 420px; }
+.sched-run .sched-exit { font-variant-numeric: tabular-nums; }
 /* feature:scheduler-presets begin */
 /* Scheduler presets (#1495): one checkbox row per catalog preset under the
    schedule layout; rows stay full-width tap targets on phones. */
@@ -3061,6 +3150,10 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 .swatch[data-theme-id="tokyo-night"] { background: #7aa2f7; }
 .swatch[data-theme-id="catppuccin"] { background: #cba6f7; }
 .theme-copy { min-width: 0; }
+/* feature:themes-catalog begin */
+.theme-choice.disabled { opacity: 0.6; cursor: not-allowed; }
+.theme-catalog-note { margin: 0 0 var(--space-2); }
+/* feature:themes-catalog end */
 .pill-tag:empty { display: none; }
 .pill-tag {
   display: inline-block;
@@ -3179,3 +3272,9 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .files-head .hint, .changes-head .hint { margin: 0; }
 /* feature:files-refresh end */
+
+/* feature:update-check begin */
+.update-mode { border: 0; padding: 0; margin: 0 0 var(--space-2); }
+.update-mode legend { margin-bottom: 4px; }
+.update-status { margin: 0 0 var(--space-2); }
+/* feature:update-check end */

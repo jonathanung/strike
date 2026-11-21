@@ -31,6 +31,8 @@ pub struct SourceSession {
     pub permission_pending: bool,
     /// Waiting on an answer to an agent question (#1451).
     pub question_pending: bool,
+    /// Last approval outcome this turn (allowed | denied | expired), #1387.
+    pub ask_outcome: String,
     /// Display name of the workspace this session is bound to (#1260).
     /// Empty when unbound. Folders above are organisation, not this.
     pub workspace: String,
@@ -595,6 +597,12 @@ fn push_session(
         row.permission_pending,
         row.question_pending,
     );
+    // After an ask ends, an idle row names its outcome until the next turn
+    // instead of a bare Idle (#1387). Waiting and running rows keep theirs.
+    let label = match (kind, crate::approval_outcome::row_label(&row.ask_outcome)) {
+        ("idle" | "unread", Some(outcome)) => outcome,
+        _ => label,
+    };
     let subtitle = if !row.snippet.is_empty() {
         row.snippet.clone()
     } else if row.archived {
@@ -712,6 +720,7 @@ mod tests {
             status: String::new(),
             permission_pending: false,
             question_pending: false,
+            ask_outcome: String::new(),
             workspace: String::new(),
         }
     }
@@ -937,6 +946,37 @@ mod tests {
             "{labels:?}"
         );
         assert!(labels.iter().any(|s| s.contains("Question")), "{labels:?}");
+    }
+
+    #[test]
+    fn idle_rows_name_the_last_ask_outcome() {
+        let now = 1_700_000_000i64;
+        let mut denied = session("denied", now - 10);
+        denied.ask_outcome = "denied".into();
+        let mut expired = session("expired", now - 20);
+        expired.ask_outcome = "expired".into();
+        // A running row keeps In progress even with an outcome recorded.
+        let mut running = session("running", now - 30);
+        running.busy = true;
+        running.ask_outcome = "allowed".into();
+        let plain = session("plain", now - 40);
+        let sessions = vec![denied, expired, running, plain];
+        let folders = Vec::new();
+        let collapsed = HashSet::new();
+        let content = HashSet::new();
+        let layout = assemble(args(&sessions, &[], &folders, &collapsed, &content));
+        let subtitle = |id: &str| {
+            layout
+                .items
+                .iter()
+                .find(|i| i.kind == LayoutKind::Session && i.id == id)
+                .map(|i| i.subtitle.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(subtitle("denied"), "Denied");
+        assert_eq!(subtitle("expired"), "Expired");
+        assert_eq!(subtitle("running"), "In progress");
+        assert_eq!(subtitle("plain"), "Idle");
     }
 
     #[test]

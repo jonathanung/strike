@@ -127,6 +127,69 @@ async function signinFlow(page, check, waitUntil, grab) {
   }
 }
 
+// #1508: the composer action row must never scroll sideways or clip a
+// chip, Send must stay on screen, and the transcript must not render
+// underneath the composer — at 1024x594 especially.
+async function composerAt(page, check, viewport, grab) {
+  const sizes = [
+    [1024, 594],
+    [1440, 900],
+    [390, 844],
+    [360, 800],
+  ];
+  for (const [width, height] of sizes) {
+    await viewport(width, height);
+    await delay(180);
+    const fit = await page.evaluate(`(() => {
+      const composer = document.querySelector(".chat > .composer");
+      const bar = document.querySelector(".composer-bar");
+      const chips = document.querySelector(".composer-chips");
+      const send = document.querySelector("#send-primary");
+      if (!composer || !bar || !chips || !send) return null;
+      const box = composer.getBoundingClientRect();
+      if (box.width === 0 || box.height === 0) return { hidden: true };
+      const clipped = [...chips.children]
+        .filter((el) => el.getBoundingClientRect().width > 0)
+        .filter((el) => {
+          const r = el.getBoundingClientRect();
+          return r.left < box.left - 1 || r.right > box.right + 1;
+        })
+        .map((el) => (el.innerText || el.getAttribute("aria-label") || "").trim());
+      const s = send.getBoundingClientRect();
+      const t = document.querySelector(".chat .transcript");
+      const tb = t ? t.getBoundingClientRect() : null;
+      return {
+        hidden: false,
+        phone: document.body.getAttribute("data-phone") === "1",
+        barScroll: bar.scrollWidth > bar.clientWidth + 1,
+        chipScroll: chips.scrollWidth > chips.clientWidth + 1,
+        clipped,
+        sendOnScreen: s.width > 0 && s.left >= 0 && s.right <= window.innerWidth + 1 && s.bottom <= window.innerHeight + 1,
+        overlap: tb && tb.height > 0 ? Math.round(tb.bottom - box.top) : 0,
+      };
+    })()`);
+    check(Boolean(fit), `composer missing at ${width}x${height}`);
+    if (!fit || fit.hidden) continue;
+    // Phones keep the #1332 chip scroller (wrapping would push the
+    // composer out of a keyboard-open viewport); Send must still be on
+    // screen there. Desktop layouts must not scroll or clip at all.
+    if (!fit.phone) {
+      check(!fit.barScroll && !fit.chipScroll, `composer row scrolls sideways at ${width}x${height}`);
+      check(fit.clipped.length === 0, `composer chip clipped at ${width}x${height}: ${fit.clipped.join(", ")}`);
+    } else {
+      check(!fit.barScroll, `composer bar (Send column) scrolls sideways at ${width}x${height}`);
+    }
+    check(fit.sendOnScreen, `Send is off screen at ${width}x${height}`);
+    // Phones use a sticky composer over a scrolling pane (#1332); the
+    // overlap rule is for the in-flow desktop column.
+    if (width > 720) {
+      check(fit.overlap <= 1, `transcript renders ${fit.overlap}px under the composer at ${width}x${height}`);
+    }
+    await grab(`composer-${width}`);
+  }
+  await viewport(1440, 900);
+}
+
 async function providerFlow(page, check, waitUntil, grab) {
   await page.evaluate(`document.querySelector('[data-nav="palette"]')?.click()`);
   const opened = await waitUntil(
@@ -487,6 +550,11 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
     check(!emptyState.cards, "empty transcript still shows suggestion cards");
     check(emptyState.cta, "empty transcript is missing Add provider");
     await headerAt(page, check, viewport, async (name) => {
+      const png = await page.send("Page.captureScreenshot", { format: "png" });
+      await writeFile(join(outDir, "screenshots", `${name}.png`), Buffer.from(png.data, "base64"));
+      shots.push(name);
+    });
+    await composerAt(page, check, viewport, async (name) => {
       const png = await page.send("Page.captureScreenshot", { format: "png" });
       await writeFile(join(outDir, "screenshots", `${name}.png`), Buffer.from(png.data, "base64"));
       shots.push(name);

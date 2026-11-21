@@ -1,0 +1,8 @@
+[package]
+name = "theme-catalog"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Theme picker rows and catalog resolution for the cockpit (#1529). Pure logic, no browser."
+
+[dependencies]
