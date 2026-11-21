@@ -1246,6 +1246,11 @@ fn message_view(
     let auth_notice =
         msg.role == Role::Notice && msg.badge == crate::transcript::PROVIDER_AUTH_CODE;
     let reconnect = msg.reconnect.clone();
+    // #1963: the root's sticky fallback notice offers Return to primary
+    // while the session is still on the fallback.
+    let fallback_return = msg.role == Role::Notice
+        && msg.key == crate::fallback::STICKY_KEY
+        && use_context::<crate::share::ReadOnlyTranscript>().is_none();
     // Notice subtype hook for scoped CSS (#1380 mutes files.invalidated).
     let notice_kind = (msg.role == Role::Notice && !msg.key.is_empty()).then(|| msg.key.clone());
     // #1371: end-of-turn failure markers carry their stop reason as a
@@ -1506,6 +1511,24 @@ fn message_view(
                             >"Retry"</button>
                         })}
                     </div>
+                }
+            })}
+            {fallback_return.then(|| {
+                let st = crate::fallback::state();
+                view! {
+                    <Show when=move || st.get().active>
+                        <div class="sx-auth-actions">
+                            <button
+                                type="button"
+                                class="sx-quiet"
+                                data-fallback-notice-return="true"
+                                title="Send the next turn to the session model again"
+                                on:click=move |_| {
+                                    let _ = crate::shell::dispatch(crate::fallback::RETURN_ACTION, "");
+                                }
+                            >"Return to primary"</button>
+                        </div>
+                    </Show>
                 }
             })}
             {if !detail.is_empty() {

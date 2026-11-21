@@ -74,6 +74,15 @@ func (e *Engine) handleSetFallback(op protocol.SetFallbackModel) {
 	})
 }
 
+// fallbackPair is the session fallback a delegated child inherits (#1963);
+// empty when none is set.
+func (e *Engine) fallbackPair() (provider, model string) {
+	if e.fallback == nil {
+		return "", ""
+	}
+	return e.fallback.name, e.fallback.model
+}
+
 // fallbackEligible reports whether a failed primary request may move to the
 // fallback: a fallback is set, this turn is not already on it, it differs
 // from the primary, and the failure is the provider's (not a cancel or a

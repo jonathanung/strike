@@ -11,10 +11,12 @@ use crate::shell::{Argument, Choice, Command, Group, ShellHook};
 const NONE: &str = "none";
 
 fn fallback_choices() -> Vec<Choice> {
+    // #1963: the row matching the current fallback says so.
+    let current = crate::fallback::state().get_untracked();
     let mut rows = vec![Choice {
         id: NONE.into(),
         label: "No fallback".into(),
-        detail: "A failed turn fails; no other model answers".into(),
+        detail: crate::fallback::choice_detail(&current, NONE, "A failed turn fails; no other model answers"),
     }];
     rows.extend(crate::shell::host::model_choices().into_iter().map(|choice| {
         let name = choice
@@ -23,9 +25,13 @@ fn fallback_choices() -> Vec<Choice> {
             .unwrap_or(choice.label.as_str())
             .to_string();
         Choice {
+            detail: crate::fallback::choice_detail(
+                &current,
+                &choice.id,
+                "Answers a turn when the session model is unavailable",
+            ),
             id: choice.id,
             label: format!("Fallback: {name}"),
-            detail: "Answers a turn when the session model is unavailable".into(),
         }
     }));
     rows
