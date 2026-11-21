@@ -1,0 +1,8 @@
+[package]
+name = "edit-resend"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Edit-last-message-and-resend rules for the cockpit composer: recall gate, discard summary, rewind cut and the resend state machine."
+
+[dependencies]

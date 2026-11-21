@@ -181,6 +181,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		InitialFolderGrants:        restored.FolderGrants,
 		QuietStartup:               true,
 		SandboxMode:                e.opts.SandboxMode,
+		SandboxRuntime:             e.opts.SandboxRuntime,
 		NetworkAllow:               e.opts.NetworkAllow,
 		WebSearch:                  e.opts.WebSearch,
 		AllowYoloWithoutSandbox:    e.opts.AllowYoloWithoutSandbox,

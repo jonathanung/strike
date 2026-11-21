@@ -355,6 +355,10 @@ const (
 	// Older daemons treat it as an approve-once reply and record nothing.
 	DecisionFolder Decision = "folder"
 	DecisionReject Decision = "reject"
+	// DecisionExpired is never sent by a client. The permission service
+	// stamps it on the terminal PermissionResolved / PermissionDecided when
+	// an ask dies with no reply (turn stopped, session closed) (#1387).
+	DecisionExpired Decision = "expired"
 )
 
 // Op is a client -> engine submission.
@@ -405,6 +409,24 @@ type QuestionReply struct {
 	RequestID string   `json:"requestId"`
 	Answers   []string `json:"answers"`
 }
+
+// ElicitationReply answers a pending ElicitationRequested. Action is accept,
+// decline, or cancel; Content carries the form values (a JSON object) on
+// accept and is ignored otherwise.
+type ElicitationReply struct {
+	RequestID string          `json:"requestId"`
+	Action    string          `json:"action"`
+	Content   json.RawMessage `json:"content,omitempty"`
+}
+
+// Elicitation modes and actions (MCP elicitation/create, #1353).
+const (
+	ElicitationModeForm = "form"
+	ElicitationModeURL  = "url"
+	ElicitationAccept   = "accept"
+	ElicitationDecline  = "decline"
+	ElicitationCancel   = "cancel"
+)
 
 // Interrupt cancels the running turn, if any.
 type Interrupt struct{}
@@ -571,6 +593,7 @@ type Rewind struct {
 func (UserInput) isOp()               {}
 func (PermissionReply) isOp()         {}
 func (QuestionReply) isOp()           {}
+func (ElicitationReply) isOp()        {}
 func (Interrupt) isOp()               {}
 func (Steer) isOp()                   {}
 func (InputQueueEdit) isOp()          {}
@@ -1455,6 +1478,28 @@ type QuestionResolved struct {
 	RequestID string `json:"requestId"`
 }
 
+// ElicitationRequested pauses an in-flight MCP tool call until an
+// ElicitationReply arrives. Server names the MCP server that asked. Mode is
+// form (RequestedSchema holds the flat JSON Schema to fill) or url (URL is
+// the page the user opens themselves).
+type ElicitationRequested struct {
+	Correlation
+	RequestID       string          `json:"requestId"`
+	Server          string          `json:"server"`
+	Message         string          `json:"message"`
+	Mode            string          `json:"mode"`
+	RequestedSchema json.RawMessage `json:"requestedSchema,omitempty"`
+	URL             string          `json:"url,omitempty"`
+}
+
+// ElicitationResolved closes a pending ElicitationRequested with the action
+// the server received (accept, decline, or cancel).
+type ElicitationResolved struct {
+	Correlation
+	RequestID string `json:"requestId"`
+	Action    string `json:"action"`
+}
+
 // TurnFileChange is one harness-touched path in a completed turn (create /
 // update / delete). Populated on TurnCompleted for timeline/UI; empty when the
 // turn made no file tool mutations.
@@ -2223,6 +2268,8 @@ func (PermissionResolved) isEvent()      {}
 func (PermissionDecided) isEvent()       {}
 func (AdmissionDecided) isEvent()        {}
 func (QuestionAsked) isEvent()           {}
+func (ElicitationRequested) isEvent()    {}
+func (ElicitationResolved) isEvent()     {}
 func (QuestionResolved) isEvent()        {}
 func (TurnSteered) isEvent()             {}
 func (InputQueued) isEvent()             {}

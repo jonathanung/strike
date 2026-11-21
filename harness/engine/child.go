@@ -56,6 +56,7 @@ type childHandle struct {
 	done      chan struct{}
 	permReply func(protocol.PermissionReply)
 	qReply    func(protocol.QuestionReply)
+	eReply    func(protocol.ElicitationReply)
 	// eng is retained so the drain goroutine can read lastAssistantText.
 	eng       *Engine
 	startedAt time.Time
@@ -525,6 +526,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		InitialTitled:              title != "",
 		SandboxMode:                e.opts.SandboxMode,
 		SandboxAllowDegrade:        e.opts.SandboxAllowDegrade,
+		SandboxRuntime:             e.opts.SandboxRuntime,
 		NetworkAllow:               e.opts.NetworkAllow,
 		BashSecrets:                e.opts.BashSecrets,
 		Audit:                      e.opts.Audit,
@@ -610,6 +612,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		done:           make(chan struct{}),
 		permReply:      child.perms.Reply,
 		qReply:         child.questions.Reply,
+		eReply:         child.elicits.Reply,
 		eng:            child,
 		startedAt:      startedAt,
 		agent:          agentName,
@@ -2184,6 +2187,23 @@ func (e *Engine) routePermissionReply(op protocol.PermissionReply) {
 func (e *Engine) routeQuestionReply(op protocol.QuestionReply) {
 	replies := e.childQuestionReplies()
 	e.questions.Reply(op)
+	for _, reply := range replies {
+		reply(op)
+	}
+}
+
+// routeElicitationReply delivers an MCP elicitation answer to the parent
+// service and every active child; request ids are session-scoped.
+func (e *Engine) routeElicitationReply(op protocol.ElicitationReply) {
+	e.childMu.Lock()
+	replies := make([]func(protocol.ElicitationReply), 0, len(e.children))
+	for _, h := range e.children {
+		if h.eReply != nil {
+			replies = append(replies, h.eReply)
+		}
+	}
+	e.childMu.Unlock()
+	e.elicits.Reply(op)
 	for _, reply := range replies {
 		reply(op)
 	}

@@ -139,6 +139,9 @@ type Policy struct {
 	// OS backend is missing or wrap fails. Default false is fail-closed: bash
 	// must not silently lose isolation (#1030). Config: sandboxAllowDegrade.
 	AllowDegrade bool
+	// Runtime selects the process launcher (default) or the microVM runtime.
+	// Microvm never degrades to the host (see DenyDegraded).
+	Runtime Runtime
 }
 
 // WorkspaceWritable reports whether the policy grants a writable workspace bind.
@@ -157,6 +160,7 @@ func (p Policy) NetworkEnabled() bool {
 func Explain(p Policy) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "sandbox mode: %s\n", p.Mode)
+	b.WriteString(explainRuntime(p))
 	if wd := strings.TrimSpace(p.WorkDir); wd != "" {
 		fmt.Fprintf(&b, "workdir: %s\n", wd)
 	}
@@ -174,7 +178,7 @@ func Explain(p Policy) string {
 	fmt.Fprintf(&b, "workspace-write: %v\n", p.WorkspaceWritable())
 	fmt.Fprintf(&b, "network: %v\n", p.NetworkEnabled())
 	degrade := "deny (fail-closed)"
-	if p.AllowDegrade {
+	if p.AllowDegrade && p.Runtime != RuntimeMicroVM {
 		degrade = "allow (unsandboxed fallback permitted)"
 	}
 	fmt.Fprintf(&b, "degrade policy: %s\n", degrade)
@@ -222,6 +226,9 @@ func describeEgressEnforcement(p Policy) string {
 // ProfileText returns the generated launcher profile text for p.
 // Linux: bwrap flag plan. macOS: seatbelt SBPL. Other: logical summary.
 func ProfileText(p Policy) string {
+	if p.Runtime == RuntimeMicroVM {
+		return microvmProfileText(p)
+	}
 	return profileText(p)
 }
 
@@ -268,6 +275,8 @@ type Result struct {
 	Backend string
 	// Degraded is true when Mode requested a sandbox but none was applied.
 	Degraded bool
+	// Reason explains a Degraded microvm wrap (empty for the process runtime).
+	Reason string
 }
 
 var (
@@ -293,6 +302,7 @@ func ResetWarnForTest() {
 	defer warnMu.Unlock()
 	warned = false
 	resetAvailabilityForTest()
+	resetMicroVMForTest()
 }
 
 // Available reports whether the platform sandbox backend is present and
@@ -315,6 +325,12 @@ func Wrap(argv []string, policy Policy) []string {
 
 // WrapResult is like Wrap but reports whether the sandbox was applied.
 func WrapResult(argv []string, policy Policy) Result {
+	if len(argv) > 0 && policy.Runtime == RuntimeMicroVM {
+		// Before the ModeOff shortcut: off + microvm is a config error and
+		// must not run on the host. No one-shot "runs unsandboxed" warning:
+		// callers fail closed with Reason instead.
+		return wrapMicroVM(argv, policy)
+	}
 	if len(argv) == 0 || policy.Mode == ModeOff {
 		return Result{Argv: cloneArgv(argv)}
 	}

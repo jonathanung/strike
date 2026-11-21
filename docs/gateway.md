@@ -432,6 +432,8 @@ refuses create, poll, and cancel, and does not run the poll loop.
 | `GET /v1/deploy-watches/{id}` | One watch with per-check evidence |
 | `POST /v1/deploy-watches/{id}/poll` | Run every check now |
 | `POST /v1/deploy-watches/{id}/cancel` | Stop; the verdict becomes `inconclusive` |
+| `POST /v1/deploy-watches/{id}/fix-session` | Confirmed: start a fix session seeded with the evidence |
+| `POST /v1/deploy-watches/{id}/revert-pr` | Confirmed: open a draft PR reverting the watched commit |
 
 ```json
 {
@@ -441,6 +443,7 @@ refuses create, poll, and cancel, and does not run the poll loop.
   "environment": "prod",
   "windowSeconds": 1800,
   "intervalSeconds": 60,
+  "failureThreshold": 3,
   "checks": [
     {"kind": "github_checks"},
     {"kind": "http", "name": "api", "url": "https://example.com/health", "expectStatus": 200}
@@ -455,13 +458,85 @@ Check kinds:
   `gh auth token`, and stays on the daemon.
 - `http` GETs `url` and compares the status (default 200). Evidence never
   echoes the URL.
+- `shell` runs `command` with `bash -c` in the serve working directory,
+  under the same sandbox preference as agent bash (`sandbox`, including
+  `off` for host execution). Exit 0 is healthy, any other exit is failing,
+  and a command that cannot run (sandbox required but missing, 60 s timeout)
+  is unreachable. Evidence is the exit code and the last output line,
+  redacted.
 
 Each check is `healthy`, `failing`, `pending`, or `unreachable` on every
-poll. A failing check is a regression and settles the watch at once.
-Otherwise the watch keeps polling until the window closes (default 30
-minutes). It is healthy only if every check was last seen healthy. Anything
-else is `inconclusive`: pending, unreachable, or never observed. Cancelled,
+poll. A check is a regression only after `failureThreshold` consecutive
+failing polls (default 3, range 1-20); that settles the watch at once. A
+shorter failing streak is a blip, and any other observation of that check
+resets the count. Otherwise the watch keeps polling until the window closes
+(default 30 minutes). It is healthy only if every check was last seen
+healthy. Anything else is `inconclusive`: pending, unreachable, never
+observed, or failing without reaching the threshold. Pick a window long
+enough for `failureThreshold` polls at `intervalSeconds`, or a real failure
+can only end as `inconclusive`. Cancelled,
 stale, and `action_required` check runs count as pending, not as a pass.
 Watches persist in `~/.strike/deploy-watches.json` (mode 0600). After a
 daemon restart they resume, and a watch whose window closed while the daemon
 was down settles on its next poll.
+
+### Deploy watch trigger
+
+A trigger of kind `deploy_watch` turns a signed deploy event into a watch
+(#1783). It uses the webhook signature (`X-Strike-Signature` over
+`timestamp.body`) on `POST /hooks/{id}`. The trigger stores the checks;
+the event names only what shipped:
+
+```json
+{"name": "prod deploys", "kind": "deploy_watch", "deployWatch": {
+  "repo": "owner/name", "environment": "prod",
+  "checks": [{"kind": "github_checks"}, {"kind": "shell", "name": "smoke", "command": "./scripts/smoke.sh"}],
+  "windowSeconds": 1800, "failureThreshold": 3}}
+```
+
+Deploy event body: `{"sha": "<merged commit>", "pr": 42, "repo": "owner/name", "environment": "prod"}`.
+`repo` may be omitted when the preset pins one, and must match it if both
+are set. Checks in the body are ignored. The same repo, commit, and
+environment redelivered inside `dedupeSeconds` is a duplicate.
+
+Each accepted event creates one watch and spawns one watch session through
+the shared root launcher, under the trigger's permission posture (default
+`plan`). The session's first prompt asks for the monitoring plan (risks,
+intended effect, signals, instrumentation gaps). When a PR is named, Strike
+also posts the configured signals and gaps as a PR comment. When the watch
+settles, Strike posts the single verdict with its evidence to the session
+and the PR. PR comments use the same GitHub token as `github_checks`. A
+posting failure is shown as `notifyError` on the watch and never changes the
+verdict. If the session cannot start, the watch is cancelled
+(`inconclusive`). Deploy-watch deliveries cannot be replayed; resend the
+deploy event.
+
+### Regression handoffs
+
+On a `regression` verdict the cockpit offers two actions (#1784). Neither
+runs automatically: each route needs the bearer and the body
+`{"confirm": true}`, returns 409 on any other verdict, and runs at most once
+per watch (a repeat returns the recorded result as `fixSession` or
+`revertPr` on the watch).
+
+- `fix-session` starts a new root through the shared launcher, seeded with
+  the verdict and evidence. Optional `"permissionMode"`; default `plan`.
+- `revert-pr` needs the serve directory to be a clone of the watched repo.
+  It fetches the remote default branch, refuses a commit that is not on it,
+  runs `git revert` (`-m 1` for a merge commit) in a temporary worktree,
+  pushes `strike/revert-<sha>` (never the default branch, never forced), and
+  opens a **draft** PR with the evidence through the GitHub API. The PR goes
+  through the repository's normal review and CI gates; Strike never merges
+  it. A revert that does not apply cleanly is reported; open a fix session
+  instead.
+
+### Cockpit verdict card
+
+A watch session is an ordinary session: it is listed, steerable, and
+cancellable like any other (#1785). When the active session is a watch
+session, the chat column shows a verdict card above the transcript:
+watching (with the failure threshold), healthy, regression, or
+inconclusive, with each check's latest state and evidence. On a
+regression the card offers **Open fix session** and **Draft revert PR**;
+each asks for confirmation first and then calls the routes above. The card
+refreshes every 15 seconds and immediately on a session switch.
