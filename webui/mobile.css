@@ -7,6 +7,19 @@
   .pin { opacity: 1; }
 }
 
+/* Keyboard-only hints (#1946): a coarse pointer has no Escape, Alt or
+   number keys, so key hint lines (.hint.keys, .notify-keys) and inline key
+   labels (.kbd-only) hide there, and .touch-only wording shows instead.
+   Desktop (fine pointer) is unchanged. */
+.touch-only { display: none !important; }
+
+@media (pointer: coarse) {
+  .hint.keys,
+  .notify-keys,
+  .kbd-only { display: none !important; }
+  .touch-only { display: revert !important; }
+}
+
 @media (max-width: 720px), (max-height: 500px) and (max-width: 1024px) {
   body[data-phone="1"] {
     height: var(--vv-height, 100dvh);

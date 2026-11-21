@@ -7405,6 +7405,7 @@ fn App() -> impl IntoView {
                             token=token
                             workspace_id=active_workspace
                             session_id=active_root
+                            on_pick_workspace=Callback::new(move |_| picker_open.set(true))
                         />
                     </Show>
                     <Show when=move || side_tab.get() == "preview">

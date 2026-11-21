@@ -18,7 +18,6 @@ use crate::api::{api, auth_header, get_json, post_json_value};
 use crate::outcome;
 use crate::same_origin;
 use crate::term::{key_bytes, Screen, ScrollFollow};
-use crate::EmptyState;
 
 #[derive(Clone, Deserialize, Default)]
 struct TermInfo {
@@ -353,7 +352,7 @@ impl TermCtl {
             if workspace.is_empty() {
                 self.sessions.set(Vec::new());
                 self.note.set(
-                    "Add a workspace in Daemon. The shell starts in that directory.".into(),
+                    NO_WORKSPACE.into(),
                 );
                 return;
             }
@@ -442,7 +441,7 @@ impl TermCtl {
         let workspace = self.workspace_id.get_untracked();
         if workspace.is_empty() {
             self.note
-                .set("Add a workspace in Daemon. The shell starts in that directory.".into());
+                .set(NO_WORKSPACE.into());
             return;
         }
         self.epoch
@@ -525,12 +524,17 @@ impl TermCtl {
     }
 }
 
+/// The no-workspace copy, shared by the empty state and the notice.
+const NO_WORKSPACE: &str = "Choose a workspace first. The shell starts in that directory.";
+
 #[component]
 pub fn TerminalPanel(
     base: RwSignal<String>,
     token: RwSignal<String>,
     workspace_id: RwSignal<String>,
     session_id: RwSignal<String>,
+    /// Opens the workspace picker from the no-workspace state (#1946).
+    on_pick_workspace: Callback<()>,
 ) -> impl IntoView {
     let screen = StoredValue::new_local(Screen::new(80, 24));
     let html = RwSignal::new(screen.with_value(|s| s.render_html()));
@@ -713,7 +717,18 @@ pub fn TerminalPanel(
                 <div class="notice" role="alert"><span>{move || note.get()}</span></div>
             </Show>
             <Show when=move || workspace_id.get().is_empty()>
-                <EmptyState title="No workspace".into() body="Add a workspace in Daemon. The shell starts in that directory.".into() />
+                // #1946: a route out of the dead end, on phone and desktop.
+                <div class="empty-state" data-term-empty="true">
+                    <span class="icon-slot" aria-hidden="true" inner_html=crate::shell::icon("status")></span>
+                    <strong>"No workspace"</strong>
+                    <p>{NO_WORKSPACE}</p>
+                    <button
+                        type="button"
+                        class="primary"
+                        data-term-pick-workspace="true"
+                        on:click=move |_| on_pick_workspace.run(())
+                    >"Choose workspace"</button>
+                </div>
             </Show>
             <Show when=move || !workspace_id.get().is_empty()>
                 <pre
@@ -749,12 +764,8 @@ pub fn TerminalPanel(
             </Show>
             <p class="hint">{move || {
                 let dir = cwd.get();
-                if dir.is_empty() {
-                    "Click the screen, then type. Leaving this tab keeps the shell running.".into()
-                } else {
-                    format!("{dir} · click the screen, then type. Leaving this tab keeps the shell running.")
-                }
-            }}</p>
+                if dir.is_empty() { String::new() } else { format!("{dir} · ") }
+            }}<span class="kbd-only">"Click the screen, then type. "</span>"Leaving this tab keeps the shell running."</p>
         </div>
     }
 }
