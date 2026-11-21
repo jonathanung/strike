@@ -190,6 +190,19 @@ plan_write for structured multi-section plans with lifecycle). session_report
 is daemon-generated from the session record: readable via artifact_read, never
 writable here.
 
+dashboard: a project page the user asked for in chat (standup, roadmap,
+kanban). content is JSON {"version":1,"blocks":[...]}. Block kinds:
+  measured (daemon fills the value; never put a number in them):
+    {"kind":"metric","title":"…","metric":"sessions.total"}  metrics:
+      sessions.total, sessions.running, sessions.waiting, sessions.idle,
+      sessions.active_24h, approvals.pending, questions.pending, cost.usd
+    {"kind":"sessions_kanban","title":"…"}
+  agent-written (shown as "agent wrote this"):
+    {"kind":"text","title":"…","body":"…"}
+    {"kind":"list","title":"…","items":["…"]}
+    {"kind":"kanban","title":"…","columns":[{"title":"…","cards":["…"]}]}
+Update the whole spec with expected_version; each save is all-or-nothing.
+
 Artifacts are addressable by id+version. Updates require expected_version and
 reject stale writers (conflict=true + current artifact). Access is owner
 (creator session only) or team (same root session lineage; default).
@@ -218,7 +231,7 @@ func (t *artifactWriteTool) Schema() json.RawMessage {
 			},
 			"type": {
 				"type": "string",
-				"description": "Artifact type on create: findings|patch|test_report|contract|plan (session_report is daemon-generated and read-only)"
+				"description": "Artifact type on create: findings|patch|test_report|contract|plan|dashboard (session_report is daemon-generated and read-only)"
 			},
 			"id": {"type": "string", "description": "Artifact id (update)"},
 			"expected_version": {

@@ -85,6 +85,25 @@ type Service struct {
 	mu       sync.Mutex
 	state    map[string]*mem
 	adapters map[string]Adapter
+	problems func(Problem)
+}
+
+// Problem is a delivery the trigger accepted whose session did not start
+// (#1926). It carries ids and names only, never the payload or prompt.
+type Problem struct {
+	TriggerID   string
+	TriggerName string
+	Event       string
+	DeliveryID  string
+}
+
+// SetProblems wires a receiver for Problems (the Ideas inbox's trigger
+// producer). It is called off the service lock, in the background; Wait
+// covers it.
+func (s *Service) SetProblems(fn func(Problem)) {
+	s.mu.Lock()
+	s.problems = fn
+	s.mu.Unlock()
 }
 
 // New binds a store to the shared root launcher. A nil launcher rejects
@@ -107,7 +126,8 @@ func (s *Service) SetDeployWatches(w DeployWatches) {
 	s.mu.Unlock()
 }
 
-// Wait blocks until background watch-session hand-offs finish. Tests use it.
+// Wait blocks until background watch-session hand-offs and Problem reports
+// finish. Tests use it.
 func (s *Service) Wait() { s.started.Wait() }
 
 // SetClock overrides the clock. Tests use it.
@@ -577,6 +597,18 @@ func (s *Service) finish(ctx context.Context, id string, res Result, req rootsta
 		d.Reason = "session did not start"
 		d.Prompt = ""
 		s.log(id, st, d, false)
+		if s.problems != nil {
+			fn, store := s.problems, s.store
+			p := Problem{TriggerID: id, Event: d.Event, DeliveryID: d.ID}
+			s.started.Add(1)
+			go func() {
+				defer s.started.Done()
+				if rec, err := store.Get(id); err == nil {
+					p.TriggerName = rec.Name
+				}
+				fn(p)
+			}()
+		}
 		if res.pending.watchID != "" && s.watches != nil {
 			// No session to own the watch: settle it inconclusive rather
 			// than leave an unowned watch polling. Cancel posts the

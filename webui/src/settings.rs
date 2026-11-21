@@ -1,4 +1,5 @@
-//! Settings page. Appearance stays here. Everything else is a palette command.
+//! Settings page. Appearance and the session Guardrails group (#1577) live
+//! here. Everything else is a palette command.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -175,6 +176,7 @@ pub fn SettingsPage(
                     on_pick=on_density
                 />
             </section>
+            <crate::guardrails::Guardrails base=base token=token status=status dials=dials />
             <crate::update_check::AutoupdateRow base=base token=token status=status dials=dials />
             <section class="card settings-section" id="settings-project">
                 <h2 class="panel-title">"Project"</h2>

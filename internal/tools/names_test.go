@@ -23,6 +23,7 @@ func TestProductToolWireNames(t *testing.T) {
 	want := map[string]tool.Tool{
 		"memory_write":    NewMemoryWrite(openMemory(t)),
 		"memory_read":     NewMemoryRead(openMemory(t)),
+		"lesson_propose":  NewLessonPropose(openMemory(t), true),
 		"issue_write":     NewIssueWrite(openIssue(t)),
 		"issue_read":      NewIssueRead(openIssue(t)),
 		"plan_write":      NewPlanWrite(openPlan(t)),

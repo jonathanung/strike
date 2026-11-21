@@ -128,6 +128,16 @@ struct WorktreeInfo {
     strike_managed: bool,
 }
 
+/// Where to change child isolation (#1577): the Settings Guardrails group,
+/// never a config-file edit. Host mode is the default, not a warning.
+fn isolation_hint(isolation: &str) -> &'static str {
+    if isolation.trim() == "worktree" {
+        "Each child gets its own git worktree. Change it in Settings → Guardrails → Child isolation."
+    } else {
+        "Children run on this host in this directory (the default). To give each child its own worktree, use Settings → Guardrails → Child isolation."
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 struct WorktreesBody {
     #[serde(default, rename = "childIsolation")]
@@ -2069,11 +2079,19 @@ pub fn WorktreePanel(
                 let isolation = info.child_isolation.clone();
                 let cleanup = info.worktree_cleanup.clone();
                 let session_mode = info.session_worktree.clone();
+                let hint = isolation_hint(&isolation);
                 view! {
                     <div class="wt-card">
                         <span class="name">{format!("session.childIsolation: {isolation}")}</span>
                         <span class="path">{format!("cleanup {cleanup} · session.worktree {session_mode}")}</span>
                     </div>
+                    <p class="hint" data-isolation-hint="">
+                        {hint}
+                        " "
+                        <button type="button" class="secondary" data-action="open-guardrails" on:click=move |_| {
+                            let _ = crate::shell::set_view("settings");
+                        }>"Open Settings"</button>
+                    </p>
                 }
             })}
             <div class="wt-actions">
@@ -2130,6 +2148,16 @@ pub fn WorktreePanel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn isolation_hint_names_settings_not_config_file() {
+        for mode in ["shared", "worktree", ""] {
+            let hint = isolation_hint(mode);
+            assert!(hint.contains("Settings → Guardrails"), "{mode}: {hint}");
+            assert!(!hint.contains("session.childIsolation"), "{mode}: {hint}");
+        }
+        assert!(isolation_hint("shared").contains("(the default)"));
+    }
 
     fn stash_row(section: &str) -> GitRow {
         GitRow {

@@ -12,6 +12,7 @@ protocol-schema = { path = "protocol-schema" }
 error-copy = { path = "error-copy" }
 load-guard = { path = "load-guard" }
 away-briefing = { path = "away-briefing" }
+dashboard-view = { path = "dashboard-view" }
 ideas-inbox = { path = "ideas-inbox" }
 md-review = { path = "md-review" }
 status-card = { path = "status-card" }

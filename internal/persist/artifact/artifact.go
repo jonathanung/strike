@@ -171,7 +171,7 @@ func MetaFrom(a Artifact) Meta {
 // ValidType reports whether t is a registered artifact type.
 func ValidType(t string) bool {
 	switch t {
-	case TypePlan, TypeContract, TypeFindings, TypePatch, TypeTestReport, TypeSessionReport:
+	case TypePlan, TypeContract, TypeFindings, TypePatch, TypeTestReport, TypeSessionReport, TypeDashboard:
 		return true
 	default:
 		return registeredTypes[t]
