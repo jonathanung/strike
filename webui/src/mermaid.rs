@@ -139,34 +139,18 @@ pub fn MermaidBlock(source: String, children: Children) -> impl IntoView {
     let kind = scene.kind;
     let label = scene_label(&scene);
     let shapes = scene.shapes.into_iter().map(shape_view).collect_view();
-    // Fit: as wide as the column allows, never upscaled past natural
-    // size. Other steps: an explicit size the canvas scrolls around.
-    let width = move || {
-        if zoom.get() == FIT {
-            "100%".to_string()
-        } else {
-            format!("{:.0}", w * ZOOMS[zoom.get()])
-        }
-    };
-    let height = move || {
-        if zoom.get() == FIT {
-            None
-        } else {
-            Some(format!("{:.0}", h * ZOOMS[zoom.get()]))
-        }
-    };
-    let fit_style = move || {
-        if zoom.get() == FIT {
-            format!("max-width: {w:.0}px")
-        } else {
-            String::new()
-        }
-    };
+    // Sizing goes through the width/height attributes and a class, never
+    // a `style` attribute: the server CSP is `style-src 'self'`. Fit uses
+    // the natural size and `.mmd-fit` caps it at the column width (never
+    // upscaled); other steps size explicitly and the canvas scrolls.
+    let width = move || format!("{:.0}", w * ZOOMS[zoom.get()]);
+    let height = move || format!("{:.0}", h * ZOOMS[zoom.get()]);
+    let svg_class = move || if zoom.get() == FIT { "mmd-svg mmd-fit" } else { "mmd-svg" };
     view! {
         <div class="mmd" data-mermaid=kind>
             <div class="sx-fence-bar mmd-bar" role="toolbar" aria-label="Diagram controls">
                 <span class="sx-lang">"mermaid"</span>
-                <Show when=move || !source_on.get()>
+                <span class="mmd-zoom" hidden=move || source_on.get()>
                     <button type="button" class="sx-quiet" data-mermaid-zoom="out" aria-label="Zoom out"
                         disabled=move || zoom.get() == 0
                         on:click=move |_| zoom.update(|z| *z = step_zoom(*z, false))>"−"</button>
@@ -177,7 +161,7 @@ pub fn MermaidBlock(source: String, children: Children) -> impl IntoView {
                     <button type="button" class="sx-quiet" data-mermaid-zoom="in" aria-label="Zoom in"
                         disabled=move || zoom.get() + 1 >= ZOOMS.len()
                         on:click=move |_| zoom.update(|z| *z = step_zoom(*z, true))>"+"</button>
-                </Show>
+                </span>
                 <button type="button" class="sx-quiet" data-mermaid-toggle=true
                     aria-pressed=move || if source_on.get() { "true" } else { "false" }
                     on:click=move |_| source_on.update(|s| *s = !*s)>
@@ -186,14 +170,13 @@ pub fn MermaidBlock(source: String, children: Children) -> impl IntoView {
             </div>
             <div class="mmd-canvas" tabindex="0" aria-label="Diagram canvas; scroll to pan" hidden=move || source_on.get()>
                 <svg
-                    class="mmd-svg"
+                    class=svg_class
                     role="img"
                     aria-label=label
                     viewBox=format!("0 0 {w:.1} {h:.1}")
                     preserveAspectRatio="xMinYMin meet"
                     width=width
                     height=height
-                    style=fit_style
                 >
                     {shapes}
                 </svg>
