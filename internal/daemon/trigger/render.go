@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/jonathanung/strike/internal/daemon/deploywatch"
 	"github.com/jonathanung/strike/pkg/redact"
 )
 
@@ -142,6 +143,39 @@ func githubEvent(secret, event string, body []byte, allowed []string) (eventFiel
 	fp := strings.Join([]string{event, action, repoName, number, commentID}, "\n")
 	sum := sha256.Sum256([]byte(fp))
 	return eventFields{fields: fields, fingerprint: hex.EncodeToString(sum[:])}, nil
+}
+
+// deployEvent parses a deploy_watch delivery into watch input. Only the
+// commit identity comes from the body; checks come from the stored preset.
+func deployEvent(rec record, event string, body []byte) (eventFields, *deploywatch.Input, error) {
+	if rec.DeployWatch == nil {
+		return eventFields{}, nil, fmt.Errorf("deploy watch preset is missing")
+	}
+	ev, err := deploywatch.ParseDeployEvent(body)
+	if err != nil {
+		return eventFields{}, nil, err
+	}
+	in, err := rec.DeployWatch.Input(ev)
+	if err != nil {
+		return eventFields{}, nil, err
+	}
+	if event == "" {
+		event = "deploy"
+	}
+	numLabel := ""
+	if in.PR > 0 {
+		numLabel = "#" + strconv.Itoa(in.PR)
+	}
+	fp := strings.Join([]string{strings.ToLower(in.Repo), strings.ToLower(in.SHA), in.Environment}, "\n")
+	sum := sha256.Sum256([]byte(fp))
+	return eventFields{
+		fields: map[string]string{
+			"event":  field(rec.Secret, event),
+			"repo":   field(rec.Secret, in.Repo),
+			"number": field(rec.Secret, numLabel),
+		},
+		fingerprint: hex.EncodeToString(sum[:]),
+	}, &in, nil
 }
 
 func channelEvent(secret string, msg Message) eventFields {
