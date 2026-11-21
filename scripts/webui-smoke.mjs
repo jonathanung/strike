@@ -207,6 +207,37 @@ try {
       `terminal auth statuses missing=${termMissing} wrong=${termWrong} right=${termRight} query=${termQuery}`,
     );
   }
+  // #1392: notification read state is daemon-side. Two clients (browser A
+  // posting a read, browser B polling) must agree, and the route needs auth.
+  {
+    const seenUrl = `http://127.0.0.1:${port}/v1/notifications/seen`;
+    const seenNoAuth = await fetch(seenUrl, { method: "POST", body: '{"upTo":1}' });
+    if (seenNoAuth.status !== 401) {
+      throw new Error(`notifications/seen without token = ${seenNoAuth.status}`);
+    }
+    const before = await (
+      await fetch(`http://127.0.0.1:${port}/v1/notifications`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    ).json();
+    const latest = Number(before.latest || 0);
+    const marked = await fetch(seenUrl, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ upTo: Math.max(latest, 1) }),
+    });
+    if (marked.status !== 200) {
+      throw new Error(`notifications/seen mark-all = ${marked.status} ${await marked.text()}`);
+    }
+    const other = await (
+      await fetch(`http://127.0.0.1:${port}/v1/notifications`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    ).json();
+    if (!other.seen || other.seen.upTo !== latest || !Array.isArray(other.seen.ids)) {
+      throw new Error(`second client read state = ${JSON.stringify(other.seen)} latest=${latest}`);
+    }
+  }
   const healthBody = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
   if (!healthBody.ok || !(healthBody.now > 0)) {
     throw new Error(`health missing now: ${JSON.stringify(healthBody)}`);
