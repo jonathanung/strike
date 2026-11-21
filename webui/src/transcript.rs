@@ -574,8 +574,9 @@ impl Transcript {
                 // #1371: an abnormal stop gets its own end-of-turn line,
                 // pushed after the turn is stamped so the elapsed/usage
                 // labels and fork keep-counts stay on the turn's real
-                // last line. A child turn's stop is the child card's job.
-                if field_str(&data, "parentSessionId").is_empty() {
+                // last line. Another session's stop on this stream (a
+                // child's) is the child card's job.
+                if !self.foreign_session(&data) {
                     let stop = field_str(&data, "stopReason");
                     if let Some(m) = crate::turn_failure::stop_marker(&stop) {
                         self.push_failure_line(
@@ -590,7 +591,7 @@ impl Transcript {
                 }
             }
             "tool.loop_detected" => {
-                if !field_str(&data, "parentSessionId").is_empty() {
+                if self.foreign_session(&data) {
                     return;
                 }
                 let count = data.get("count").and_then(|c| c.as_i64()).unwrap_or(0);
@@ -848,6 +849,16 @@ impl Transcript {
             self.title = title.to_string();
         }
         self.auto_title = title.to_string();
+    }
+
+    /// Whether an event belongs to a different session than the turn in
+    /// progress (a child's stream), by the same rule `TurnUsage::absorb`
+    /// uses: only a known, differing `sessionId` is foreign. A child
+    /// session opened on its own has its own `turn.started` id, so its
+    /// events are not foreign there.
+    fn foreign_session(&self, data: &Value) -> bool {
+        let session = field_str(data, "sessionId");
+        !self.turn_session.is_empty() && !session.is_empty() && session != self.turn_session
     }
 
     /// One turn-failure notice line (#1371): end-of-turn marker or
@@ -2157,13 +2168,35 @@ mod tests {
     }
 
     #[test]
-    fn child_turn_stop_adds_no_marker() {
-        let t = turn_ending(serde_json::json!({
-            "stopReason": "error",
-            "parentSessionId": "root",
-            "depth": 1
-        }));
+    fn foreign_session_stop_adds_no_marker() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "go"})));
+        t.apply_envelope(&env(
+            "turn.started",
+            serde_json::json!({"turnId": "t1", "sessionId": "root"}),
+        ));
+        t.apply_envelope(&env(
+            "tool.loop_detected",
+            serde_json::json!({"sessionId": "child", "message": "x"}),
+        ));
+        t.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"sessionId": "child", "stopReason": "error"}),
+        ));
         assert!(t.messages.iter().all(|m| m.role != Role::Notice));
+        // A child session viewed on its own: its events carry the
+        // parent link but match its own turn, so the marker shows.
+        let mut c = Transcript::new();
+        c.apply_envelope(&env("user.message", serde_json::json!({"text": "task"})));
+        c.apply_envelope(&env(
+            "turn.started",
+            serde_json::json!({"sessionId": "child", "parentSessionId": "root"}),
+        ));
+        c.apply_envelope(&env(
+            "turn.completed",
+            serde_json::json!({"sessionId": "child", "parentSessionId": "root", "stopReason": "timeout"}),
+        ));
+        assert_eq!(c.messages.last().unwrap().title, "Turn timed out");
     }
 
     #[test]
@@ -2208,12 +2241,6 @@ mod tests {
         t.apply_envelope(&env("tool.loop_detected", serde_json::json!({})));
         assert_eq!(t.messages.len(), 1);
         assert_eq!(t.messages[0].body, "Repeated failing tool calls");
-        // A child's loop guard is not the root transcript's line.
-        t.apply_envelope(&env(
-            "tool.loop_detected",
-            serde_json::json!({"parentSessionId": "root", "message": "x"}),
-        ));
-        assert_eq!(t.messages.len(), 1);
     }
 
     #[test]
