@@ -1524,6 +1524,8 @@ pub fn NotificationBell(
                                     <span>"Browser banners"</span>
                                 </label>
                                 <p class="notify-hint">"Banners use this browser only. The centre still keeps the record."</p>
+                                <h3>"Push notifications"</h3>
+                                <crate::push::PushToggle base=base token=token />
                                 <div class="notify-perm">
                                     <button class="secondary" on:click=move |_| {
                                         request_notification_permission();

@@ -1,6 +1,8 @@
 //! Providers and API keys. The list comes from `GET /v1/providers`.
 //! Keys are posted to the daemon and never written to localStorage,
-//! never copied into a status string, and never logged.
+//! never copied into a status string, and never logged. Device-code and
+//! OAuth sign-in, offered per the daemon's `methods`, live in
+//! `provider_signin`.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -12,6 +14,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::api::{self, delete_json, get_text, post_json_value};
+use crate::provider_signin::{Signin, SigninActions};
 use load_guard::{apply_provider_load, prepare_provider_load, LoadEpoch, ProviderView};
 use wasm_bindgen::JsCast;
 
@@ -286,8 +289,10 @@ fn ProviderCard(
     base: RwSignal<String>,
     token: RwSignal<String>,
     bump: RwSignal<u32>,
+    signin: Signin,
 ) -> impl IntoView {
     let name = row.name.clone();
+    let methods = row.methods.clone();
     let detail = row.detail.clone();
     let env = env_note(&detail);
     let authed = row.authed;
@@ -504,6 +509,7 @@ fn ProviderCard(
     let base_input = name.clone();
     let seeded = base_url.clone();
     let note_name = name.clone();
+    let signin_name = name.clone();
     view! {
         <li class="providers-card" data-provider=name_attr>
             <div class="providers-card-head">
@@ -577,6 +583,7 @@ fn ProviderCard(
                     })}
                 </div>
             })}
+            <SigninActions provider=signin_name methods=methods signin=signin />
             {move || {
                 let text = notes.with(|map| map.get(&note_name).cloned().unwrap_or_default());
                 (!text.is_empty()).then(|| view! {
@@ -658,6 +665,13 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
     let new_note = RwSignal::new(String::new());
 
     let bump = RwSignal::new(0u32);
+    // Device / OAuth sign-in (#1533, #1538). Polls stop when the page
+    // unmounts; flows are never persisted.
+    let signin = Signin::new(base, token, notes, bump);
+    {
+        let signin = signin.clone();
+        on_cleanup(move || signin.stop());
+    }
     let load_epoch = RwSignal::new(LoadEpoch::new());
     let loaded_base = RwSignal::new(String::new());
     let loaded_at = RwSignal::new(String::new());
@@ -876,6 +890,7 @@ pub fn ProvidersPage(base: RwSignal<String>, token: RwSignal<String>) -> impl In
                             base=base
                             token=token
                             bump=bump
+                            signin=signin.clone()
                         />
                     }
                 }).collect_view()}
