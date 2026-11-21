@@ -711,6 +711,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sidechat", s.handleSideChatList)
 	s.mux.HandleFunc("POST /v1/sidechat/ask", s.handleSideChatAsk)
 	s.mux.HandleFunc("POST /v1/sidechat/ops", s.handleSideChatOps)
+	s.mux.HandleFunc("POST /v1/prompt/sharpen", s.handlePromptSharpen)
 	s.mux.HandleFunc("GET /v1/live/events", s.handleLiveEvents)
 	s.mux.HandleFunc("GET /v1/notifications", s.handleNotifications)
 	s.mux.HandleFunc("GET /v1/notifications/stream", s.handleNotificationStream)
