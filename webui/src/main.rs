@@ -6154,7 +6154,17 @@ mod composer_grow_history_tests {
     }
 }
 
+#[wasm_bindgen::prelude::wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console, js_name = error)]
+    fn console_error(s: &str);
+}
+
 fn main() {
+    // A wasm panic otherwise surfaces only as "RuntimeError: unreachable";
+    // log the message and location so the console (and the smoke's
+    // console dump) says what broke.
+    std::panic::set_hook(Box::new(|info| console_error(&format!("strike-webui panic: {info}"))));
     leptos::mount::mount_to_body(App);
     // The cockpit mounted, so the static boot shell from index.html has
     // done its job. mount_to_body appends rather than replacing the body,
