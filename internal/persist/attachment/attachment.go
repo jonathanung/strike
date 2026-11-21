@@ -11,6 +11,7 @@
 package attachment
 
 import (
+	"archive/zip"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -29,6 +30,10 @@ const (
 	KindLog     = "log"
 	KindArchive = "archive"
 	KindBuild   = "build"
+	// KindDocument is an Office Open XML document (docx/xlsx/pptx).
+	KindDocument = "document"
+	KindAudio    = "audio"
+	KindVideo    = "video"
 
 	// RefPrefix is the scheme for content-addressed attachment refs.
 	// Full form: att:sha256:<hex>
@@ -37,6 +42,17 @@ const (
 	// DefaultMaxBytes is the per-blob ingest cap (matches TUI image paste).
 	DefaultMaxBytes = 5 << 20
 )
+
+// Office Open XML media types, detected from zip entry names.
+const (
+	MIMEDocx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	MIMEXlsx = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	MIMEPptx = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+)
+
+// maxZipSniffEntries bounds the entry names inspected for OOXML markers.
+// Only the central directory is read; no entry is decompressed.
+const maxZipSniffEntries = 4096
 
 // ProviderImageMIME is the default set sent to vision-capable providers.
 var ProviderImageMIME = []string{"image/png", "image/jpeg", "image/webp", "image/gif"}
@@ -148,6 +164,12 @@ func KindFromMIME(mime string) string {
 		return KindLog
 	case "application/zip", "application/gzip", "application/x-tar", "application/x-gzip":
 		return KindArchive
+	case MIMEDocx, MIMEXlsx, MIMEPptx:
+		return KindDocument
+	case "audio/mpeg", "audio/wav", "audio/ogg", "audio/webm", "audio/mp4":
+		return KindAudio
+	case "video/mp4", "video/webm":
+		return KindVideo
 	default:
 		return ""
 	}
@@ -156,7 +178,7 @@ func KindFromMIME(mime string) string {
 // ValidKind reports whether kind is a known attachment type.
 func ValidKind(kind string) bool {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case KindImage, KindPDF, KindDiagram, KindLog, KindArchive, KindBuild:
+	case KindImage, KindPDF, KindDiagram, KindLog, KindArchive, KindBuild, KindDocument, KindAudio, KindVideo:
 		return true
 	default:
 		return false
@@ -177,10 +199,29 @@ func SniffMIME(raw []byte) string {
 		return "image/gif"
 	case len(raw) >= 12 && string(raw[0:4]) == "RIFF" && string(raw[8:12]) == "WEBP":
 		return "image/webp"
+	case len(raw) >= 12 && string(raw[0:4]) == "RIFF" && string(raw[8:12]) == "WAVE":
+		return "audio/wav"
 	case len(raw) >= 5 && string(raw[0:5]) == "%PDF-":
 		return "application/pdf"
 	case len(raw) >= 4 && raw[0] == 0x50 && raw[1] == 0x4b && (raw[2] == 0x03 || raw[2] == 0x05 || raw[2] == 0x07) && (raw[3] == 0x04 || raw[3] == 0x06 || raw[3] == 0x08):
+		if m := sniffOOXML(raw); m != "" {
+			return m
+		}
 		return "application/zip"
+	case len(raw) >= 3 && string(raw[0:3]) == "ID3":
+		return "audio/mpeg"
+	case len(raw) >= 4 && string(raw[0:4]) == "OggS":
+		return "audio/ogg"
+	case len(raw) >= 4 && raw[0] == 0x1a && raw[1] == 0x45 && raw[2] == 0xdf && raw[3] == 0xa3:
+		return "video/webm"
+	case len(raw) >= 12 && string(raw[4:8]) == "ftyp":
+		if m := sniffISOBrand(string(raw[8:12])); m != "" {
+			return m
+		}
+	case len(raw) >= 3 && raw[0] == 0xff && raw[1]&0xe0 == 0xe0 && raw[1]&0x06 != 0 && raw[2]&0xf0 != 0xf0:
+		// MPEG audio frame sync without an ID3 tag (layer bits set,
+		// bitrate index not "bad"). JPEG (ff d8) is matched above.
+		return "audio/mpeg"
 	case len(raw) >= 2 && raw[0] == 0x1f && raw[1] == 0x8b:
 		return "application/gzip"
 	case bytes.HasPrefix(raw, []byte("<svg")) || bytes.HasPrefix(raw, []byte("<?xml")):
@@ -203,6 +244,69 @@ func SniffMIME(raw []byte) string {
 	}
 }
 
+// sniffOOXML returns the OOXML media type when a zip's entry names carry
+// the package markers ([Content_Types].xml plus word/, xl/ or ppt/).
+// Only the central directory is parsed, bounded by maxZipSniffEntries;
+// anything unreadable is left as a plain zip ("").
+func sniffOOXML(raw []byte) string {
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		return ""
+	}
+	var types, word, xl, ppt bool
+	for i, f := range zr.File {
+		if i >= maxZipSniffEntries {
+			break
+		}
+		name := f.Name
+		switch {
+		case name == "[Content_Types].xml":
+			types = true
+		case strings.HasPrefix(name, "word/"):
+			word = true
+		case strings.HasPrefix(name, "xl/"):
+			xl = true
+		case strings.HasPrefix(name, "ppt/"):
+			ppt = true
+		}
+	}
+	if !types {
+		return ""
+	}
+	switch {
+	case word && !xl && !ppt:
+		return MIMEDocx
+	case xl && !word && !ppt:
+		return MIMEXlsx
+	case ppt && !word && !xl:
+		return MIMEPptx
+	default:
+		return ""
+	}
+}
+
+// sniffISOBrand maps an ISO base media (ftyp) major brand to a type.
+// HEIC/AVIF and QuickTime brands are left unknown rather than guessed.
+func sniffISOBrand(brand string) string {
+	switch brand {
+	case "isom", "iso2", "iso4", "iso5", "iso6", "mp41", "mp42", "avc1", "dash", "M4V ", "mmp4", "MSNV":
+		return "video/mp4"
+	case "M4A ":
+		return "audio/mp4"
+	default:
+		return ""
+	}
+}
+
+func isOOXML(mime string) bool {
+	switch mime {
+	case MIMEDocx, MIMEXlsx, MIMEPptx:
+		return true
+	default:
+		return false
+	}
+}
+
 // Classify resolves kind and MIME from bytes plus optional declared values.
 func Classify(raw []byte, declaredMIME, declaredKind string) (kind, mime string, err error) {
 	if len(raw) == 0 {
@@ -221,6 +325,11 @@ func Classify(raw []byte, declaredMIME, declaredKind string) (kind, mime string,
 	}
 	if sniffed != "" && mime != sniffed && !compatibleMIME(mime, sniffed) {
 		return "", "", fmt.Errorf("%w: declared %s but content is %s", ErrKind, mime, sniffed)
+	}
+	// Content wins over a generic declaration: a docx declared as a plain
+	// zip (or octet-stream-ish upload paths that say zip) is a document.
+	if mime == "application/zip" && isOOXML(sniffed) {
+		mime = sniffed
 	}
 	kind = strings.ToLower(strings.TrimSpace(declaredKind))
 	inferred := KindFromMIME(mime)
@@ -270,14 +379,41 @@ func SelectForProvider(kind, mime string, caps Capabilities) error {
 
 func normalizeMIME(mime string) string {
 	mime = strings.ToLower(strings.TrimSpace(strings.Split(mime, ";")[0]))
-	if mime == "image/jpg" {
+	switch mime {
+	case "image/jpg":
 		return "image/jpeg"
+	case "audio/x-wav", "audio/wave", "audio/vnd.wave":
+		return "audio/wav"
+	case "audio/mp3":
+		return "audio/mpeg"
 	}
 	return mime
 }
 
+// compatibleMIME allows a declared type that differs from the sniffed one
+// only where the sniff cannot tell them apart: OOXML is a zip, so a zip
+// sniff (markers not found) still admits a declared OOXML type, and an
+// OOXML sniff admits a declared plain zip. WebM and MP4 containers carry
+// audio-only files too (browser voice notes record audio/webm), so an
+// audio declaration on those containers is accepted.
 func compatibleMIME(declared, sniffed string) bool {
-	return normalizeMIME(declared) == normalizeMIME(sniffed)
+	declared, sniffed = normalizeMIME(declared), normalizeMIME(sniffed)
+	switch {
+	case declared == sniffed:
+		return true
+	case isOOXML(declared) && sniffed == "application/zip":
+		return true
+	case declared == "application/zip" && isOOXML(sniffed):
+		return true
+	case declared == "audio/webm" && sniffed == "video/webm":
+		return true
+	case declared == "audio/mp4" && sniffed == "video/mp4":
+		return true
+	case declared == "video/mp4" && sniffed == "audio/mp4":
+		return true
+	default:
+		return false
+	}
 }
 
 func min(a, b int) int {

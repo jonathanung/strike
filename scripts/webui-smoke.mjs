@@ -391,7 +391,26 @@ try {
     envLine("tool.begin", null, { callId: "c9", name: "bash", args: { command: "sleep 240" } }) +
     envLine("tool.end", "2026-10-26T06:24:00Z", { callId: "c9", name: "bash", output: "done" }) +
     envLine("text.delta", "2026-10-26T06:24:30Z", { text: "old answer" }) +
-    envLine("turn.completed", "2026-10-26T06:25:00Z", { stopReason: "end_turn" });
+    envLine("turn.completed", "2026-10-26T06:25:00Z", { stopReason: "end_turn" }) +
+    // Turn failure (#1371): an engine-error turn and a loop-guard turn,
+    // both under a minute so the elapsed check above is unchanged. Only
+    // these two may end with a [data-turn-stop] marker; the clean
+    // end_turn turns above must not.
+    envLine("user.message", "2026-10-26T06:30:00Z", { text: "failing replay turn" }) +
+    envLine("turn.started", "2026-10-26T06:30:01Z", { turnId: "tf1" }) +
+    envLine("text.delta", "2026-10-26T06:30:05Z", { text: "half answer" }) +
+    envLine("engine.error", "2026-10-26T06:30:06Z", { turnId: "tf1", message: "provider exploded" }) +
+    envLine("turn.completed", "2026-10-26T06:30:07Z", { turnId: "tf1", stopReason: "error" }) +
+    envLine("user.message", "2026-10-26T06:40:00Z", { text: "looping replay turn" }) +
+    envLine("turn.started", "2026-10-26T06:40:01Z", { turnId: "tf2" }) +
+    envLine("tool.loop_detected", "2026-10-26T06:40:05Z", {
+      turnId: "tf2",
+      reason: "identical_calls",
+      toolName: "bash",
+      count: 3,
+      message: "repeated identical failing tool calls",
+    }) +
+    envLine("turn.completed", "2026-10-26T06:40:06Z", { turnId: "tf2", stopReason: "loop_detected" });
   await writeFile(join(sessionsDir, "elapsed-session.jsonl"), elapsedSession);
   await writeFile(
     join(sessionsDir, "elapsed-session.meta.json"),
@@ -1740,6 +1759,51 @@ try {
     "font and density",
   );
 
+  // #1583: Settings → Updates shows the effective autoupdate dial, `off`
+  // persists and the route answers "off" (no probe), and the row never
+  // claims "up to date" without a successful check.
+  await waitUntil(
+    `(() => {
+      const sec = document.querySelector('[data-section="updates"]');
+      const notify = sec?.querySelector('input[data-autoupdate="notify"]');
+      return !!notify && notify.checked && !notify.disabled && !!sec.querySelector(".update-status")?.textContent;
+    })()`,
+    "updates section shows the effective notify dial",
+  );
+  const updateRoute = async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/update`, { headers: { Authorization: `Bearer ${token}` } });
+    return { status: res.status, body: res.status === 200 ? await res.json() : null };
+  };
+  const updateCap = (await updateRoute()).status === 200;
+  await evaluate(`document.querySelector('input[data-autoupdate="off"]').click()`);
+  await waitUntil(
+    `(() => {
+      const off = document.querySelector('input[data-autoupdate="off"]');
+      const line = document.querySelector('[data-section="updates"] .update-status')?.textContent || "";
+      return off.checked && !off.disabled && (${updateCap} ? line.includes("Checks are off") : true);
+    })()`,
+    "autoupdate off saved",
+  );
+  {
+    const settings = await (await fetch(`http://127.0.0.1:${port}/v1/settings`, { headers: { Authorization: `Bearer ${token}` } })).json();
+    if (settings.autoupdateEffective !== "off") {
+      throw new Error(`autoupdate off did not persist: ${JSON.stringify(settings.autoupdateEffective)}`);
+    }
+    if (updateCap) {
+      const r = await updateRoute();
+      if (r.body?.state !== "off") throw new Error(`update route with dial off: ${JSON.stringify(r)}`);
+    }
+  }
+  await evaluate(`document.querySelector('input[data-autoupdate="notify"]').click()`);
+  await waitUntil(
+    `(() => {
+      const n = document.querySelector('input[data-autoupdate="notify"]');
+      const line = document.querySelector('[data-section="updates"] .update-status')?.textContent || "";
+      return n.checked && !n.disabled && !line.includes("Checks are off");
+    })()`,
+    "autoupdate back to notify",
+  );
+
   await waitUntil(`(() => {
     if (document.querySelector(".gw-pop")) return true;
     if (!document.querySelector('[data-nav="palette-dialog"]')) {
@@ -1991,6 +2055,95 @@ try {
   );
   await evaluate(`(() => { const b = [...document.querySelectorAll(".attach-chip button")].find((x) => x.closest(".attach-chip")?.innerText.includes("honesty-shot.png")); b?.click(); return !!b; })()`);
   await waitUntil(`!document.querySelector("[data-attach-warning]")`, "attachment warning clears with the file");
+  // Office + media classification (#1390): a docx with its real browser
+  // MIME is accepted as a document, an mp4 header as video, a plain zip
+  // stays an archive, and text renamed to .docx is rejected honestly.
+  const crc32 = (buf) => {
+    let c = ~0;
+    for (const b of buf) {
+      c ^= b;
+      for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+    }
+    return ~c >>> 0;
+  };
+  const zipStored = (entries) => {
+    const locals = [];
+    const centrals = [];
+    let offset = 0;
+    for (const [name, body] of entries) {
+      const nameBuf = Buffer.from(name);
+      const data = Buffer.from(body);
+      const crc = crc32(data);
+      const local = Buffer.alloc(30);
+      local.writeUInt32LE(0x04034b50, 0);
+      local.writeUInt16LE(20, 4);
+      local.writeUInt32LE(crc, 14);
+      local.writeUInt32LE(data.length, 18);
+      local.writeUInt32LE(data.length, 22);
+      local.writeUInt16LE(nameBuf.length, 26);
+      locals.push(local, nameBuf, data);
+      const central = Buffer.alloc(46);
+      central.writeUInt32LE(0x02014b50, 0);
+      central.writeUInt16LE(20, 4);
+      central.writeUInt16LE(20, 6);
+      central.writeUInt32LE(crc, 16);
+      central.writeUInt32LE(data.length, 20);
+      central.writeUInt32LE(data.length, 24);
+      central.writeUInt16LE(nameBuf.length, 28);
+      central.writeUInt32LE(offset, 42);
+      centrals.push(central, nameBuf);
+      offset += 30 + nameBuf.length + data.length;
+    }
+    const cd = Buffer.concat(centrals);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0);
+    end.writeUInt16LE(entries.length, 8);
+    end.writeUInt16LE(entries.length, 10);
+    end.writeUInt32LE(cd.length, 12);
+    end.writeUInt32LE(offset, 16);
+    return Buffer.concat([...locals, cd, end]);
+  };
+  const docxMIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const ingest = async (name, mime, buf) => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/attachments`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name, mime, data: Buffer.from(buf).toString("base64") }),
+    });
+    return { status: res.status, body: await res.text() };
+  };
+  const docxFixture = zipStored([["[Content_Types].xml", "<Types/>"], ["word/document.xml", "<w:document/>"]]);
+  const mp4Fixture = Buffer.concat([Buffer.from("\x00\x00\x00\x18ftypisom\x00\x00\x02\x00", "latin1"), Buffer.alloc(32)]);
+  const classified = [
+    ["smoke.docx", docxMIME, docxFixture, 200, "document"],
+    ["smoke.docx", "", docxFixture, 200, "document"],
+    ["smoke.zip", "application/zip", zipStored([["README.md", "hi"]]), 200, "archive"],
+    ["smoke.mp4", "video/mp4", mp4Fixture, 200, "video"],
+    ["fake.docx", docxMIME, Buffer.from("just text, not a document\n"), 400, ""],
+  ];
+  for (const [name, mime, buf, wantStatus, wantKind] of classified) {
+    const got = await ingest(name, mime, buf);
+    const kind = got.status === 200 ? JSON.parse(got.body).kind : "";
+    if (got.status !== wantStatus || kind !== wantKind) {
+      throw new Error(`classify ${name} (${mime || "no mime"}): ${got.status} kind=${kind} body=${got.body.slice(0, 200)}`);
+    }
+  }
+  // Composer: an mp4 chip gets a <video controls> preview; removing it clears it.
+  await evaluate(`(() => {
+    const input = document.querySelector('input[data-chat-attach="true"]');
+    const bytes = Uint8Array.from(atob(${JSON.stringify(mp4Fixture.toString("base64"))}), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], "smoke-clip.mp4", { type: "video/mp4" }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  await waitUntil(
+    `(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); const v = chip && chip.querySelector("video.attach-media"); return !!v && v.controls && v.src.startsWith("blob:"); })()`,
+    "mp4 composer chip shows video controls",
+  );
+  await evaluate(`(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); chip?.querySelector("button")?.click(); return !!chip; })()`);
+  await waitUntil(`![...document.querySelectorAll(".attach-chip")].some((c) => c.innerText.includes("smoke-clip.mp4"))`, "mp4 chip removed");
   await send("Runtime.evaluate", {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
   });
@@ -2465,6 +2618,120 @@ try {
     { timeout: WAIT_MS, interval: 250 },
   );
 
+  // Local issues (#1500): create → listed under Open → close → listed under
+  // Closed → still closed after the panel remounts (fresh daemon read) and
+  // in the daemon's own list. An empty title is refused inline.
+  const issuesBoot = await (
+    await fetch(`http://127.0.0.1:${port}/v1/bootstrap`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (!issuesBoot.capabilities?.issues) {
+    throw new Error(`bootstrap does not advertise the issues capability: ${JSON.stringify(issuesBoot.capabilities)}`);
+  }
+  const issueRows = async () =>
+    (await evaluate(`[...document.querySelectorAll("[data-local-issues] .local-issue-row")].map((r) => [
+      r.dataset.issueId,
+      r.dataset.issueStatus,
+      r.innerText,
+    ])`)) || [];
+  const smokeIssueTitle = "smoke local issue";
+  await runPalette("Local issues");
+  await waitFor(
+    "issues panel mounts with the create form",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-local-issues] [data-issues-form]")`)) === true,
+    }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-action="issues-create"]').click()`);
+  await waitFor(
+    "empty title is refused inline",
+    async () => {
+      const t = await evaluate(`document.querySelector("[data-issues-action-error]")?.innerText || ""`);
+      return { ok: String(t).includes("Title is required"), body: t };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const fillIssue = await evaluate(`(() => {
+    const set = (sel, value) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      el.value = value;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    };
+    if (!set("[data-issues-title]", ${JSON.stringify(smokeIssueTitle)})) return "missing title";
+    if (!set("[data-issues-body]", "filed by webui-smoke")) return "missing body";
+    document.querySelector('[data-action="issues-create"]').click();
+    return "sent";
+  })()`);
+  if (fillIssue !== "sent") throw new Error(`issues create form: ${fillIssue}`);
+  let smokeIssueId = "";
+  await waitFor(
+    "created issue appears under Open",
+    async () => {
+      const rows = await issueRows();
+      const row = rows.find((r) => String(r[2]).includes(smokeIssueTitle));
+      if (row) smokeIssueId = row[0];
+      return { ok: !!row && row[1] === "open", body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-issue-id="${smokeIssueId}"] .link').click()`);
+  await waitFor(
+    "issue body expands",
+    async () => {
+      const t = await evaluate(`document.querySelector('[data-issue-body="${smokeIssueId}"]')?.innerText || ""`);
+      return { ok: String(t).includes("filed by webui-smoke"), body: t };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector('[data-issue-id="${smokeIssueId}"] [data-action="issues-close"]').click()`);
+  await waitFor(
+    "closed issue leaves the Open filter",
+    async () => {
+      const rows = await issueRows();
+      return { ok: !rows.some((r) => r[0] === smokeIssueId), body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-issues-filter="closed"]').click()`);
+  await waitFor(
+    "closed issue listed under Closed",
+    async () => {
+      const rows = await issueRows();
+      return { ok: rows.some((r) => r[0] === smokeIssueId && r[1] === "closed"), body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Remount: leave the tab and come back; the panel re-reads the daemon.
+  await runPalette("Memory");
+  await waitFor(
+    "issues panel unmounts on another tab",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-local-issues]")`)) === false }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await runPalette("Local issues");
+  await waitFor(
+    "issues panel remounts",
+    async () => ({ ok: (await evaluate(`!!document.querySelector('[data-issues-filter="closed"]')`)) === true }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-issues-filter="closed"]').click()`);
+  await waitFor(
+    "closed issue persists after the panel remounts",
+    async () => {
+      const rows = await issueRows();
+      return { ok: rows.some((r) => r[0] === smokeIssueId && r[1] === "closed"), body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const persisted = await (
+    await fetch(`http://127.0.0.1:${port}/v1/issues?status=closed`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (!(persisted.issues || []).some((i) => String(i.ID ?? i.id) === smokeIssueId && (i.Status ?? i.status) === "closed")) {
+    throw new Error(`daemon does not list issue ${smokeIssueId} as closed: ${JSON.stringify(persisted)}`);
+  }
+
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
   // that predates Goals has no palette command and fails here.
   await runPalette("Goals");
@@ -2770,16 +3037,25 @@ try {
     throw new Error(`side chat shell did not boot ${JSON.stringify(booted)}`);
   }
 
-  const seeded = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+  // The seed carries an outbox client message id (#1325); the retry below
+  // must be acknowledged as a duplicate and never start a second turn.
+  const seedInit = {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      "X-Strike-Client-Message-Id": "smoke-seed-1325",
     },
     body: JSON.stringify({ type: "user.input", data: { text: "read the makefile" } }),
-  });
+  };
+  const seeded = await fetch(`http://127.0.0.1:${port}/v1/ops`, seedInit);
   if (!seeded.ok) {
     throw new Error(`seed user.input ${seeded.status} ${await seeded.text()}`);
+  }
+  const seedRetry = await fetch(`http://127.0.0.1:${port}/v1/ops`, seedInit);
+  const seedRetryBody = await seedRetry.text();
+  if (seedRetry.status !== 200 || !seedRetryBody.includes('"duplicate":true')) {
+    throw new Error(`outbox retry was not deduped: ${seedRetry.status} ${seedRetryBody}`);
   }
 
   await evaluate(`document.querySelector(".side-chat-open-activity").click()`);
@@ -4288,6 +4564,38 @@ try {
         };
       })()`);
       return { ok: v.n === 1 && v.text === "took 4:12" && v.onSlow && v.body, ...v };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Turn failure (#1371): the same replay ends its two failing turns with
+  // a stop marker each (error, loop_detected), in order, badged failed;
+  // the loop guard's own line names the tool; clean turns get none.
+  await waitFor(
+    "turn failure markers on the replayed failing turns only",
+    async () => {
+      const v = await evaluate(`(() => {
+        const marks = [...document.querySelectorAll("article[data-turn-stop]")];
+        const arts = [...document.querySelectorAll("article.sx-msg")];
+        const idx = (el) => arts.indexOf(el);
+        const failing = arts.find((a) => (a.innerText || "").includes("half answer"));
+        const guard = arts.find((a) => (a.innerText || "").includes("Loop guard"));
+        return {
+          reasons: marks.map((m) => m.getAttribute("data-turn-stop")).join(","),
+          titles: marks.map((m) => (m.querySelector(".sx-who")?.textContent || "").trim()).join("|"),
+          afterAnswer: !!failing && marks.length > 0 && idx(marks[0]) > idx(failing),
+          guardText: guard ? guard.innerText : "",
+          engineError: document.body.innerText.includes("provider exploded"),
+        };
+      })()`);
+      return {
+        ok:
+          v.reasons === "error,loop_detected" &&
+          v.titles === "Turn failed|Turn stopped by loop guard" &&
+          v.afterAnswer &&
+          v.guardText.includes("bash, 3 times") &&
+          v.engineError,
+        ...v,
+      };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
