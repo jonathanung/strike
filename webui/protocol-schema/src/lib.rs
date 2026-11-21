@@ -709,7 +709,7 @@ pub struct DebugUpdated {
     #[serde(default, rename = "hypotheses", deserialize_with = "null_as_default")]
     pub hypotheses: Vec<DebugHypothesis>,
     #[serde(default, rename = "override")]
-    pub override: String,
+    pub r#override: String,
     #[serde(default, rename = "fixed")]
     pub fixed: bool,
     #[serde(default, rename = "instrumentation", deserialize_with = "null_as_default")]

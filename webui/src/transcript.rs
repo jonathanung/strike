@@ -873,6 +873,40 @@ impl Transcript {
                     turn_id: field_str(&data, "turnId"),
                 });
             }
+            "debug.updated" => {
+                // #1345: start, fix unlock (with any override reason), mark
+                // fixed and the closing summary stay in the transcript; the
+                // Debug panel shows the rest.
+                if self.foreign_session(&data) {
+                    return;
+                }
+                let Some(state) = crate::debug_mode_ui::state_from_envelope(raw) else {
+                    return;
+                };
+                let Some((title, body)) = debug_mode::transcript_note(&state) else {
+                    return;
+                };
+                self.assistant_open = false;
+                self.push(Message {
+                    id: 0,
+                    role: Role::Notice,
+                    title,
+                    body: body.clone(),
+                    badge: "debug".into(),
+                    detail: String::new(),
+                    key: String::new(),
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: body,
+                    reconnect: String::new(),
+                    at_ms,
+                    attachments: Vec::new(),
+                    turn_id: field_str(&data, "turnId"),
+                });
+            }
             "artifact.updated" => self.artifact_updates = self.artifact_updates.wrapping_add(1),
             "compaction.started"
             | "compaction.completed"

@@ -15,6 +15,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
 import { createServer } from "node:http";
+import { debugModeCheck } from "./webui-debug-mode-check.mjs";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
 import { seedRepeatedWorkflow, skillProposalsCheck } from "./webui-skill-proposals-check.mjs";
 import {
@@ -7575,6 +7576,7 @@ try {
 
   await seedRepeatedWorkflow({ home, port, token });
   await skillProposalsCheck({ send, repoDir: process.cwd() });
+  await debugModeCheck({ send, port, token });
 
   console.log("webui-smoke ok");
 } catch (err) {

@@ -244,6 +244,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "debug-mode"
+version = "0.1.0"
+
+[[package]]
 name = "derive-where"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1368,6 +1372,7 @@ name = "strike-webui"
 version = "0.1.0"
 dependencies = [
  "composer-drafts",
+ "debug-mode",
  "edit-resend",
  "gloo-net",
  "ideas-inbox",

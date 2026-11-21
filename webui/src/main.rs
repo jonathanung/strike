@@ -25,6 +25,7 @@ mod container_panel;
 mod context_doctor;
 mod composer_triggers;
 mod config_sources;
+mod debug_mode_ui;
 mod diag;
 mod diagnostics;
 mod draft_size;
@@ -1335,6 +1336,7 @@ fn App() -> impl IntoView {
     let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
     let elicitations = RwSignal::new(Vec::<elicitation::Pending>::new());
+    let debug_state = RwSignal::new(None::<debug_mode::State>);
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
     let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
     let panel_open = RwSignal::new(false);
@@ -2137,6 +2139,7 @@ fn App() -> impl IntoView {
             children_note.set(String::new());
             asks.set(Vec::new());
             elicitations.set(Vec::new());
+            debug_state.set(None);
             live_audit.set(Vec::new());
             confirm.set(None);
             wipe_on_replay.set(false);
@@ -2300,6 +2303,7 @@ fn App() -> impl IntoView {
                     note_steer(transcript_cb, &data, &on_note);
                     apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
                     elicitation_ui::apply_elicitation_notes(&data, elicitations);
+                    debug_mode_ui::apply_debug_envelope(&data, debug_state);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
                     lines_cb.set(transcript_cb.with_untracked(|t| t.chat_lines()));
@@ -5928,6 +5932,7 @@ fn App() -> impl IntoView {
                         find=find_view
                     />
                     </Show>
+                    <debug_mode_ui::DebugPanel base=base token=token root=active_root debug=debug_state />
                     <elicitation_ui::ElicitationCards base=base token=token root=active_root elicitations=elicitations />
                     <ApprovalCards
                         asks=asks

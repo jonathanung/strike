@@ -250,6 +250,8 @@ func TestSweepRemovesTaggedLines(t *testing.T) {
 	writeFile(t, filepath.Join(root, "a.go"), "package a\n"+tag+"\nfunc A() {}\r\n"+tag, 0o640)
 	writeFile(t, filepath.Join(root, "sub", "clean.go"), "package sub\n", 0o644)
 	writeFile(t, filepath.Join(root, ".git", "HEAD"), Marker+"\n", 0o644)
+	writeFile(t, filepath.Join(root, "node_modules", "dep", "i.js"), Marker+"\n", 0o644)
+	writeFile(t, filepath.Join(root, "web", "target", "out.txt"), Marker+"\n", 0o644)
 	writeFile(t, filepath.Join(root, "bin.dat"), "\x00"+Marker+"\n", 0o644)
 
 	hits, err := Scan(root)
@@ -287,6 +289,11 @@ func TestSweepRemovesTaggedLines(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(root, "bin.dat")); !strings.Contains(string(b), Marker) {
 		t.Fatal("binary files must not be swept")
+	}
+	for _, p := range []string{filepath.Join("node_modules", "dep", "i.js"), filepath.Join("web", "target", "out.txt")} {
+		if b, _ := os.ReadFile(filepath.Join(root, p)); !strings.Contains(string(b), Marker) {
+			t.Fatalf("%s must not be swept", p)
+		}
 	}
 }
 

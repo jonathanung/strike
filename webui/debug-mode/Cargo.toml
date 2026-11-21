@@ -1,0 +1,8 @@
+[package]
+name = "debug-mode"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Debug mode panel rules for the cockpit (#1345): state merge, reproduce checklist, hypothesis input, action gating and the closing summary. Pure logic; the panel owns the ops."
+
+[dependencies]
