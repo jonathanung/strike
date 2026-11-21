@@ -15,6 +15,7 @@ web cockpit, or the daemon routes directly:
 |---|---|---|
 | `settings` | default provider, model, agent, reasoning effort, theme | `host.Settings` |
 | `memory` | project and global memory entries (key, value, tags, author) | `host.Memory` / `MemoryScopes` |
+| `knowledge` | project and global knowledge pins (path, note, author) | `host.Knowledge` |
 | `schedules` | prompt, goal and workflow schedule definitions (no run history) | `schedule.Service.Create` |
 | `sessions` | every session as a redacted session package (same format as single-session export), with parent/lead links | `session.Manager` |
 
@@ -28,12 +29,12 @@ be checked:
 
 - **Secrets:** provider credentials (`~/.strike/auth.json`), gateway bearer
   tokens and pairing codes, secret references and environment values.
-  Credential-shaped text inside sessions, memory and schedule prompts is
-  scrubbed by the same redaction as session export.
+  Credential-shaped text inside sessions, memory, knowledge pin notes and
+  schedule prompts is scrubbed by the same redaction as session export.
 - **Trust settings:** permission mode and sandbox settings, global and per
   schedule. Script schedules (commands can embed credentials, and they must
   be re-armed on the target).
-- **Not covered yet:** knowledge pins, artifacts, attachments, goals and
+- **Not covered yet:** artifacts, attachments, goals and
   autopilot state, workspaces and their rules, issues, plans, ledger.
 
 The file is plain JSON and **not encrypted** (`"encrypted": false`). Treat it
@@ -59,6 +60,7 @@ Nothing on the target is overwritten silently:
 | Same id/key and identical content | `skip` |
 | Same id/key, different content | `copy`: a session gets a new id and a `(restored)` title; a memory entry or schedule gets a `(restored)` name |
 | Setting already set to a different value | `skip`, keeping the target's value |
+| Knowledge pin already on the target | `skip`. The path is the pin's identity, so a different note is kept, never copied. |
 | Target refuses the record (missing store, invalid schedule) | `fail`. The other records still restore, and the report lists every decision. |
 
 Restoring the same archive twice is a no-op the second time.
@@ -79,6 +81,11 @@ Restoring the same archive twice is a no-op the second time.
   "sections": {"memory": [ … ]}
 }
 ```
+
+Knowledge pins store paths as written. A project-relative path points into
+whatever project the target opens; an absolute path is restored as is and
+may not exist on another machine. A gateway older than the `knowledge`
+section refuses such an archive with `unknown section "knowledge"`.
 
 Exclusion `kind` is `secret`, `policy`, `not-yet-included`, or `unavailable`
 (a store this gateway does not run). The code lives in
