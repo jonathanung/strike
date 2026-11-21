@@ -183,6 +183,7 @@ type (
 	SetPermissionMode       = pub.SetPermissionMode
 	SetFast                 = pub.SetFast
 	SetVerbosity            = pub.SetVerbosity
+	DebugControl            = pub.DebugControl
 	StartWorkflow           = pub.StartWorkflow
 	StopWorkflow            = pub.StopWorkflow
 	FilesChanged            = pub.FilesChanged
@@ -249,6 +250,10 @@ type (
 	PermissionModeSelected  = pub.PermissionModeSelected
 	FastSelected            = pub.FastSelected
 	VerbositySelected       = pub.VerbositySelected
+	DebugUpdated            = pub.DebugUpdated
+	DebugHypothesis         = pub.DebugHypothesis
+	DebugEvidence           = pub.DebugEvidence
+	DebugHit                = pub.DebugHit
 	FilesInvalidated        = pub.FilesInvalidated
 	PathOverlap             = pub.PathOverlap
 	PathOverlapHolder       = pub.PathOverlapHolder

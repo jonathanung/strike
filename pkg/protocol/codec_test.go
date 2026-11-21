@@ -1093,6 +1093,46 @@ func TestUserMessageAttachmentRefRoundTrip(t *testing.T) {
 	}
 }
 
+func TestUserMessageAttachmentDeliveryRoundTrip(t *testing.T) {
+	ev := UserMessage{
+		Text: "hi",
+		Images: []ImageAttachment{
+			{MIME: "image/png", Ref: "att:sha256:" + strings.Repeat("ab", 32), Delivery: AttachmentDeliverySent},
+			{MIME: "application/pdf", Name: "a.pdf", Delivery: AttachmentDeliveryDropped, DeliveryReason: "pdf cannot be sent as a provider image"},
+			{MIME: "image/png", Name: "old.png"},
+		},
+	}
+	env, err := Wrap(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"delivery":"dropped","deliveryReason":"pdf cannot be sent as a provider image"`) {
+		t.Fatalf("delivery fields missing: %s", raw)
+	}
+	if strings.Count(string(raw), `"delivery"`) != 2 {
+		t.Fatalf("empty delivery must be omitted: %s", raw)
+	}
+	got, err := env.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	um := got.(UserMessage)
+	want := []struct{ delivery, reason string }{
+		{AttachmentDeliverySent, ""},
+		{AttachmentDeliveryDropped, "pdf cannot be sent as a provider image"},
+		{"", ""},
+	}
+	for i, w := range want {
+		if um.Images[i].Delivery != w.delivery || um.Images[i].DeliveryReason != w.reason {
+			t.Fatalf("image %d = %#v, want %+v", i, um.Images[i], w)
+		}
+	}
+}
+
 func TestToolRetryEventsRoundTrip(t *testing.T) {
 	corr := Correlation{SessionID: "s1", TurnID: "t1", ProviderRequestID: "p1", Attempt: 1}
 	cases := []Event{

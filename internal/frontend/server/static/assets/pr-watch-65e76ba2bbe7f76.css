@@ -1,0 +1,102 @@
+/* feature:pr-watch begin */
+/* PR watch (#1356): linked PR chip, checks list, fix-in-session confirm. */
+.pr-watch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+}
+.pr-watch-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+}
+.pr-chip {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--type-sm);
+  font-weight: 600;
+  padding: 2px var(--space-2);
+  cursor: pointer;
+}
+.pr-chip:focus-visible,
+.pr-link:focus-visible,
+.pr-check-name:focus-visible {
+  outline: 1px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.pr-chip-pass { border-color: var(--success); color: var(--success); }
+.pr-chip-fail { border-color: var(--danger); color: var(--danger); }
+.pr-chip-running { border-color: var(--warning); color: var(--warning); }
+.pr-chip-merged { border-color: var(--accent-alt); color: var(--accent-alt); }
+.pr-chip-closed,
+.pr-chip-neutral,
+.pr-chip-unavailable { color: var(--muted); }
+.pr-link { font-size: var(--type-sm); }
+.pr-reason,
+.pr-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+.pr-error { color: var(--danger); font-size: var(--type-sm); }
+.pr-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pr-check {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  font-size: var(--type-sm);
+  color: var(--ink);
+}
+.pr-check-state {
+  min-width: 4.5em;
+  color: var(--muted);
+}
+.pr-check-pass .pr-check-state { color: var(--success); }
+.pr-check-fail .pr-check-state { color: var(--danger); }
+.pr-check-running .pr-check-state,
+.pr-check-queued .pr-check-state { color: var(--warning); }
+.pr-fix {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+}
+.pr-fix-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+}
+.pr-fix-text {
+  margin: 0;
+  max-height: 16em;
+  overflow: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--type-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.pr-fix-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+/* feature:pr-watch end */

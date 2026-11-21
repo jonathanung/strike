@@ -53,6 +53,9 @@ type Restored struct {
 	FolderGrants []permission.FolderGrant
 	// PlanHandoff is the last protocol.PlanHandoff (approved plan identity).
 	PlanHandoff PlanHandoffState
+	// Debug is the last successful protocol.DebugUpdated (Error empty), or
+	// nil when the log never used debug mode.
+	Debug *protocol.DebugUpdated
 }
 
 // reqAccum collects one provider-request's stream into an assistant message
@@ -174,7 +177,7 @@ func restoreEvents(events []protocol.Event, keep func(protocol.Event) bool) Rest
 			msgs = append(msgs, provider.Message{
 				Role:   provider.RoleUser,
 				Text:   e.Text,
-				Images: protocolImagesToProvider(e.Images),
+				Images: protocolImagesToProvider(restorableImages(e.Images)),
 			})
 		case protocol.TextDelta:
 			ensure(e.ProviderRequestID)
@@ -217,6 +220,11 @@ func restoreEvents(events []protocol.Event, keep func(protocol.Event) bool) Rest
 			r.Effort = e.Level
 		case protocol.FastSelected:
 			r.Priority = e.Enabled
+		case protocol.DebugUpdated:
+			if e.Error == "" {
+				ev := e
+				r.Debug = &ev
+			}
 		case protocol.AutonomySelected:
 			r.Autonomy = e.Mode.Normalize()
 		case protocol.VerbositySelected:
@@ -320,6 +328,20 @@ func restoreEvents(events []protocol.Event, keep func(protocol.Event) bool) Rest
 
 // restoreRootEvent reports whether ev belongs to the root conversation
 // (not a child/subagent lineage). Events without correlation are treated as root.
+// restorableImages drops attachments the engine recorded as not sent
+// (#1814), so resumed history matches what the model actually saw. Older
+// logs without a delivery decision keep every attachment, as before.
+func restorableImages(images []protocol.ImageAttachment) []protocol.ImageAttachment {
+	var out []protocol.ImageAttachment
+	for _, img := range images {
+		if img.Delivery == protocol.AttachmentDeliveryDropped {
+			continue
+		}
+		out = append(out, img)
+	}
+	return out
+}
+
 func restoreRootEvent(ev protocol.Event) bool {
 	corr, ok := restoreCorrelation(ev)
 	if !ok {
@@ -357,6 +379,8 @@ func restoreCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.EffortSelected:
 		return e.Correlation, true
 	case protocol.FastSelected:
+		return e.Correlation, true
+	case protocol.DebugUpdated:
 		return e.Correlation, true
 	case protocol.AutonomySelected:
 		return e.Correlation, true

@@ -1081,6 +1081,170 @@
       },
       "type": "object"
     },
+    "DebugControl": {
+      "additionalProperties": true,
+      "description": "DebugControl drives the session's hypothesis-first debug mode. Action is start, hypotheses, evidence, mark, unlock, fixed, end or scan. Hypotheses is the ranked list for hypotheses; HypothesisID, Status, Source and Text carry evidence and verdicts; Text is the override reason for unlock.",
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "hypotheses": {
+          "items": {
+            "$ref": "#/$defs/DebugHypothesis"
+          },
+          "type": "array"
+        },
+        "hypothesisId": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    },
+    "DebugEvidence": {
+      "additionalProperties": true,
+      "description": "DebugEvidence is captured runtime output attached to a hypothesis.",
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "DebugHit": {
+      "additionalProperties": true,
+      "description": "DebugHit is one tagged instrumentation line on disk.",
+      "properties": {
+        "line": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "text"
+      ],
+      "type": "object"
+    },
+    "DebugHypothesis": {
+      "additionalProperties": true,
+      "description": "DebugHypothesis is one ranked candidate cause in a debug session.",
+      "properties": {
+        "confirms": {
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/DebugEvidence"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "rank": {
+          "type": "integer"
+        },
+        "refutes": {
+          "type": "string"
+        },
+        "statement": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "statement"
+      ],
+      "type": "object"
+    },
+    "DebugUpdated": {
+      "additionalProperties": true,
+      "description": "DebugUpdated reports debug-mode state after a DebugControl op. Phase is hypothesis, fix or closed; empty with no Error means no debug session. Error is set (and state unchanged) when the action was refused. Instrumentation lists tagged lines still on disk; Removed lists the lines the end sweep deleted.",
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "attempt": {
+          "type": "integer"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "error": {
+          "type": "string"
+        },
+        "fixed": {
+          "type": "boolean"
+        },
+        "hypotheses": {
+          "items": {
+            "$ref": "#/$defs/DebugHypothesis"
+          },
+          "type": "array"
+        },
+        "instrumentation": {
+          "items": {
+            "$ref": "#/$defs/DebugHit"
+          },
+          "type": "array"
+        },
+        "override": {
+          "type": "string"
+        },
+        "parentSessionId": {
+          "type": "string"
+        },
+        "phase": {
+          "type": "string"
+        },
+        "providerRequestId": {
+          "type": "string"
+        },
+        "removed": {
+          "items": {
+            "$ref": "#/$defs/DebugHit"
+          },
+          "type": "array"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "type": "object"
+    },
     "Decision": {
       "description": "Open string. Writers use x-strike-known-values. Readers must accept other strings.",
       "type": "string",
@@ -1906,6 +2070,12 @@
         "data": {
           "type": "string"
         },
+        "delivery": {
+          "type": "string"
+        },
+        "deliveryReason": {
+          "type": "string"
+        },
         "kind": {
           "type": "string"
         },
@@ -2357,6 +2527,30 @@
             },
             "type": {
               "const": "context.fit_warning"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "time",
+            "data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/DebugUpdated"
+            },
+            "time": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "type": {
+              "const": "debug.updated"
             },
             "v": {
               "type": "string"
@@ -3744,6 +3938,24 @@
             },
             "type": {
               "const": "context.controls"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
+              "$ref": "#/$defs/DebugControl"
+            },
+            "type": {
+              "const": "debug.control"
             },
             "v": {
               "type": "string"
@@ -7565,9 +7777,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "Forward-compatible Op/Event wire schema generated from pkg/protocol. The root schema is one event envelope: unknown type strings and unknown fields are valid. $defs/KnownEvent lists types this version writes. $defs/KnownOp is fail-closed: unknown op type strings are not valid. required is the writer contract; readers treat missing fields as zero values. See schemas/protocol/v1/COMPAT.md.",
   "title": "Strike event envelope",
-  "x-strike-event-count": 69,
+  "x-strike-event-count": 70,
   "x-strike-legacy-version": "1.0.0",
-  "x-strike-op-count": 35,
+  "x-strike-op-count": 36,
   "x-strike-protocol-version": "1.26.0",
   "x-strike-unknown-event": "valid",
   "x-strike-unknown-field": "ignore",

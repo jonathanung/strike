@@ -196,28 +196,67 @@ func (e *Engine) hydrateImages(imgs []provider.Image) []provider.Image {
 	return imgs
 }
 
-func (e *Engine) imagesForProvider(images []protocol.ImageAttachment) []provider.Image {
-	resolved := e.hydrateImages(protocolImagesToProvider(images))
+// deliverImages decides, per persisted attachment, whether it reaches the
+// provider this turn (#1814). It returns the attachments annotated with
+// Delivery/DeliveryReason (for the durable user.message, so resume and
+// rewind replay the decision) and the provider images actually sent. A
+// dropped attachment still emits the engine.error "attachment: …" notice.
+func (e *Engine) deliverImages(images []protocol.ImageAttachment) ([]protocol.ImageAttachment, []provider.Image) {
+	if len(images) == 0 {
+		return images, nil
+	}
 	imagesOK := e.providerAcceptsImages()
-	out := make([]provider.Image, 0, len(resolved))
-	for _, img := range resolved {
-		kind := attachmentKindFromMIME(img.MIME)
-		if err := selectAttachmentForProvider(kind, img.MIME, imagesOK); err != nil {
-			e.emit(protocol.EngineError{
-				Correlation: e.sessionCorr(),
-				Message:     "attachment: " + err.Error(),
-			})
+	annotated := make([]protocol.ImageAttachment, len(images))
+	out := make([]provider.Image, 0, len(images))
+	for i, att := range images {
+		img, reason := e.deliverOneImage(att, imagesOK)
+		annotated[i] = att
+		if reason != "" {
+			annotated[i].Delivery = protocol.AttachmentDeliveryDropped
+			annotated[i].DeliveryReason = reason
 			continue
 		}
-		if len(img.Data) == 0 {
-			continue
-		}
+		annotated[i].Delivery = protocol.AttachmentDeliverySent
+		annotated[i].DeliveryReason = ""
 		out = append(out, img)
 	}
 	if len(out) == 0 {
-		return nil
+		out = nil
 	}
-	return out
+	return annotated, out
+}
+
+// deliverOneImage resolves one attachment for the provider. A non-empty
+// reason means it was dropped; policy rejections are also reported as an
+// engine.error, as before.
+func (e *Engine) deliverOneImage(att protocol.ImageAttachment, imagesOK bool) (provider.Image, string) {
+	resolved := e.hydrateImages(protocolImagesToProvider([]protocol.ImageAttachment{att}))
+	if len(resolved) == 0 {
+		return provider.Image{}, "attachment payload missing"
+	}
+	img := resolved[0]
+	kind := attachmentKindFromMIME(img.MIME)
+	if err := selectAttachmentForProvider(kind, img.MIME, imagesOK); err != nil {
+		e.emit(protocol.EngineError{
+			Correlation: e.sessionCorr(),
+			Message:     "attachment: " + err.Error(),
+		})
+		return provider.Image{}, attachmentDropReason(err)
+	}
+	if len(img.Data) == 0 {
+		return provider.Image{}, "attachment bytes unavailable"
+	}
+	return img, ""
+}
+
+// attachmentDropReason is the user-facing tail of a policy error, without
+// the "attachment: unsupported format:" prefixes.
+func attachmentDropReason(err error) string {
+	msg := strings.TrimSpace(err.Error())
+	msg = strings.TrimPrefix(msg, "attachment:")
+	msg = strings.TrimSpace(msg)
+	msg = strings.TrimPrefix(msg, "unsupported format:")
+	return strings.TrimSpace(msg)
 }
 
 func (e *Engine) providerAcceptsImages() bool {
@@ -306,7 +345,7 @@ func (e *Engine) applyPendingSteer(turnID, mode string) {
 	corr := e.baseCorr()
 	corr.TurnID = turnID
 	// Durable user.message so resume sees the guidance in the transcript.
-	persisted := e.persistImages(ps.images)
+	persisted, sent := e.deliverImages(e.persistImages(ps.images))
 	shown := ps.text
 	if strings.TrimSpace(ps.display) != "" {
 		shown = ps.display
@@ -315,7 +354,7 @@ func (e *Engine) applyPendingSteer(turnID, mode string) {
 	e.messages = append(e.messages, provider.Message{
 		Role:   provider.RoleUser,
 		Text:   ps.text,
-		Images: e.imagesForProvider(persisted),
+		Images: sent,
 	})
 	e.emit(protocol.TurnSteered{
 		Correlation:  corr,
@@ -748,7 +787,7 @@ func (e *Engine) runTurn(ctx context.Context, text, display, loopID string, imag
 	e.sessionBudgetStop = false
 	e.sessionBudgetStopKind = ""
 	e.sessionBudgetStopMsg = ""
-	persisted := e.persistImages(images)
+	persisted, sent := e.deliverImages(e.persistImages(images))
 	shown := text
 	if strings.TrimSpace(display) != "" {
 		shown = display
@@ -760,7 +799,7 @@ func (e *Engine) runTurn(ctx context.Context, text, display, loopID string, imag
 	e.messages = append(e.messages, provider.Message{
 		Role:   provider.RoleUser,
 		Text:   text,
-		Images: e.imagesForProvider(persisted),
+		Images: sent,
 	})
 
 	// spawnChild attaches a function only when the selected task subagent has a
@@ -1320,6 +1359,23 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 	// Begin was emitted. Pre-Execute cancel/shutdown check (no Execute).
 	if ctx.Err() != nil {
 		return e.canceledOrTimeoutToolResult(ctx, call.ID, corr, tool.Result{})
+	}
+
+	// Debug phase gate (#1345): during the hypothesis phase only
+	// marker-tagged instrumentation edits pass. Deny before hooks and
+	// Execute so a fix edit has no side effects; the reason reaches the
+	// transcript and the model as blocked tool feedback.
+	if ge := e.checkDebugGate(call); ge != nil {
+		return e.settleToolFeedback(toolFeedback{
+			Corr:      corr,
+			CallID:    call.ID,
+			Output:    protocol.ToolFeedbackBlocked(ge.Error()),
+			IsError:   true,
+			EmitEnd:   true,
+			ErrorCode: protocol.ErrorCodeBlocked,
+			Retryable: false,
+			Title:     call.Name,
+		})
 	}
 
 	// Declarative rules first (cheap, no process). Block skips shell + Execute.

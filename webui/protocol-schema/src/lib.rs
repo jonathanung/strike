@@ -636,6 +636,95 @@ pub struct Correlation {
     pub depth: i64,
 }
 
+/// DebugControl drives the session's hypothesis-first debug mode. Action is start, hypotheses, evidence, mark, unlock, fixed, end or scan. Hypotheses is the ranked list for hypotheses; HypothesisID, Status, Source and Text carry evidence and verdicts; Text is the override reason for unlock.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct DebugControl {
+    #[serde(default, rename = "action")]
+    pub action: String,
+    #[serde(default, rename = "hypotheses", deserialize_with = "null_as_default")]
+    pub hypotheses: Vec<DebugHypothesis>,
+    #[serde(default, rename = "hypothesisId")]
+    pub hypothesis_id: String,
+    #[serde(default, rename = "status")]
+    pub status: String,
+    #[serde(default, rename = "source")]
+    pub source: String,
+    #[serde(default, rename = "text")]
+    pub text: String,
+}
+
+/// DebugEvidence is captured runtime output attached to a hypothesis.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct DebugEvidence {
+    #[serde(default, rename = "source")]
+    pub source: String,
+    #[serde(default, rename = "text")]
+    pub text: String,
+}
+
+/// DebugHit is one tagged instrumentation line on disk.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct DebugHit {
+    #[serde(default, rename = "path")]
+    pub path: String,
+    #[serde(default, rename = "line")]
+    pub line: i64,
+    #[serde(default, rename = "text")]
+    pub text: String,
+}
+
+/// DebugHypothesis is one ranked candidate cause in a debug session.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct DebugHypothesis {
+    #[serde(default, rename = "id")]
+    pub id: String,
+    #[serde(default, rename = "rank")]
+    pub rank: i64,
+    #[serde(default, rename = "statement")]
+    pub statement: String,
+    #[serde(default, rename = "confirms")]
+    pub confirms: String,
+    #[serde(default, rename = "refutes")]
+    pub refutes: String,
+    #[serde(default, rename = "status")]
+    pub status: String,
+    #[serde(default, rename = "evidence", deserialize_with = "null_as_default")]
+    pub evidence: Vec<DebugEvidence>,
+}
+
+/// DebugUpdated reports debug-mode state after a DebugControl op. Phase is hypothesis, fix or closed; empty with no Error means no debug session. Error is set (and state unchanged) when the action was refused. Instrumentation lists tagged lines still on disk; Removed lists the lines the end sweep deleted.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct DebugUpdated {
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default, rename = "turnId")]
+    pub turn_id: String,
+    #[serde(default, rename = "providerRequestId")]
+    pub provider_request_id: String,
+    #[serde(default, rename = "attempt")]
+    pub attempt: i64,
+    #[serde(default, rename = "parentSessionId")]
+    pub parent_session_id: String,
+    #[serde(default, rename = "depth")]
+    pub depth: i64,
+    #[serde(default, rename = "action")]
+    pub action: String,
+    #[serde(default, rename = "phase")]
+    pub phase: String,
+    #[serde(default, rename = "hypotheses", deserialize_with = "null_as_default")]
+    pub hypotheses: Vec<DebugHypothesis>,
+    #[serde(default, rename = "override")]
+    pub r#override: String,
+    #[serde(default, rename = "fixed")]
+    pub fixed: bool,
+    #[serde(default, rename = "instrumentation", deserialize_with = "null_as_default")]
+    pub instrumentation: Vec<DebugHit>,
+    #[serde(default, rename = "removed", deserialize_with = "null_as_default")]
+    pub removed: Vec<DebugHit>,
+    #[serde(default, rename = "error")]
+    pub error: String,
+}
+
 /// DelegationChanged reports a lifecycle transition on a delegation object. Correlation is the owner (creator) session. Emitted for UI/debug and for event-wait consumers (#775). Subscribe hooks on create may also notify the lead via mailbox when State matches a subscribed kind.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct DelegationChanged {
@@ -1096,6 +1185,10 @@ pub struct ImageAttachment {
     pub kind: String,
     #[serde(default, rename = "name")]
     pub name: String,
+    #[serde(default, rename = "delivery")]
+    pub delivery: String,
+    #[serde(default, rename = "deliveryReason")]
+    pub delivery_reason: String,
 }
 
 /// InputQueueCancel removes one pending user-input item.
@@ -3008,6 +3101,7 @@ pub enum Event {
     CompactionStarted(CompactionStarted),
     ContextControlsSelected(ContextControlsSelected),
     ContextFitWarning(ContextFitWarning),
+    DebugUpdated(DebugUpdated),
     DelegationChanged(DelegationChanged),
     DiagnosticBundle(DiagnosticBundle),
     EffortSelected(EffortSelected),
@@ -3071,6 +3165,7 @@ pub enum Event {
 pub enum Op {
     Compact(Compact),
     SetContextControls(SetContextControls),
+    DebugControl(DebugControl),
     ElicitationReply(ElicitationReply),
     ReturnToPrimary(ReturnToPrimary),
     FilesChanged(FilesChanged),
@@ -3156,6 +3251,7 @@ pub fn decode_event(raw: &str) -> Result<Event, DecodeError> {
         "compaction.started" => map_event::<CompactionStarted>("compaction.started", &env.data, Event::CompactionStarted),
         "context.controls" => map_event::<ContextControlsSelected>("context.controls", &env.data, Event::ContextControlsSelected),
         "context.fit_warning" => map_event::<ContextFitWarning>("context.fit_warning", &env.data, Event::ContextFitWarning),
+        "debug.updated" => map_event::<DebugUpdated>("debug.updated", &env.data, Event::DebugUpdated),
         "delegation.changed" => map_event::<DelegationChanged>("delegation.changed", &env.data, Event::DelegationChanged),
         "diagnostic.bundle" => map_event::<DiagnosticBundle>("diagnostic.bundle", &env.data, Event::DiagnosticBundle),
         "effort.selected" => map_event::<EffortSelected>("effort.selected", &env.data, Event::EffortSelected),
@@ -3250,6 +3346,7 @@ pub fn decode_op(raw: &str) -> Result<Op, DecodeError> {
     match env.r#type.as_str() {
         "compact" => map_op::<Compact>("compact", data.clone(), Op::Compact),
         "context.controls" => map_op::<SetContextControls>("context.controls", data.clone(), Op::SetContextControls),
+        "debug.control" => map_op::<DebugControl>("debug.control", data.clone(), Op::DebugControl),
         "elicitation.reply" => map_op::<ElicitationReply>("elicitation.reply", data.clone(), Op::ElicitationReply),
         "fallback.return" => map_op::<ReturnToPrimary>("fallback.return", data.clone(), Op::ReturnToPrimary),
         "files.changed" => map_op::<FilesChanged>("files.changed", data.clone(), Op::FilesChanged),

@@ -13,6 +13,7 @@ import (
 // not import Strike product packages.
 func TestProductionImportsAreKernelOnly(t *testing.T) {
 	allowed := map[string]bool{
+		"github.com/jonathanung/strike/harness/debugmode":  true,
 		"github.com/jonathanung/strike/harness/fn":         true,
 		"github.com/jonathanung/strike/harness/permission": true,
 		"github.com/jonathanung/strike/harness/provider":   true,

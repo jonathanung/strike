@@ -256,6 +256,10 @@ name = "dashboard-view"
 version = "0.1.0"
 
 [[package]]
+name = "debug-mode"
+version = "0.1.0"
+
+[[package]]
 name = "derive-where"
 version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1044,6 +1048,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "quote-message"
+version = "0.1.0"
+
+[[package]]
 name = "quote-use"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1391,6 +1399,7 @@ dependencies = [
  "away-briefing",
  "composer-drafts",
  "dashboard-view",
+ "debug-mode",
  "edit-resend",
  "gloo-net",
  "ideas-inbox",
@@ -1402,6 +1411,7 @@ dependencies = [
  "prompt-library",
  "protocol-schema",
  "qrcode",
+ "quote-message",
  "send_wrapper",
  "serde",
  "serde_json",

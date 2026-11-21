@@ -19,9 +19,11 @@ md-review = { path = "md-review" }
 status-card = { path = "status-card" }
 mermaid-lite = { path = "mermaid-lite" }
 composer-drafts = { path = "composer-drafts" }
+debug-mode = { path = "debug-mode" }
 prompt-library = { path = "prompt-library" }
 signin-flow = { path = "signin-flow" }
 transcript-window = { path = "transcript-window" }
+quote-message = { path = "quote-message" }
 edit-resend = { path = "edit-resend" }
 theme-catalog = { path = "theme-catalog" }
 table-export = { path = "table-export" }
