@@ -3107,6 +3107,35 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 /* feature:terminal end */
 
+/* feature:link-patterns begin */
+/* User Text Link Patterns (#1383): links made at display time read as
+   links but stay distinct from built-in path/URL links. */
+a.sx-userlink {
+  color: var(--accent-alt);
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+a.sx-userlink:hover, a.sx-userlink:focus-visible { text-decoration-style: solid; }
+a.sx-userlink > code { color: inherit; }
+.lp-rule {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+}
+.lp-rule legend { padding: 0 4px; color: var(--muted); font-size: var(--type-sm); }
+.lp-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: var(--type-sm); color: var(--muted); }
+.lp-field input { width: 100%; min-width: 0; font-family: ui-monospace, monospace; }
+.lp-row-actions, .lp-actions { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-2); }
+.lp-error { grid-column: 1 / -1; margin: 0; color: var(--danger); font-size: var(--type-sm); }
+.lp-error:empty, .lp-note:empty { display: none; }
+.lp-preview { margin: var(--space-2) 0 0; color: var(--ink); overflow-wrap: anywhere; }
+/* feature:link-patterns end */
+
 /* feature:mermaid-rendering begin */
 /* Mermaid diagrams (#1368): native SVG from mermaid-lite. Colours come
    from the theme tokens so diagrams follow light/dark and custom themes. */
