@@ -1,5 +1,5 @@
 //! Durable storage (#1271): palette commands for the Memory, Knowledge,
-//! Artifacts, and Decisions (#1485) side-panel tabs and for the session
+//! Artifacts, Decisions (#1485), and Issues (#1500) side-panel tabs and for the session
 //! memory mode. The panels themselves live in `crate::storage` and are rendered by
 //! `main.rs` when their side tab is active; this file only registers the
 //! commands with the shell, following docs/webui-shell.md. The performers
@@ -69,6 +69,23 @@ pub fn install(reg: &mut ShellHook) {
         order: 92,
         run: Rc::new(|args| crate::shell::dispatch("panel-decisions", args)),
         visible: Some(Rc::new(crate::storage::ledger_capable)),
+        enabled: None,
+        confirm: None,
+        choices: None,
+    });
+    // Local issues (#1500): listed only when the daemon advertises the
+    // `issues` bootstrap capability.
+    reg.command(Command {
+        id: "panel-issues",
+        group: Group::Session,
+        label: "Local issues",
+        detail: "Project-local issues agents filed with issue_write",
+        shortcut: "",
+        keywords: &["storage", "issues", "tracker", "todo", "tickets"],
+        argument: None,
+        order: 93,
+        run: Rc::new(|args| crate::shell::dispatch("panel-issues", args)),
+        visible: Some(Rc::new(crate::local_issues::issues_capable)),
         enabled: None,
         confirm: None,
         choices: None,
