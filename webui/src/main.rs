@@ -39,6 +39,7 @@ mod project_init;
 mod onboarding;
 mod park;
 mod permissions_explain;
+mod plan_card;
 mod steer_queue;
 mod model_menu;
 mod model_menu_view;
@@ -1260,6 +1261,8 @@ fn App() -> impl IntoView {
         });
     });
     let queue_items = RwSignal::new(Vec::<steer_queue::QueueItem>::new());
+    // Agent plan checklist (#1354): the live todowrite list.
+    let plan = RwSignal::new(plan_card::PlanState::default());
     let queue_focus = RwSignal::new(String::new());
     let editing_id = RwSignal::new(String::new());
     let edit_draft = RwSignal::new(String::new());
@@ -1829,6 +1832,7 @@ fn App() -> impl IntoView {
             tf_query.set(String::new());
             tf_idx.set(0);
             queue_items.set(Vec::new());
+            plan.set(plan_card::PlanState::default());
             editing_id.set(String::new());
             edit_draft.set(String::new());
             steer_note.set(String::new());
@@ -1912,6 +1916,11 @@ fn App() -> impl IntoView {
                 if let Some(data) = ev.data().as_string() {
                     note_live_title(sessions_cb, roots_cb, &titled_root, &data);
                     transcript_cb.update(|t| t.apply_envelope(&data));
+                    let mut plan_changed = false;
+                    plan.update_untracked(|p| plan_changed = p.apply_envelope(&data));
+                    if plan_changed {
+                        plan.notify();
+                    }
                     let on_note = |note: steer_queue::LiveNote| match note {
                         steer_queue::LiveNote::Queue(items) => {
                             let editing = editing_id.get_untracked();
@@ -5240,6 +5249,7 @@ fn App() -> impl IntoView {
                                 }}
                             </div>
                         </Show>
+                        <plan_card::PlanCard plan=plan />
                         <div class="steer-queue" id="steer-queue">
                             <Show when=move || !steer_note.get().is_empty()>
                                 <p class="steer-note" role="status">{move || steer_note.get()}</p>
