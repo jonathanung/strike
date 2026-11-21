@@ -3790,11 +3790,17 @@ try {
     { timeout: STEP_MS, interval: 200 },
   );
   const fitWidth = (await mermaidProbe()).shown;
-  await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-zoom="in"]').click()`);
+  // The message row can re-render when its turn finishes (elapsed/usage
+  // land), which remounts the block at Fit; click again while still at
+  // Fit so the check measures zoom, not that remount.
   await waitFor(
     "mermaid zoom in sizes the diagram explicitly",
     async () => {
-      const p = await mermaidProbe();
+      let p = await mermaidProbe();
+      if (p.fit) {
+        await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-zoom="in"]').click()`);
+        p = await mermaidProbe();
+      }
       return { ok: p.fit === false && p.shown > fitWidth, ...p };
     },
     { timeout: STEP_MS, interval: 200 },

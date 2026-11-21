@@ -157,18 +157,18 @@ pub fn MermaidBlock(source: String, children: Children) -> impl IntoView {
                 <span class="mmd-zoom" hidden=move || source_on.get()>
                     <button type="button" class="sx-quiet" data-mermaid-zoom="out" aria-label="Zoom out"
                         disabled=move || zoom.get() == 0
-                        on:click=move |_| zoom.update(|z| *z = step_zoom(*z, false))>"−"</button>
+                        on:click=move |_| { let _ = zoom.try_update(|z| *z = step_zoom(*z, false)); }>"−"</button>
                     <button type="button" class="sx-quiet" data-mermaid-zoom="fit" aria-label="Fit diagram to width"
-                        on:click=move |_| zoom.set(FIT)>
+                        on:click=move |_| { let _ = zoom.try_set(FIT); }>
                         {move || if zoom.get() == FIT { "Fit".to_string() } else { format!("{:.0}%", ZOOMS[zoom.get()] * 100.0) }}
                     </button>
                     <button type="button" class="sx-quiet" data-mermaid-zoom="in" aria-label="Zoom in"
                         disabled=move || zoom.get() + 1 >= ZOOMS.len()
-                        on:click=move |_| zoom.update(|z| *z = step_zoom(*z, true))>"+"</button>
+                        on:click=move |_| { let _ = zoom.try_update(|z| *z = step_zoom(*z, true)); }>"+"</button>
                 </span>
                 <button type="button" class="sx-quiet" data-mermaid-toggle=true
                     aria-pressed=move || if source_on.get() { "true" } else { "false" }
-                    on:click=move |_| source_on.update(|s| *s = !*s)>
+                    on:click=move |_| { let _ = source_on.try_update(|s| *s = !*s); }>
                     {move || toggle_label(source_on.get())}
                 </button>
             </div>
