@@ -3423,6 +3423,138 @@ try {
       await rm(join(process.cwd(), stashFile), { force: true });
     }
   }
+  // Review queue (#1324): seed two separate edits in a tracked file,
+  // accept nothing, reject the first hunk (two taps: Reject, then
+  // "Revert this hunk?") and require it reverted on disk, comment on the
+  // second hunk, then Send review and require exactly one transcript
+  // turn labelled "Review". Runs only when the seed file is unmodified
+  // so a developer's own edits are never touched; restored in finally.
+  const reviewSeed = join(process.cwd(), "AGENTS.md");
+  const reviewOriginal = await readFile(reviewSeed, "utf8");
+  const reviewStatus = await gitStatusPaths();
+  if (reviewStatus.unstaged.includes("AGENTS.md") || reviewStatus.staged.includes("AGENTS.md")) {
+    console.log("review queue smoke: skipped (AGENTS.md already modified)");
+  } else {
+    try {
+      const seeded = reviewOriginal.split("\n");
+      seeded[0] = "# strike-cli (smoke-review-first-1324)";
+      seeded.push("smoke-review-second-1324");
+      await writeFile(reviewSeed, seeded.join("\n"));
+      await clickSideTab("Review", "Review queue");
+      const reviewProbe = async () => {
+        const raw = await evaluate(`(() => {
+          const file = document.querySelector('[data-rq-file="AGENTS.md"]');
+          const hunks = file ? [...file.querySelectorAll("[data-rq-hunk]")] : [];
+          const send = document.querySelector(".rq-send-btn");
+          return JSON.stringify({
+            hunks: hunks.length,
+            first: hunks[0] ? hunks[0].textContent.includes("smoke-review-first-1324") : false,
+            summary: (document.querySelector("[data-rq-summary]") || {}).textContent || "",
+            sendDisabled: send ? send.disabled : null,
+            note: (document.querySelector(".rq-note") || {}).textContent || "",
+          });
+        })()`);
+        return JSON.parse(raw || "{}");
+      };
+      const reviewClick = async (expr, label) => {
+        await waitFor(
+          label,
+          async () => {
+            const v = await evaluate(`(() => { const b = ${expr}; if (!b) return "missing"; if (b.disabled) return "disabled"; b.click(); return "clicked"; })()`);
+            return { ok: v === "clicked", v };
+          },
+          { timeout: WAIT_MS, interval: 250 },
+        );
+      };
+      await waitFor(
+        "review queue lists two AGENTS.md hunks, send disabled",
+        async () => {
+          const p = await reviewProbe();
+          return { ok: p.hunks === 2 && p.first && p.sendDisabled === true && p.summary.includes("0 comments"), ...p };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      const firstHunk = `document.querySelector('[data-rq-file="AGENTS.md"] [data-rq-hunk] .rq-reject')`;
+      await reviewClick(firstHunk, "review reject (first tap)");
+      await waitFor(
+        "review reject asks for confirmation",
+        async () => {
+          const label = await evaluate(`(${firstHunk} || {}).textContent || ""`);
+          return { ok: String(label).includes("Revert this hunk?"), label };
+        },
+        { timeout: STEP_MS, interval: 200 },
+      );
+      await reviewClick(firstHunk, "review reject (confirm)");
+      await waitFor(
+        "rejected hunk reverted on disk and listed",
+        async () => {
+          const disk = await readFile(reviewSeed, "utf8");
+          const p = await reviewProbe();
+          return {
+            ok: !disk.includes("smoke-review-first-1324") && disk.includes("smoke-review-second-1324") && p.hunks === 1 && p.summary.includes("1 rejected hunk"),
+            ...p,
+          };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      await reviewClick(`document.querySelector('[data-rq-file="AGENTS.md"] .rq-comment-open')`, "review comment open");
+      await waitFor(
+        "review comment composer opens with a line range",
+        async () => {
+          const v = await evaluate(`(() => {
+            const ta = document.querySelector(".rq-composer textarea");
+            const start = document.querySelector('.rq-composer input[aria-label="Start line"]');
+            if (!ta || !start || !start.value) return "missing";
+            ta.value = "smoke review comment 1324";
+            ta.dispatchEvent(new Event("input", { bubbles: true }));
+            return "typed";
+          })()`);
+          return { ok: v === "typed", v };
+        },
+        { timeout: STEP_MS, interval: 200 },
+      );
+      await reviewClick(`document.querySelector(".rq-composer .rq-save")`, "review add comment");
+      await waitFor(
+        "review comment listed and send enabled",
+        async () => {
+          const p = await reviewProbe();
+          const listed = await evaluate(`[...document.querySelectorAll(".rq-comment")].some((c) => c.textContent.includes("smoke review comment 1324"))`);
+          return { ok: listed === true && p.summary.includes("1 comment") && p.sendDisabled === false, listed, ...p };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      const reviewTurns = async () =>
+        Number(
+          await evaluate(
+            `[...document.querySelectorAll('article[data-role="you"] .sx-who')].filter((e) => (e.textContent || "").trim() === "Review").length`,
+          ),
+        );
+      const turnsBefore = await reviewTurns();
+      await reviewClick(`document.querySelector(".rq-send-btn")`, "review send");
+      await waitFor(
+        "review arrives as one transcript turn labelled Review and the queue clears",
+        async () => {
+          const turns = await reviewTurns();
+          const p = await reviewProbe();
+          return { ok: turns === turnsBefore + 1 && p.summary.includes("0 comments · 0 rejected hunks"), turns, turnsBefore, ...p };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      // Let the echo turn the review started finish before later sections.
+      await waitFor(
+        "review turn completes",
+        async () => {
+          const res = await fetch(`http://127.0.0.1:${port}/v1/review`, { headers: { Authorization: `Bearer ${token}` } });
+          const body = res.ok ? await res.json() : {};
+          return { ok: res.ok && body.busy === false, status: res.status, busy: body.busy };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+    } finally {
+      await writeFile(reviewSeed, reviewOriginal);
+    }
+    await clickSideTab("Git", "Staged");
+  }
   await waitUntil(`(() => {
     if ((document.body.innerText || "").includes("session.childIsolation")) return true;
     const cmd = document.querySelector('[data-command-id="panel-worktrees"]');
