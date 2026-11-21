@@ -3,7 +3,7 @@ package server
 import (
 	"testing"
 
-	"github.com/jonathanung/strike/pkg/protocol"
+	"github.com/jonathanung/strike/internal/protocol"
 )
 
 // TestStatusTracksStickyFallback pins #1922: a root sticky ModelFallback
