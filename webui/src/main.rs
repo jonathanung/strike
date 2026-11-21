@@ -18,6 +18,7 @@ mod confirm;
 mod composer_triggers;
 mod diag;
 mod draft_size;
+mod drafts;
 mod editor;
 mod load_epoch;
 mod localfiles;
@@ -1129,6 +1130,22 @@ fn App() -> impl IntoView {
     Effect::new(move |_| {
         let _ = draft.get();
         sync_composer_height_soon();
+    });
+    // Per-session drafts (#1367): the composer text belongs to the
+    // viewed session. Every switch — whichever of the active_root
+    // setters made it — saves the outgoing session's draft and restores
+    // the incoming one; every edit (typing, recall, send clearing it)
+    // is persisted under `strike.draft.<root>`.
+    let draft_book = StoredValue::new_local(drafts::book());
+    Effect::new(move |_| {
+        let root = active_root.get();
+        let text = draft.get();
+        if let Some(restored) = draft_book
+            .try_update_value(|book| book.sync(&root, &text))
+            .flatten()
+        {
+            draft.set(restored);
+        }
     });
     let loading = RwSignal::new(true);
     let meta_epoch = RwSignal::new(LoadEpoch::new());
@@ -2977,6 +2994,9 @@ fn App() -> impl IntoView {
     // confirmation when one was required.
     let on_deleted = Callback::new(move |id: String| {
         let was_live = roots.get_untracked().iter().any(|row| row.id == id);
+        // Drop the deleted session's draft (#1367) before the fallback
+        // switch below, so it is not saved back as the outgoing draft.
+        draft_book.update_value(|book| book.forget(&id));
         pins.update(|list| list.retain(|p| p != &id));
         save(
             "strike.pins",
