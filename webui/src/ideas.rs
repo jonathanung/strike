@@ -236,7 +236,7 @@ pub fn IdeasBadge(base: RwSignal<String>, token: RwSignal<String>) -> impl IntoV
         Some(text) => {
             let label = format!("{} open ideas", open.get());
             view! {
-                <button type="button" class="ideas-badge" data-ideas-badge="true" title=label.clone() aria-label=label on:click=move |_| { let _ = crate::shell::host::set_view("ideas"); }>
+                <button type="button" class="ideas-badge" data-ideas-badge="true" title=label.clone() aria-label=label on:click=move |_| { let _ = crate::shell::set_view("ideas"); }>
                     <span class="ideas-badge-label">"Ideas"</span>
                     <span class="badge">{text}</span>
                 </button>
