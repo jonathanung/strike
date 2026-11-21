@@ -854,6 +854,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "md-review"
+version = "0.1.0"
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1317,6 +1321,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "signin-flow"
+version = "0.1.0"
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1356,12 +1364,14 @@ dependencies = [
  "js-sys",
  "leptos",
  "load-guard",
+ "md-review",
  "protocol-schema",
  "qrcode",
  "quote-message",
  "send_wrapper",
  "serde",
  "serde_json",
+ "signin-flow",
  "status-card",
  "theme-catalog",
  "transcript-window",
