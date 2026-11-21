@@ -32,6 +32,7 @@ import (
 	"github.com/jonathanung/strike/internal/frontend/server/terminal"
 	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/persist/suggestion"
 	"github.com/jonathanung/strike/internal/persist/taskrun"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/version"
@@ -243,6 +244,10 @@ type Server struct {
 	clientMsgOnce  sync.Once
 	clientMsgStore *clientMsgDedupe
 
+	// suggestOnce lazily opens the Ideas inbox store (#1323).
+	suggestOnce  sync.Once
+	suggestStore *suggestion.Store
+	suggestErr   error
 	// prWatch caches PR/check polls per session (#1356, prwatch.go).
 	prWatch prWatchState
 
@@ -514,6 +519,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/git/stash/drop", s.handleGitStashDrop)
 	s.mux.HandleFunc("GET /v1/git/branch-changes", s.handleGitBranchChanges)
 	s.mux.HandleFunc("GET /v1/git/branch-diff", s.handleGitBranchDiff)
+	s.mux.HandleFunc("GET /v1/git/pr", s.handleGitPRPreview)
+	s.mux.HandleFunc("POST /v1/git/pr", s.handleGitPRCreate)
 	s.mux.HandleFunc("GET /v1/git/show", s.handleGitShow)
 	s.mux.HandleFunc("POST /v1/git/stage", s.handleGitStage)
 	s.mux.HandleFunc("POST /v1/git/unstage", s.handleGitUnstage)
@@ -717,6 +724,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/notifications/push-subscriptions", s.handlePushSubscribe)
 	s.mux.HandleFunc("DELETE /v1/notifications/push-subscriptions", s.handlePushUnsubscribe)
 	s.mux.HandleFunc("POST /v1/notifications/seen", s.handleNotificationSeen)
+	s.mux.HandleFunc("GET /v1/suggestions", s.handleSuggestionsList)
+	s.mux.HandleFunc("POST /v1/suggestions", s.handleSuggestionCreate)
+	s.mux.HandleFunc("PUT /v1/suggestions/prefs", s.handleSuggestionPrefs)
+	s.mux.HandleFunc("POST /v1/suggestions/{id}/accept", s.handleSuggestionAccept)
+	s.mux.HandleFunc("POST /v1/suggestions/{id}/dismiss", s.handleSuggestionDismiss)
+	s.mux.HandleFunc("POST /v1/suggestions/{id}/snooze", s.handleSuggestionSnooze)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
 	s.mux.HandleFunc("GET /v1/terminals", s.handleTerminalsList)
 	s.mux.HandleFunc("POST /v1/terminals", s.handleTerminalCreate)
