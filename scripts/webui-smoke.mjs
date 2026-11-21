@@ -8414,8 +8414,21 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+  // #1963: the fallback menu shows what is set: the confirmed pick's row
+  // is marked Current, and "No fallback" is not.
   await palettePick("model.fallback");
   await delay(250);
+  await waitFor(
+    "fallback menu marks the current fallback",
+    async () => {
+      const raw = await evaluate(`JSON.stringify([...document.querySelectorAll('[data-choice-id]')]
+        .filter((el) => (el.querySelector('.path')?.textContent || "").startsWith("Current · "))
+        .map((el) => el.getAttribute("data-choice-id")))`);
+      const current = JSON.parse(raw || "[]");
+      return { ok: current.length === 1 && current[0].includes("\t"), current };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
   await evaluate(`document.querySelector('[data-choice-id="none"]')?.click()`);
   await waitFor(
     "fallback chip clears on daemon confirmation",
@@ -8425,6 +8438,19 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+  await palettePick("model.fallback");
+  await delay(250);
+  await waitFor(
+    "fallback menu marks No fallback as current once cleared",
+    async () => {
+      const detail = await evaluate(`document.querySelector('[data-choice-id="none"] .path')?.textContent || ""`);
+      return { ok: detail.startsWith("Current · "), detail };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  // Close the palette by re-picking "No fallback" (a no-op clear).
+  await evaluate(`document.querySelector('[data-choice-id="none"]')?.click()`);
+  await delay(250);
   await palettePick("model.fast");
   await delay(250);
   await evaluate(`document.querySelector('[data-choice-id="on"]')?.click()`);

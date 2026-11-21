@@ -100,6 +100,9 @@ type apiResponse struct {
 		Content      apiContent `json:"content"`
 		FinishReason string     `json:"finishReason"`
 	} `json:"candidates"`
+	PromptFeedback *struct {
+		BlockReason string `json:"blockReason"`
+	} `json:"promptFeedback,omitempty"`
 	UsageMetadata *usageMetadata `json:"usageMetadata,omitempty"`
 }
 
@@ -121,6 +124,11 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 			return
 		}
 		if len(resp.Candidates) == 0 {
+			if resp.PromptFeedback != nil && resp.PromptFeedback.BlockReason != "" {
+				// The prompt itself was blocked: a refusal, not an outage.
+				ch <- provider.StreamEvent{Type: provider.EventDone, StopReason: provider.StopReasonRefusal, Usage: googleUsage(resp.UsageMetadata)}
+				return
+			}
 			base.Fail(ch, fmt.Errorf("google: response has no candidates"))
 			return
 		}
@@ -141,16 +149,34 @@ func (p *Provider) Stream(ctx context.Context, req provider.Request) (<-chan pro
 				}}
 			}
 		}
-		done := provider.StreamEvent{Type: provider.EventDone, StopReason: candidate.FinishReason}
-		if resp.UsageMetadata != nil {
-			done.Usage = &provider.Usage{
-				InputTokens:  resp.UsageMetadata.PromptTokenCount,
-				OutputTokens: resp.UsageMetadata.CandidatesTokenCount,
-				TotalTokens:  resp.UsageMetadata.TotalTokenCount,
-			}
+		ch <- provider.StreamEvent{
+			Type:       provider.EventDone,
+			StopReason: googleStopReason(candidate.FinishReason),
+			Usage:      googleUsage(resp.UsageMetadata),
 		}
-		ch <- done
 	}), nil
+}
+
+// googleStopReason normalizes Gemini finishReason. A safety or policy block
+// (SAFETY, PROHIBITED_CONTENT, BLOCKLIST, SPII) is the typed
+// provider.StopReasonRefusal (#1963); everything else passes through.
+func googleStopReason(raw string) string {
+	switch raw {
+	case "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII":
+		return provider.StopReasonRefusal
+	}
+	return raw
+}
+
+func googleUsage(u *usageMetadata) *provider.Usage {
+	if u == nil {
+		return nil
+	}
+	return &provider.Usage{
+		InputTokens:  u.PromptTokenCount,
+		OutputTokens: u.CandidatesTokenCount,
+		TotalTokens:  u.TotalTokenCount,
+	}
 }
 
 func (p *Provider) endpoint(model string) string {
