@@ -75,11 +75,17 @@ pub fn TranscriptPane(
     };
     let draft = RwSignal::new(String::new());
     let pinned = RwSignal::new(true);
+    // A share link renders this pane read-only (#1565): no rename, retry,
+    // fork, regenerate, export, or Share of its own.
+    let read_only = use_context::<crate::share::ReadOnlyTranscript>().is_some();
     let cursor = RwSignal::new(None::<u32>);
     let cursor_session = RwSignal::new(String::new());
     let rename_for = RwSignal::new(String::new());
     let seen_session = RwSignal::new(None::<String>);
     let win_start = RwSignal::new(tw::TAIL);
+    // #1372: per-session reasoning toggle, off by default; reset on
+    // session switch below and on reload (never persisted).
+    let show_reasoning = RwSignal::new(false);
     Effect::new(move |_| {
         let next = session.get();
         let prev = seen_session.get_untracked();
@@ -99,6 +105,7 @@ pub fn TranscriptPane(
         win_start.set(tw::TAIL);
         folds.map.set(HashMap::new());
         folds.dismissed.update_untracked(|d| *d = None);
+        show_reasoning.set(false);
     });
     let scroller = NodeRef::<leptos::html::Div>::new();
     let scroller_fx = scroller;
@@ -368,6 +375,9 @@ pub fn TranscriptPane(
             pinned.set(false);
             scroll_message(next);
         };
+        if read_only && matches!(key.as_str(), "t" | "f" | "r" | "g" | "e") {
+            return;
+        }
         match key.as_str() {
             "j" | "ArrowDown" => {
                 ev.prevent_default();
@@ -440,6 +450,10 @@ pub fn TranscriptPane(
             "e" => {
                 ev.prevent_default();
                 export_timeline.run(());
+            }
+            k if k == crate::reasoning::TOGGLE_KEY => {
+                ev.prevent_default();
+                show_reasoning.update(|v| *v = !*v);
             }
             _ => {}
         }
@@ -563,9 +577,27 @@ pub fn TranscriptPane(
                     <button type="button" class="sx-quiet" on:click=move |_| commit_rename()>"Save"</button>
                     <button type="button" class="sx-quiet" on:click=cancel_rename>"Cancel"</button>
                 </Show>
+                <Show when=move || !read_only && !editing.get()>
+                    <button type="button" class="sx-quiet" data-share-open="true" title="Share a read-only link to this session"
+                        on:click=move |_| crate::share::request_open()>"Share"</button>
+                </Show>
             </div>
             <Show when=move || !note.get().is_empty()>
                 <p class="sx-note" role="alert">{move || note.get()}</p>
+            </Show>
+            // #1372: the toggle appears once the session has reasoning;
+            // a session without any renders nothing new.
+            <Show when=move || transcript.with(|t| !t.reasoning.is_empty())>
+                <div class="sx-toolbar sx-reasoning-toolbar">
+                    <button
+                        type="button"
+                        class="sx-quiet"
+                        data-reasoning-toggle="true"
+                        title="Show or hide model reasoning for this session (h)"
+                        aria-pressed=move || if show_reasoning.get() { "true" } else { "false" }
+                        on:click=move |_| show_reasoning.update(|v| *v = !*v)
+                    >{move || crate::reasoning::toggle_label(show_reasoning.get())}</button>
+                </div>
             </Show>
             {move || {
                 // Count what is visibly open among the folds that exist
@@ -619,8 +651,9 @@ pub fn TranscriptPane(
                 <Show when=move || !loading.get() && transcript.with(|t| t.messages.is_empty()) && load_error.get().is_empty()>
                     <div class="sx-empty">
                         <strong>{move || empty_headline(tick.get())}</strong>
-                        <p>"Send a message to start."</p>
+                        <p>{if read_only { "Nothing in this session yet." } else { "Send a message to start." }}</p>
                         <button
+                            hidden=read_only
                             type="button"
                             class="secondary"
                             data-add-provider="true"
@@ -665,14 +698,32 @@ pub fn TranscriptPane(
                                 // each `<details open>` re-syncs with the
                                 // fold state (see `FoldState`).
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
+                                // #1372: reasoning renders above the line
+                                // it preceded (below a user line, which
+                                // only holds a turn's trailing reasoning),
+                                // and only while the toggle is on.
+                                let thought = r.reasoning.clone().filter(|_| show_reasoning.get());
+                                let below = r.msg.role == Role::You;
+                                let (above, after) = if below { (None, thought) } else { (thought, None) };
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, r.verify, r.tail, fold_open, folds)}
+                                    {above.map(|text| reasoning_block(text, false))}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, r.verify, r.steer, r.tail, fold_open, folds)}
+                                    {after.map(|text| reasoning_block(text, false))}
                                 }
                             })
                         }
                     }
                 />
+                {move || {
+                    // #1372: reasoning still streaming, not yet attached
+                    // to a line, at the tail of the turn.
+                    if !show_reasoning.get() {
+                        return None;
+                    }
+                    let live = transcript.with(|t| t.reasoning.live().to_string());
+                    (!live.trim().is_empty()).then(|| reasoning_block(live, true))
+                }}
             </div>
             <Show when=move || !pinned.get() && transcript.with(|t| !t.messages.is_empty())>
                 <button type="button" class="sx-jump" on:click=jump>"Latest"</button>
@@ -813,7 +864,9 @@ struct RowData {
     current: Option<crate::transcript_find::TMatch>,
     elapsed: Option<String>,
     usage: Option<(String, String)>,
+    reasoning: Option<String>,
     verify: Option<crate::turn_verify::TurnVerify>,
+    steer: Option<crate::steer_ack::AckState>,
     tail: Option<crate::tool_tail::ToolTail>,
 }
 
@@ -842,9 +895,25 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
         usage: t
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
+        reasoning: t.reasoning.for_message(msg.id).map(str::to_owned),
         verify: t.verify_for(msg.id).cloned(),
+        steer: t.steer_acks.get(msg.id),
         tail: t.tail_for(msg.id).cloned(),
     })
+}
+
+/// One reasoning block (#1372): muted, collapsible, labelled as not the
+/// answer. Open when shown — the user asked to see it.
+fn reasoning_block(text: String, live: bool) -> impl IntoView {
+    view! {
+        <details class="sx-reasoning" data-reasoning=if live { "live" } else { "done" } open=true>
+            <summary>
+                <span class="sx-reasoning-label">{crate::reasoning::block_label(live)}</span>
+                <span class="sx-reasoning-note">"not part of the answer"</span>
+            </summary>
+            <pre class="sx-reasoning-text">{text}</pre>
+        </details>
+    }
 }
 
 /// Runs `f` in a task after the current one, by which point pending
@@ -1055,6 +1124,7 @@ fn message_view(
     turn_elapsed: Option<String>,
     turn_usage: Option<(String, String)>,
     turn_verify: Option<crate::turn_verify::TurnVerify>,
+    steer: Option<crate::steer_ack::AckState>,
     tail: Option<crate::tool_tail::ToolTail>,
     fold_open: bool,
     folds: FoldState,
@@ -1088,6 +1158,13 @@ fn message_view(
     // no attribute.
     let turn_stop: Option<String> =
         crate::turn_failure::stop_reason_of(&msg.key).map(str::to_string);
+    // #1359: compaction / budget markers carry their kind as a hook for
+    // scoped styling and browser checks; other lines have no attribute.
+    let compaction: Option<String> = msg
+        .key
+        .strip_prefix(crate::compaction_marks::KEY_PREFIX)
+        .map(str::to_string);
+    let compaction_fold = compaction.is_some();
     let auth_retry = retry_text.trim().to_string();
     let stamp = line_stamp(msg.at_ms);
     let stamp_full = line_full_time(msg.at_ms);
@@ -1151,7 +1228,7 @@ fn message_view(
     // "Copy failed" instead of silence. Reverts after 2s.
     let copy_state = RwSignal::new(None::<bool>);
     view! {
-        <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role data-kind=notice_kind data-turn-stop=turn_stop>
+        <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role data-kind=notice_kind data-turn-stop=turn_stop data-compaction=compaction>
             <header>
                 {if find_title {
                     view! { <span class="sx-who"><crate::transcript_find::MarkedText text=title.clone() kind="inline" ranges=title_ranges current=cur_title /></span> }.into_any()
@@ -1215,6 +1292,9 @@ fn message_view(
             } else {
                 view! { <p class="sx-body">{body.clone()}</p> }.into_any()
             }}
+            {steer.map(|ack| view! {
+                <p class="steer-ack" data-steer-state=ack.key() role="note">{ack.text()}</p>
+            })}
             {if !prose && !chips.is_empty() {
                 view! {
                     <div class="sx-chips">
@@ -1260,6 +1340,8 @@ fn message_view(
                     "Diff"
                 } else if auth_notice {
                     "Details"
+                } else if compaction_fold {
+                    "Summary and residue"
                 } else {
                     "Output"
                 };

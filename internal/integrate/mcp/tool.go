@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/jonathanung/strike/harness/tool"
@@ -13,6 +14,15 @@ import (
 
 // Permission is the permission.Ruleset name for all MCP-backed tools.
 const Permission = "mcp"
+
+// errCallTimeout is the cancel cause when a tools/call watchdog fires.
+var errCallTimeout = errors.New("mcp tool call timed out")
+
+// elicitCaller is a session that can answer elicitation/create while a
+// tools/call is in flight (stdio clients).
+type elicitCaller interface {
+	CallToolElicit(ctx context.Context, name string, args json.RawMessage, fn ElicitHandler) (callToolResult, error)
+}
 
 type bridgeTool struct {
 	client  session
@@ -113,11 +123,36 @@ func (t *bridgeTool) Execute(ctx context.Context, args json.RawMessage, tc *tool
 		return tool.Result{}, mapMCPError(t.client.deadErr())
 	}
 
-	callCtx, cancel := context.WithTimeout(ctx, defaultCallTimeout)
-	defer cancel()
+	// The call timeout is a watchdog rather than a fixed deadline: it stops
+	// while the user answers an elicitation (#1353), since a person may take
+	// longer than a server, and restarts when the answer goes back.
+	callCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	watchdog := time.AfterFunc(defaultCallTimeout, func() { cancel(errCallTimeout) })
+	defer watchdog.Stop()
 
-	res, err := t.client.CallTool(callCtx, t.mcpName, args)
+	var res callToolResult
+	var err error
+	if ec, ok := t.client.(elicitCaller); ok && tc.Elicit != nil {
+		res, err = ec.CallToolElicit(callCtx, t.mcpName, args, func(_ context.Context, p ElicitParams) ElicitResult {
+			watchdog.Stop()
+			defer watchdog.Reset(defaultCallTimeout)
+			answer := tc.Elicit(callCtx, tool.ElicitRequest{
+				Server:          t.server,
+				Message:         p.Message,
+				Mode:            p.Mode,
+				RequestedSchema: p.RequestedSchema,
+				URL:             p.URL,
+			})
+			return ElicitResult{Action: answer.Action, Content: answer.Content}
+		})
+	} else {
+		res, err = t.client.CallTool(callCtx, t.mcpName, args)
+	}
 	if err != nil {
+		if errors.Is(context.Cause(callCtx), errCallTimeout) {
+			return tool.Result{}, tool.ErrTimeout(err.Error())
+		}
 		return tool.Result{}, mapMCPError(err)
 	}
 

@@ -713,6 +713,10 @@ func (s *Server) handleEvent(ctx context.Context, ev protocol.Event) error {
 	case protocol.QuestionAsked:
 		// No ACP elicitation mapping yet — dismiss so the turn cannot hang.
 		return s.handleQuestionAsked(ctx, e)
+	case protocol.ElicitationRequested:
+		// MCP elicitation is not mapped onto ACP yet (#1353 follow-up):
+		// cancel so the paused MCP call settles.
+		return s.handleElicitationRequested(ctx, e)
 	}
 
 	s.mu.Lock()
@@ -759,6 +763,29 @@ func (s *Server) handleQuestionAsked(ctx context.Context, e protocol.QuestionAsk
 		SessionID: sid,
 		Update: contentChunk("agent_thought_chunk",
 			"question tool dismissed (ACP adapter does not map elicitation yet)"),
+	})
+}
+
+func (s *Server) handleElicitationRequested(ctx context.Context, e protocol.ElicitationRequested) error {
+	submitCtx, cancel := context.WithTimeout(ctx, s.opts.SubmitTimeout)
+	defer cancel()
+	if err := s.submit(submitCtx, protocol.ElicitationReply{RequestID: e.RequestID, Action: protocol.ElicitationCancel}); err != nil {
+		return nil // best-effort; the call still settles when the turn ends
+	}
+	s.mu.Lock()
+	sid := s.opts.SessionID
+	ready := s.sessionReady
+	s.mu.Unlock()
+	if !ready {
+		return nil
+	}
+	if sid == "" {
+		sid = "strike"
+	}
+	return s.notify("session/update", SessionUpdateNotification{
+		SessionID: sid,
+		Update: contentChunk("agent_thought_chunk",
+			"MCP input request cancelled (ACP adapter does not map elicitation yet)"),
 	})
 }
 
