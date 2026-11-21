@@ -6,7 +6,7 @@ and organisational folders, search across titles and recent transcript
 text, delegated children nested in the conductor view), a transcript over
 `/v1/live/events`, a composer that can steer or queue (split send,
 visible engine queue, stop, context hold) and set the real
-permission mode, and a side panel with Activity, Files, Changes, Git, Worktrees,
+permission mode, and a side panel with Activity, Files, Changes, Git, Review, Worktrees,
 Memory, Knowledge, and Artifacts.
 Apps is a separate surface: a launcher and one queue, GitHub triage
 (`docs/webui-apps.md`).
@@ -500,6 +500,32 @@ transcript folds away) are not searched and find does not expand
 collapsed cards to reveal a match; a case-sensitive toggle is likewise
 deferred until someone asks for it.
 
+## Review queue
+
+The Review side tab (`webui/src/review_queue.rs`, daemon routes in
+`internal/frontend/server/review.go`, #1324) lists the live session's
+unstaged working-tree changes as files and hunks from the same `git diff`
+the Git panel reads. Each hunk can be accepted (a mark kept with the
+session), rejected (reverted at once with `git apply -R` of that one hunk,
+after a second confirming tap), or commented on with a file + line range.
+Comments, accept marks, and rejections are stored per session under
+`<session dir>/review/<id>.json` until **Send review** delivers every
+comment and rejection as one user turn. That turn opens with a fixed
+header, and the transcript labels it "Review" instead of showing it as
+typed text. Reject and Send wait for the session to be idle; read-only
+attach shows the queue disabled with the daemon's reason.
+
+Not in this slice:
+
+- Untracked (new) files and staged changes: the queue reads unstaged
+  `git diff` only. Review a new file in the Git panel.
+- Delegated children's worktrees: the queue follows the open root's
+  working tree. Reviewing a child's isolated worktree needs a child-scoped
+  cwd on these routes.
+- Binary, mode-only, and git-quoted paths are listed with a note and no
+  hunk actions.
+- Accept is a review mark only; it does not stage the hunk.
+
 ## Markdown Review
 
 The document pane's rendered Markdown view takes anchored comments
@@ -624,3 +650,13 @@ Stall is already a real badge when the team roster sets `budget.stall`.
 Retry is `team.spawn` of the same objective, which starts a new child; it
 does not resume the old session. Stop is `team.child_interrupt`. None of
 these need a new panel.
+
+## Instance backup
+
+Settings → Backup ships export and dry-run-first restore for sessions,
+memory, schedules and non-secret settings (#1339, see
+`docs/instance-backup.md`). Knowledge pins, artifacts, attachments,
+goals/autopilot state, workspaces and their rules, issues, plans and the
+ledger are not in archive version 1; the manifest names them as
+`not-yet-included`. Passphrase encryption is not offered: the file says
+`"encrypted": false` and secrets are excluded regardless.

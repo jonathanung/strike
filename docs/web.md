@@ -1155,6 +1155,8 @@ Permission asks appear as `permission.asked` events; resolve with
 | `PUT` | `/v1/knowledge` | **yes** | Pin (`{path,note?,author?,scope?}`). Notes are scrubbed. Blocked in attach-only. |
 | `DELETE` | `/v1/knowledge` | **yes** | Unpin (`{path,scope?}`). Blocked in attach-only. |
 | `GET` | `/v1/memory/export` | mode | Download portable `strike-memory.json` (TUI format) |
+| `GET` | `/v1/backup/export` | mode | Download `strike-backup.json`: whole-gateway archive (sessions, memory, schedules, non-secret settings) with manifest, sha256 per section, and named exclusions (#1339) |
+| `POST` | `/v1/backup/restore` | live (dry run: mode) | Body is the archive. `?dryRun=1` reports create/skip/copy per record without writing; otherwise restores through each store. Never overwrites: identical records skip, differing ones restore as copies |
 | `POST` | `/v1/memory/import` | **yes** | Import (`{path}` or `{data}`, `replace?`); blocked in attach-only |
 | `POST` | `/v1/issues` | **yes** | Create issue (`{title,body?}`); blocked in attach-only |
 | `POST` | `/v1/issues/{id}/close` | **yes** | Close issue; blocked in attach-only |
@@ -1187,6 +1189,7 @@ writes remain coherent via the underlying stores; browser reads are race-safe.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/v1/files/search` | mode | Workspace file search (`q`, `limit`≤50) for `@file` completion; root-scoped via `host.Files.SearchFiles` |
+| `GET` | `/v1/files/grep` | mode | Search in files (#1406): plain-text, case-insensitive substring search (`q`, `limit` default 200, ≤500). JSON: `matches` (`path`, 1-based `line`, trimmed `snippet`), `capped`, `filesScanned`. Same index and root scoping as `/v1/files/search` (`.gitignore` honored, `.git` and noise dirs skipped) plus the allowed-root ceiling; symlinks and binary files (NUL in the first 8000 bytes) skipped. Walk caps: 5000 files, 1 MiB per file, 64 MiB per search, 20 matches per file, 5 s; any cap hit sets `capped: true`. 501 when the host has no content search. |
 | `GET` | `/v1/sessions/{id}/reference` | mode | Size of an `@session:<id>` reference (#1550): `chars` of the exact quoted block the daemon attaches (summary + last 10 turns), `tokens` (~4 chars/token, `estimated`), `turns`, `omitted`, `hasSummary`, `self`. 404 for a missing/pruned session. Display only. |
 | `GET` | `/v1/file/view` | mode | Document read (`path`). JSON: content, sha256, mtimeUnixNano, binary, truncated, writable, writeBlock. Work-root confined; symlinks rejected. An explicit allowed-root ceiling (workspace `AllowedRoots`, when the registry grows one) also rejects paths outside that list. |
 | `GET` | `/v1/file/raw` | mode | One workspace file's bytes (`path`) for the document viewer's image/binary view (#1393). Same confinement as `/v1/file/view` (work root, symlinks rejected, allowed-root ceiling). Allowlisted images (png, jpeg, gif, webp, avif, bmp, ico, svg) are served `inline` with their MIME; everything else as `application/octet-stream` `attachment`. Capped at 1 MiB (the document-view cap): **413** `too_large` past it. Responses carry `Content-Security-Policy: default-src 'none'; …; sandbox` and `nosniff`. Normal `/v1` auth (bearer or the HttpOnly cookie); query tokens are refused. |
