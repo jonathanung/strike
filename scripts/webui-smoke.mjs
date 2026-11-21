@@ -4443,6 +4443,72 @@ try {
     throw new Error(`schedule duplicate saved state copy=${JSON.stringify(schedCopy)} orig=${JSON.stringify(schedOrig)}`);
   }
 
+  // Script schedules (#1777): Script is an explicit choice, the first
+  // submit only shows the confirm step (full command, mode, sandbox dial)
+  // and writes nothing; "Confirm and arm" creates it armed.
+  const scriptCmd = "echo smoke-script-1777";
+  await evaluate(`document.querySelector(".sched .section-head button.secondary").click()`);
+  await evaluate(`(() => {
+    const name = document.getElementById("schedule-name");
+    name.value = "Smoke script";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    const src = document.getElementById("schedule-source");
+    src.value = "script";
+    src.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  await waitFor(
+    "script command field after choosing Script",
+    async () => ({ ok: (await evaluate(`!!document.getElementById("schedule-command")`)) === true }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    const cmd = document.getElementById("schedule-command");
+    cmd.value = ${JSON.stringify(scriptCmd)};
+    cmd.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector(".sched-form .sched-actions .primary").click();
+  })()`);
+  await waitFor(
+    "script confirm step repeats the command, mode, and sandbox dial",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        cmd: (document.getElementById("schedule-confirm-command") || {}).textContent || "",
+        text: (document.querySelector(".sched-confirm") || {}).innerText || "",
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: p.cmd === scriptCmd && (p.text || "").includes("Mode:") && (p.text || "").includes("Sandbox:"),
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const schedBeforeArm = await (
+    await fetch(`http://127.0.0.1:${port}/v1/schedules`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (schedBeforeArm.schedules.some((s) => s.name === "Smoke script")) {
+    throw new Error("script schedule was written before the confirm step");
+  }
+  await evaluate(`document.getElementById("schedule-confirm").click()`);
+  await waitFor(
+    "script schedule armed notice and script badge",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        text: document.body ? document.body.innerText : "",
+        badge: [...document.querySelectorAll(".sched-row")].some((r) => r.textContent.includes("Smoke script") && !!r.querySelector(".sched-script-badge")),
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: (p.text || "").includes("Script schedule armed") && p.badge === true, badge: p.badge };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const schedAfterArm = await (
+    await fetch(`http://127.0.0.1:${port}/v1/schedules`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  const armed = schedAfterArm.schedules.find((s) => s.name === "Smoke script");
+  if (!armed || armed.source !== "script" || armed.command !== scriptCmd || !armed.armedAt || armed.overlap !== "skip") {
+    throw new Error(`script schedule armed state ${JSON.stringify(armed)}`);
+  }
+
   // Scheduler presets (#1495): the section lists the daemon catalog, Apply
   // round-trips the checked ids through POST /v1/scheduler/presets, and the
   // selection survives a reload (it is the daemon's persisted global state).
