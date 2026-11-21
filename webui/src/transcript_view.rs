@@ -1317,12 +1317,13 @@ fn turn_files_view(
                                     view! { <li><span class="turn-files-path">{path}</span></li> }.into_any()
                                 } else {
                                     let open = path.clone();
+                                    let attr = path.clone();
                                     view! {
                                         <li>
                                             <a
                                                 class="turn-files-path"
                                                 href="#file"
-                                                data-path=path.clone()
+                                                data-path=attr
                                                 on:click=move |ev: web_sys::MouseEvent| {
                                                     ev.prevent_default();
                                                     dispatch_open_file(&open, 0);
