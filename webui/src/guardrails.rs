@@ -387,6 +387,36 @@ pub fn daemon_reason(err: &str) -> String {
     err.trim().to_string()
 }
 
+/// Fallback line while the group cannot render: still loading, or a daemon
+/// that does not report the guardrail dials (older than #1804).
+pub fn unavailable_note(snapshot: &Value) -> &'static str {
+    if snapshot.is_object() {
+        "This daemon does not report the guardrail dials. Update strike on the gateway host to edit them here."
+    } else {
+        "Reading the daemon's guardrail dials…"
+    }
+}
+
+/// Re-check a choice dial's radios against the daemon value. A browser
+/// radio flips on click; when the change is cancelled at the confirm or
+/// rejected by the daemon, this puts the shown choice back.
+fn sync_radios(key: &str, dials: RwSignal<Value>) {
+    use wasm_bindgen::JsCast;
+    let value = dials.with_untracked(|d| choice_value(lookup(d, key)));
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return;
+    };
+    let Ok(list) = doc.query_selector_all(&format!("input[name=\"{}\"]", dom_id(key))) else {
+        return;
+    };
+    for i in 0..list.length() {
+        if let Some(input) = list.item(i).and_then(|n| n.dyn_into::<web_sys::HtmlInputElement>().ok()) {
+            let choice = input.get_attribute("data-choice").unwrap_or_default();
+            input.set_checked(choice == value);
+        }
+    }
+}
+
 fn dom_id(key: &str) -> String {
     format!("guard-{}", key.replace('.', "-"))
 }
@@ -398,13 +428,40 @@ pub fn Guardrails(
     status: RwSignal<String>,
     dials: RwSignal<Value>,
 ) -> impl IntoView {
+    // The page's own settings read swallows errors; read once here so a
+    // failure is shown instead of a "reading" line that never resolves.
+    let load_error = RwSignal::new(String::new());
+    let load = move || {
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        load_error.set(String::new());
+        spawn_local(async move {
+            match get_json::<Value>(&b, &t, "/v1/settings").await {
+                Ok(v) => dials.set(v),
+                Err(e) => load_error.set(e),
+            }
+        });
+    };
+    load();
+    let fallback = move || {
+        let err = load_error.get();
+        if !err.is_empty() {
+            view! {
+                <p class="banner" role="alert" data-guard-load-error="">{format!("Could not read the guardrail dials: {err}")}</p>
+                <button type="button" class="secondary" on:click=move |_| load()>"Retry"</button>
+            }
+            .into_any()
+        } else {
+            let text = dials.with(|d| unavailable_note(d));
+            view! { <p class="hint">{text}</p> }.into_any()
+        }
+    };
     view! {
         <section class="card settings-section guardrails" id="settings-guardrails" data-section="guardrails">
             <h2 class="panel-title">"Guardrails"</h2>
             <p class="hint" data-guard-note="">{APPLY_NOTE}</p>
             <Show
                 when=move || dials.with(|d| d.get("turnTimeoutS").is_some())
-                fallback=|| view! { <p class="hint">"Reading the daemon's guardrail dials…"</p> }
+                fallback=fallback
             >
                 <div class="guard-group">
                     {SESSION_DIALS.iter().map(|spec| view! { <DialRow spec=spec base=base token=token status=status dials=dials /> }).collect_view()}
@@ -456,6 +513,9 @@ fn DialRow(
                 Err(e) => error.set(daemon_reason(&e)),
             }
             busy.set(false);
+            if matches!(spec.kind, Kind::Choice(_)) {
+                sync_radios(spec.key, dials);
+            }
         });
     };
     let submit = move |value: String| {
@@ -470,6 +530,10 @@ fn DialRow(
             let v = value.clone();
             if !ask(request, Rc::new(move || apply(v.clone()))) {
                 status.set(BUSY.into());
+            }
+            // Until the confirm is accepted the daemon value stands.
+            if matches!(spec.kind, Kind::Choice(_)) {
+                sync_radios(spec.key, dials);
             }
         } else {
             apply(value);
@@ -690,6 +754,12 @@ mod tests {
         let req = confirm_for(spec("childIsolation"), Some(&json!("worktree")), "shared");
         assert!(req.body.contains("default mode"));
         assert!(!req.body.to_lowercase().contains("unsafe"));
+    }
+
+    #[test]
+    fn unavailable_note_tells_loading_from_old_daemon() {
+        assert!(unavailable_note(&Value::Null).contains("Reading"));
+        assert!(unavailable_note(&json!({"theme": "x"})).contains("does not report"));
     }
 
     #[test]
