@@ -97,26 +97,22 @@ pub fn ConfigSources(
                     <p class="hint">"The daemon reported no config sources."</p>
                 </Show>
                 <ol class="config-source-list">
-                    <For
-                        each=move || rows.get().into_iter().enumerate().collect::<Vec<_>>()
-                        key=|(i, row)| (*i, row.clone())
-                        children=move |(_, row)| {
-                            let present = row.exists;
-                            view! {
-                                <li
-                                    class="config-source"
-                                    data-config-source=row.display.clone()
-                                    data-exists=if present { "true" } else { "false" }
-                                >
-                                    <span class="name">{row.title().to_string()}</span>
-                                    <code class="path">{row.display.clone()}</code>
-                                    <span class="meta">
-                                        {format!("{} · {} · {}", row.scope_label(), row.kind_label(), row.state_label())}
-                                    </span>
-                                </li>
-                            }
+                    {move || rows.get().into_iter().map(|row| {
+                        let exists = if row.exists { "true" } else { "false" };
+                        let title = row.title().to_string();
+                        let meta = format!("{} · {} · {}", row.scope_label(), row.kind_label(), row.state_label());
+                        view! {
+                            <li
+                                class="config-source"
+                                data-config-source=row.display.clone()
+                                data-exists=exists
+                            >
+                                <span class="name">{title}</span>
+                                <code class="path">{row.display.clone()}</code>
+                                <span class="meta">{meta}</span>
+                            </li>
                         }
-                    />
+                    }).collect_view()}
                 </ol>
                 <button type="button" class="secondary" data-action="reload-config-sources" on:click=move |_| refresh()>
                     "Refresh"
