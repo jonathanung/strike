@@ -340,7 +340,11 @@ pub fn PromptLibrary(draft: RwSignal<String>) -> impl IntoView {
                                     cursor.set(0);
                                 }
                                 on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                    let n = filtered().len();
+                                    let rows: Vec<Prompt> = {
+                                        let list = prompts.get_untracked();
+                                        search(&list, &query.get_untracked()).into_iter().cloned().collect()
+                                    };
+                                    let n = rows.len();
                                     match ev.key().as_str() {
                                         "ArrowDown" if n > 0 => {
                                             ev.prevent_default();
@@ -352,7 +356,7 @@ pub fn PromptLibrary(draft: RwSignal<String>) -> impl IntoView {
                                         }
                                         "Enter" => {
                                             ev.prevent_default();
-                                            if let Some(p) = filtered().get(cursor.get_untracked()).cloned() {
+                                            if let Some(p) = rows.get(cursor.get_untracked()).cloned() {
                                                 use_prompt(p);
                                             }
                                         }
