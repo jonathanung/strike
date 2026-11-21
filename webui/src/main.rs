@@ -70,6 +70,7 @@ mod model_menu_view;
 mod session_list;
 mod session_loops;
 mod settings;
+mod ship_pr;
 mod session_panel;
 mod storage;
 mod tab_title;
@@ -6443,6 +6444,7 @@ fn App() -> impl IntoView {
                         </div>
                     </Show>
                     <div hidden=move || !git_active.get()>
+                        <ship_pr::ShipPr base=base token=token status_line=status active=git_active />
                         <git::GitPanel base=base token=token status_line=status active=git_active />
                     </div>
                     <div hidden=move || !review_active.get()>

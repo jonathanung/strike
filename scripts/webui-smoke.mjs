@@ -3815,6 +3815,63 @@ try {
     stageAllSeeded = false;
   }
   await clickSideTab("Git", "Staged");
+  // Ship to PR (#1340): the preview route answers with an honest state
+  // (CI checks out a detached merge commit, so "blocked" with a detached
+  // blocker is expected there), a create without confirmPush never pushes
+  // or creates (409, or 200 only when it found an already-open PR), and
+  // the Git tab's "Create pull request" panel renders that preview.
+  {
+    const shipHeaders = { Authorization: `Bearer ${token}` };
+    const shipRes = await fetch(`http://127.0.0.1:${port}/v1/git/pr`, { headers: shipHeaders });
+    if (!shipRes.ok) {
+      throw new Error(`ship-to-pr preview: HTTP ${shipRes.status} ${await shipRes.text()}`);
+    }
+    const ship = await shipRes.json();
+    if (!["ok", "blocked"].includes(ship.state) || !Array.isArray(ship.blockers)) {
+      throw new Error(`ship-to-pr preview shape: ${JSON.stringify(ship).slice(0, 300)}`);
+    }
+    const shipCreate = await fetch(`http://127.0.0.1:${port}/v1/git/pr`, {
+      method: "POST",
+      headers: { ...shipHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "smoke must not ship" }),
+    });
+    const shipCreateText = await shipCreate.text();
+    const foundExisting = shipCreate.status === 200 && shipCreateText.includes('"existing":true');
+    if (shipCreate.status !== 409 && !foundExisting) {
+      throw new Error(`ship-to-pr create without confirmPush: HTTP ${shipCreate.status} ${shipCreateText.slice(0, 300)}`);
+    }
+    await evaluate(`(() => { document.querySelector("[data-ship-pr-open]").click(); return true; })()`);
+    await waitFor(
+      `ship-to-pr panel renders preview state ${ship.state}`,
+      async () => {
+        const raw = await evaluate(`JSON.stringify((() => {
+          const panel = document.querySelector("[data-ship-pr-panel]");
+          if (!panel) return null;
+          const create = panel.querySelector("[data-ship-pr-create]");
+          return {
+            branch: !!panel.querySelector("[data-ship-pr-branch]"),
+            blockers: (panel.querySelector("[data-ship-pr-blockers]") || {}).textContent || "",
+            existing: !!panel.querySelector("[data-ship-pr-existing]"),
+            createDisabled: create ? create.disabled : null,
+            error: (panel.querySelector("[data-ship-pr-error]") || {}).textContent || "",
+          };
+        })())`);
+        const got = JSON.parse(raw || "null");
+        let ok = !!got && got.branch && !got.error;
+        if (ok && ship.state === "blocked" && !ship.existing) {
+          ok = got.blockers.length > 0 && got.createDisabled !== false;
+        }
+        if (ok && ship.state === "ok" && !ship.existing) {
+          // Push/dirty confirmations start unticked, so create starts disabled
+          // whenever a push is needed.
+          ok = ship.needsPush ? got.createDisabled === true : got.createDisabled !== null;
+        }
+        return { ok, got };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await evaluate(`(() => { document.querySelector("[data-ship-pr-open]").click(); return true; })()`);
+  }
   // Git panel small wins (#1427/#1432/#1435): the path filter exists,
   // an active no-match query flips every section's empty text to
   // "No files match.", and the log rows carry full-hash copy hooks.
