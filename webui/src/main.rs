@@ -60,6 +60,8 @@ mod providers;
 mod review_queue;
 mod push;
 mod reasoning;
+mod questions;
+mod questions_ui;
 mod review_branch;
 mod rule_author;
 mod sandbox_explain;
@@ -1348,6 +1350,7 @@ fn App() -> impl IntoView {
     let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
     let elicitations = RwSignal::new(Vec::<elicitation::Pending>::new());
+    let questions = RwSignal::new(Vec::<questions::Pending>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
     let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
     let panel_open = RwSignal::new(false);
@@ -2167,6 +2170,7 @@ fn App() -> impl IntoView {
             children_note.set(String::new());
             asks.set(Vec::new());
             elicitations.set(Vec::new());
+            questions.set(Vec::new());
             live_audit.set(Vec::new());
             confirm.set(None);
             wipe_on_replay.set(false);
@@ -2332,6 +2336,7 @@ fn App() -> impl IntoView {
                     note_steer(transcript_cb, &data, &on_note);
                     apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
                     elicitation_ui::apply_elicitation_notes(&data, elicitations);
+                    questions_ui::apply_question_notes(&data, questions);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
                     lines_cb.set(transcript_cb.with_untracked(|t| t.chat_lines()));
@@ -6026,6 +6031,7 @@ fn App() -> impl IntoView {
                     />
                     </Show>
                     <elicitation_ui::ElicitationCards base=base token=token root=active_root elicitations=elicitations />
+                    <questions_ui::QuestionCards base=base token=token root=active_root questions=questions />
                     <ApprovalCards
                         asks=asks
                         perm_mode=perm_mode

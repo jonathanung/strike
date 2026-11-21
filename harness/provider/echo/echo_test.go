@@ -2,6 +2,7 @@ package echo
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -121,6 +122,54 @@ func TestEchoRunToolCall(t *testing.T) {
 	}
 	if !sawTool || !sawDone {
 		t.Fatalf("tool=%v done=%v events=%d", sawTool, sawDone, len(evs))
+	}
+}
+
+func TestEchoAskQuestionToolCall(t *testing.T) {
+	ch, err := New().Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Text: "ask Use Postgres?"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var call *provider.ToolCall
+	var stop string
+	for _, ev := range collect(t, ch) {
+		switch ev.Type {
+		case provider.EventToolCall:
+			call = ev.ToolCall
+		case provider.EventDone:
+			stop = ev.StopReason
+		case provider.EventTextDelta:
+			t.Fatalf("unexpected text %q", ev.Text)
+		}
+	}
+	if call == nil || call.Name != "question" {
+		t.Fatalf("tool = %#v", call)
+	}
+	if stop != "tool_use" {
+		t.Fatalf("stop = %q", stop)
+	}
+	var args struct {
+		Questions []struct {
+			ID       string `json:"id"`
+			Question string `json:"question"`
+			Options  []struct {
+				Label string `json:"label"`
+			} `json:"options"`
+		} `json:"questions"`
+	}
+	if err := json.Unmarshal(call.Args, &args); err != nil {
+		t.Fatal(err)
+	}
+	if len(args.Questions) != 2 {
+		t.Fatalf("questions = %d, want 2", len(args.Questions))
+	}
+	if q := args.Questions[0]; q.Question != "Use Postgres?" || len(q.Options) != 2 {
+		t.Fatalf("first question = %#v", q)
+	}
+	if q := args.Questions[1]; q.Question == "" || len(q.Options) != 0 {
+		t.Fatalf("second question should be free-form, got %#v", q)
 	}
 }
 
