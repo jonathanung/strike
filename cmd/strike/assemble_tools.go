@@ -18,6 +18,8 @@ import (
 	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/harness/scheduler"
 	"github.com/jonathanung/strike/harness/tool"
+	"github.com/jonathanung/strike/internal/composer/sessionref"
+	"github.com/jonathanung/strike/internal/composer/triggers"
 	"github.com/jonathanung/strike/internal/enginebind"
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/host/local"
@@ -890,7 +892,10 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			SessionID: sid,
 			Select:    selectProvider,
 			PrepareInput: func(text, dir string) engine.InputPrep {
-				return composerPrepare(text, dir, skills)
+				return composerPrepare(text, dir, skills, &triggers.Sessions{
+					Self: sid,
+					Read: sessionref.Reader(sessions.Dir(), sessionref.DefaultTurns),
+				})
 			},
 			Registry:       registry,
 			WorkDir:        toolDir,

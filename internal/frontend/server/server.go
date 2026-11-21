@@ -443,6 +443,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/sandbox", s.handleSandboxGet)
 	s.mux.HandleFunc("PATCH /v1/sandbox", s.handleSandboxPatch)
 	s.mux.HandleFunc("GET /v1/sessions/{id}/children", s.handleSessionChildren)
+	s.mux.HandleFunc("GET /v1/sessions/{id}/reference", s.handleSessionReference)
 	s.mux.HandleFunc("GET /v1/session-lifecycle", s.handleSessionLifecycleCapabilities)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork", s.handleSessionFork)
 	s.mux.HandleFunc("POST /v1/sessions/{id}/fork_at", s.handleSessionForkAt)

@@ -124,7 +124,12 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     Artifacts.
     Clicking or dragging a file inserts `@path`. The daemon expands
     `@file`, `$skill`, `/command`, and `!shell` on `user.input` and `steer`
-    before a turn starts. `!` asks through the bash permission model and
+    before a turn starts. `@session:<id>` (#1550) attaches another
+    same-gateway session's compacted summary and last 10 turns as a quoted,
+    attributed block (`--- session: <id> ---`), never the raw log; a
+    self-reference or a missing/pruned session attaches nothing and posts a
+    notice. `GET /v1/sessions/{id}/reference` reports that block's size
+    (chars, ~tokens) for display before send. `!` asks through the bash permission model and
     does not start a model turn. The composer `+` menu and the suggestion
     popup only list those real actions (`composerCommands` and `skills` on
     bootstrap, files from `/v1/files/search`). A shell ask shows Allow once /
