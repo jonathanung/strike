@@ -1886,7 +1886,7 @@ try {
   // every attachment, so the composer must say so before send (warn,
   // not block). Removing the file clears the warning.
   await evaluate(`(() => {
-    const input = document.querySelector("[data-chat-attach]");
+    const input = document.querySelector('input[data-chat-attach="true"]');
     const bytes = Uint8Array.from(atob(${JSON.stringify(png)}), (c) => c.charCodeAt(0));
     const dt = new DataTransfer();
     dt.items.add(new File([bytes], "honesty-shot.png", { type: "image/png" }));
