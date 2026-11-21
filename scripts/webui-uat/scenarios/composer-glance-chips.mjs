@@ -13,19 +13,28 @@
 import { delay } from "../browser.mjs";
 
 const MEASURE = `(() => {
-  const chips = [...document.querySelectorAll(".composer-chips .composer-glance")].map((el) => ({
-    text: (el.textContent || "").trim(),
-    clientWidth: el.clientWidth,
-    scrollWidth: el.scrollWidth,
-    clientHeight: el.clientHeight,
-    scrollHeight: el.scrollHeight,
-  }));
+  // Hidden chips (phones fold Approval/Autonomy into the safety chip,
+  // #1924) are skipped. A deliberate one-line ellipsis (the phone model
+  // name, full name in aria-label) may overflow horizontally; nothing
+  // may overflow vertically.
+  const chips = [...document.querySelectorAll(".composer-chips .composer-glance")]
+    .filter((el) => el.getBoundingClientRect().width > 0)
+    .map((el) => ({
+      text: (el.textContent || "").trim(),
+      ellipsis: getComputedStyle(el).textOverflow === "ellipsis",
+      clientWidth: el.clientWidth,
+      scrollWidth: el.scrollWidth,
+      clientHeight: el.clientHeight,
+      scrollHeight: el.scrollHeight,
+    }));
   const autonomy = chips.find((c) => c.text.startsWith("Autonomy"));
+  const safety = chips.find((c) => c.text.startsWith("Safety"));
   return {
     count: chips.length,
     autonomy: autonomy ? autonomy.text : "",
+    safety: safety ? safety.text : "",
     clipped: chips
-      .filter((c) => c.scrollWidth > c.clientWidth || c.scrollHeight > c.clientHeight)
+      .filter((c) => (!c.ellipsis && c.scrollWidth > c.clientWidth) || c.scrollHeight > c.clientHeight)
       .map((c) => c.text),
   };
 })()`;
@@ -59,10 +68,10 @@ export async function scenario(ctx) {
   check(Boolean(phone), "phone layout did not engage at 390x844");
 
   const at390 = await measureAt(390, 844);
-  check(at390.count >= 3, `expected at least 3 glance chips at 390, got ${at390.count}`);
+  check(at390.count >= 2, `expected at least 2 glance chips at 390, got ${at390.count}`);
   check(
-    at390.autonomy.startsWith("Autonomy · "),
-    `autonomy chip missing at 390: ${JSON.stringify(at390)}`,
+    at390.safety.startsWith("Safety"),
+    `safety chip missing at 390: ${JSON.stringify(at390)}`,
   );
   check(
     at390.clipped.length === 0,
@@ -71,7 +80,7 @@ export async function scenario(ctx) {
   await shoot("glance-chips", ["mobile"]);
 
   const at360 = await measureAt(360, 800);
-  check(at360.count >= 3, `expected at least 3 glance chips at 360, got ${at360.count}`);
+  check(at360.count >= 2, `expected at least 2 glance chips at 360, got ${at360.count}`);
   check(
     at360.clipped.length === 0,
     `glance chips clipped at 360x800: ${at360.clipped.join(", ")}`,
@@ -79,6 +88,10 @@ export async function scenario(ctx) {
 
   const atDesk = await measureAt(1440, 900);
   check(atDesk.count >= 3, `expected at least 3 glance chips on desktop, got ${atDesk.count}`);
+  check(
+    atDesk.autonomy.startsWith("Autonomy · ") && !atDesk.safety,
+    `desktop should show the Autonomy chip, not the phone safety chip: ${JSON.stringify(atDesk)}`,
+  );
   check(
     atDesk.clipped.length === 0,
     `glance chips clipped at 1440x900: ${atDesk.clipped.join(", ")}`,

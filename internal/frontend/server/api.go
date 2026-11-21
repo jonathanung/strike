@@ -45,6 +45,9 @@ type sessionListItem struct {
 	PRURL    string `json:"prUrl,omitempty"`
 	PRNumber int    `json:"prNumber,omitempty"`
 	PRState  string `json:"prState,omitempty"`
+	// HistoryTokens is the context occupancy recorded on the session's last
+	// usage.reported (#1502); omitted when unknown — never estimated.
+	HistoryTokens int64 `json:"historyTokens,omitempty"`
 }
 
 type agentsResponse struct {
@@ -167,7 +170,7 @@ type bootstrapResponse struct {
 }
 
 var browserProtocolOps = []string{
-	"compact", "context.controls", "elicitation.reply", "inspect.prompt", "interrupt", "permission.reply", "question.reply",
+	"compact", "context.controls", "debug.control", "elicitation.reply", "inspect.prompt", "interrupt", "permission.reply", "question.reply",
 	"rewind", "select.agent", "select.model", "set.autonomy", "set.effort", "set.fallback_model",
 	"set.fast", "set.permission_mode", "set.verbosity", "steer", "user.input",
 	"input.queue_edit", "input.queue_cancel", "input.queue_reorder", "input.queue_send_now",
@@ -864,14 +867,15 @@ func listSessionFiles(dir string) ([]sessionListItem, error) {
 			continue // roots only in switcher
 		}
 		out = append(out, sessionListItem{
-			ID:          info.ID,
-			Title:       info.Title,
-			Mtime:       info.UpdatedAt.Unix(),
-			ForkedFrom:  info.ForkedFrom,
-			WorkspaceID: info.WorkspaceID,
-			PRURL:       info.PRURL,
-			PRNumber:    info.PRNumber,
-			PRState:     session.NormalizePRState(info.PRState),
+			ID:            info.ID,
+			Title:         info.Title,
+			Mtime:         info.UpdatedAt.Unix(),
+			ForkedFrom:    info.ForkedFrom,
+			WorkspaceID:   info.WorkspaceID,
+			PRURL:         info.PRURL,
+			PRNumber:      info.PRNumber,
+			PRState:       session.NormalizePRState(info.PRState),
+			HistoryTokens: sessionHistoryTokens(info.Path, info.ID),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {

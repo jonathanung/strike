@@ -118,6 +118,17 @@
 
 .notify-row.on { border-color: var(--border-focus); }
 
+/* feature:notify-groups begin (#1826) */
+.notify-member { margin-left: var(--space-3); }
+
+.notify-group-count {
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+}
+/* feature:notify-groups end */
+
 button.notify-open {
   flex: 1;
   min-width: 0;

@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
 import { bestOfNCheck } from "./webui-best-of-n-check.mjs";
 import { createServer } from "node:http";
+import { debugModeCheck } from "./webui-debug-mode-check.mjs";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
 import { sessionRefCheck } from "./webui-session-ref-check.mjs";
 import { seedRepeatedWorkflow, skillProposalsCheck } from "./webui-skill-proposals-check.mjs";
@@ -27,7 +28,7 @@ import {
 } from "./webui-load-warnings-check.mjs";
 import { mdReviewBrowserCheck } from "./webui-md-review-check.mjs";
 import { seedSkillUsage, skillUsageCheck } from "./webui-skill-usage-check.mjs";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -2740,9 +2741,18 @@ try {
       const box = [...document.querySelectorAll("[data-sent-attachments]")].find((el) => el.innerText.includes("smoke-shot.png"));
       if (!box) return false;
       const img = box.querySelector(".sx-attach-chip img");
-      return box.innerText.includes("smoke-spec.pdf") && !!img && img.src.startsWith("blob:") && img.complete && img.naturalWidth > 0;
+      // #1814: the engine's per-attachment delivery decision survives the
+      // reload. A PDF is never sent as a provider image; the PNG carries
+      // a reported state (sent or dropped), never "not reported".
+      const chips = [...box.querySelectorAll(".sx-attach-chip")];
+      const pdf = chips.find((c) => c.innerText.includes("smoke-spec.pdf"));
+      const png = chips.find((c) => c.innerText.includes("smoke-shot.png"));
+      const pdfDropped = !!pdf && pdf.dataset.attachDelivery === "dropped" && pdf.innerText.includes("Not sent");
+      const pngReported = !!png && ["sent", "dropped"].includes(png.dataset.attachDelivery || "");
+      const ok = box.innerText.includes("smoke-spec.pdf") && !!img && img.src.startsWith("blob:") && img.complete && img.naturalWidth > 0 && pdfDropped && pngReported;
+      return ok || JSON.stringify({ pdf: pdf?.dataset.attachDelivery, png: png?.dataset.attachDelivery, text: box.innerText.slice(0, 300) });
     })()`,
-    "sent image + PDF chips render after reload with a loaded thumbnail",
+    "sent image + PDF chips render after reload with a loaded thumbnail and delivery state",
   );
 
   // Usage + Audit (#1286): open each view and confirm its controls
@@ -6293,6 +6303,94 @@ try {
     }),
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Stale/large resume warning (#1502): opening a session idle for 3 days
+  // whose last recorded context is ~950k tokens shows the inline card;
+  // a stale small one and a fresh large one open with no card. Resume
+  // anyway dismisses it and remembers the dismissal for that size.
+  // Fixtures are written here, not at boot, so the earlier steps see the
+  // same session set as main; the session list re-polls every 4s.
+  // The last usage.reported carries the recorded context occupancy; the
+  // file mtime is the activity time.
+  const staleAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+  for (const [id, used, stale] of [
+    ["stale-large", 950000, true],
+    ["stale-small", 1000, true],
+    ["fresh-large", 950000, false],
+  ]) {
+    const file = join(sessionsDir, `${id}.jsonl`);
+    await writeFile(
+      file,
+      line(`resume fixture ${id}`) +
+        JSON.stringify({ type: "usage.reported", time: "2026-10-26T06:00:02Z", data: { used: { n: used, known: true } } }) +
+        "\n",
+    );
+    await writeFile(join(sessionsDir, `${id}.meta.json`), JSON.stringify({ title: `Resume ${id}` }) + "\n");
+    if (stale) await utimes(file, staleAt, staleAt);
+  }
+  const staleListedTokens = ((await listJSON("/v1/sessions")).sessions || []).find((s) => s.id === "stale-large")?.historyTokens;
+  if (staleListedTokens !== 950000) {
+    throw new Error(`session list historyTokens for stale-large = ${staleListedTokens}`);
+  }
+  const staleResumeCard = async () =>
+    evaluate(
+      `(() => { const el = document.querySelector("[data-stale-resume]"); return el ? el.getAttribute("data-stale-resume") + "|" + el.innerText : ""; })()`,
+    );
+  const openResumeRow = async (id) => {
+    await waitFor(
+      `resume fixture row ${id}`,
+      async () => ({ ok: (await evaluate(`!!document.querySelector(${JSON.stringify(rowSel(id))})`)) === true }),
+      { timeout: STEP_MS, interval: 250 },
+    );
+    const clicked = await evaluate(
+      `(() => { const row = document.querySelector(${JSON.stringify(rowSel(id))}); const btn = row && row.querySelector(".ss-main"); if (btn) btn.click(); return !!btn; })()`,
+    );
+    if (clicked !== true) throw new Error(`could not open ${id}`);
+    await waitFor(
+      `${id} open`,
+      async () => ({
+        ok:
+          (await evaluate(
+            `(() => { const el = document.querySelector('[data-session-id][aria-selected="true"]'); return el ? el.getAttribute("data-session-id") : ""; })()`,
+          )) === id,
+      }),
+      { timeout: STEP_MS, interval: 250 },
+    );
+  };
+  const expectNoStaleCard = async (id) => {
+    await delay(750);
+    const card = await staleResumeCard();
+    if (card) throw new Error(`stale-resume card shown for ${id}: ${card.slice(0, 200)}`);
+  };
+  await openResumeRow("stale-small");
+  await expectNoStaleCard("stale-small");
+  await openResumeRow("fresh-large");
+  await expectNoStaleCard("fresh-large");
+  await openResumeRow("stale-large");
+  const shownStaleCard = await waitFor(
+    "stale-resume card on the stale, large session",
+    async () => {
+      const card = (await staleResumeCard()) || "";
+      return { ok: card.startsWith("stale-large|") && card.includes("tokens of history") && card.includes("3d ago"), card };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  for (const label of ["Resume anyway", "Start fresh", "Cancel"]) {
+    if (!shownStaleCard.card.includes(label)) throw new Error(`stale-resume card missing ${label}: ${shownStaleCard.card}`);
+  }
+  await clickSel(`[data-stale-resume-action="resume"]`);
+  await waitFor(
+    "stale-resume card dismissed by Resume anyway",
+    async () => ({ ok: !(await staleResumeCard()) }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const staleDismissed = JSON.parse((await evaluate(`localStorage.getItem("strike.staleResume.dismissed") || "{}"`)) || "{}");
+  if (staleDismissed["stale-large"] !== 950000) {
+    throw new Error(`stale-resume dismissal not remembered: ${JSON.stringify(staleDismissed)}`);
+  }
+  await openResumeRow("stale-small");
+  await openResumeRow("stale-large");
+  await expectNoStaleCard("stale-large after dismissal");
+
   // Session restore (#1391): the viewed session is persisted like theme
   // and layout, so a reload returns to it; a saved id whose session was
   // deleted falls back to another session instead of an empty screen.
@@ -8806,6 +8904,8 @@ try {
 
   await seedRepeatedWorkflow({ home, port, token });
   await skillProposalsCheck({ send, repoDir: process.cwd(), port, token });
+  await debugModeCheck({ send, port, token });
+  // Last: the comparison card it leaves in the chat column stays put.
   await bestOfNCheck({ send });
 
   console.log("webui-smoke ok");

@@ -10,6 +10,11 @@ import (
 // maxSweepFileSize skips large files (generated bundles, binaries).
 const maxSweepFileSize = 4 << 20
 
+// skipDirs are never scanned or swept: VCS metadata and dependency or build
+// output trees. Instrumentation belongs in sources, and walking these on
+// every scan would stall the engine on large checkouts.
+var skipDirs = map[string]bool{".git": true, "node_modules": true, "target": true}
+
 // Hit is one tagged line found on disk.
 type Hit struct {
 	Path string // slash-separated, relative to root
@@ -24,7 +29,8 @@ type SweepReport struct {
 }
 
 // Scan reports every tagged line under root without modifying files.
-// Skips .git, symlinks, files over 4 MiB and binary files.
+// Skips .git, node_modules and target directories, symlinks, files over
+// 4 MiB and binary files.
 func Scan(root string) ([]Hit, error) {
 	var hits []Hit
 	err := walkText(root, func(rel string, _ string, data []byte, _ fs.FileMode) error {
@@ -62,7 +68,7 @@ func walkText(root string, fn func(rel, abs string, data []byte, mode fs.FileMod
 			return err
 		}
 		if d.IsDir() {
-			if d.Name() == ".git" && path != root {
+			if path != root && skipDirs[d.Name()] {
 				return filepath.SkipDir
 			}
 			return nil

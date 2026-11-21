@@ -235,6 +235,8 @@ Go `UserMessage`.
 | `images[].bytes` | number | yes |
 | `images[].kind` | string | yes |
 | `images[].name` | string | yes |
+| `images[].delivery` | string | yes |
+| `images[].deliveryReason` | string | yes |
 | `loopId` | string | yes |
 
 #### `session.titled`
@@ -968,6 +970,42 @@ Go `VerbositySelected`.
 | `depth` | number | yes |
 | `level` | string |  |
 | `delivery` | string |  |
+
+#### `debug.updated`
+
+Go `DebugUpdated`.
+
+| Field | Type | omitempty |
+|---|---|---|
+| `sessionId` | string | yes |
+| `turnId` | string | yes |
+| `providerRequestId` | string | yes |
+| `attempt` | number | yes |
+| `parentSessionId` | string | yes |
+| `depth` | number | yes |
+| `action` | string |  |
+| `phase` | string | yes |
+| `hypotheses` | array of object | yes |
+| `hypotheses[].id` | string |  |
+| `hypotheses[].rank` | number | yes |
+| `hypotheses[].statement` | string |  |
+| `hypotheses[].confirms` | string | yes |
+| `hypotheses[].refutes` | string | yes |
+| `hypotheses[].status` | string | yes |
+| `hypotheses[].evidence` | array of object | yes |
+| `hypotheses[].evidence[].source` | string | yes |
+| `hypotheses[].evidence[].text` | string |  |
+| `override` | string | yes |
+| `fixed` | bool | yes |
+| `instrumentation` | array of object | yes |
+| `instrumentation[].path` | string |  |
+| `instrumentation[].line` | number |  |
+| `instrumentation[].text` | string |  |
+| `removed` | array of object | yes |
+| `removed[].path` | string |  |
+| `removed[].line` | number |  |
+| `removed[].text` | string |  |
+| `error` | string | yes |
 
 #### `files.invalidated`
 

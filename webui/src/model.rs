@@ -121,6 +121,10 @@ pub struct SessionItem {
     pub last_activity_at: i64,
     #[serde(default)]
     pub unread: Option<bool>,
+    /// Context occupancy recorded on the session's last usage report
+    /// (#1502); 0 when the daemon could not tell — never estimated.
+    #[serde(default, rename = "historyTokens")]
+    pub history_tokens: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2050,6 +2054,7 @@ mod tests {
             status: String::new(),
             last_activity_at: 0,
             unread: None,
+            history_tokens: 0,
         }];
         let mut seen = HashMap::new();
         seen.insert("a".into(), 40i64);

@@ -28,6 +28,7 @@ mod container_panel;
 mod context_doctor;
 mod composer_triggers;
 mod config_sources;
+mod debug_mode_ui;
 mod diag;
 mod diagnostics;
 mod draft_size;
@@ -110,6 +111,7 @@ mod regenerate_title;
 mod rewind;
 mod session_delete;
 mod session_ref_chip;
+mod stale_resume;
 mod session_restore;
 mod share;
 mod shell;
@@ -1364,6 +1366,7 @@ fn App() -> impl IntoView {
     let boot_ms = now_ms();
     let focus = RwSignal::new(false);
     let back_stack = RwSignal::new(Vec::<String>::new());
+    let stale_warning = RwSignal::new(None::<stale_resume::StaleWarning>);
     // Open-file history and recents (#1395): in-memory, global across
     // sessions like the Files pane, mirroring the session stacks here.
     let file_history = RwSignal::new(file_history::FileHistory::default());
@@ -1390,6 +1393,7 @@ fn App() -> impl IntoView {
     let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
     let elicitations = RwSignal::new(Vec::<elicitation::Pending>::new());
+    let debug_state = RwSignal::new(None::<debug_mode::State>);
     let questions = RwSignal::new(Vec::<questions::Pending>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
     let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
@@ -1608,6 +1612,9 @@ fn App() -> impl IntoView {
     // Session rewind (#1336): the preview dialog's open request.
     let rewind_target = RwSignal::new(None::<rewind::RewindTarget>);
     let pending_files = RwSignal::new(Vec::<chat_mode::PendingAttachment>::new());
+    // Quote a message (#1362): the line attached to the next send. One
+    // at a time; quoting another line replaces it.
+    let quote_draft = RwSignal::new(None::<quote_message::Quote>);
     // Visual annotate (#1545): marks per pending image id, and the image
     // open in the overlay. Marks live and die with the composer session.
     let annotate_marks: annotate::MarkStore = RwSignal::new(HashMap::new());
@@ -2218,6 +2225,7 @@ fn App() -> impl IntoView {
             children_note.set(String::new());
             asks.set(Vec::new());
             elicitations.set(Vec::new());
+            debug_state.set(None);
             questions.set(Vec::new());
             live_audit.set(Vec::new());
             confirm.set(None);
@@ -2385,6 +2393,7 @@ fn App() -> impl IntoView {
                     note_steer(transcript_cb, &data, &on_note);
                     apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
                     elicitation_ui::apply_elicitation_notes(&data, elicitations);
+                    debug_mode_ui::apply_debug_envelope(&data, debug_state);
                     questions_ui::apply_question_notes(&data, questions);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
@@ -2970,6 +2979,12 @@ fn App() -> impl IntoView {
         if text.is_empty() && !ready {
             return;
         }
+        // #1362: a quote rides on the user's own words; it never sends alone.
+        let quoted = quote_draft.get_untracked();
+        if quoted.is_some() && text.is_empty() {
+            queue_note.set("Add a message to send with the quote.".into());
+            return;
+        }
         let root = active_root.get_untracked();
         if root.is_empty() {
             status.set("no live session yet".into());
@@ -3144,13 +3159,24 @@ fn App() -> impl IntoView {
                     "sha256": file.uploaded_sha,
                 }));
             }
+            // #1362: the quote travels as a delimited block ahead of the
+            // user's text, so the agent gets the exact quoted text and the
+            // stored log keeps the reference. It wraps the annotated text
+            // (#1545); `text` stays the user's own words for the restore.
+            let wire = match &quoted {
+                Some(q) => quote_message::compose(&q.role, q.anchor, &q.text, &text_out),
+                None => text_out.clone(),
+            };
             let body = if images.is_empty() {
-                serde_json::json!({"text": text_out})
+                serde_json::json!({"text": wire})
             } else {
-                serde_json::json!({"text": text_out, "images": images})
+                serde_json::json!({"text": wire, "images": images})
             };
             match outbox::post_op_with_id(&b, &t, &root, op, body, &client_id).await {
                 Ok(()) => {
+                    if quoted.is_some() && quote_draft.get_untracked() == quoted {
+                        quote_draft.set(None);
+                    }
                     for file in &updated {
                         chat_mode::revoke_preview(&file.preview);
                     }
@@ -3372,6 +3398,22 @@ fn App() -> impl IntoView {
 
     let open_session = move |id: String, live: bool| {
         phone_pane.set(mobile::PANE_CHAT.into());
+        // Stale/large resume warning (#1502): decided from the list row
+        // before switching; any older card is cleared by the new open.
+        let viewing = active_root.get_untracked();
+        let limit = context_limit.get_untracked();
+        let warn = sessions.with_untracked(|list| {
+            list.iter().find(|s| s.id == id).and_then(|row| {
+                stale_resume::check(
+                    row,
+                    now_ms() as i64,
+                    limit,
+                    &viewing,
+                    stale_resume::dismissed_tokens(&row.id),
+                )
+            })
+        });
+        stale_warning.set(warn);
         remember(&id);
         if live {
             activate_root(id);
@@ -3660,6 +3702,22 @@ fn App() -> impl IntoView {
     // is filed separately; this PR only composes the two existing
     // endpoints, in delete-then-close order, after the user's force
     // confirmation when one was required.
+    // Stale/large resume card actions (#1502). Start fresh opens a new
+    // session and only pre-fills the composer with a reference to the old
+    // one; nothing is sent or copied. Cancel returns to the session open
+    // before (the resumed one sends nothing until a turn is started).
+    let on_stale_fresh = Callback::new(move |w: stale_resume::StaleWarning| {
+        new_session();
+        draft.set(stale_resume::fresh_prompt(&w.id, &w.title));
+        sync_composer_height_soon();
+    });
+    let on_stale_cancel = Callback::new(move |w: stale_resume::StaleWarning| {
+        if w.previous.is_empty() || w.previous == w.id {
+            return;
+        }
+        let live = roots.get_untracked().iter().any(|r| r.id == w.previous);
+        open_session(w.previous, live);
+    });
     // Rewind applied (#1336): after a conversation restore the picked
     // turn's prompt returns to the composer for edit-and-resend; it is
     // never sent automatically.
@@ -5104,7 +5162,31 @@ fn App() -> impl IntoView {
     })
     .into();
     let rename_for_palette = apply_title.clone();
+    // A quote's anchor is per session: switching sessions drops it.
+    Effect::new(move |prev: Option<String>| {
+        let root = active_root.get();
+        if prev.is_some_and(|p| p != root) {
+            quote_draft.set(None);
+        }
+        root
+    });
     let handlers = TranscriptHandlers {
+        quote: (move |id: u32| {
+            match transcript.with_untracked(|t| t.quote_source(id)) {
+                Some((role, anchor, text)) => {
+                    quote_draft.set(Some(quote_message::Quote { role, anchor, text }));
+                    if let Some(el) = web_sys::window()
+                        .and_then(|w| w.document())
+                        .and_then(|doc| doc.query_selector("#composer-input").ok().flatten())
+                        .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+                    {
+                        let _ = el.focus();
+                    }
+                }
+                None => ux_note.set("That line cannot be quoted until it finishes.".into()),
+            }
+        })
+        .into(),
         edit_last: (move |id: u32| {
             let root = active_root.get_untracked();
             let last = transcript.with_untracked(|t| t.last_user_id());
@@ -6036,6 +6118,11 @@ fn App() -> impl IntoView {
                     <Show when=move || !stream_note.get().is_empty()>
                         <p class="hint banner">{move || stream_note.get()}</p>
                     </Show>
+                    <stale_resume::StaleResumeCard
+                        warning=stale_warning
+                        on_fresh=on_stale_fresh
+                        on_cancel=on_stale_cancel
+                    />
                     <Show when=move || !load_notice.get().is_empty()>
                         <div class="notice" role="status" data-load-warning-notice="true">
                             <span>{move || load_notice.get()}</span>
@@ -6148,6 +6235,7 @@ fn App() -> impl IntoView {
                         find=find_view
                     />
                     </Show>
+                    <debug_mode_ui::DebugPanel base=base token=token root=active_root debug=debug_state />
                     <elicitation_ui::ElicitationCards base=base token=token root=active_root elicitations=elicitations />
                     <questions_ui::QuestionCards base=base token=token root=active_root questions=questions />
                     <ApprovalCards
@@ -6277,6 +6365,29 @@ fn App() -> impl IntoView {
                                     <span class="name">"Use a skill"</span>
                                     <span class="path">"Skills loaded for this daemon"</span>
                                 </button>
+                                <button type="button" class="palette-row" data-plus-approval="true" on:click=move |_| {
+                                    plus_open.set(false);
+                                    autonomy_menu.set(false);
+                                    mode_menu.set(true);
+                                }>
+                                    <span class="name">{move || format!("Approval · {}", mode_label(&perm_mode.get()))}</span>
+                                    <span class="path">"Who answers tool asks in this session"</span>
+                                </button>
+                                <button type="button" class="palette-row" data-plus-verbosity="true" on:click=move |_| {
+                                    plus_open.set(false);
+                                    crate::shell::show_palette_at(crate::verbosity::COMMAND);
+                                }>
+                                    <span class="name">"Response style"</span>
+                                    <span class="path">"Concise, Default, or Detailed for this session"</span>
+                                </button>
+                                <button type="button" class="palette-row" data-plus-autonomy="true" on:click=move |_| {
+                                    plus_open.set(false);
+                                    mode_menu.set(false);
+                                    autonomy_menu.set(true);
+                                }>
+                                    <span class="name">{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</span>
+                                    <span class="path">"Who clears a workflow phase exit"</span>
+                                </button>
                                 <button type="button" class="palette-row" data-prompts-open-menu="true" on:click=move |_| {
                                     plus_open.set(false);
                                     let _ = crate::shell::dispatch(prompt_library::INSERT_ID, "");
@@ -6355,6 +6466,20 @@ fn App() -> impl IntoView {
                             <session_loops::LoopRows base=base token=token root=active_root capable=loops_capable loops=loop_rows note=loop_note />
                             <Show when=move || !steer_note.get().is_empty()>
                                 <p class="steer-note" role="status">{move || steer_note.get()}</p>
+                            </Show>
+                            <Show when=move || quote_draft.with(|q| q.is_some())>
+                                <div class="quote-chip" role="group" aria-label="Quoted message">
+                                    <span class="quote-chip-text">
+                                        {move || quote_draft.with(|q| q.as_ref().map(|q| quote_message::label(&q.role, &q.text)).unwrap_or_default())}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        class="quote-chip-remove"
+                                        aria-label="Remove quote"
+                                        title="Remove quote (Backspace in an empty composer)"
+                                        on:click=move |_| quote_draft.set(None)
+                                    >"×"</button>
+                                </div>
                             </Show>
                             <Show when=move || !queue_note.get().is_empty()>
                                 <p class="steer-error" role="alert">{move || queue_note.get()}</p>
@@ -6660,6 +6785,13 @@ fn App() -> impl IntoView {
                                                 }
                                             }
                                         }
+                                    } else if ev.key() == "Backspace"
+                                        && draft.get_untracked().is_empty()
+                                        && quote_draft.with_untracked(|q| q.is_some())
+                                    {
+                                        // #1362: Backspace on an empty composer removes the quote.
+                                        ev.prevent_default();
+                                        quote_draft.set(None);
                                     } else if ev.key() == "Escape" && (ac_open.get_untracked() || plus_open.get_untracked()) {
                                         ev.prevent_default();
                                         ev.stop_propagation();
@@ -6816,6 +6948,25 @@ fn App() -> impl IntoView {
                                     model_menu.set(false);
                                     autonomy_menu.update(|v| *v = !*v);
                                 }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
+                                // #1924: phones show one safety chip in place of
+                                // the Approval and Autonomy chips so the row
+                                // fits one 44px line at 360px. Non-default
+                                // values stay named and flagged; tapping it
+                                // opens "+" where both pickers live.
+                                <button type="button" class=move || {
+                                    if approvals::safety_summary(&perm_mode.get(), &autonomy.get()).danger {
+                                        "composer-glance approvals-mode-chip safety-glance danger"
+                                    } else {
+                                        "composer-glance approvals-mode-chip safety-glance"
+                                    }
+                                } data-safety-status="true" title="Approval mode and autonomy. Opens + to change either." aria-label=move || approvals::safety_summary(&perm_mode.get(), &autonomy.get()).aria on:click=move |_| {
+                                    mode_menu.set(false);
+                                    model_menu.set(false);
+                                    autonomy_menu.set(false);
+                                    ac_open.set(false);
+                                    ac_force.set(String::new());
+                                    plus_open.update(|v| *v = !*v);
+                                }>{move || approvals::safety_summary(&perm_mode.get(), &autonomy.get()).label}</button>
                                 <crate::fallback::FallbackChip base=base token=token active_root=active_root status=status busy=Signal::derive(move || session_busy_now.get()) />
                                 <crate::verbosity::VerbosityChip base=base token=token active_root=active_root status=status busy=Signal::derive(move || session_busy_now.get()) />
                                 // #1574: the live workflow run, only while the
