@@ -5781,7 +5781,10 @@ fn App() -> impl IntoView {
                                     if ev.alt_key() && !ev.ctrl_key() && !ev.meta_key()
                                         && (ev.key().eq_ignore_ascii_case("p") || ev.code() == "KeyP")
                                     {
+                                        // The chord is consumed here: it must not
+                                        // bubble on to page-level key handlers.
                                         ev.prevent_default();
+                                        ev.stop_propagation();
                                         let _ = sharpen.start();
                                         return;
                                     }
