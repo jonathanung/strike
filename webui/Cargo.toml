@@ -17,6 +17,7 @@ composer-drafts = { path = "composer-drafts" }
 signin-flow = { path = "signin-flow" }
 transcript-window = { path = "transcript-window" }
 quote-message = { path = "quote-message" }
+edit-resend = { path = "edit-resend" }
 theme-catalog = { path = "theme-catalog" }
 js-sys = "0.3"
 send_wrapper = "0.6"
