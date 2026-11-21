@@ -55,6 +55,7 @@ mod session_delete;
 mod session_restore;
 mod shell;
 mod side_chat;
+mod side_chat_promote;
 mod status;
 mod term;
 mod terminal;
@@ -5941,6 +5942,9 @@ fn App() -> impl IntoView {
                 focus_name=side_focus_name
                 live_provider=provider_name
                 live_model=model_name
+                on_promote=Callback::new(move |(text,): (String,)| {
+                    draft.update(|d| *d = side_chat_promote::insert_into_draft(d, &text));
+                })
             />
         </Show>
         <WorkspacePicker
