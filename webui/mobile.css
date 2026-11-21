@@ -520,10 +520,6 @@ body:not([data-phone="1"]) .chat > .composer { flex: 0 0 auto; }
 body[data-phone="1"] .composer-chips {
   overflow: hidden;
 }
-body[data-phone="1"] .composer-chips [data-approval-status],
-body[data-phone="1"] .composer-chips [data-autonomy-status] {
-  display: none;
-}
 body[data-phone="1"] .composer-chips .safety-glance {
   display: inline-flex;
   align-items: center;
@@ -543,6 +539,12 @@ body[data-phone="1"] .composer-chips .composer-glance:not(.safety-glance) {
 }
 body[data-phone="1"] .composer-bar .steer-actions {
   flex: 0 0 auto;
+}
+/* Last and at least as specific as the shrink rule above, so the folded
+   chips stay hidden. */
+body[data-phone="1"] .composer-chips .composer-glance[data-approval-status],
+body[data-phone="1"] .composer-chips .composer-glance[data-autonomy-status] {
+  display: none;
 }
 /* feature:phone-safety-chip end */
 
