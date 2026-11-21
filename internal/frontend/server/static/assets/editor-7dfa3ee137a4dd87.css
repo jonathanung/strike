@@ -189,6 +189,40 @@
 .ev-md .md-table .md-left { text-align: left; }
 .ev-md .md-table .md-center { text-align: center; }
 .ev-md .md-table .md-right { text-align: right; }
+/* Table actions (#1505): Copy Markdown / CSV / TSV + Widen. Revealed on
+   hover or keyboard focus on desktop; always shown (compact) on touch and
+   phone widths. opacity, not display, so the buttons stay in the tab
+   order and :focus-within can reveal them. */
+.ev-md .md-table-block { margin: 0.5em 0; min-width: 0; }
+.ev-md .md-table-block > .md-table-wrap { margin: 0; }
+.ev-md .md-table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-1);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.ev-md .md-table-block:hover .md-table-actions,
+.ev-md .md-table-block:focus-within .md-table-actions,
+.ev-md .md-table-wide .md-table-actions,
+.ev-md .md-table-actions:has(.md-table-note:not(:empty)) { opacity: 1; }
+.ev-md .md-table-actions button { font-size: var(--type-sm); }
+.ev-md .md-table-widen[aria-pressed="true"] { color: var(--ink); border-color: var(--border-focus); }
+.ev-md .md-table-note { color: var(--danger); font-size: var(--type-sm); }
+.ev-md .md-table-note:empty { display: none; }
+/* Wide view: columns take their natural width instead of squeezing, and
+   the wrapper (already max-width: 100%, overflow-x: auto) scrolls
+   sideways inside the column. The page and neighbouring messages never
+   reflow. */
+.ev-md .md-table-wide .md-table { width: max-content; min-width: 100%; }
+.ev-md .md-table-wide .md-table th,
+.ev-md .md-table-wide .md-table td { white-space: nowrap; overflow-wrap: normal; }
+@media (hover: none), (max-width: 720px) {
+  .ev-md .md-table-actions { opacity: 1; gap: 2px; }
+  .ev-md .md-table-actions button { padding: 0 6px; }
+}
 /* feature:markdown-tables end */
 /* feature:md-code-copy begin */
 .ev-md .ev-fence { margin: 0.5em 0; }

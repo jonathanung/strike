@@ -1,0 +1,62 @@
+/* feature:team-message begin */
+/* #1573: human -> child / all-members composer in the activity panel. */
+.team-message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--ground);
+}
+.team-message-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.team-message-head h3 {
+  margin: 0;
+  font-size: var(--type-sm);
+  font-weight: 650;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.team-message form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.team-message-body {
+  min-height: 64px;
+  resize: vertical;
+}
+.team-message-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.team-message-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.team-message-bar .hint { margin: 0; }
+.team-message-note,
+.team-message-ok,
+.team-message-error {
+  margin: 0;
+  font-size: var(--type-sm);
+  line-height: 1.4;
+}
+.team-message-note { color: var(--muted); }
+.team-message-ok { color: var(--success); }
+.team-message-error { color: var(--signal); }
+@media (max-width: 640px) {
+  .team-message-bar .hint { display: none; }
+}
+/* feature:team-message end */

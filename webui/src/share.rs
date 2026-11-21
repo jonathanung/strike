@@ -144,6 +144,8 @@ pub fn ShareView(token: String) -> impl IntoView {
         retry: (|_: String| {}).into(),
         fork: (|_: i32| {}).into(),
         open_file: (|_: String, _: u32| {}).into(),
+        // Read-only share view: no composer, so no quoting (#1362).
+        quote: (|_: u32| {}).into(),
         // Read-only share view: no composer, so no edit & resend (#1361).
         edit_last: (|_: u32| {}).into(),
         // Read-only share view: no rewind either (#1336).

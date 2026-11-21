@@ -1,0 +1,75 @@
+/* feature:prompt-library begin */
+.prompt-lib-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: color-mix(in srgb, var(--overlay) 45%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
+.prompt-lib-dialog {
+  width: min(560px, 94vw);
+  max-height: 88vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.prompt-lib-dialog h2 { margin: 0; font-size: var(--type-lg); overflow-wrap: anywhere; }
+.prompt-lib-dialog p { margin: 0; overflow-wrap: anywhere; }
+.prompt-lib-field { display: grid; gap: var(--space-1); }
+.prompt-lib-field input,
+.prompt-lib-field textarea,
+.prompt-lib-search {
+  width: 100%;
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  color: var(--ink);
+}
+.prompt-lib-field textarea { resize: vertical; min-height: 120px; }
+.prompt-lib-error {
+  color: var(--signal);
+  border: 1px solid color-mix(in srgb, var(--signal) 45%, var(--rule));
+  background: color-mix(in srgb, var(--signal) 10%, var(--surface));
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+}
+.prompt-lib-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-1);
+  max-height: 50vh;
+  overflow: auto;
+}
+.prompt-lib-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+}
+.prompt-lib-row.on { border-color: var(--sharp); }
+.prompt-lib-pick {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  text-align: left;
+  background: none;
+  border: 0;
+  color: var(--ink);
+  padding: var(--space-1) 0;
+}
+.prompt-lib-pick .path { color: var(--muted); font-size: var(--type-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-lib-actions { display: flex; justify-content: flex-end; gap: var(--space-2); flex-wrap: wrap; }
+/* feature:prompt-library end */

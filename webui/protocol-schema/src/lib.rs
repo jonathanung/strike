@@ -1094,6 +1094,10 @@ pub struct ImageAttachment {
     pub kind: String,
     #[serde(default, rename = "name")]
     pub name: String,
+    #[serde(default, rename = "delivery")]
+    pub delivery: String,
+    #[serde(default, rename = "deliveryReason")]
+    pub delivery_reason: String,
 }
 
 /// InputQueueCancel removes one pending user-input item.

@@ -764,9 +764,71 @@ pub fn validate_rule_draft(permission: &str, pattern: &str, action: &str) -> Res
     Ok(())
 }
 
+/// The phone composer's one safety chip (#1924): approval mode and
+/// autonomy folded into a single short label so the chip row fits one
+/// 44px line at 360px. Defaults read just "Safety" (the aria label and
+/// the "+" rows spell the values out); anything else names the
+/// non-default values. `danger` follows the same rules as the
+/// desktop chips (#1572): a dangerous approval mode or a non-supervised
+/// autonomy. The aria label always spells out both values.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SafetySummary {
+    pub label: String,
+    pub aria: String,
+    pub danger: bool,
+}
+
+pub fn safety_summary(perm_mode: &str, autonomy: &str) -> SafetySummary {
+    let mode_id = if known_mode(perm_mode) { perm_mode } else { "default" };
+    let mode = crate::model::mode_label(mode_id);
+    let auto = crate::model::autonomy_or_default(autonomy);
+    let mut parts = Vec::new();
+    if mode_id != "default" {
+        parts.push(mode);
+    }
+    if auto != "supervised" {
+        parts.push(auto);
+    }
+    let label = if parts.is_empty() {
+        "Safety".to_string()
+    } else {
+        format!("Safety · {}", parts.join(" · "))
+    };
+    SafetySummary {
+        label,
+        aria: format!("Approval: {mode}. Autonomy: {auto}. Change approval or autonomy"),
+        danger: is_dangerous(perm_mode) || auto != "supervised",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn safety_summary_folds_approval_and_autonomy() {
+        let cases = [
+            ("default", "supervised", "Safety", false),
+            ("", "", "Safety", false),
+            ("bogus", "nonsense", "Safety", false),
+            ("plan", "supervised", "Safety · Plan", false),
+            ("yolo", "supervised", "Safety · Yolo", true),
+            ("accept-edits", "supervised", "Safety · Edits", true),
+            ("default", "agent", "Safety · agent", true),
+            ("yolo", "skip-all", "Safety · Yolo · skip-all", true),
+        ];
+        for (mode, auto, label, danger) in cases {
+            let got = safety_summary(mode, auto);
+            assert_eq!(got.label, label, "{mode}/{auto}");
+            assert_eq!(got.danger, danger, "{mode}/{auto}");
+            assert!(got.aria.contains("Approval: "), "{}", got.aria);
+            assert!(got.aria.contains("Autonomy: "), "{}", got.aria);
+        }
+        assert_eq!(
+            safety_summary("yolo", "agent").aria,
+            "Approval: Yolo. Autonomy: agent. Change approval or autonomy"
+        );
+    }
 
     #[test]
     fn dangerous_modes_confirm_and_tightening_does_not() {
