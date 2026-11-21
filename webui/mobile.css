@@ -478,6 +478,43 @@
   }
 }
 
+/* feature:composer-wrap begin (#1508)
+   At 1024x594 the chip row scrolled sideways: "Approval ·" was cut
+   mid-word under a 20px scrollbar. On desktop layouts at <=1100px the
+   chips wrap onto extra rows instead; Send/Steer/Stop stay a sibling
+   column pinned to the last row, so the primary action is always on
+   screen and nothing scrolls sideways. Wider desktops keep the single
+   row (it fits at 1440). Phones (data-phone="1") keep the #1332 scroller
+   with the fade and sticky model chip: wrapping there grows the composer
+   past a keyboard-open visual viewport (UAT phone-keyboard-390). */
+@media (max-width: 1100px) {
+  body:not([data-phone="1"]) .composer-bar {
+    flex-wrap: nowrap;
+    align-items: flex-end;
+    overflow: visible;
+  }
+  body:not([data-phone="1"]) .composer-chips {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    overflow: visible;
+  }
+  body:not([data-phone="1"]) .composer-chips .composer-glance {
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  body:not([data-phone="1"]) .composer-bar .steer-actions {
+    flex: 0 0 auto;
+  }
+}
+/* The composer never shrinks into the transcript: the transcript is the
+   only flex child that gives up height, so no transcript or starter
+   content renders underneath the composer. */
+body:not([data-phone="1"]) .chat > .composer { flex: 0 0 auto; }
+.chat > .transcript { min-height: 0; }
+/* feature:composer-wrap end */
+
 .phone-nav {
   display: none;
 }

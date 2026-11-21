@@ -103,6 +103,8 @@ pub struct Message {
     /// the envelope carried one. Empty for legacy log lines. Used by the
     /// orphan sweep (#1506) to scope a `turn.completed` to its own turn.
     pub turn_id: String,
+    /// Attachments sent with a `user.message` (#1389). Empty elsewhere.
+    pub attachments: Vec<crate::transcript_attachments::SentAttachment>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -310,6 +312,10 @@ pub struct Transcript {
     /// `sessionId` of the turn in progress (from `turn.started`), so a
     /// child session's streams are not counted on the parent's turn.
     turn_session: String,
+    /// Per-turn verification badges (#1373), keyed like `turn_elapsed` by
+    /// the turn's final message id. Only turns whose `turn.completed`
+    /// carried a verification report get an entry.
+    pub turn_verify: HashMap<u32, crate::turn_verify::TurnVerify>,
     /// Live `tool.output` tails (#1374), keyed by the tool card's message
     /// id. Removed when the call's `tool.end` arrives; a call that never
     /// ends keeps its last tail as the only record of what it printed.
@@ -340,8 +346,15 @@ impl Transcript {
             turn_usage: HashMap::new(),
             usage_acc: crate::turn_usage::TurnUsage::default(),
             turn_session: String::new(),
+            turn_verify: HashMap::new(),
             tool_tails: HashMap::new(),
         }
+    }
+
+    /// The verification badge stamped on this message, if it is the final
+    /// line of a completed turn whose payload carried a report (#1373).
+    pub fn verify_for(&self, id: u32) -> Option<&crate::turn_verify::TurnVerify> {
+        self.turn_verify.get(&id)
     }
 
     /// The live output tail of tool card `id`, while it has one (#1374).
@@ -519,6 +532,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: field_str(&data, "turnId"),
+                    attachments: crate::transcript_attachments::parse_images(&data),
                 });
                 self.turn_start = Some(id);
                 self.absorb();
@@ -573,6 +587,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "turn.completed" => {
@@ -580,7 +595,8 @@ impl Transcript {
                 self.sweep_orphaned_at_turn_end(&field_str(&data, "turnId"));
                 self.absorb();
                 let usage = std::mem::take(&mut self.usage_acc);
-                self.stamp_turn(at_ms, usage);
+                let verify = crate::turn_verify::turn_verify(&data);
+                self.stamp_turn(at_ms, usage, verify);
                 // #1371: an abnormal stop gets its own end-of-turn line,
                 // pushed after the turn is stamped so the elapsed/usage
                 // labels and fork keep-counts stay on the turn's real
@@ -651,6 +667,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: field_str(&data, "turnId"),
+                    attachments: Vec::new(),
                 });
             }
             "tool.output" => {
@@ -732,6 +749,7 @@ impl Transcript {
                         reconnect: String::new(),
                         at_ms,
                         turn_id: field_str(&data, "turnId"),
+                        attachments: Vec::new(),
                     });
                 }
             }
@@ -758,6 +776,42 @@ impl Transcript {
                 );
                 card.at_ms = at_ms;
                 self.upsert_child(card);
+            }
+            "child.escalated" => {
+                // #1375: a child tripped a budget/stall/loop. One persistent
+                // line names the child, the trip and the action taken; the
+                // later child.completed card still carries the outcome.
+                let session = field_str(&data, "sessionId");
+                let mut name = field_str(&data, "name");
+                if name.is_empty() {
+                    name = session.chars().take(8).collect();
+                }
+                if name.is_empty() {
+                    name = "A child".into();
+                }
+                let body = crate::child_signals::escalation_sentence(
+                    &field_str(&data, "kind"),
+                    &field_str(&data, "reason"),
+                    &field_str(&data, "action"),
+                );
+                self.push(Message {
+                    id: 0,
+                    role: Role::Notice,
+                    title: format!("{name} escalated"),
+                    body: body.clone(),
+                    badge: "escalated".into(),
+                    detail: String::new(),
+                    key: String::new(),
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: body,
+                    reconnect: String::new(),
+                    at_ms,
+                    turn_id: field_str(&data, "turnId"),
+                });
             }
             "artifact.updated" => self.artifact_updates = self.artifact_updates.wrapping_add(1),
             "engine.error" => {
@@ -793,6 +847,7 @@ impl Transcript {
                         reconnect: provider,
                         at_ms,
                         turn_id: String::new(),
+                        attachments: Vec::new(),
                     });
                     return;
                 }
@@ -813,6 +868,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "permission.asked" => {
@@ -851,6 +907,7 @@ impl Transcript {
                     reconnect: String::new(),
                     at_ms,
                     turn_id: String::new(),
+                    attachments: Vec::new(),
                 });
             }
             "permission.resolved" => {
@@ -863,12 +920,44 @@ impl Transcript {
                     .rev()
                     .find(|m| m.key == request_id && m.role == Role::Permission)
                 {
+                    // Name how the ask ended (#1387): Allowed, Denied, or
+                    // Expired when it died with no answer.
+                    msg.title = crate::approval_outcome::resolved_title(&decision).into();
                     msg.badge = if decision.is_empty() {
                         "done".into()
                     } else {
                         decision
                     };
                 }
+            }
+            "permission.decided" if crate::approval_outcome::is_latched_denial(&data) => {
+                // A repeat of an action the user already denied: no card,
+                // one line saying why (#1387).
+                let permission = field_str(&data, "permission");
+                let patterns = pattern_list(&data);
+                let body = if patterns.is_empty() {
+                    permission.clone()
+                } else {
+                    format!("{permission} · {patterns}")
+                };
+                self.push(Message {
+                    id: 0,
+                    role: Role::Permission,
+                    title: "Denied".into(),
+                    body,
+                    badge: "denied".into(),
+                    detail: crate::approval_outcome::LATCHED_DETAIL.into(),
+                    key: String::new(),
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: permission,
+                    reconnect: String::new(),
+                    at_ms,
+                    turn_id: String::new(),
+                });
             }
             _ => {}
         }
@@ -924,6 +1013,7 @@ impl Transcript {
             reconnect: String::new(),
             at_ms,
             turn_id,
+            attachments: Vec::new(),
         });
     }
 
@@ -1064,7 +1154,12 @@ impl Transcript {
         }
     }
 
-    fn stamp_turn(&mut self, completed_ms: f64, usage: crate::turn_usage::TurnUsage) {
+    fn stamp_turn(
+        &mut self,
+        completed_ms: f64,
+        usage: crate::turn_usage::TurnUsage,
+        verify: Option<crate::turn_verify::TurnVerify>,
+    ) {
         let Some(id) = self.turn_start else {
             return;
         };
@@ -1099,6 +1194,11 @@ impl Transcript {
             // reported a known input or output count.
             if usage.label().is_some() {
                 self.turn_usage.insert(last_id, usage);
+            }
+            // Verification badge (#1373): same final line, from the
+            // payload only; no report, no badge.
+            if let Some(v) = verify {
+                self.turn_verify.insert(last_id, v);
             }
         }
         self.turn_start = None;
@@ -1202,6 +1302,7 @@ impl Transcript {
             reconnect: String::new(),
             at_ms,
             turn_id: String::new(),
+            attachments: Vec::new(),
         });
     }
 }
@@ -2693,6 +2794,42 @@ mod tests {
     }
 
     #[test]
+    fn child_escalated_renders_a_line() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env(
+            "child.escalated",
+            serde_json::json!({
+                "sessionId": "abcd1234ef",
+                "name": "scout",
+                "kind": "stall",
+                "reason": "no progress for 300s",
+                "action": "finalizing",
+                "terminalStatus": "blocked"
+            }),
+        ));
+        let line = t
+            .messages
+            .iter()
+            .find(|m| m.badge == "escalated")
+            .expect("escalation line");
+        assert_eq!(line.role, Role::Notice);
+        assert_eq!(line.title, "scout escalated");
+        assert_eq!(
+            line.body,
+            "Stalled: no progress for 300s. Action: finishing with a handoff."
+        );
+
+        // No name: fall back to the short session id.
+        t.apply_envelope(&env(
+            "child.escalated",
+            serde_json::json!({"sessionId": "abcd1234ef", "kind": "tokens", "reason": "", "action": "interrupted"}),
+        ));
+        let last = t.messages.last().unwrap();
+        assert_eq!(last.title, "abcd1234 escalated");
+        assert_eq!(last.body, "Token budget. Action: stopped.");
+    }
+
+    #[test]
     fn orphan_child_row_swept_at_turn_end() {
         let mut t = Transcript::new();
         t.apply_envelope(&env(
@@ -3300,6 +3437,47 @@ mod tests {
         assert!(matches!(blocks[0], Block::Paragraph(_)));
     }
 
+    // #1373: per-turn verification badge.
+    fn verify_turn(t: &mut Transcript, prompt: &str, done: Value) -> u32 {
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": prompt})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "answer"})));
+        let last = t.messages.last().unwrap().id;
+        t.apply_envelope(&env("turn.completed", done));
+        last
+    }
+
+    #[test]
+    fn verification_badge_stamps_final_line_from_payload_only() {
+        use crate::turn_verify::VerifyState;
+        let mut t = Transcript::new();
+        let a = verify_turn(
+            &mut t,
+            "one",
+            serde_json::json!({"verification": {"passed": true, "claimed": true, "verified": true}}),
+        );
+        let b = verify_turn(
+            &mut t,
+            "two",
+            serde_json::json!({"verification": {"passed": false, "claimed": true, "verified": false}}),
+        );
+        let c = verify_turn(
+            &mut t,
+            "three",
+            serde_json::json!({"verification": {"passed": false, "claimed": false, "verified": true}}),
+        );
+        let d = verify_turn(&mut t, "four", serde_json::json!({"stopReason": "end_turn"}));
+        assert_eq!(t.verify_for(a).unwrap().state, VerifyState::Verified);
+        assert_eq!(t.verify_for(b).unwrap().state, VerifyState::Claimed);
+        assert_eq!(t.verify_for(c).unwrap().state, VerifyState::Unverified);
+        assert!(t.verify_for(d).is_none(), "no payload, no badge");
+        assert_eq!(t.turn_verify.len(), 3);
+        // Only the final line of each turn carries it.
+        for m in &t.messages {
+            if ![a, b, c].contains(&m.id) {
+                assert!(t.verify_for(m.id).is_none(), "{}", m.id);
+            }
+        }
+    }
     // #1374: live tool.output tail.
     fn begin(t: &mut Transcript, call: &str) -> u32 {
         t.apply_envelope(&env(
