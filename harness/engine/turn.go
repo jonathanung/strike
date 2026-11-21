@@ -2190,5 +2190,6 @@ func (e *Engine) BashSandboxPolicy(workDir string) sandbox.Policy {
 	}
 	p.NetworkAllow = sandbox.CloneNetworkAllow(e.opts.NetworkAllow)
 	p.AllowDegrade = e.opts.SandboxAllowDegrade
+	p.Runtime = sandbox.ResolveRuntime(e.opts.SandboxRuntime)
 	return p
 }
