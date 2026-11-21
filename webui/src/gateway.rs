@@ -505,33 +505,68 @@ fn connect_http_error(target: &str, code: u16, body: &str) -> String {
     }
 }
 
+/// Why a candidate probe failed. `Auth` (401/403 from `/v1/gateway`)
+/// is kept apart because the same-origin gateway may still be switched
+/// to so its own pairing flow can run (see `auth_refusal_passes`).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ProbeFailure {
+    Auth(String),
+    Other(String),
+}
+
+impl ProbeFailure {
+    fn message(self) -> String {
+        match self {
+            ProbeFailure::Auth(m) | ProbeFailure::Other(m) => m,
+        }
+    }
+}
+
+/// #1523 product decision: a 401/403 from the SAME-ORIGIN gateway
+/// ("This gateway", or a saved profile pointing at the page origin) is
+/// let through so the switch commits and the gateway's own pairing /
+/// token prompt takes over. A 401/403 from any other target refuses
+/// the switch and the error is shown at the form.
+pub(crate) fn auth_refusal_passes(id: &str, target: &str, page_origin: &str) -> bool {
+    if id == "this" {
+        return true;
+    }
+    let target = target.trim().trim_end_matches('/');
+    let origin = page_origin.trim().trim_end_matches('/');
+    target.is_empty() || (!origin.is_empty() && target == origin)
+}
+
 /// Probe a candidate gateway BEFORE any switch (#1523): `/health` must
 /// answer 200 and `/v1/gateway` must accept the candidate's own token
 /// (never the current gateway's token — `token` is the target profile's
 /// stored token, or empty for a brand-new target). Ok carries the
 /// gateway-info body; Err is a specific, form-ready message and the
 /// caller must leave the current connection untouched.
-async fn probe_target(base: &str, token: &str) -> Result<String, String> {
+async fn probe_target(base: &str, token: &str) -> Result<String, ProbeFailure> {
     let target = if base.trim().is_empty() {
         "this gateway"
     } else {
         base.trim()
     };
     match gateway_fetch("GET", base, token, "/health", None).await {
-        Err(_) => return Err(connect_unreachable_error(target)),
-        Ok((code, body)) if code != 200 => return Err(connect_http_error(target, code, &body)),
+        Err(_) => return Err(ProbeFailure::Other(connect_unreachable_error(target))),
+        Ok((code, body)) if code != 200 => {
+            return Err(ProbeFailure::Other(connect_http_error(target, code, &body)))
+        }
         Ok(_) => {}
     }
     let body = match gateway_fetch("GET", base, token, "/v1/gateway", None).await {
         Err(_) => {
-            return Err(format!(
+            return Err(ProbeFailure::Other(format!(
                 "{target} answered health, then the gateway check failed. \
                  Nothing changed — the current gateway is still selected."
-            ))
+            )))
         }
-        Ok((401, _)) | Ok((403, _)) => return Err(connect_auth_error(target)),
+        Ok((401, _)) | Ok((403, _)) => return Err(ProbeFailure::Auth(connect_auth_error(target))),
         Ok((200, body)) => body,
-        Ok((code, body)) => return Err(connect_http_error(target, code, &body)),
+        Ok((code, body)) => {
+            return Err(ProbeFailure::Other(connect_http_error(target, code, &body)))
+        }
     };
     // Cross-origin targets must also pass the credentialed check the
     // cockpit's real data calls depend on (see credentialed_health_ok).
@@ -539,7 +574,7 @@ async fn probe_target(base: &str, token: &str) -> Result<String, String> {
     let origin = page_origin();
     if !dest.is_empty() && dest != origin.trim_end_matches('/') {
         if !credentialed_health_ok(base, token).await {
-            return Err(connect_cross_origin_error(target));
+            return Err(ProbeFailure::Other(connect_cross_origin_error(target)));
         }
     }
     Ok(body)
@@ -944,7 +979,20 @@ pub fn GatewaySwitcher(
                     form_note.set(String::new());
                     commit_switch(id, profile_base, cand);
                 }
-                Err(msg) => {
+                Err(ProbeFailure::Auth(_))
+                    if auth_refusal_passes(&id, &profile_base, &page_origin()) =>
+                {
+                    if switch_seq.get_untracked() != seq {
+                        return;
+                    }
+                    // Same-origin gateway refused this browser: switch
+                    // anyway so its own pairing / token prompt runs
+                    // (probe() marks it "unauthorized" with guidance).
+                    form_note.set(String::new());
+                    commit_switch(id, profile_base, cand);
+                }
+                Err(fail) => {
+                    let msg = fail.message();
                     if switch_seq.get_untracked() != seq {
                         return;
                     }
@@ -1180,7 +1228,10 @@ pub fn GatewaySwitcher(
                     form_note.set(format!("Connected to {u}. It is saved in Gateways."));
                     commit_switch(id, u, cand);
                 }
-                Err(msg) => form_note.set(msg),
+                // Connect never targets the current/same-origin gateway
+                // (target_is_current above), so every failure, 401/403
+                // included, refuses the switch.
+                Err(fail) => form_note.set(fail.message()),
             }
         });
     };
@@ -1358,6 +1409,32 @@ mod tests {
         assert!(target_is_current("http://a:1", "", "http://a:1/"));
         assert!(!target_is_current("http://b:2", "http://a:1", "http://a:1"));
         assert!(!target_is_current("http://b:2", "", "http://a:1"));
+    }
+
+    #[test]
+    fn auth_refusal_passes_only_for_same_origin() {
+        let origin = "http://127.0.0.1:7777";
+        let cases = [
+            ("this", "", true),
+            ("this", "http://10.0.0.2:8787", true),
+            ("g1", "", true),
+            ("g1", "http://127.0.0.1:7777/", true),
+            ("g1", "http://127.0.0.1:7777", true),
+            ("g1", "http://127.0.0.1:8787", false),
+            ("g1", "http://100.64.0.5:8787", false),
+            ("paired-x", "http://10.0.0.2:7777", false),
+        ];
+        for (id, target, want) in cases {
+            assert_eq!(auth_refusal_passes(id, target, origin), want, "{id} {target}");
+        }
+        // No known page origin: only "this"/blank count as same-origin.
+        assert!(!auth_refusal_passes("g1", "http://127.0.0.1:7777", ""));
+    }
+
+    #[test]
+    fn probe_failure_message_keeps_text() {
+        assert_eq!(ProbeFailure::Auth("a".into()).message(), "a");
+        assert_eq!(ProbeFailure::Other("b".into()).message(), "b");
     }
 
     #[test]
