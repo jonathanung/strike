@@ -1,0 +1,55 @@
+/* feature:markdown-review begin */
+/* Markdown Review (#1366): anchored comments on rendered documents. */
+.mdr-host { min-width: 0; }
+.mdr-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+.mdr-head,
+.mdr-send,
+.mdr-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.mdr-head { justify-content: space-between; }
+.mdr-count { font-size: var(--type-sm); color: var(--muted); }
+.mdr-quote {
+  margin: 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--rule);
+  color: var(--muted);
+  font-size: var(--type-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 8em;
+  overflow: auto;
+}
+.mdr-draft {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  background: var(--ground);
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+}
+.mdr-panel button { min-height: var(--control); }
+.mdr-group { display: flex; flex-direction: column; gap: 4px; }
+.mdr-heading { margin: 0; font-size: var(--type-sm); }
+.mdr-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.mdr-item { display: flex; flex-direction: column; gap: 4px; }
+.mdr-body { margin: 0; white-space: pre-wrap; word-break: break-word; }
+.mdr-stale .mdr-quote { border-left-color: var(--danger); text-decoration: line-through; }
+.mdr-badge { font-size: var(--type-sm); color: var(--danger); }
+.mdr-error { color: var(--danger); margin: 0; }
+.mdr-note { margin: 0; }
+/* feature:markdown-review end */

@@ -2244,8 +2244,13 @@ pub fn DocumentPane(
     jump_line: RwSignal<u32>,
     want_diff: RwSignal<bool>,
     editing: RwSignal<bool>,
+    /// Live root and its busy state, for Markdown Review sends (#1366).
+    root: RwSignal<String>,
+    busy: Memo<bool>,
 ) -> impl IntoView {
     let content = RwSignal::new(String::new());
+    // Markdown Review (#1366): the passage selected in the rendered view.
+    let review_quote = RwSignal::new(String::new());
     let draft = RwSignal::new(String::new());
     let sha = RwSignal::new(String::new());
     let mtime = RwSignal::new(String::new());
@@ -3149,7 +3154,24 @@ pub fn DocumentPane(
             })}
             <div class="ev-body">
                 <Show when=move || !binary.get() && !loading.get() && preview.get()>
-                    {move || view! { <MarkdownView text=content.get() outline=true /> }}
+                    <div
+                        id={crate::markdown_review::HOST_ID}
+                        class="mdr-host"
+                        on:mouseup=move |_| crate::markdown_review::capture(review_quote)
+                        on:keyup=move |_| crate::markdown_review::capture(review_quote)
+                        on:touchend=move |_| crate::markdown_review::capture(review_quote)
+                    >
+                        {move || view! { <MarkdownView text=content.get() outline=true /> }}
+                    </div>
+                    <crate::markdown_review::MdReviewPanel
+                        base=base
+                        token=token
+                        root=root
+                        busy=busy
+                        path=loaded_path
+                        content=content
+                        quote=review_quote
+                    />
                 </Show>
                 <Show when=move || !binary.get() && !loading.get() && !preview.get() && !editing.get()>
                     {move || view! {

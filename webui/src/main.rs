@@ -20,6 +20,7 @@ mod diag;
 mod draft_size;
 mod editor;
 mod load_epoch;
+mod markdown_review;
 mod localfiles;
 mod customize;
 mod gateway;
@@ -4996,6 +4997,8 @@ fn App() -> impl IntoView {
                             jump_line=doc_line
                             want_diff=doc_diff
                             editing=doc_editing
+                            root=active_root
+                            busy=session_busy_now
                         />
                     </Show>
                     <Show when=move || tf_open.get() && doc_path.get().is_empty()>
