@@ -657,6 +657,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/notifications", s.handleNotifications)
 	s.mux.HandleFunc("GET /v1/notifications/stream", s.handleNotificationStream)
 	s.mux.HandleFunc("PUT /v1/notifications/prefs", s.handleNotificationPrefs)
+	s.mux.HandleFunc("POST /v1/notifications/seen", s.handleNotificationSeen)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
 	s.mux.HandleFunc("GET /v1/terminals", s.handleTerminalsList)
 	s.mux.HandleFunc("POST /v1/terminals", s.handleTerminalCreate)
