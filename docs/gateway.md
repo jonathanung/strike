@@ -432,6 +432,8 @@ refuses create, poll, and cancel, and does not run the poll loop.
 | `GET /v1/deploy-watches/{id}` | One watch with per-check evidence |
 | `POST /v1/deploy-watches/{id}/poll` | Run every check now |
 | `POST /v1/deploy-watches/{id}/cancel` | Stop; the verdict becomes `inconclusive` |
+| `POST /v1/deploy-watches/{id}/fix-session` | Confirmed: start a fix session seeded with the evidence |
+| `POST /v1/deploy-watches/{id}/revert-pr` | Confirmed: open a draft PR reverting the watched commit |
 
 ```json
 {
@@ -508,3 +510,22 @@ posting failure is shown as `notifyError` on the watch and never changes the
 verdict. If the session cannot start, the watch is cancelled
 (`inconclusive`). Deploy-watch deliveries cannot be replayed; resend the
 deploy event.
+
+### Regression handoffs
+
+On a `regression` verdict the cockpit offers two actions (#1784). Neither
+runs automatically: each route needs the bearer and the body
+`{"confirm": true}`, returns 409 on any other verdict, and runs at most once
+per watch (a repeat returns the recorded result as `fixSession` or
+`revertPr` on the watch).
+
+- `fix-session` starts a new root through the shared launcher, seeded with
+  the verdict and evidence. Optional `"permissionMode"`; default `plan`.
+- `revert-pr` needs the serve directory to be a clone of the watched repo.
+  It fetches the remote default branch, refuses a commit that is not on it,
+  runs `git revert` (`-m 1` for a merge commit) in a temporary worktree,
+  pushes `strike/revert-<sha>` (never the default branch, never forced), and
+  opens a **draft** PR with the evidence through the GitHub API. The PR goes
+  through the repository's normal review and CI gates; Strike never merges
+  it. A revert that does not apply cleanly is reported; open a fix session
+  instead.
