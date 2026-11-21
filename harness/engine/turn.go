@@ -606,8 +606,26 @@ func (e *Engine) startNextPendingUserInput(ctx context.Context) bool {
 // lifts the permission deny latch (#1387); child notices, mailbox turns and
 // other engine-started turns keep it.
 func (e *Engine) startUserTurn(ctx context.Context, text, display string, images []protocol.ImageAttachment) {
-	e.perms.ClearDenyLatch()
+	e.clearDenyLatches()
 	e.startTurnShown(ctx, text, display, images)
+}
+
+// clearDenyLatches lifts the deny latch on this engine and every live child
+// engine: a user's message speaks to the whole session tree, and a delegated
+// child that was denied must not stay latched after the user writes again.
+func (e *Engine) clearDenyLatches() {
+	e.perms.ClearDenyLatch()
+	e.childMu.Lock()
+	kids := make([]*Engine, 0, len(e.children))
+	for _, h := range e.children {
+		if h != nil && h.eng != nil {
+			kids = append(kids, h.eng)
+		}
+	}
+	e.childMu.Unlock()
+	for _, k := range kids {
+		k.clearDenyLatches()
+	}
 }
 
 func (e *Engine) startTurn(ctx context.Context, text string, images []protocol.ImageAttachment) {
