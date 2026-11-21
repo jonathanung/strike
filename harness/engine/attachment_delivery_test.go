@@ -87,3 +87,31 @@ func TestDeliverImagesKeepsOrderForMixedTurn(t *testing.T) {
 		t.Fatalf("nil input = %#v, %#v", a, s)
 	}
 }
+
+func TestRestoreSkipsDroppedAttachments(t *testing.T) {
+	events := []protocol.Event{
+		protocol.UserMessage{Text: "look", Images: []protocol.ImageAttachment{
+			{MIME: "image/png", Data: "iVBORw0KGgo=", Name: "sent.png", Delivery: protocol.AttachmentDeliverySent},
+			{MIME: "application/pdf", Data: "JVBERi0=", Name: "a.pdf", Delivery: protocol.AttachmentDeliveryDropped, DeliveryReason: "application/pdf cannot be sent as a provider image"},
+			{MIME: "image/png", Data: "iVBORw0KGgo=", Name: "old.png"},
+		}},
+		protocol.UserMessage{Text: "only dropped", Images: []protocol.ImageAttachment{
+			{MIME: "image/png", Data: "iVBORw0KGgo=", Delivery: protocol.AttachmentDeliveryDropped},
+		}},
+	}
+	got := Restore(events)
+	if len(got.Messages) != 2 {
+		t.Fatalf("messages = %#v", got.Messages)
+	}
+	if n := len(got.Messages[0].Images); n != 2 {
+		t.Fatalf("first message images = %d, want 2 (sent + unreported)", n)
+	}
+	for _, img := range got.Messages[0].Images {
+		if img.MIME != "image/png" {
+			t.Fatalf("dropped attachment restored: %#v", img)
+		}
+	}
+	if got.Messages[1].Images != nil {
+		t.Fatalf("all-dropped message restored images: %#v", got.Messages[1].Images)
+	}
+}
