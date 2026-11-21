@@ -83,13 +83,26 @@ impl Signin {
         notes: RwSignal<HashMap<String, String>>,
         bump: RwSignal<u32>,
     ) -> Self {
+        let flows = RwSignal::new(HashMap::new());
+        let pastes = RwSignal::new(HashMap::new());
+        // A flow belongs to the gateway that started it. Switching gateways
+        // drops every flow (which also ends its poll) instead of polling the
+        // new gateway for an id it never issued.
+        Effect::new(move |prev: Option<String>| {
+            let now = base.get();
+            if prev.is_some_and(|prev| prev != now) {
+                flows.set(HashMap::new());
+                pastes.set(HashMap::new());
+            }
+            now
+        });
         Signin {
             base,
             token,
             notes,
             bump,
-            flows: RwSignal::new(HashMap::new()),
-            pastes: RwSignal::new(HashMap::new()),
+            flows,
+            pastes,
             busy: RwSignal::new(Vec::new()),
             alive: Arc::new(AtomicBool::new(true)),
         }
