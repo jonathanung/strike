@@ -66,6 +66,7 @@ Endpoints:
   GET  /v1/sidechat                 list read-only side-chat turns
   POST /v1/sidechat/ask             ask about the session (no tools, no user.input)
   POST /v1/sidechat/ops             refused; cannot approve tools or post user.input
+  POST /v1/prompt/sharpen           rewrite a composer draft (one-shot, no transcript writes)
   GET  /v1/live/events              SSE of live engine events
   GET  /v1/status                   live status chrome
   GET  /v1/agents                   selectable agents

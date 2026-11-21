@@ -36,6 +36,7 @@ mod model;
 mod notify;
 mod outcome;
 mod project_init;
+mod prompt_sharpen;
 mod onboarding;
 mod park;
 mod permissions_explain;
@@ -5199,6 +5200,13 @@ fn App() -> impl IntoView {
                                     <span class="name">"Use a skill"</span>
                                     <span class="path">"Skills loaded for this daemon"</span>
                                 </button>
+                                <button type="button" class="palette-row" data-sharpen-menu="true" on:click=move |_| {
+                                    plus_open.set(false);
+                                    let _ = crate::shell::dispatch(prompt_sharpen::COMMAND_ID, "");
+                                }>
+                                    <span class="name">"Sharpen prompt"</span>
+                                    <span class="path">"Rewrite the draft with the session model (Alt+P)"</span>
+                                </button>
                                 <button type="button" class="palette-row" data-chat-attach="menu" on:click=move |_| {
                                     plus_open.set(false);
                                     if let Some(el) = file_input.get() {
@@ -5376,6 +5384,7 @@ fn App() -> impl IntoView {
                                     }
                                 }
                             />
+                            <prompt_sharpen::SharpenBar draft=draft active_root=active_root busy=session_busy_now base=base token=token />
                             <textarea
                                 id="composer-input"
                                 aria-label="Message this session"
@@ -5403,6 +5412,16 @@ fn App() -> impl IntoView {
                                     }
                                 }
                                 on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                    // Prompt sharpen (#1385): Alt+P rewrites the
+                                    // draft; `code` also matches macOS, where
+                                    // Option+P types a symbol.
+                                    if ev.alt_key() && !ev.ctrl_key() && !ev.meta_key()
+                                        && (ev.key().eq_ignore_ascii_case("p") || ev.code() == "KeyP")
+                                    {
+                                        ev.prevent_default();
+                                        let _ = crate::shell::dispatch(prompt_sharpen::COMMAND_ID, "");
+                                        return;
+                                    }
                                     if ev.key() == "ArrowDown" || ev.key() == "ArrowUp" {
                                         let items = ac_items.get_untracked();
                                         if ac_open.get_untracked() && items.iter().any(|item| item.selectable) {
