@@ -429,6 +429,19 @@ try {
   ) {
     throw new Error(`backup export check failed status=${backupRes.status} body=${backupText.slice(0, 400)}`);
   }
+  // #1940: the estimate names every exported section without record data.
+  const backupEst = await fetch(`http://127.0.0.1:${port}/v1/backup/estimate`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const backupEstBody = await backupEst.json().catch(() => ({}));
+  if (
+    !backupEst.ok ||
+    !(backupEstBody.totalBytes > 0) ||
+    !(backupEstBody.sections || []).some((s) => s.name === "memory") ||
+    JSON.stringify(backupEstBody).includes("smoke likes plain files")
+  ) {
+    throw new Error(`backup estimate check failed status=${backupEst.status} body=${JSON.stringify(backupEstBody).slice(0, 400)}`);
+  }
   const backupPlan = await fetch(`http://127.0.0.1:${port}/v1/backup/restore?dryRun=1`, {
     method: "POST",
     headers: auth,
@@ -2111,6 +2124,11 @@ try {
   await waitUntil(
     `!!document.querySelector('[data-action="backup-export"]') && !document.querySelector('[data-action="backup-export"]').disabled`,
     "backup export control",
+  );
+  // #1940: the size estimate is shown before export.
+  await waitUntil(
+    `(document.querySelector("[data-backup-estimate]")?.innerText || "").includes("to download.")`,
+    "backup size estimate",
   );
   await evaluate(`document.querySelector('[data-action="backup-export"]').click()`);
   await waitUntil(

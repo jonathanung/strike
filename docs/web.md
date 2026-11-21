@@ -1176,7 +1176,8 @@ Permission asks appear as `permission.asked` events; resolve with
 | `PUT` | `/v1/knowledge` | **yes** | Pin (`{path,note?,author?,scope?}`). Notes are scrubbed. Blocked in attach-only. |
 | `DELETE` | `/v1/knowledge` | **yes** | Unpin (`{path,scope?}`). Blocked in attach-only. |
 | `GET` | `/v1/memory/export` | mode | Download portable `strike-memory.json` (TUI format) |
-| `GET` | `/v1/backup/export` | mode | Download `strike-backup.json`: whole-gateway archive (sessions, memory, schedules, non-secret settings) with manifest, sha256 per section, and named exclusions (#1339) |
+| `GET` | `/v1/backup/estimate` | mode | `{totalBytes, sections:[{name,items,bytes,sha256}], excluded}` for the archive an export would produce now; no record data (#1940) |
+| `GET` | `/v1/backup/export` | mode | Download `strike-backup.json`: whole-gateway archive (sessions, memory, knowledge pins, schedules, issues, plans, non-secret settings) with manifest, sha256 per section, and named exclusions (#1339) |
 | `POST` | `/v1/backup/restore` | live (dry run: mode) | Body is the archive. `?dryRun=1` reports create/skip/copy per record without writing; otherwise restores through each store. Never overwrites: identical records skip, differing ones restore as copies |
 | `GET` | `/v1/preview/ports` | mode | Live preview (#1341): listening loopback TCP ports on the gateway host (`detection: proc` on Linux, `unsupported` elsewhere). The gateway's own port is omitted and reported as `self`. |
 | `GET` | `/v1/preview` | mode | The selected preview target `{selected, port, origin, path}`. `?probe=1` adds reachability and framing (`ok`/`refused`). |
