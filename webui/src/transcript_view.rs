@@ -907,7 +907,7 @@ struct RowData {
     reasoning: Option<String>,
     verify: Option<crate::turn_verify::TurnVerify>,
     files: Option<crate::turn_files::TurnFiles>,
-    steer: Option<crate::steer_ack::AckState>,
+    steer: Option<crate::steer_ack::SteerMark>,
     tail: Option<crate::tool_tail::ToolTail>,
 }
 
@@ -943,7 +943,7 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
         reasoning: t.reasoning.for_message(msg.id).map(str::to_owned),
         verify: t.verify_for(msg.id).cloned(),
         files: t.files_for(msg.id).cloned(),
-        steer: t.steer_acks.get(msg.id),
+        steer: t.steer_acks.mark(msg.id),
         tail: t.tail_for(msg.id).cloned(),
     })
 }
@@ -1209,7 +1209,7 @@ fn message_view(
     turn_usage: Option<(String, String)>,
     turn_verify: Option<crate::turn_verify::TurnVerify>,
     turn_files: Option<crate::turn_files::TurnFiles>,
-    steer: Option<crate::steer_ack::AckState>,
+    steer: Option<crate::steer_ack::SteerMark>,
     tail: Option<crate::tool_tail::ToolTail>,
     fold_open: bool,
     folds: FoldState,
@@ -1339,6 +1339,14 @@ fn message_view(
                 <Show when=move || show_badge>
                     {match StatusKind::parse_known(&badge) {
                         Some(kind) => view! { <StatusMark kind=kind place=StatusSlot::Badge /> }.into_any(),
+                        // #1827: a /loop firing names its loop; one stable
+                        // class token, the id on its own attribute.
+                        None if crate::transcript::loop_badge_id(&badge).is_some() => {
+                            let loop_id = crate::transcript::loop_badge_id(&badge).unwrap_or_default().to_string();
+                            view! {
+                                <span class="sx-status sx-status-loop" data-status="loop" data-loop-id=loop_id.clone() title=format!("Fired by /loop {loop_id}")>{badge.clone()}</span>
+                            }.into_any()
+                        }
                         None => {
                             // Badge text keeps its space ("no result"); the
                             // class token cannot, so it is dashed (#1506).
@@ -1375,6 +1383,17 @@ fn message_view(
                             title="Quote this message in your next send (q)"
                             on:click=move |_| quote.run((id,))
                         >"Quote"</button>
+                    })}
+                    {is_you.then(|| {
+                        // Prompt library (#1357): keep a sent message as a
+                        // reusable prompt; opens the save dialog prefilled.
+                        // Not on a read-only share transcript (no library).
+                        let text = copy_text.clone();
+                        view! {
+                            <button type="button" class="sx-quiet" data-save-prompt="true" on:click=move |_| {
+                                let _ = crate::shell::dispatch(crate::prompt_library::SAVE_ID, &text);
+                            }>"Save as prompt"</button>
+                        }
                     })}
                     {can_rewind.then(|| view! {
                         <button
@@ -1422,8 +1441,8 @@ fn message_view(
             } else {
                 view! { <p class="sx-body">{body.clone()}</p> }.into_any()
             }}
-            {steer.map(|ack| view! {
-                <p class="steer-ack" data-steer-state=ack.key() role="note">{ack.text()}</p>
+            {steer.map(|mark| view! {
+                <p class="steer-ack" data-steer-state=mark.key() role="note">{mark.text()}</p>
             })}
             {if !prose && !chips.is_empty() {
                 view! {
