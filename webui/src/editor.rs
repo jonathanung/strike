@@ -2475,6 +2475,9 @@ pub fn DocumentPane(
                     status.set(http_message(&e));
                     loading.set(false);
                     writable.set(false);
+                    // A Back/Forward step onto a file that no longer
+                    // opens still lands, so the next step goes past it.
+                    history.update(|h| h.step_failed(&p));
                 }
             }
         });

@@ -54,6 +54,17 @@ impl FileHistory {
         self.pos = self.entries.len() - 1;
     }
 
+    /// A requested `path` failed to load. If it answered a pending step,
+    /// move there anyway (it is not added to Recent), so a deleted file
+    /// cannot wedge Back/Forward; any other failure changes nothing.
+    pub fn step_failed(&mut self, path: &str) {
+        if let Some(i) = self.pending.take() {
+            if self.entries.get(i).map(String::as_str) == Some(path) {
+                self.pos = i;
+            }
+        }
+    }
+
     pub fn current(&self) -> Option<&str> {
         self.entries.get(self.pos).map(String::as_str)
     }
@@ -152,6 +163,20 @@ mod tests {
         h.visit("c");
         assert_eq!(h.current(), Some("c"));
         assert_eq!(h.begin_step(-1).as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn a_step_onto_a_file_that_fails_to_load_still_lands() {
+        let mut h = visited(&["a", "gone", "c"]);
+        assert_eq!(h.begin_step(-1).as_deref(), Some("gone"));
+        h.step_failed("gone");
+        assert_eq!(h.current(), Some("gone"));
+        assert_eq!(h.begin_step(-1).as_deref(), Some("a"));
+        // An ordinary failed open (no pending step) changes nothing.
+        let mut h = visited(&["a", "b"]);
+        h.step_failed("missing");
+        assert_eq!(h.current(), Some("b"));
+        assert_eq!(h.recent(10), vec!["b", "a"]);
     }
 
     #[test]
