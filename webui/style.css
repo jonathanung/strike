@@ -3163,3 +3163,67 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .files-head .hint, .changes-head .hint { margin: 0; }
 /* feature:files-refresh end */
+/* feature:search-in-files begin */
+/* #1406: Files-pane search box; matches marked with .tf-mark (transcript-find.css). */
+.sif {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.sif-bar {
+  display: flex;
+  gap: var(--space-2);
+}
+.sif-input {
+  flex: 1;
+  min-width: 0;
+}
+.sif-capped {
+  font-weight: 600;
+}
+.sif-results {
+  display: grid;
+  gap: var(--space-2);
+  max-height: 50vh;
+  overflow: auto;
+}
+.sif-path {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+  font-family: var(--mono, monospace);
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+.sif-count {
+  color: var(--muted);
+}
+.sif-hit {
+  display: flex;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--ink);
+  font-family: var(--mono, monospace);
+  font-size: 0.85em;
+  cursor: pointer;
+}
+.sif-hit:hover,
+.sif-hit:focus-visible {
+  background: var(--surface-muted);
+}
+.sif-line {
+  color: var(--muted);
+  min-width: 3ch;
+  text-align: right;
+  flex: none;
+}
+.sif-hit .ev-inline {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+/* feature:search-in-files end */

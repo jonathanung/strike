@@ -31,6 +31,7 @@ mod providers;
 mod rule_author;
 mod sandbox_explain;
 mod schedule;
+mod search_in_files;
 mod scheduler_presets;
 mod model;
 mod notify;
@@ -1297,6 +1298,10 @@ fn App() -> impl IntoView {
     let doc_path = RwSignal::new(String::new());
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
+    // Search in files (#1406): the Files-pane box's query and a run
+    // counter the palette command bumps to start a search.
+    let sif_query = RwSignal::new(String::new());
+    let sif_run = RwSignal::new(0u32);
     let doc_editing = RwSignal::new(false);
     let layout = RwSignal::new(chat_mode::normalize_layout(&load("strike.layout")));
     let sessions_drawer = RwSignal::new(false);
@@ -4378,6 +4383,20 @@ fn App() -> impl IntoView {
         }),
     );
     shell::bind(
+        "search-in-files.run",
+        Rc::new(move |args: &str| {
+            let q = args.trim();
+            if q.is_empty() {
+                return Err("Type the text to find.".into());
+            }
+            side_tab.set("files".into());
+            mode.set("chat".into());
+            sif_query.set(q.to_string());
+            sif_run.update(|n| *n = n.wrapping_add(1));
+            Ok(())
+        }),
+    );
+    shell::bind(
         "workspaces.change",
         Rc::new(move |_| {
             picker_open.set(true);
@@ -5774,6 +5793,17 @@ fn App() -> impl IntoView {
                                 <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
                                 <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
                             </div>
+                            <search_in_files::SearchInFiles
+                                base=base
+                                token=token
+                                query=sif_query
+                                run=sif_run
+                                on_open=Callback::new(move |(path, line): (String, u32)| {
+                                    doc_diff.set(false);
+                                    doc_line.set(line);
+                                    doc_path.set(path);
+                                })
+                            />
                             <p class="hint">"Click a file to open it. @ mentions it in chat; drag also inserts @path."</p>
                             <Show when=move || !files_error.get().is_empty()>
                                 <div class="notice" role="alert">

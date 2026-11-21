@@ -466,6 +466,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/session-list", s.handleSessionList)
 	s.mux.HandleFunc("GET /v1/files", s.handleFiles)
 	s.mux.HandleFunc("GET /v1/files/search", s.handleFilesSearch)
+	s.mux.HandleFunc("GET /v1/files/grep", s.handleFilesGrep)
 	s.mux.HandleFunc("GET /v1/changed-files", s.handleChangedFiles)
 	s.mux.HandleFunc("GET /v1/git/status", s.handleGitStatus)
 	s.mux.HandleFunc("GET /v1/git/diff", s.handleGitDiff)
