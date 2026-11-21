@@ -893,7 +893,7 @@ pub fn NotificationBell(
     let activate = UnsyncCallback::new(move |note: Note| {
         mark(note.id.clone());
         if note.kind == "update.available" {
-            let _ = crate::shell::host::set_view("settings");
+            let _ = crate::shell::set_view("settings");
         }
         if let Some(target) = parse_focus(&note.href) {
             if let Some(window) = web_sys::window() {
