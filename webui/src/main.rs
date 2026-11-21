@@ -37,6 +37,7 @@ mod load_epoch;
 mod load_warnings;
 mod markdown_review;
 mod local_issues;
+mod mermaid;
 mod localfiles;
 mod customize;
 mod deploy_watch;
