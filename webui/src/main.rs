@@ -66,6 +66,7 @@ mod tool_tail;
 mod terminal;
 mod transcript;
 mod transcript_view;
+mod update_check;
 mod triggers;
 mod turn_elapsed;
 mod turn_failure;
@@ -1730,6 +1731,7 @@ fn App() -> impl IntoView {
                                 crate::local_issues::set_issues_capable(boot.capabilities.issues);
                                 issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
                                 skills.set(boot.skills);
                                 loops_capable.set(boot.capabilities.loops);
                                 commands.set(if boot.capabilities.loops {

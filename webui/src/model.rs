@@ -249,6 +249,9 @@ pub struct BootstrapCapabilities {
     /// present, live engine, and not `--read-only`.
     #[serde(default, rename = "projectInit")]
     pub project_init: bool,
+    /// True when `GET /v1/update` can run the release probe (#1583).
+    #[serde(default, rename = "updateCheck")]
+    pub update_check: bool,
     /// True when `/v1/sessions/{id}/loops` can start and stop session
     /// loops (#1588): live engine and not `--read-only`.
     #[serde(default)]
