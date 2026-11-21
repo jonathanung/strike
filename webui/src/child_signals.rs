@@ -165,6 +165,8 @@ pub fn TeamMessagesFeed(
     let show_all = RwSignal::new(false);
     let open = RwSignal::new(Vec::<String>::new());
     let total = move || messages.with(|m| m.len());
+    // Outside view!: a bare `>` in an attribute closes the tag.
+    let many = move || total() > FEED_LIMIT;
     let rows = move || {
         let limit = if show_all.get() { 0 } else { FEED_LIMIT };
         messages.with(|m| names.with(|n| feed_rows(m, n, &lead_id.get(), limit)))
@@ -174,7 +176,7 @@ pub fn TeamMessagesFeed(
             <section class="agent-feed" data-agent-feed="true" aria-label="Agent messages">
                 <header class="agent-feed-head">
                     <span class="hint">"Agent messages"</span>
-                    <Show when=move || total() > FEED_LIMIT>
+                    <Show when=many>
                         <button
                             type="button"
                             class="secondary"
