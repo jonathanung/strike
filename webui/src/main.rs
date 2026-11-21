@@ -36,6 +36,7 @@ mod gateway_peek;
 mod gateway_qr;
 mod git;
 mod goals;
+mod instance_backup;
 mod mobile;
 mod provider_signin;
 mod providers;

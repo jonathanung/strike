@@ -1155,6 +1155,8 @@ Permission asks appear as `permission.asked` events; resolve with
 | `PUT` | `/v1/knowledge` | **yes** | Pin (`{path,note?,author?,scope?}`). Notes are scrubbed. Blocked in attach-only. |
 | `DELETE` | `/v1/knowledge` | **yes** | Unpin (`{path,scope?}`). Blocked in attach-only. |
 | `GET` | `/v1/memory/export` | mode | Download portable `strike-memory.json` (TUI format) |
+| `GET` | `/v1/backup/export` | mode | Download `strike-backup.json`: whole-gateway archive (sessions, memory, schedules, non-secret settings) with manifest, sha256 per section, and named exclusions (#1339) |
+| `POST` | `/v1/backup/restore` | live (dry run: mode) | Body is the archive. `?dryRun=1` reports create/skip/copy per record without writing; otherwise restores through each store. Never overwrites: identical records skip, differing ones restore as copies |
 | `POST` | `/v1/memory/import` | **yes** | Import (`{path}` or `{data}`, `replace?`); blocked in attach-only |
 | `POST` | `/v1/issues` | **yes** | Create issue (`{title,body?}`); blocked in attach-only |
 | `POST` | `/v1/issues/{id}/close` | **yes** | Close issue; blocked in attach-only |

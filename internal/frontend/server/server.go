@@ -526,6 +526,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/memory", s.handleMemory)
 	s.mux.HandleFunc("GET /v1/memory/export", s.handleMemoryExport)
 	s.mux.HandleFunc("POST /v1/memory/import", s.handleMemoryImport)
+	// Whole-gateway backup/restore (#1339). Secrets are never exported.
+	s.mux.HandleFunc("GET /v1/backup/export", s.handleBackupExport)
+	s.mux.HandleFunc("POST /v1/backup/restore", s.handleBackupRestore)
 	s.mux.HandleFunc("GET /v1/memory/mode", s.handleMemoryModeGet)
 	s.mux.HandleFunc("PUT /v1/memory/mode", s.handleMemoryModePut)
 	s.mux.HandleFunc("PUT /v1/memory/{key}", s.handleMemoryPut)
