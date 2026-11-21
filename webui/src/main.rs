@@ -47,6 +47,7 @@ mod settings;
 mod session_panel;
 mod storage;
 mod tab_title;
+mod themes;
 mod task_runner;
 mod transcript_find;
 mod usage_audit;
@@ -141,10 +142,6 @@ pub(crate) fn remove_key(key: &str) {
     }
 }
 
-fn known_theme(id: &str) -> bool {
-    appearance::known_theme(id)
-}
-
 fn event_in_field(ev: &web_sys::KeyboardEvent) -> bool {
     let Some(target) = ev.target() else {
         return false;
@@ -159,7 +156,7 @@ fn event_in_field(ev: &web_sys::KeyboardEvent) -> bool {
         || el.get_attribute("contenteditable").is_some()
 }
 
-fn theme_color(theme: &str, scheme: &str) -> &'static str {
+pub(crate) fn theme_color(theme: &str, scheme: &str) -> &'static str {
     match (theme, scheme) {
         ("nord", "light") => "#eceff4",
         ("nord", _) => "#2e3440",
@@ -176,28 +173,6 @@ fn theme_color(theme: &str, scheme: &str) -> &'static str {
         (_, "light") => "#ffffff",
         _ => "#14131c",
     }
-}
-
-/// Applies a bundled TUI theme. Surfaces a theme file omits stay on the
-/// Strike ladder for that scheme (see webui/style.css).
-fn apply_theme(theme: &str, scheme: &str) {
-    let theme = if known_theme(theme) { theme } else { "strike" };
-    let scheme = if scheme == "light" { "light" } else { "dark" };
-    if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
-        if let Some(el) = doc.document_element() {
-            let _ = el.set_attribute("data-theme", theme);
-            let _ = el.set_attribute("data-scheme", scheme);
-        }
-        if let Some(meta) = doc
-            .query_selector("meta[name=\"theme-color\"]")
-            .ok()
-            .flatten()
-        {
-            let _ = meta.set_attribute("content", theme_color(theme, scheme));
-        }
-    }
-    save("strike.theme", theme);
-    save("strike.scheme", scheme);
 }
 
 fn apply_layout(layout: &str) {
@@ -1209,12 +1184,15 @@ fn App() -> impl IntoView {
     } else {
         "queue".to_string()
     });
+    // The requested theme id. It may name a daemon catalog theme (#1529);
+    // themes::paint decides how it is drawn and falls back to Strike with
+    // a note when the catalog does not know it.
     let theme_id = RwSignal::new({
         let t = load("strike.theme");
-        if known_theme(&t) {
-            t
+        if t.trim().is_empty() {
+            "strike".to_string()
         } else {
-            "strike".into()
+            t
         }
     });
     let scheme_id: RwSignal<String> = RwSignal::new(if load("strike.scheme") == "light" {
@@ -1222,6 +1200,19 @@ fn App() -> impl IntoView {
     } else {
         "dark".to_string()
     });
+    let themes_state = RwSignal::new(theme_catalog::CatalogState::Loading);
+    let theme_note = RwSignal::new(String::new());
+    let repaint_theme = move || {
+        let paint = themes::paint(
+            &theme_id.get_untracked(),
+            &scheme_id.get_untracked(),
+            &themes_state.get_untracked(),
+        );
+        theme_note.set(paint.note().to_string());
+        if let theme_catalog::Paint::Fallback { keep: false, .. } = paint {
+            theme_id.set(theme_catalog::DEFAULT_ID.to_string());
+        }
+    };
     let font_id = RwSignal::new(appearance::normalize_font(&load("strike.font")));
     let density_id = RwSignal::new(appearance::normalize_density(&load("strike.density")));
     let onboarded = RwSignal::new(load("strike.onboarded") == "1");
@@ -1338,7 +1329,21 @@ fn App() -> impl IntoView {
     let changes = RwSignal::new(Vec::<model::ChangedFile>::new());
     let changes_error = RwSignal::new(String::new());
     let phone_pane = RwSignal::new(mobile::PANE_CHAT.to_string());
-    apply_theme(&theme_id.get_untracked(), &scheme_id.get_untracked());
+    repaint_theme();
+    Effect::new(move |_| {
+        themes_state.track();
+        repaint_theme();
+    });
+    Effect::new(move |_| {
+        let (b, t) = (base.get(), token.get());
+        themes_state.set(theme_catalog::CatalogState::Loading);
+        spawn_local(async move {
+            let state = themes::fetch(&b, &t).await;
+            if base.get_untracked() == b && token.get_untracked() == t {
+                themes_state.set(state);
+            }
+        });
+    });
     appearance::apply_type(&font_id.get_untracked(), &density_id.get_untracked());
     apply_layout(&layout.get_untracked());
     Effect::new(move |_| {
@@ -2746,13 +2751,13 @@ fn App() -> impl IntoView {
     };
 
     let set_theme = move |theme: String| {
-        let theme = if known_theme(&theme) {
-            theme
+        let theme = theme.trim().to_string();
+        theme_id.set(if theme.is_empty() {
+            theme_catalog::DEFAULT_ID.to_string()
         } else {
-            "strike".into()
-        };
-        theme_id.set(theme.clone());
-        apply_theme(&theme, &scheme_id.get_untracked());
+            theme
+        });
+        repaint_theme();
     };
     let set_scheme = move |scheme: String| {
         let scheme: String = if scheme == "light" {
@@ -2760,8 +2765,8 @@ fn App() -> impl IntoView {
         } else {
             "dark".to_string()
         };
-        scheme_id.set(scheme.clone());
-        apply_theme(&theme_id.get_untracked(), &scheme);
+        scheme_id.set(scheme);
+        repaint_theme();
     };
     let set_font = move |font: String| {
         font_id.set(appearance::normalize_font(&font));
@@ -4706,6 +4711,7 @@ fn App() -> impl IntoView {
                 token=token
                 status=status
                 theme=theme_id
+                theme_catalog=themes_state
                 on_theme=set_theme
                 on_done=finish_onboarding
             />
@@ -4721,6 +4727,8 @@ fn App() -> impl IntoView {
                 project_init_capable=project_init_capable
                 root=active_root
                 theme=theme_id
+                theme_catalog=themes_state
+                theme_note=theme_note
                 scheme=scheme_id
                 font=font_id
                 density=density_id
