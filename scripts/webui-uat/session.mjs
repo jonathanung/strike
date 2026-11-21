@@ -14,6 +14,8 @@ const KEYS = {
   Enter: { key: "Enter", code: "Enter", vk: 13 },
   Escape: { key: "Escape", code: "Escape", vk: 27 },
   ArrowLeft: { key: "ArrowLeft", code: "ArrowLeft", vk: 37 },
+  Tab: { key: "Tab", code: "Tab", vk: 9 },
+  "?": { key: "?", code: "Slash", vk: 191 },
 };
 
 const DESK = { width: 1440, height: 900 };

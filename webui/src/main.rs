@@ -37,6 +37,7 @@ mod editor;
 mod error_notice;
 mod fallback;
 mod files_invalidated;
+mod focus_trap;
 mod lessons;
 mod elicitation;
 mod elicitation_ui;
@@ -3946,6 +3947,10 @@ fn App() -> impl IntoView {
     let announcer = announce::Announcer::new();
     announce::watch_asks(announcer, asks);
     announce::watch_turns(announcer, active_root, session_busy_now, transcript);
+    // #1878: agent questions, session status changes, modal focus.
+    announce::watch_questions(announcer, questions);
+    announce::watch_sessions(announcer, roots, active_root);
+    focus_trap::install();
     // Prompt sharpen (#1385): App-owned so the binding outlives the
     // chat view's remounts.
     let sharpen = prompt_sharpen::Sharpen::new(

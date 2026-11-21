@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { STYLE_CSS, audit, ratio, table, themes } from "./contrast.mjs";
+import { STYLE_CSS, TEXT_MIN, audit, ratio, rootBlocks, table, themes } from "./contrast.mjs";
 
 const css = readFileSync(STYLE_CSS, "utf8");
 const webui = (name) => readFileSync(fileURLToPath(new URL(`../../webui/${name}`, import.meta.url)), "utf8");
@@ -87,6 +87,44 @@ test("accent-role text meets AA on the default Strike theme (#1337)", () => {
   // The pair this replaces really did fail.
   const dark = strike.find((t) => t.scheme === "dark").tokens;
   assert.ok(ratio(dark.acid, dark.ground) < 4.5);
+});
+
+// The selector a11y.css uses to set --acid-text for one theme and scheme.
+function acidTextSelector(theme, scheme) {
+  const light = scheme === "light" ? '[data-scheme="light"]' : ':not([data-scheme="light"])';
+  return `:root[data-theme="${theme}"]${light}`;
+}
+
+function resolve(value, tokens) {
+  const m = value.match(/^var\(--([\w-]+)\)$/);
+  return m ? tokens[m[1]] : value;
+}
+
+test("accent-role text meets AA on every theme and scheme (#1878)", () => {
+  const blocks = rootBlocks(webui("a11y.css"));
+  const fallback = blocks[":root"]?.["acid-text"];
+  assert.equal(fallback, "var(--acid)");
+  const rows = [];
+  for (const t of themes(css)) {
+    const own = blocks[acidTextSelector(t.theme, t.scheme)]?.["acid-text"];
+    const fg = resolve(own || fallback, t.tokens);
+    for (const bg of ["ground", "surface", "raised"]) {
+      const r = ratio(fg, t.tokens[bg]);
+      rows.push({ theme: t.theme, scheme: t.scheme, pair: `acid-text/${bg}`, fg, bg: t.tokens[bg], ratio: r, min: TEXT_MIN, kind: "text", pass: r >= TEXT_MIN });
+    }
+  }
+  assert.equal(rows.length, 14 * 3);
+  const bad = rows.filter((r) => !r.pass);
+  assert.equal(bad.length, 0, `--acid-text failures:\n${table(bad)}`);
+});
+
+test("the --acid-text check catches a theme that falls back to a failing --acid (#1878)", () => {
+  const a11y = webui("a11y.css").replace(/:root\[data-theme="dracula"\]\[data-scheme="light"\] \{[^}]*\}/, "");
+  const blocks = rootBlocks(a11y);
+  const dracula = themes(css).find((t) => t.theme === "dracula" && t.scheme === "light");
+  const own = blocks[acidTextSelector("dracula", "light")]?.["acid-text"];
+  assert.equal(own, undefined);
+  assert.ok(ratio(resolve("var(--acid)", dracula.tokens), dracula.tokens.raised) < TEXT_MIN);
 });
 
 test("reduced motion is honoured globally (#1337)", () => {
