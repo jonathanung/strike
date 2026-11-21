@@ -879,6 +879,23 @@ func TestLivePermissionQuestionPendingOnStatus(t *testing.T) {
 	}
 }
 
+func TestLiveElicitationPendingReadsAsWaiting(t *testing.T) {
+	live := NewLive("s1", "/tmp", nil, make(chan protocol.Op, 1))
+	live.Publish(protocol.TurnStarted{})
+	live.Publish(protocol.ElicitationRequested{RequestID: "e1", Server: "fixture", Mode: protocol.ElicitationModeForm})
+	st := live.Status()
+	if !st.ElicitationPending {
+		t.Fatal("elicitation pending after requested")
+	}
+	if st.TurnState != protocol.ClassifyLive(protocol.LiveStatusInput{Busy: true, QuestionPending: true}) {
+		t.Fatalf("turn state = %q, want the waiting state", st.TurnState)
+	}
+	live.Publish(protocol.ElicitationResolved{RequestID: "e1", Action: protocol.ElicitationDecline})
+	if live.Status().ElicitationPending {
+		t.Fatal("elicitation cleared after resolved")
+	}
+}
+
 func TestLiveHubListExposesAttentionFlags(t *testing.T) {
 	ops := make(chan protocol.Op, 4)
 	live := NewLive("r1", "/tmp", nil, ops)
