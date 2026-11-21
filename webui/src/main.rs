@@ -51,6 +51,7 @@ mod park;
 mod permissions_explain;
 mod plan_card;
 mod steer_queue;
+mod steer_ack;
 mod model_menu;
 mod model_menu_view;
 mod session_list;
