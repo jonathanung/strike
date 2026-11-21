@@ -2151,7 +2151,19 @@ try {
     return true;
   })()`);
   await waitUntil(
-    `(() => { const t = document.body.innerText; return t.includes("annotate smoke 1545") && t.includes("Annotations on annotate-shot.png") && t.includes('[pin x=50%, y=50%] "move this button"'); })()`,
+    `(() => {
+      const t = document.body.innerText;
+      if (t.includes("annotate smoke 1545") && t.includes("Annotations on annotate-shot.png") && t.includes('[pin x=50%, y=50%] "move this button"')) return true;
+      const msgs = [...document.querySelectorAll(".sx-msg")].slice(-3).map((m) => m.innerText.slice(0, 300));
+      return JSON.stringify({
+        msgs,
+        chips: document.querySelectorAll(".attach-chip").length,
+        draft: document.getElementById("composer-input")?.value || "",
+        notes: [...document.querySelectorAll(".hint, .queue-note, [role=status]")].map((n) => n.innerText).filter(Boolean).slice(0, 8),
+        overlay: !!document.querySelector("[data-annotate]"),
+        confirm: !!document.querySelector(".confirm-dialog"),
+      });
+    })()`,
     "sent turn carries the annotation block",
   );
   await send("Runtime.evaluate", {
