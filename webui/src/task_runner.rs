@@ -17,7 +17,7 @@ use load_guard::LoadEpoch;
 
 use crate::load_epoch::begin;
 
-use crate::api::{get_json, post_json_value};
+use crate::api::{get_json, patch_json, post_json_value};
 
 #[derive(Clone, Deserialize)]
 struct PlanMeta {
@@ -195,6 +195,122 @@ fn activate_path(id: &str) -> String {
     format!("/v1/roots/{id}/activate")
 }
 
+
+/// One plan mutation through the daemon's existing plan routes (#1480).
+/// `ownerRoot` and `expectedVersion` are filled in at send time from a
+/// fresh `GET /v1/plans/{id}` so the store's CAS stays the arbiter.
+#[derive(Clone, Debug, PartialEq)]
+enum PlanEdit {
+    Retitle { title: String },
+    AddSection { title: String, body: String },
+    UpdateSection { id: String, title: String, body: String },
+    SetStatus { status: String },
+    Reopen,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditMethod {
+    Patch,
+    Post,
+}
+
+/// Route, method and body (without owner/version) for one edit.
+fn edit_request(plan_id: &str, edit: &PlanEdit) -> (EditMethod, String, serde_json::Value) {
+    let base = format!("/v1/plans/{}", crate::api::js_encode(plan_id));
+    match edit {
+        PlanEdit::Retitle { title } => (
+            EditMethod::Patch,
+            base,
+            serde_json::json!({ "title": title.trim() }),
+        ),
+        PlanEdit::AddSection { title, body } => (
+            EditMethod::Post,
+            format!("{base}/sections"),
+            serde_json::json!({ "title": title.trim(), "body": body }),
+        ),
+        PlanEdit::UpdateSection { id, title, body } => (
+            EditMethod::Patch,
+            format!("{base}/sections/{}", crate::api::js_encode(id)),
+            serde_json::json!({ "title": title.trim(), "body": body }),
+        ),
+        PlanEdit::SetStatus { status } => (
+            EditMethod::Post,
+            format!("{base}/status"),
+            serde_json::json!({ "status": status }),
+        ),
+        PlanEdit::Reopen => (EditMethod::Post, format!("{base}/reopen"), serde_json::json!({})),
+    }
+}
+
+/// Client-side refusal before any request; everything else is the daemon's.
+fn edit_precheck(edit: &PlanEdit) -> Result<(), &'static str> {
+    match edit {
+        PlanEdit::Retitle { title } if title.trim().is_empty() => Err("A plan title cannot be empty."),
+        PlanEdit::AddSection { title, .. } | PlanEdit::UpdateSection { title, .. }
+            if title.trim().is_empty() =>
+        {
+            Err("A section needs a title.")
+        }
+        _ => Ok(()),
+    }
+}
+
+/// `HTTP 409 {"error":"plan: version conflict ..."}` → the daemon's reason.
+fn plan_error(raw: &str) -> String {
+    let body = raw
+        .strip_prefix("HTTP ")
+        .and_then(|rest| rest.split_once(' ').map(|(_, b)| b))
+        .unwrap_or(raw);
+    serde_json::from_str::<serde_json::Value>(body.trim())
+        .ok()
+        .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(str::to_string))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| raw.to_string())
+}
+
+#[derive(Clone, Deserialize)]
+struct PlanVersion {
+    #[serde(default)]
+    version: i64,
+    #[serde(default, rename = "owner_root")]
+    owner_root: String,
+}
+
+/// Send one edit, then re-sync the run board from the edited plan
+/// (`action: open` is the store's Ensure: it copies titles/bodies/status).
+async fn send_plan_edit(
+    base: &str,
+    token: &str,
+    plan_id: &str,
+    edit: &PlanEdit,
+) -> Result<RunBody, String> {
+    let path = format!("/v1/plans/{}", crate::api::js_encode(plan_id));
+    let current = get_json::<PlanVersion>(base, token, &path).await?;
+    let (method, route, mut body) = edit_request(plan_id, edit);
+    body["ownerRoot"] = serde_json::Value::String(current.owner_root.clone());
+    body["expectedVersion"] = serde_json::json!(current.version);
+    match method {
+        EditMethod::Patch => patch_json(base, token, &route, body).await?,
+        EditMethod::Post => {
+            post_json_value(base, token, &route, body).await?;
+        }
+    }
+    post_run(
+        base,
+        token,
+        plan_id,
+        serde_json::json!({ "action": "open", "ownerRoot": current.owner_root }),
+    )
+    .await
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct SectionDraftEdit {
+    id: String,
+    title: String,
+    body: String,
+}
+
 #[component]
 pub fn TaskRunner(
     base: RwSignal<String>,
@@ -219,6 +335,15 @@ pub fn TaskRunner(
     let pending_select = RwSignal::new(String::new());
     let run_epoch = RwSignal::new(LoadEpoch::new());
     let run_loading = RwSignal::new(false);
+    // Plan editing (#1480). Each form holds the user's text until the
+    // daemon accepts it; a refusal keeps the text and shows the reason.
+    let title_edit = RwSignal::new(None::<String>);
+    let section_edit = RwSignal::new(None::<SectionDraftEdit>);
+    let add_open = RwSignal::new(false);
+    let add_title = RwSignal::new(String::new());
+    let add_body = RwSignal::new(String::new());
+    let edit_error = RwSignal::new(String::new());
+    let edit_busy = RwSignal::new(false);
 
     // #1548: Schedule-style session open, built here because this page
     // already holds active_root. Like Schedule, activate first and switch
@@ -334,6 +459,10 @@ pub fn TaskRunner(
     Effect::new(move |_| {
         let _ = selected.get();
         row.set(String::new());
+        title_edit.set(None);
+        section_edit.set(None);
+        add_open.set(false);
+        edit_error.set(String::new());
         open_selected();
     });
 
@@ -400,6 +529,40 @@ pub fn TaskRunner(
                         run.set(Some(again.run));
                     }
                 }
+            }
+        });
+    };
+
+    // `on_ok` runs only after the daemon accepted the edit and the board
+    // re-synced; it closes the form that sent it.
+    let apply_edit = move |edit: PlanEdit, on_ok: fn(RwSignal<Option<String>>, RwSignal<Option<SectionDraftEdit>>, RwSignal<bool>)| {
+        if let Err(reason) = edit_precheck(&edit) {
+            edit_error.set(reason.into());
+            return;
+        }
+        let plan_id = selected.get_untracked();
+        if plan_id.is_empty() || edit_busy.get_untracked() {
+            return;
+        }
+        edit_busy.set(true);
+        edit_error.set(String::new());
+        let gen = run_epoch.with_untracked(|epoch| epoch.token());
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            let result = send_plan_edit(&b, &t, &plan_id, &edit).await;
+            edit_busy.set(false);
+            if selected.get_untracked() != plan_id {
+                return;
+            }
+            match result {
+                Ok(body) => {
+                    on_ok(title_edit, section_edit, add_open);
+                    if run_epoch.with_untracked(|epoch| epoch.accept(gen)) {
+                        run.set(Some(body.run));
+                    }
+                    refresh_plans();
+                }
+                Err(err) => edit_error.set(plan_error(&err)),
             }
         });
     };
@@ -589,6 +752,19 @@ pub fn TaskRunner(
                 </Show>
             </aside>
             <section class="task-col task-board" aria-label="Checklist">
+                <Show when=move || title_edit.get().is_some()>
+                    <form class="plan-edit-form" data-plan-edit="title" on:submit=move |ev: web_sys::SubmitEvent| {
+                        ev.prevent_default();
+                        let title = title_edit.get_untracked().unwrap_or_default();
+                        apply_edit(PlanEdit::Retitle { title }, |t, _, _| t.set(None));
+                    }>
+                        <label>"Plan title"<input id="plan-edit-title" prop:value=move || title_edit.get().unwrap_or_default() on:input=move |ev| title_edit.set(Some(event_target_value(&ev))) /></label>
+                        <div class="task-actions">
+                            <button type="submit" class="primary" disabled=move || edit_busy.get()>"Save title"</button>
+                            <button type="button" class="secondary" on:click=move |_| { title_edit.set(None); edit_error.set(String::new()); }>"Cancel"</button>
+                        </div>
+                    </form>
+                </Show>
                 {move || {
                     let current = run.get();
                     let Some(current) = current else {
@@ -602,11 +778,32 @@ pub fn TaskRunner(
                     let picked = row.get();
                     let names: std::collections::HashMap<String, String> = current.sections.iter().map(|s| (s.id.clone(), s.title.clone())).collect();
                     let rows = current.sections.clone();
+                    let rename_from = title.clone();
+                    let closed = plan_status == "closed";
+                    let status_now = plan_status.clone();
+                    let status_attr = plan_status.clone();
                     view! {
                         <div class="section-head">
                             <h2 class="panel-title">{title}</h2>
-                            <span class="hint">{plan_status}</span>
+                            <span class="hint" data-plan-status=status_attr>{plan_status}</span>
                             <button class="primary" on:click=move |_| act("start", String::new(), Vec::new())>"Run"</button>
+                        </div>
+                        <div class="task-actions plan-edit-bar">
+                            <button type="button" class="secondary" data-action="plan-rename" on:click=move |_| { edit_error.set(String::new()); title_edit.set(Some(rename_from.clone())); }>"Rename"</button>
+                            <label class="plan-status-pick">"Status"
+                                <select data-action="plan-status" prop:value=status_now.clone() on:change=move |ev| {
+                                    let next = event_target_value(&ev);
+                                    apply_edit(PlanEdit::SetStatus { status: next }, |_, _, _| {});
+                                }>
+                                    <option value="draft">"Draft"</option>
+                                    <option value="approved">"Approved"</option>
+                                    <option value="closed">"Closed"</option>
+                                </select>
+                            </label>
+                            <Show when=move || closed>
+                                <button type="button" class="secondary" data-action="plan-reopen" on:click=move |_| apply_edit(PlanEdit::Reopen, |_, _, _| {})>"Reopen"</button>
+                            </Show>
+                            <button type="button" class="secondary" data-action="plan-add-section" on:click=move |_| { edit_error.set(String::new()); add_open.set(true); }>"Add section"</button>
                         </div>
                         <ol class="task-list">
                             {rows.into_iter().map(|sec| {
@@ -639,9 +836,55 @@ pub fn TaskRunner(
                         <p class="hint keys">"j/k move  r run  a approve  s skip  t retry  [ ] reorder"</p>
                     }.into_any()
                 }}
+                <Show when=move || add_open.get()>
+                    <form class="plan-edit-form" data-plan-edit="add" on:submit=move |ev: web_sys::SubmitEvent| {
+                        ev.prevent_default();
+                        let edit = PlanEdit::AddSection { title: add_title.get_untracked(), body: add_body.get_untracked() };
+                        apply_edit(edit, |_, _, open| open.set(false));
+                    }>
+                        <label>"New section title"<input id="plan-add-title" prop:value=move || add_title.get() on:input=move |ev| add_title.set(event_target_value(&ev)) /></label>
+                        <label>"Body"<textarea id="plan-add-body" rows="4" prop:value=move || add_body.get() on:input=move |ev| add_body.set(event_target_value(&ev))></textarea></label>
+                        <div class="task-actions">
+                            <button type="submit" class="primary" disabled=move || edit_busy.get()>"Add"</button>
+                            <button type="button" class="secondary" on:click=move |_| { add_open.set(false); edit_error.set(String::new()); }>"Cancel"</button>
+                        </div>
+                    </form>
+                </Show>
+                <Show when=move || !edit_error.get().is_empty()>
+                    <p class="task-note plan-edit-error" role="alert" data-plan-edit-error="true">{move || edit_error.get()}</p>
+                </Show>
             </section>
             <aside class="task-col task-read" aria-label="Checkpoint">
-                {move || checkpoint_view(run.get(), row.get(), act, open_child)}
+                <Show when=move || section_edit.get().is_some()>
+                    <form class="plan-edit-form" data-plan-edit="section" on:submit=move |ev: web_sys::SubmitEvent| {
+                        ev.prevent_default();
+                        let Some(d) = section_edit.get_untracked() else { return };
+                        apply_edit(PlanEdit::UpdateSection { id: d.id, title: d.title, body: d.body }, |_, s, _| s.set(None));
+                    }>
+                        <label>"Section title"<input id="plan-section-title" prop:value=move || section_edit.get().map(|d| d.title).unwrap_or_default() on:input=move |ev| {
+                            let v = event_target_value(&ev);
+                            section_edit.update(|d| if let Some(d) = d { d.title = v; });
+                        } /></label>
+                        <label>"Section body"<textarea id="plan-section-body" rows="8" prop:value=move || section_edit.get().map(|d| d.body).unwrap_or_default() on:input=move |ev| {
+                            let v = event_target_value(&ev);
+                            section_edit.update(|d| if let Some(d) = d { d.body = v; });
+                        }></textarea></label>
+                        <div class="task-actions">
+                            <button type="submit" class="primary" disabled=move || edit_busy.get()>"Save section"</button>
+                            <button type="button" class="secondary" on:click=move |_| { section_edit.set(None); edit_error.set(String::new()); }>"Cancel"</button>
+                        </div>
+                        <Show when=move || !edit_error.get().is_empty()>
+                            <p class="task-note plan-edit-error" role="alert">{move || edit_error.get()}</p>
+                        </Show>
+                    </form>
+                </Show>
+                {move || {
+                    let on_edit = move |id: String, title: String, body: String| {
+                        edit_error.set(String::new());
+                        section_edit.set(Some(SectionDraftEdit { id, title, body }));
+                    };
+                    checkpoint_view(run.get(), row.get(), act, open_child, on_edit)
+                }}
             </aside>
         </div>
         <p class="task-note" aria-live="polite">{move || note.get()}</p>
@@ -657,6 +900,7 @@ fn checkpoint_view(
     row: String,
     act: impl Fn(&'static str, String, Vec<String>) + Copy + 'static,
     open_child: impl Fn(String) + Copy + Send + Sync + 'static,
+    on_edit: impl Fn(String, String, String) + Copy + 'static,
 ) -> impl IntoView {
     let Some(run) = run else {
         return view! { <p class="hint">"The checkpoint is the section body, the child handoff, and the verification report."</p> }.into_any();
@@ -688,6 +932,7 @@ fn checkpoint_view(
     let approve_id = id.clone();
     let retry_id = id.clone();
     let skip_id = id.clone();
+    let edit_args = (id.clone(), sec.title.clone(), sec.body.clone());
     view! {
         <div class="section-head">
             <h2 class="panel-title">{title}</h2>
@@ -698,7 +943,13 @@ fn checkpoint_view(
             <button class="secondary" disabled=move || !can_retry on:click=move |_| act("retry", retry_id.clone(), Vec::new())>"Retry"</button>
             <button class="secondary" disabled=move || !can_skip on:click=move |_| act("skip", skip_id.clone(), Vec::new())>"Skip"</button>
         </div>
-        <h3>"Section"</h3>
+        <div class="section-head">
+            <h3>"Section"</h3>
+            <button type="button" class="secondary" data-action="plan-edit-section" title="Edit this section's title and body" on:click=move |_| {
+                let (i, t, b) = edit_args.clone();
+                on_edit(i, t, b);
+            }>"Edit"</button>
+        </div>
         <pre class="task-check">{if body.is_empty() { "(no body)".into() } else { body }}</pre>
         {match cp {
             None => view! { <p class="hint">"Run spawns a child for a ready section. When it finishes, the handoff and verification report land here. A failed section blocks the ones that depend on it."</p> }.into_any(),
@@ -875,6 +1126,46 @@ mod tests {
         let line = poll_error_line("HTTP 500");
         assert!(line.starts_with("Live update failed: HTTP 500"));
         assert!(line.contains("Refresh to retry"));
+    }
+
+    #[test]
+    fn edit_request_maps_each_edit_to_its_route() {
+        let cases = [
+            (PlanEdit::Retitle { title: " New ".into() }, EditMethod::Patch, "/v1/plans/p1", serde_json::json!({"title": "New"})),
+            (
+                PlanEdit::AddSection { title: "S".into(), body: "b".into() },
+                EditMethod::Post,
+                "/v1/plans/p1/sections",
+                serde_json::json!({"title": "S", "body": "b"}),
+            ),
+            (
+                PlanEdit::UpdateSection { id: "s 2".into(), title: "T".into(), body: "".into() },
+                EditMethod::Patch,
+                "/v1/plans/p1/sections/s%202",
+                serde_json::json!({"title": "T", "body": ""}),
+            ),
+            (PlanEdit::SetStatus { status: "approved".into() }, EditMethod::Post, "/v1/plans/p1/status", serde_json::json!({"status": "approved"})),
+            (PlanEdit::Reopen, EditMethod::Post, "/v1/plans/p1/reopen", serde_json::json!({})),
+        ];
+        for (edit, method, path, body) in cases {
+            let (m, p, b) = edit_request("p1", &edit);
+            assert_eq!((m, p.as_str(), b), (method, path, body), "{edit:?}");
+        }
+    }
+
+    #[test]
+    fn edit_precheck_only_refuses_empty_titles() {
+        assert!(edit_precheck(&PlanEdit::Retitle { title: "  ".into() }).is_err());
+        assert!(edit_precheck(&PlanEdit::AddSection { title: "".into(), body: "x".into() }).is_err());
+        assert!(edit_precheck(&PlanEdit::UpdateSection { id: "s".into(), title: " ".into(), body: "".into() }).is_err());
+        assert!(edit_precheck(&PlanEdit::UpdateSection { id: "s".into(), title: "t".into(), body: "".into() }).is_ok());
+        assert!(edit_precheck(&PlanEdit::Reopen).is_ok());
+    }
+
+    #[test]
+    fn plan_error_extracts_daemon_reason() {
+        assert_eq!(plan_error(r#"HTTP 409 {"error":"plan: version conflict: have 3, expected 2"}"#), "plan: version conflict: have 3, expected 2");
+        assert_eq!(plan_error("HTTP 500 oops"), "HTTP 500 oops");
     }
 
     #[test]
