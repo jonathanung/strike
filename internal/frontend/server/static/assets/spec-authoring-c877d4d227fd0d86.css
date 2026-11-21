@@ -18,7 +18,7 @@
 .spec-main { display: flex; flex-direction: column; gap: var(--space-2); }
 .spec-create { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-3); }
 .spec-create label, .spec-req label, .spec-task label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: var(--type-sm); }
-.spec-create input, .spec-req input, .spec-req textarea, .spec-task input, .spec-task textarea, .spec-design {
+.spec-create input, .spec-req input, .spec-req textarea, .spec-task input, .spec-task textarea, .spec-design, .spec-draft-desc {
   background: var(--ground);
   border: 1px solid var(--rule);
   border-radius: var(--radius-sm);
@@ -27,6 +27,12 @@
   color: var(--ink);
 }
 .spec-design { width: 100%; min-height: 240px; resize: vertical; font-family: var(--mono, monospace); font-size: var(--type-sm); }
+.spec-draft { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2); border: 1px dashed var(--border-muted); border-radius: var(--radius); }
+.spec-draft label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: var(--type-sm); }
+.spec-draft-desc { width: 100%; resize: vertical; }
+.spec-draft button { align-self: flex-start; }
+.spec-design-modes { display: flex; gap: var(--space-2); }
+.spec-design-preview { min-height: 240px; padding: var(--space-2); border: 1px solid var(--border-muted); border-radius: var(--radius); overflow: auto; }
 .spec-tabs { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .spec-tab {
   display: inline-flex;

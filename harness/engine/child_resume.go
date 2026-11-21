@@ -147,6 +147,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 		Team:                       e.team,
 		Select:                     e.opts.Select,
 		Registry:                   childReg,
+		ToolVisible:                e.opts.ToolVisible,
 		WorkDir:                    e.opts.WorkDir,
 		WorkspaceRoots:             append([]string(nil), e.opts.WorkspaceRoots...),
 		ProjectRoot:                e.opts.ProjectRoot,
@@ -469,6 +470,7 @@ func (e *Engine) resumeChild(ctx context.Context, req tool.TaskResumeRequest) (t
 			DelegationID: delegID,
 			BudgetKind:   budgetKind,
 			Finalization: finalization,
+			Usage:        h.usageSnapshot(),
 		}
 		e.emit(completed)
 		e.persistChildEvent(childID, completed)

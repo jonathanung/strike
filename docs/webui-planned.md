@@ -310,7 +310,7 @@ files are inspected and edited.
 
 ## Powers
 
-The daemon side is in place but no chip is drawn yet (#1347, #1867).
+The daemon side is in place but no chip is drawn yet (#1347, #1867, #1943).
 `internal/integrate/powers` loads packs from
 `<workspace>/.strike/powers/<pack>/` and `~/.strike/powers/<pack>/`, and
 the workspace copy wins on a name clash. Workspace packs load only in a
@@ -340,14 +340,23 @@ Routes: `GET /v1/powers?session=`, `POST /v1/powers/suggest`
 and `POST /v1/powers/mute` `{name, muted}`. The mutating routes refuse
 `--read-only`. Closing a root or deleting a session unloads its Powers.
 
-Not built yet (#1943):
-- skills loaded into context per session;
-- per-session tool scoping (the MCP registry is process-wide, so a pack's
-  tools are visible to every root until the last session releases them);
-- the composer chip row with context cost (#1259);
+Activations key on the root engine's session id; the routes accept the
+root id or the session id. A pack's tools and skills are scoped to the
+session that activated it (#1943): tools bridged from a server Powers
+attached are hidden from every other root (provider tools, the tools
+prompt layer and `toolsearch`, and refused at dispatch), and children of
+the root inherit its set. A failed server is not in the set. Pack skills
+are listed in that session's `skill` tool and loadable there only, while
+the pack is active; a configured skill of the same name wins. Servers
+configured outside Powers stay shared. Mute state and last-used times
+persist in `~/.strike/powers-state.json`.
+
+Not built yet (#1974):
+- the composer chip row with context cost (#1259) and the failure state;
+- the "Activate <name>?" suggestion chip;
 - pack membership on Customize;
 - goal-declared Powers (#1284);
-- persisted mute and last-used time.
+- a webui-smoke check and the UAT evidence.
 
 ## Composer triggers
 
@@ -696,6 +705,7 @@ Daemon wiring shipped (#1881): `team.spawn` takes optional `model` and
 | `GET /v1/bestofn?root=` | This session's runs, newest first |
 | `GET /v1/bestofn/{id}` | One run: per-candidate status, elapsed, summary, diffstat, verification |
 | `POST /v1/bestofn/{id}/cancel` | Interrupt every running candidate (`team.child_interrupt`) |
+| `POST /v1/bestofn/{id}/compare` | Ask the owner session for commentary on how the runs differ (one user turn; once per run; only after every run stopped and before a decision) |
 | `POST /v1/bestofn/{id}/adopt` | `{childId}`: apply the winner's patch, then remove every candidate worktree |
 | `POST /v1/bestofn/{id}/keep-none` | Discard all and remove every candidate worktree |
 
@@ -715,8 +725,17 @@ Cancel all, Adopt (confirmed) and Keep none (confirmed). Wording and
 parsing live in `webui/best-of-n` (unit-tested in CI); the browser check
 is `scripts/webui-best-of-n-check.mjs`.
 
-Not built yet: parent-agent commentary on how the results differ, and
-per-candidate tokens/cost (`child.completed` does not carry usage today).
+Commentary and usage (#1962): `child.completed` carries optional `usage`
+(tokens summed over the child's streams, `costUsd` when the model is
+priced), and each candidate row shows it. A provider that reports nothing
+shows nothing, never a zero. **Compare** appears once every run stopped:
+it submits one user turn to the owning session asking for a short note
+on how the runs differ, explicitly not a verdict or ranking. It spends a
+parent turn, so it runs only on click and once per run; a busy session
+refuses with a retry hint. Adopt stays a separate confirmed step.
+
+Not built yet: UAT screenshots / video for #1346 (owed on the PR; no
+local `strike serve` was allowed in the lane that shipped #1962).
 
 ## MCP elicitation
 
