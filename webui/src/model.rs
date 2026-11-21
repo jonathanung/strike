@@ -90,6 +90,9 @@ pub struct RootSummary {
     pub permission_pending: bool,
     #[serde(default, rename = "questionPending")]
     pub question_pending: bool,
+    /// Last approval outcome this turn (allowed | denied | expired), #1387.
+    #[serde(default, rename = "askOutcome")]
+    pub ask_outcome: String,
     /// `None` when the field is absent (older daemon). Present `false` is read.
     #[serde(default)]
     pub unread: Option<bool>,
@@ -152,6 +155,13 @@ pub struct LiveStatus {
     /// empty to the `supervised` default rather than inventing a mode.
     #[serde(default)]
     pub autonomy: String,
+    /// Active workflow and phase the daemon reports on every status
+    /// (#1574; `StatusSnapshot.Workflow` / `.Phase`). Both empty when no
+    /// workflow is active. Later changes arrive as `phase.changed`.
+    #[serde(default)]
+    pub workflow: String,
+    #[serde(default)]
+    pub phase: String,
     #[serde(default)]
     pub busy: bool,
     #[serde(default, rename = "contextUsed")]
@@ -253,6 +263,9 @@ pub struct BootstrapCapabilities {
     /// (`GET /v1/config-sources`, #1493).
     #[serde(default, rename = "configFiles")]
     pub config_files: bool,
+    /// True when `GET /v1/update` can run the release probe (#1583).
+    #[serde(default, rename = "updateCheck")]
+    pub update_check: bool,
     /// True when `/v1/sessions/{id}/loops` can start and stop session
     /// loops (#1588): live engine and not `--read-only`.
     #[serde(default)]
@@ -507,6 +520,8 @@ pub struct SessionRow {
     pub permission_pending: bool,
     /// Live root is waiting on an answer to an agent question (#1451).
     pub question_pending: bool,
+    /// Last approval outcome this turn (allowed | denied | expired), #1387.
+    pub ask_outcome: String,
     /// Unix milliseconds when `status` began.
     pub status_since: i64,
     /// Unix milliseconds of the last user-visible activity. 0 when unknown.
@@ -791,6 +806,7 @@ fn blank_row(id: &str, title: &str, mtime: i64, pinned: bool) -> SessionRow {
         status: String::new(),
         permission_pending: false,
         question_pending: false,
+        ask_outcome: String::new(),
         status_since: 0,
         last_activity_at: 0,
     }
@@ -845,6 +861,7 @@ pub fn merge_sessions(
         }
         entry.permission_pending = r.permission_pending;
         entry.question_pending = r.question_pending;
+        entry.ask_outcome = r.ask_outcome.clone();
         if r.status_since > 0 {
             entry.status_since = r.status_since;
         }
@@ -1470,6 +1487,7 @@ mod tests {
             status: String::new(),
             permission_pending: false,
             question_pending: false,
+            ask_outcome: String::new(),
             status_since: 0,
             last_activity_at: 0,
         }
@@ -1487,6 +1505,7 @@ mod tests {
             last_activity_at: 0,
             permission_pending: false,
             question_pending: false,
+            ask_outcome: String::new(),
             unread: None,
         }];
         let sessions = vec![SessionItem {
@@ -1525,6 +1544,7 @@ mod tests {
             last_activity_at: 9_000,
             permission_pending: true,
             question_pending: false,
+            ask_outcome: String::new(),
             unread: Some(true),
         }];
         let mut seen = HashMap::new();
