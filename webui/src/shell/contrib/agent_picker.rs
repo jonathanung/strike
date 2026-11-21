@@ -16,7 +16,9 @@ pub fn install(reg: &mut ShellHook) {
             "Set the agent the open session runs",
             Rc::new(|args| crate::agent_picker::pick(args)),
         )
-        .keywords(&["agent", "persona", "switch", "build", "plan"])
+        // No agent names as keywords: "plan" here outranked "Set approval
+        // mode: Plan" for a typed "plan" in the palette.
+        .keywords(&["agent", "persona", "switch"])
         .order(11)
         .argument(Argument {
             placeholder: "Filter agents",
