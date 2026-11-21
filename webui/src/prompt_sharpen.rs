@@ -206,95 +206,128 @@ fn focus_composer() {
     focus_selector("#composer-input");
 }
 
-/// The sharpen strip above the composer textarea: progress, the
-/// original-vs-sharpened preview, inline errors, and Undo.
-#[component]
-pub fn SharpenBar(
-    draft: RwSignal<String>,
-    active_root: RwSignal<String>,
-    #[prop(into)] busy: Signal<bool>,
-    base: RwSignal<String>,
-    token: RwSignal<String>,
-) -> impl IntoView {
-    let phase = RwSignal::new(Phase::Idle);
+/// Sharpen state, owned by the App (not the composer view) so the
+/// palette binding and Alt+P keep working when the chat view remounts.
+#[derive(Clone, Copy)]
+pub struct Sharpen {
+    phase: RwSignal<Phase>,
     // (original draft, sharpened text) after Accept; Undo restores the
     // original while the composer still shows the sharpened text.
-    let undo = RwSignal::new(None::<(String, String)>);
+    undo: RwSignal<Option<(String, String)>>,
     // Bumped per request so a superseded or cancelled call is ignored.
-    let generation = RwSignal::new(0u32);
+    generation: RwSignal<u32>,
+    draft: RwSignal<String>,
+    active_root: RwSignal<String>,
+    busy: Signal<bool>,
+    base: RwSignal<String>,
+    token: RwSignal<String>,
+}
 
-    // A session switch abandons any sharpen in flight or on screen.
-    Effect::new(move |prev: Option<String>| {
-        let root = active_root.get();
-        if prev.is_some_and(|p| p != root) {
-            generation.update(|g| *g = g.wrapping_add(1));
-            phase.set(Phase::Idle);
-            undo.set(None);
-        }
-        root
-    });
-    // Sending clears the draft; Undo ends there.
-    Effect::new(move |_| {
-        if draft.get().is_empty() {
-            undo.set(None);
-        }
-    });
+impl Sharpen {
+    /// Create the state, its effects, and the palette binding. Call once
+    /// from the App.
+    pub fn new(
+        draft: RwSignal<String>,
+        active_root: RwSignal<String>,
+        busy: Signal<bool>,
+        base: RwSignal<String>,
+        token: RwSignal<String>,
+    ) -> Self {
+        let s = Self {
+            phase: RwSignal::new(Phase::Idle),
+            undo: RwSignal::new(None),
+            generation: RwSignal::new(0),
+            draft,
+            active_root,
+            busy,
+            base,
+            token,
+        };
+        // A session switch abandons any sharpen in flight or on screen.
+        Effect::new(move |prev: Option<String>| {
+            let root = active_root.get();
+            if prev.is_some_and(|p| p != root) {
+                s.generation.update(|g| *g = g.wrapping_add(1));
+                s.phase.set(Phase::Idle);
+                s.undo.set(None);
+            }
+            root
+        });
+        // Sending clears the draft; Undo ends there.
+        Effect::new(move |_| {
+            if draft.get().is_empty() {
+                s.undo.set(None);
+            }
+        });
+        crate::shell::bind(COMMAND_ID, std::rc::Rc::new(move |_args: &str| s.start()));
+        s
+    }
 
-    let start = move || -> Result<(), String> {
-        if phase.get_untracked() == Phase::Running {
+    /// Sharpen the current draft. `Err` carries the reason it did not
+    /// start (also shown inline).
+    pub fn start(self) -> Result<(), String> {
+        if self.phase.get_untracked() == Phase::Running {
             return Ok(());
         }
-        let text = draft.get_untracked();
-        let root = active_root.get_untracked();
-        if let Err(msg) = can_sharpen(&text, busy.get_untracked(), &root) {
-            phase.set(Phase::Failed(msg.to_string()));
+        let text = self.draft.get_untracked();
+        let root = self.active_root.get_untracked();
+        if let Err(msg) = can_sharpen(&text, self.busy.get_untracked(), &root) {
+            self.phase.set(Phase::Failed(msg.to_string()));
             return Err(msg.to_string());
         }
-        generation.update(|g| *g = g.wrapping_add(1));
-        let mine = generation.get_untracked();
-        phase.set(Phase::Running);
-        let (b, t) = (base.get_untracked(), token.get_untracked());
+        self.generation.update(|g| *g = g.wrapping_add(1));
+        let mine = self.generation.get_untracked();
+        self.phase.set(Phase::Running);
+        let (b, t) = (self.base.get_untracked(), self.token.get_untracked());
         spawn_local(async move {
             let path = format!("/v1/prompt/sharpen?root={}", crate::api::js_encode(&root));
             let result =
                 crate::api::post_json_value(&b, &t, &path, serde_json::json!({ "text": text })).await;
-            if generation.get_untracked() != mine || active_root.get_untracked() != root {
+            if self.generation.get_untracked() != mine || self.active_root.get_untracked() != root {
                 return;
             }
             match result.map_err(|e| error_text(&e)).and_then(parse_result) {
                 Ok(r) => {
-                    phase.set(Phase::Preview(r));
+                    self.phase.set(Phase::Preview(r));
                     focus_selector("[data-sharpen-accept]");
                 }
-                Err(msg) => phase.set(Phase::Failed(msg)),
+                Err(msg) => self.phase.set(Phase::Failed(msg)),
             }
         });
         Ok(())
-    };
-    crate::shell::bind(COMMAND_ID, std::rc::Rc::new(move |_args: &str| start()));
-    on_cleanup(|| crate::shell::unbind(COMMAND_ID));
+    }
 
-    let accept = move || {
-        let Phase::Preview(r) = phase.get_untracked() else {
+    fn accept(self) {
+        let Phase::Preview(r) = self.phase.get_untracked() else {
             return;
         };
-        let current = draft.get_untracked();
+        let current = self.draft.get_untracked();
         if !accept_allowed(&current, &r.original) {
-            phase.set(Phase::Failed(
+            self.phase.set(Phase::Failed(
                 "The draft changed while sharpening, so the rewrite was not applied. Sharpen again.".into(),
             ));
             return;
         }
-        undo.set(Some((current, r.sharpened.clone())));
-        draft.set(r.sharpened);
-        phase.set(Phase::Idle);
+        self.undo.set(Some((current, r.sharpened.clone())));
+        self.draft.set(r.sharpened);
+        self.phase.set(Phase::Idle);
         focus_composer();
-    };
-    let reject = move || {
-        generation.update(|g| *g = g.wrapping_add(1));
-        phase.set(Phase::Idle);
+    }
+
+    fn reject(self) {
+        self.generation.update(|g| *g = g.wrapping_add(1));
+        self.phase.set(Phase::Idle);
         focus_composer();
-    };
+    }
+}
+
+/// The sharpen strip above the composer textarea: progress, the
+/// original-vs-sharpened preview, inline errors, and Undo.
+#[component]
+pub fn SharpenBar(sharpen: Sharpen) -> impl IntoView {
+    let Sharpen { phase, undo, draft, .. } = sharpen;
+    let accept = move || sharpen.accept();
+    let reject = move || sharpen.reject();
 
     let visible = move || {
         phase.get() != Phase::Idle

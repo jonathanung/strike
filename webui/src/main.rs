@@ -3139,6 +3139,15 @@ fn App() -> impl IntoView {
         roots.get().iter().any(|r| r.id == root && r.busy)
             || (live_busy.get() && live_busy_root.get() == root)
     });
+    // Prompt sharpen (#1385): App-owned so the binding outlives the
+    // chat view's remounts.
+    let sharpen = prompt_sharpen::Sharpen::new(
+        draft,
+        active_root,
+        Signal::derive(move || session_busy_now.get()),
+        base,
+        token,
+    );
 
     Effect::new(move |_| {
         if model_menu.get() {
@@ -5202,7 +5211,7 @@ fn App() -> impl IntoView {
                                 </button>
                                 <button type="button" class="palette-row" data-sharpen-menu="true" on:click=move |_| {
                                     plus_open.set(false);
-                                    let _ = crate::shell::dispatch(prompt_sharpen::COMMAND_ID, "");
+                                    let _ = sharpen.start();
                                 }>
                                     <span class="name">"Sharpen prompt"</span>
                                     <span class="path">"Rewrite the draft with the session model (Alt+P)"</span>
@@ -5384,7 +5393,7 @@ fn App() -> impl IntoView {
                                     }
                                 }
                             />
-                            <prompt_sharpen::SharpenBar draft=draft active_root=active_root busy=session_busy_now base=base token=token />
+                            <prompt_sharpen::SharpenBar sharpen=sharpen />
                             <textarea
                                 id="composer-input"
                                 aria-label="Message this session"
@@ -5419,7 +5428,7 @@ fn App() -> impl IntoView {
                                         && (ev.key().eq_ignore_ascii_case("p") || ev.code() == "KeyP")
                                     {
                                         ev.prevent_default();
-                                        let _ = crate::shell::dispatch(prompt_sharpen::COMMAND_ID, "");
+                                        let _ = sharpen.start();
                                         return;
                                     }
                                     if ev.key() == "ArrowDown" || ev.key() == "ArrowUp" {
