@@ -99,20 +99,14 @@ jobs:
             curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.83.0
             . "$HOME/.cargo/env"
           fi
-          cargo test --manifest-path webui/protocol-schema/Cargo.toml --locked
-          cargo test --manifest-path webui/load-guard/Cargo.toml --locked
-          cargo test --manifest-path webui/md-review/Cargo.toml --locked
-          cargo test --manifest-path webui/transcript-window/Cargo.toml --locked
-          cargo test --manifest-path webui/dashboard-view/Cargo.toml --locked
-          cargo test --manifest-path webui/edit-resend/Cargo.toml --locked
-          cargo test --manifest-path webui/ideas-inbox/Cargo.toml --locked
-          cargo test --manifest-path webui/status-card/Cargo.toml --locked
-          cargo test --manifest-path webui/mermaid-lite/Cargo.toml --locked
-          cargo test --manifest-path webui/composer-drafts/Cargo.toml --locked
-          cargo test --manifest-path webui/away-briefing/Cargo.toml --locked
-          cargo test --manifest-path webui/prompt-library/Cargo.toml --locked
-          cargo test --manifest-path webui/theme-catalog/Cargo.toml --locked
-          cargo test --manifest-path webui/signin-flow/Cargo.toml --locked
+          # Every webui sub-crate (webui/*/Cargo.toml) is discovered, so a new
+          # crate needs no ci.yml edit. The webui crate itself runs in webui-smoke.
+          for manifest in webui/*/Cargo.toml; do
+            case "$manifest" in webui/target/*) continue ;; esac
+            echo "::group::cargo test $manifest"
+            cargo test --manifest-path "$manifest" --locked
+            echo "::endgroup::"
+          done
 
       # E3.2 prompt regression: verbose report of tool/turn/token deltas.
       # Non-blocking for now (test itself soft-fails metric drift unless
@@ -220,7 +214,8 @@ jobs:
   # runs against the PR's UI, not main's committed bundle.
   webui-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    # +10 min for the host-target webui unit test build.
+    timeout-minutes: 45
     env:
       # Keep in sync with webui-bundle.yml (nix dev shell fenix stable +
       # nixpkgs trunk). trunk fetches wasm-opt per webui/Trunk.toml; do not
@@ -306,6 +301,15 @@ jobs:
       # webui-bundle.yml before it commits.
       - name: Check built webui bundle matches sources
         run: node scripts/check-webui-bundle.mjs
+
+      # The main webui crate is bin-only (src/main.rs), so there is no --lib
+      # target. Its #[cfg(test)] modules are pure-Rust unit tests: build and
+      # run them on the host (x86_64) target. leptos/web-sys/wasm-bindgen
+      # compile natively; tests must not call into JS (that panics off wasm).
+      # Shares webui/target with the trunk build via the cache above.
+      - name: Webui crate unit tests (host)
+        working-directory: webui
+        run: cargo test --locked --bin strike-webui
 
       - name: Build strike
         run: go build -o strike ./cmd/strike

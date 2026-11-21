@@ -1956,7 +1956,10 @@ mod tests {
             keep_events: -1,
             retry_text: String::new(),
             copy_text: String::new(),
+            reconnect: String::new(),
             at_ms: 0.0,
+            turn_id: String::new(),
+            attachments: Vec::new(),
         };
         let msgs = vec![msg(1, "out"), msg(2, ""), msg(3, "diff")];
         assert_eq!(fold_ids(&msgs), vec![1, 3]);

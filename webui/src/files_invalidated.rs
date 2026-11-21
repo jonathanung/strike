@@ -34,12 +34,15 @@ pub const SHOWN_PATHS: usize = 3;
 /// replayed log arrives as one burst well inside this gap.
 pub const DEBOUNCE_MS: i32 = 400;
 
-/// True when a raw envelope is a `files.invalidated` event. Matches the
-/// quoted type token the same way the shell already spots
-/// `compaction.completed`; quoted text inside payload strings is escaped
-/// (`\"`) by JSON and cannot match.
+/// True when a raw envelope is a `files.invalidated` event. The quoted
+/// token is a cheap prefilter; a payload string whose whole value is
+/// `files.invalidated` also contains it, so a hit is confirmed against the
+/// envelope's top-level `type`.
 pub fn is_event(raw: &str) -> bool {
     raw.contains("\"files.invalidated\"")
+        && serde_json::from_str::<Value>(raw)
+            .ok()
+            .is_some_and(|v| v.get("type").and_then(Value::as_str) == Some(KIND))
 }
 
 /// Non-empty, trimmed paths from the event's `data.paths`.

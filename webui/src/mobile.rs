@@ -463,6 +463,7 @@ mod tests {
         assert!(resume_reconnect(2));
     }
 
+    #[test]
     fn resume_after_keeps_a_cursor_on_the_same_root() {
         assert_eq!(resume_after(120, false), Some(120));
         assert_eq!(resume_after(0, false), None);
