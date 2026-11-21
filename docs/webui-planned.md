@@ -485,6 +485,26 @@ events, and the cockpit Debug panel (hypothesis card, instrumentation
 list, reproduce checklist, mobile chip). Bash is not inspected by the
 gate; the permission layer still governs it.
 
+## Run with N models
+
+Orchestration core shipped, card not drawn (#1346).
+`internal/daemon/bestofn` validates a comparison (2–4 distinct
+model/effort pairs, non-empty prompt, non-negative per-run budget), shows
+the N× cost multiplier, and builds one spawn spec per model: same prompt,
+the parent's permission mode passed through (never widened), and a
+worktree per candidate when the prompt may edit files (shared otherwise).
+A candidate whose spawn fails, fails mid-run, or is cancelled is recorded
+as such and the comparison completes with the rest; cancelling all
+interrupts only running children. Picking a winner is a separate call
+that requires every candidate to have stopped and the winner to have
+finished; it returns which child to keep and which to archive. "Keep
+none" archives all. A run is decided once.
+
+Not drawn yet: the Spawner wired to `team.spawn` (a per-child model and
+effort field on the spawn op), worktree merge/cleanup on adopt, parent
+commentary, the comparison card and model picker, and verification
+reuse (#780).
+
 ## Not planned as a copy
 
 Stall is already a real badge when the team roster sets `budget.stall`.
