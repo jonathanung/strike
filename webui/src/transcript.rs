@@ -312,6 +312,9 @@ pub struct Transcript {
     /// `sessionId` of the turn in progress (from `turn.started`), so a
     /// child session's streams are not counted on the parent's turn.
     turn_session: String,
+    /// Opt-in reasoning (#1372), kept out of `messages` entirely; the
+    /// pane renders it only while its per-session toggle is on.
+    pub reasoning: crate::reasoning::ReasoningLog,
     /// Per-turn verification badges (#1373), keyed like `turn_elapsed` by
     /// the turn's final message id. Only turns whose `turn.completed`
     /// carried a verification report get an entry.
@@ -352,6 +355,7 @@ impl Transcript {
             turn_usage: HashMap::new(),
             usage_acc: crate::turn_usage::TurnUsage::default(),
             turn_session: String::new(),
+            reasoning: crate::reasoning::ReasoningLog::default(),
             turn_verify: HashMap::new(),
             turn_files: HashMap::new(),
             steer_acks: crate::steer_ack::SteerAcks::default(),
@@ -533,6 +537,7 @@ impl Transcript {
             "user.message" => {
                 self.assistant_open = false;
                 self.trigger_note.clear();
+                self.attach_reasoning_to_last();
                 let text = field_str(&data, "text");
                 let shown = display_user_text(&strip_echo_progress(&text));
                 // #1324: a review-queue turn is labelled as a review, not
@@ -580,7 +585,15 @@ impl Transcript {
                 self.turn_session = field_str(&data, "sessionId");
             }
             "usage.reported" => self.usage_acc.absorb(&data, &self.turn_session),
-            "reasoning.delta" => {}
+            "reasoning.delta" => {
+                // #1372: recorded off-transcript; another session's
+                // stream (a child's) is not this turn's reasoning.
+                let session = field_str(&data, "sessionId");
+                if !self.turn_session.is_empty() && !session.is_empty() && session != self.turn_session {
+                    return;
+                }
+                self.reasoning.push_delta(&field_str(&data, "text"));
+            }
             "text.delta" => {
                 let chunk = field_str(&data, "text");
                 if chunk.is_empty() {
@@ -593,6 +606,8 @@ impl Transcript {
                             last.body = strip_echo_progress(&last.body);
                             last.copy_text = last.body.clone();
                             last.chips = chips_in(&last.body);
+                            let id = last.id;
+                            self.reasoning.attach_live(id);
                             return;
                         }
                     }
@@ -622,6 +637,7 @@ impl Transcript {
             }
             "turn.completed" => {
                 self.assistant_open = false;
+                self.attach_reasoning_to_last();
                 self.sweep_orphaned_at_turn_end(&field_str(&data, "turnId"));
                 self.absorb();
                 let usage = std::mem::take(&mut self.usage_acc);
@@ -1123,8 +1139,21 @@ impl Transcript {
         self.next_id += 1;
         message.id = self.next_id;
         let id = message.id;
+        // #1372: reasoning streamed before this line belongs above it.
+        // A user line opens the next turn, so it never takes reasoning.
+        if message.role != Role::You {
+            self.reasoning.attach_live(id);
+        }
         self.messages.push(message);
         id
+    }
+
+    /// Settle reasoning still streaming at a turn boundary onto the
+    /// turn's last line (#1372).
+    fn attach_reasoning_to_last(&mut self) {
+        if let Some(id) = self.messages.last().map(|m| m.id) {
+            self.reasoning.attach_live(id);
+        }
     }
 
     fn find_tool(&self, call_id: &str, name: &str) -> Option<usize> {
@@ -2631,6 +2660,49 @@ mod tests {
     }
 
     #[test]
+    fn reasoning_attaches_around_tools_and_turn_end() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "fix it"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"sessionId": "s1"})));
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"sessionId": "s1", "text": "check the file"})));
+        assert_eq!(t.reasoning.live(), "check the file");
+        t.apply_envelope(&env(
+            "tool.begin",
+            serde_json::json!({"callId": "c1", "name": "read", "args": {"path": "a.rs"}}),
+        ));
+        let tool_id = t.messages.last().unwrap().id;
+        assert_eq!(t.reasoning.for_message(tool_id), Some("check the file"));
+        t.apply_envelope(&env("tool.end", serde_json::json!({"callId": "c1", "name": "read", "output": "x"})));
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"text": "now answer"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "Fixed."})));
+        let answer = t.messages.last().unwrap().clone();
+        assert_eq!(answer.role, Role::Strike);
+        assert_eq!(t.reasoning.for_message(answer.id), Some("now answer"));
+        // Mid-answer reasoning appends to the answer's own entry.
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"text": " double-check"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": " Done."})));
+        assert_eq!(t.reasoning.for_message(answer.id), Some("now answer double-check"));
+        // Trailing reasoning settles on the turn's last line at turn end.
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"text": " wrap"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        assert_eq!(t.reasoning.live(), "");
+        assert_eq!(t.reasoning.for_message(answer.id), Some("now answer double-check wrap"));
+        // A child's reasoning on this stream is not this turn's.
+        t.apply_envelope(&env("reasoning.delta", serde_json::json!({"sessionId": "child", "text": "nope"})));
+        assert_eq!(t.reasoning.live(), "");
+        assert!(t.messages.iter().all(|m| !m.body.contains("check the file")));
+    }
+
+    #[test]
+    fn no_reasoning_leaves_log_empty() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "hi"})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "hello"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        assert!(t.reasoning.is_empty());
+    }
+
+    #[test]
     fn provider_auth_error_renders_actionable_notice() {
         let mut t = Transcript::new();
         t.apply_envelope(&env("user.message", serde_json::json!({"text": "fix the bug"})));
@@ -3273,8 +3345,14 @@ mod tests {
             serde_json::json!({"text": " to exercise the bash tool and the permission prompt."}),
         ));
         t.apply_envelope(&env("turn.completed", serde_json::json!({})));
+        // #1372: reasoning is opt-in and quarantined — never in a
+        // message body, copy text or the markdown export; it sits in the
+        // side log, attached to the answer it preceded.
         assert!(t.messages.iter().all(|m| !m.body.contains("secret chain")));
+        assert!(t.messages.iter().all(|m| !m.copy_text.contains("secret chain")));
+        assert!(!t.to_markdown().contains("secret chain"));
         let strike = t.messages.iter().find(|m| m.role == Role::Strike).unwrap();
+        assert_eq!(t.reasoning.for_message(strike.id), Some("secret chain"));
         assert!(!strike.body.contains("Tip:"));
         assert!(strike.body.contains("You said: hello"));
         assert_eq!(strike.keep_events, 5);
