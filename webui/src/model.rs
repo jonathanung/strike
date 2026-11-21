@@ -496,6 +496,46 @@ pub struct TeamMember {
     pub budget: Option<serde_json::Map<String, serde_json::Value>>,
     #[serde(default)]
     pub terminal: bool,
+    /// Latest `child.escalated` the daemon recorded for this member (#1375).
+    #[serde(default)]
+    pub escalation: Option<TeamEscalation>,
+}
+
+/// One child budget/stall/loop trip, as the daemon's team snapshot keeps it.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct TeamEscalation {
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub action: String,
+    #[serde(default, rename = "terminalStatus")]
+    #[allow(dead_code)]
+    pub terminal_status: String,
+}
+
+/// One inter-agent message from the daemon's bounded team snapshot
+/// (`TeamSnapshot.messages`, already redacted daemon-side).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct TeamMessage {
+    #[serde(default, rename = "messageId")]
+    pub message_id: String,
+    #[serde(default)]
+    pub from: String,
+    #[serde(default)]
+    pub to: String,
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub urgency: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default, rename = "taskId")]
+    #[allow(dead_code)]
+    pub task_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -508,6 +548,18 @@ pub struct TeamSnapshot {
     pub lead_id: String,
     #[serde(default)]
     pub members: HashMap<String, TeamMember>,
+    /// Recent inter-agent mail, oldest first (#1375). The daemon sends
+    /// `null` for an empty list, which reads as empty here.
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub messages: Vec<TeamMessage>,
+}
+
+fn null_as_empty<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
 }
 
 #[derive(Clone, Debug)]
@@ -1698,6 +1750,28 @@ mod tests {
         assert!(boot.capabilities.project_init);
         let boot: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
         assert!(!boot.capabilities.project_init);
+    }
+
+    #[test]
+    fn team_snapshot_reads_messages_and_escalation() {
+        let snap: TeamSnapshot = serde_json::from_str(
+            r#"{"available":true,"leadId":"lead","members":{"c1":{"sessionId":"c1","name":"scout","state":"running","escalation":{"kind":"stall","reason":"no progress","action":"finalizing","terminalStatus":"blocked"}}},"messages":[{"messageId":"m1","from":"c1","to":"lead","body":"stuck on schema","summary":"blocked","urgency":"high","kind":"request"}]}"#,
+        )
+        .unwrap();
+        let esc = snap.members["c1"].escalation.clone().unwrap();
+        assert_eq!((esc.kind.as_str(), esc.action.as_str()), ("stall", "finalizing"));
+        assert_eq!(snap.messages.len(), 1);
+        assert_eq!(snap.messages[0].summary, "blocked");
+        assert_eq!(snap.messages[0].urgency, "high");
+
+        // Go marshals an empty slice as null; older daemons omit it.
+        for raw in [
+            r#"{"available":true,"members":{},"messages":null}"#,
+            r#"{"available":true,"members":{}}"#,
+        ] {
+            let snap: TeamSnapshot = serde_json::from_str(raw).unwrap();
+            assert!(snap.messages.is_empty(), "{raw}");
+        }
     }
 
     #[test]
