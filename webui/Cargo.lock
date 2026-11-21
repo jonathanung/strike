@@ -86,6 +86,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "away-briefing"
+version = "0.1.0"
+
+[[package]]
 name = "base16"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -876,6 +880,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "mermaid-lite"
+version = "0.1.0"
+
+[[package]]
 name = "next_tuple"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1367,6 +1375,7 @@ version = "0.1.0"
 name = "strike-webui"
 version = "0.1.0"
 dependencies = [
+ "away-briefing",
  "composer-drafts",
  "edit-resend",
  "error-copy",
@@ -1376,6 +1385,7 @@ dependencies = [
  "leptos",
  "load-guard",
  "md-review",
+ "mermaid-lite",
  "protocol-schema",
  "qrcode",
  "send_wrapper",

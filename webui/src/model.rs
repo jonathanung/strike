@@ -273,6 +273,10 @@ pub struct FileSearchResponse {
 /// ignored; a missing object parses as every capability off.
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct BootstrapCapabilities {
+    /// True when `GET /v1/container/status` reports the isolation posture
+    /// ladder and container status (#1584). Read-only.
+    #[serde(default)]
+    pub container: bool,
     /// True when `GET /v1/workspace/trust` reports the workspace trust
     /// state and the repo config it gates (#1781).
     #[serde(default, rename = "workspaceTrust")]
@@ -593,6 +597,190 @@ pub fn workspace_trust_outcome(status: u16, body: &str) -> Result<WorkspaceTrust
     Err(diag_error_message(status, body))
 }
 
+/// One rung of the E12.7 isolation ladder from `/v1/container/status`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ContainerRung {
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub describe: String,
+    #[serde(default)]
+    pub active: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ContainerRuntime {
+    #[serde(default)]
+    pub engine: String,
+    #[serde(default)]
+    pub found: bool,
+    #[serde(default)]
+    pub available: bool,
+    #[serde(default)]
+    pub error: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ContainerInfo {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub running: bool,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub image: String,
+    #[serde(default)]
+    pub compatible: Option<bool>,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default, rename = "sessionModel")]
+    pub session_model: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ContainerDrift {
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub have: String,
+    #[serde(default)]
+    pub want: String,
+    #[serde(default)]
+    pub error: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ContainerDetect {
+    #[serde(default)]
+    pub markers: Vec<String>,
+}
+
+/// `GET /v1/container/status` (#1584): read-only isolation posture.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct ContainerStatusReply {
+    #[serde(default)]
+    pub posture: String,
+    #[serde(default, rename = "postureSource")]
+    pub posture_source: String,
+    #[serde(default)]
+    pub describe: String,
+    #[serde(default)]
+    pub ladder: Vec<ContainerRung>,
+    #[serde(default, rename = "permissionMode")]
+    pub permission_mode: String,
+    #[serde(default, rename = "sandboxMode")]
+    pub sandbox_mode: String,
+    #[serde(default)]
+    pub workspace: String,
+    #[serde(default, rename = "configScope")]
+    pub config_scope: String,
+    #[serde(default)]
+    pub runtime: ContainerRuntime,
+    #[serde(default)]
+    pub container: ContainerInfo,
+    #[serde(default)]
+    pub drift: ContainerDrift,
+    #[serde(default)]
+    pub detect: ContainerDetect,
+    #[serde(default)]
+    pub errors: Vec<String>,
+}
+
+fn short_hash(h: &str) -> &str {
+    if h.len() > 12 {
+        &h[..12]
+    } else {
+        h
+    }
+}
+
+impl ContainerStatusReply {
+    /// Where the posture came from, in words. Host rungs are a supported
+    /// mode (#1290), so nothing here reads as a warning.
+    pub fn posture_note(&self) -> String {
+        if self.posture_source == "env" {
+            "Set at launch (STRIKE_ISOLATION).".to_string()
+        } else {
+            let perm = if self.permission_mode.is_empty() {
+                "default"
+            } else {
+                self.permission_mode.as_str()
+            };
+            let sandbox = if self.sandbox_mode.is_empty() {
+                "workspace-write"
+            } else {
+                self.sandbox_mode.as_str()
+            };
+            format!("From the host dials: permission mode {perm}, sandbox {sandbox}.")
+        }
+    }
+
+    /// The engine probe: honest about a missing runtime, which is normal
+    /// for host mode.
+    pub fn runtime_line(&self) -> String {
+        let r = &self.runtime;
+        if r.available {
+            format!("{} is running.", r.engine)
+        } else if r.found {
+            format!("{} is installed but not answering: {}", r.engine, r.error)
+        } else {
+            "No container runtime found (docker or podman). Host mode is the active, supported posture.".to_string()
+        }
+    }
+
+    /// The workspace container from `strike container status`.
+    pub fn container_line(&self) -> String {
+        let c = &self.container;
+        if !self.runtime.available {
+            return format!("{}: not checked (runtime unavailable).", c.name);
+        }
+        match c.status.as_str() {
+            "absent" | "" => format!("{}: no container for this workspace.", c.name),
+            status => {
+                let mut line = format!("{}: {}", c.name, status);
+                match c.compatible {
+                    Some(true) => line.push_str(", matches current config"),
+                    Some(false) if !c.reason.is_empty() => {
+                        line.push_str(&format!(", out of date ({})", c.reason))
+                    }
+                    Some(false) => line.push_str(", out of date"),
+                    None => {}
+                }
+                line
+            }
+        }
+    }
+
+    /// The ejected Dockerfile drift state from `strike container drift`.
+    pub fn drift_line(&self) -> String {
+        let d = &self.drift;
+        match d.state.as_str() {
+            "matches" => format!("{} matches the current config ({}).", d.path, short_hash(&d.want)),
+            "drifted" => format!(
+                "{} drifted: has {}, config wants {}.",
+                d.path,
+                if d.have.is_empty() { "no hash" } else { short_hash(&d.have) },
+                short_hash(&d.want)
+            ),
+            "not-ejected" => format!("Not ejected ({} not present).", d.path),
+            _ => format!("Could not check {}: {}", d.path, d.error),
+        }
+    }
+}
+
+/// Reads a `/v1/container/status` response; non-2xx is the daemon's error.
+pub fn container_status_outcome(status: u16, body: &str) -> Result<ContainerStatusReply, String> {
+    if (200..300).contains(&status) {
+        return serde_json::from_str(body).map_err(|e| e.to_string());
+    }
+    Err(diag_error_message(status, body))
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct Bootstrap {
     #[serde(default)]
@@ -846,10 +1034,39 @@ pub struct TeamSnapshot {
     pub lead_id: String,
     #[serde(default)]
     pub members: HashMap<String, TeamMember>,
+    /// Delegations by id (#1381), the daemon's `DelegationSnapshot` map.
+    /// Go marshals an empty map as `null`, which reads as empty here.
+    #[serde(default, deserialize_with = "null_as_default")]
+    pub delegations: HashMap<String, Delegation>,
     /// Recent inter-agent mail, oldest first (#1375). The daemon sends
     /// `null` for an empty list, which reads as empty here.
     #[serde(default, deserialize_with = "null_as_empty")]
     pub messages: Vec<TeamMessage>,
+}
+
+/// One delegation (DTO mirror of the daemon's `DelegationSnapshot`):
+/// queued | working | blocked | review | done | failed | canceled.
+/// `session_id` is empty until a child session exists.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct Delegation {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub state: String,
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub reason: String,
+}
+
+fn null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
 }
 
 fn null_as_empty<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
@@ -2149,6 +2366,78 @@ mod tests {
             "daemon is --read-only"
         );
         assert_eq!(workspace_trust_outcome(500, "").unwrap_err(), "HTTP 500");
+    }
+
+    #[test]
+    fn bootstrap_reads_the_container_capability() {
+        let boot: Bootstrap =
+            serde_json::from_str(r#"{"capabilities":{"container":true},"skills":[]}"#).unwrap();
+        assert!(boot.capabilities.container);
+        let off: Bootstrap = serde_json::from_str(r#"{"skills":[]}"#).unwrap();
+        assert!(!off.capabilities.container);
+    }
+
+    #[test]
+    fn container_status_host_mode_without_runtime_is_not_an_error() {
+        let r = container_status_outcome(
+            200,
+            r#"{"posture":"host+sandbox","postureSource":"dials","sandboxMode":"workspace-write",
+               "ladder":[{"label":"host+yolo"},{"label":"host+default"},{"label":"host+sandbox","active":true},
+               {"label":"container"},{"label":"container+no-network"}],
+               "runtime":{"engine":"docker","found":false,"error":"engine not found"},
+               "container":{"name":"strike-repo-abc","status":"absent"},
+               "drift":{"state":"not-ejected","path":"Dockerfile.devcontainer"}}"#,
+        )
+        .unwrap();
+        assert_eq!(r.ladder.iter().filter(|g| g.active).count(), 1);
+        assert!(r.runtime_line().contains("Host mode is the active, supported posture"));
+        assert_eq!(r.container_line(), "strike-repo-abc: not checked (runtime unavailable).");
+        assert_eq!(r.drift_line(), "Not ejected (Dockerfile.devcontainer not present).");
+        assert_eq!(
+            r.posture_note(),
+            "From the host dials: permission mode default, sandbox workspace-write."
+        );
+    }
+
+    #[test]
+    fn container_status_lines_for_a_running_container() {
+        let r = container_status_outcome(
+            200,
+            r#"{"posture":"container","postureSource":"env",
+               "runtime":{"engine":"/usr/bin/docker","found":true,"available":true},
+               "container":{"name":"strike-repo","status":"running","running":true,"compatible":false,"reason":"config hash a != b"},
+               "drift":{"state":"drifted","path":"Dockerfile.devcontainer","have":"0123456789abcdef","want":"fedcba9876543210"}}"#,
+        )
+        .unwrap();
+        assert_eq!(r.posture_note(), "Set at launch (STRIKE_ISOLATION).");
+        assert_eq!(r.runtime_line(), "/usr/bin/docker is running.");
+        assert_eq!(
+            r.container_line(),
+            "strike-repo: running, out of date (config hash a != b)"
+        );
+        assert_eq!(
+            r.drift_line(),
+            "Dockerfile.devcontainer drifted: has 0123456789ab, config wants fedcba987654."
+        );
+        let down = container_status_outcome(
+            200,
+            r#"{"runtime":{"engine":"/usr/bin/podman","found":true,"error":"daemon down"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            down.runtime_line(),
+            "/usr/bin/podman is installed but not answering: daemon down"
+        );
+    }
+
+    #[test]
+    fn container_status_outcome_surfaces_route_errors() {
+        assert_eq!(
+            container_status_outcome(409, r#"{"error":"workspace directory is not available"}"#)
+                .unwrap_err(),
+            "workspace directory is not available"
+        );
+        assert_eq!(container_status_outcome(500, "").unwrap_err(), "HTTP 500");
     }
 
     #[test]

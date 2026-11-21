@@ -1161,6 +1161,8 @@ fn message_view(
     let auth_notice =
         msg.role == Role::Notice && msg.badge == crate::transcript::PROVIDER_AUTH_CODE;
     let reconnect = msg.reconnect.clone();
+    // Notice subtype hook for scoped CSS (#1380 mutes files.invalidated).
+    let notice_kind = (msg.role == Role::Notice && !msg.key.is_empty()).then(|| msg.key.clone());
     // #1371: end-of-turn failure markers carry their stop reason as a
     // hook for scoped styling and browser checks; every other line has
     // no attribute.
@@ -1242,7 +1244,7 @@ fn message_view(
     // "Copy failed" instead of silence. Reverts after 2s.
     let copy_state = RwSignal::new(None::<bool>);
     view! {
-        <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role data-turn-stop=turn_stop data-compaction=compaction>
+        <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role data-kind=notice_kind data-turn-stop=turn_stop data-compaction=compaction>
             <header>
                 {if find_title {
                     view! { <span class="sx-who"><crate::transcript_find::MarkedText text=title.clone() kind="inline" ranges=title_ranges current=cur_title /></span> }.into_any()
@@ -1514,6 +1516,7 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                     }
                 }
                 Block::Code { lang, text } => {
+                    let mermaid = crate::mermaid::is_mermaid(&lang).then(|| text.clone());
                     let copy = text.clone();
                     // #1575: known fence languages get the file viewer's
                     // `ev-*` token spans; unknown/empty stay plain text.
@@ -1521,7 +1524,7 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                     // Same honest per-button feedback as the message
                     // Copy button (#1582).
                     let copy_state = RwSignal::new(None::<bool>);
-                    view! {
+                    let fence = view! {
                         <div class="sx-fence">
                             <div class="sx-fence-bar">
                                 <span class="sx-lang">{lang}</span>
@@ -1536,7 +1539,16 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                             </div>
                             <pre class="sx-code">{code}</pre>
                         </div>
-                    }.into_any()
+                    };
+                    // Mermaid fence → diagram, with this code block as the
+                    // source view and the parse-failure fallback (#1368).
+                    match mermaid {
+                        Some(source) => view! {
+                            <crate::mermaid::MermaidBlock source=source>{fence}</crate::mermaid::MermaidBlock>
+                        }
+                        .into_any(),
+                        None => fence.into_any(),
+                    }
                 }
             }
         })

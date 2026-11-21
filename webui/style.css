@@ -527,6 +527,33 @@ kbd {
   border: 1px solid var(--border-muted);
   border-radius: var(--radius-sm);
 }
+/* feature:container-panel begin (#1584) */
+.container-posture { margin: 0 0 var(--space-2); display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; }
+.container-posture-label {
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-muted);
+}
+.container-ladder { list-style: none; margin: 0 0 var(--space-2); padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.container-ladder .rung {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--type-sm);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-muted);
+  color: var(--muted);
+}
+.container-ladder .rung.on { color: inherit; border-color: currentColor; font-weight: 600; }
+.container-facts { margin: 0 0 var(--space-2); display: grid; grid-template-columns: max-content 1fr; gap: 4px var(--space-3, 12px); }
+.container-facts dt { color: var(--muted); font-size: var(--type-sm); }
+.container-facts dd { margin: 0; font-size: var(--type-sm); word-break: break-word; }
+@media (max-width: 480px) {
+  .container-facts { grid-template-columns: 1fr; }
+  .container-facts dd { margin-bottom: var(--space-2); }
+}
+/* feature:container-panel end */
 /* feature:workspace-trust (#1781) */
 .workspace-trust { flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3, 12px) 0; }
 .trust-badge {
@@ -3068,6 +3095,39 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 /* feature:terminal end */
 
+/* feature:mermaid-rendering begin */
+/* Mermaid diagrams (#1368): native SVG from mermaid-lite. Colours come
+   from the theme tokens so diagrams follow light/dark and custom themes. */
+.mmd { margin: 6px 0 0; border: 1px solid var(--border-muted); border-radius: var(--radius-sm); background: var(--surface-muted); min-width: 0; }
+.mmd > .mmd-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.mmd > .mmd-bar [data-mermaid-toggle] { margin-left: auto; }
+.mmd-canvas { overflow: auto; max-width: 100%; max-height: 70vh; padding: var(--space-2); }
+.mmd-canvas:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.mmd-svg { display: block; max-width: none; }
+/* Zoom steps (ZOOMS in mermaid.rs); z2 is Fit: natural size capped at
+   the column width, never upscaled. */
+.mmd-z2 .mmd-svg { max-width: 100%; height: auto; }
+.mmd-z0 .mmd-svg { zoom: 0.5; }
+.mmd-z1 .mmd-svg { zoom: 0.75; }
+.mmd-z3 .mmd-svg { zoom: 1.25; }
+.mmd-z4 .mmd-svg { zoom: 1.5; }
+.mmd-z5 .mmd-svg { zoom: 2; }
+.mmd-z6 .mmd-svg { zoom: 3; }
+.mmd-zoom { display: inline-flex; gap: 4px; }
+.mmd-zoom[hidden] { display: none; }
+.mmd-source > .sx-fence, .mmd-failed > .sx-fence { margin: 0; border: 0; }
+.mmd-fail-note { margin: 0; padding: 4px var(--space-2) 6px; color: var(--muted); font-size: var(--type-sm); }
+.mmd-node, .mmd-actor { fill: var(--surface); stroke: var(--rule); stroke-width: 1.2; }
+.mmd-note-box { fill: var(--raised); stroke: var(--warning); stroke-width: 1; }
+.mmd-edge, .mmd-message { fill: none; stroke: var(--muted); stroke-width: 1.4; }
+.mmd-thick { stroke-width: 2.6; }
+.mmd-lifeline, .mmd-frame { fill: none; stroke: var(--border-muted); stroke-width: 1; }
+.mmd-arrow { fill: var(--muted); stroke: none; }
+rect.mmd-edge-label { fill: var(--surface-muted); stroke: none; }
+.mmd-text { fill: var(--ink); stroke: none; font: 13px ui-sans-serif, system-ui, sans-serif; }
+.mmd-text.mmd-edge-label, .mmd-text.mmd-message { fill: var(--muted); font-size: 12px; }
+/* feature:mermaid-rendering end */
+
 /* feature:phone-reading begin */
 /* Kept last on purpose: these rules must win the cascade over the base
    .sx-code / .ev-md rules above at equal specificity. */
@@ -3312,6 +3372,73 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .files-head .hint, .changes-head .hint { margin: 0; }
 /* feature:files-refresh end */
+/* feature:global-search begin */
+/* Global transcript search (#1355): palette-launched overlay. Tokens only. */
+.gs-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: color-mix(in srgb, var(--overlay) 45%, transparent);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 10vh var(--space-4) var(--space-4);
+}
+.gs-dialog {
+  width: min(680px, 96vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: var(--space-3);
+}
+.gs-form { display: flex; gap: var(--space-2); }
+.gs-input { flex: 1 1 auto; min-width: 0; }
+.gs-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+.gs-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.gs-hit {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  padding: var(--space-2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--ink);
+}
+.gs-hit:hover,
+.gs-hit.on { border-color: var(--acid); }
+.gs-title { font-size: var(--type-md); font-weight: 600; }
+.gs-meta { font-size: 11px; color: var(--muted); }
+.gs-snippet {
+  font-size: var(--type-sm);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.gs-snippet mark {
+  background: color-mix(in srgb, var(--acid) 30%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+/* feature:global-search end */
 /* feature:search-in-files begin */
 /* #1406: Files-pane search box; matches marked with .tf-mark (transcript-find.css). */
 .sif {
@@ -3507,3 +3634,13 @@ button.context-doctor-open { background: transparent; border: 0; padding: 0; fon
   cursor: pointer;
 }
 /* feature:diagnostics end */
+/* feature:files-invalidated begin */
+/* #1380: a freshness signal, not a warning — muted system line. */
+.sx-notice[data-kind="files.invalidated"] {
+  border-left-color: var(--border-muted);
+  color: var(--muted);
+}
+.sx-notice[data-kind="files.invalidated"] .sx-who {
+  color: var(--muted);
+}
+/* feature:files-invalidated end */
