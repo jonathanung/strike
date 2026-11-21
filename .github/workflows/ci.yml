@@ -99,19 +99,14 @@ jobs:
             curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.83.0
             . "$HOME/.cargo/env"
           fi
-          cargo test --manifest-path webui/protocol-schema/Cargo.toml --locked
-          cargo test --manifest-path webui/load-guard/Cargo.toml --locked
-          cargo test --manifest-path webui/md-review/Cargo.toml --locked
-          cargo test --manifest-path webui/transcript-window/Cargo.toml --locked
-          cargo test --manifest-path webui/dashboard-view/Cargo.toml --locked
-          cargo test --manifest-path webui/edit-resend/Cargo.toml --locked
-          cargo test --manifest-path webui/ideas-inbox/Cargo.toml --locked
-          cargo test --manifest-path webui/status-card/Cargo.toml --locked
-          cargo test --manifest-path webui/mermaid-lite/Cargo.toml --locked
-          cargo test --manifest-path webui/composer-drafts/Cargo.toml --locked
-          cargo test --manifest-path webui/away-briefing/Cargo.toml --locked
-          cargo test --manifest-path webui/theme-catalog/Cargo.toml --locked
-          cargo test --manifest-path webui/signin-flow/Cargo.toml --locked
+          # Every webui sub-crate (webui/*/Cargo.toml) is discovered, so a new
+          # crate needs no ci.yml edit. The webui crate itself runs in webui-smoke.
+          for manifest in webui/*/Cargo.toml; do
+            case "$manifest" in webui/target/*) continue ;; esac
+            echo "::group::cargo test $manifest"
+            cargo test --manifest-path "$manifest" --locked
+            echo "::endgroup::"
+          done
 
       # E3.2 prompt regression: verbose report of tool/turn/token deltas.
       # Non-blocking for now (test itself soft-fails metric drift unless
