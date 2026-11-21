@@ -8,6 +8,7 @@
 //! in `customize`.
 
 mod agent_picker;
+mod annotate;
 mod api;
 mod appearance;
 mod attachment_honesty;
@@ -18,14 +19,19 @@ mod approvals_ui;
 mod chat_mode;
 mod child_signals;
 mod clipboard;
+mod compaction_marks;
 mod confirm;
 mod composer_triggers;
+mod config_sources;
 mod diag;
 mod draft_size;
 mod drafts;
 mod editor;
 mod lessons;
+mod elicitation;
+mod elicitation_ui;
 mod load_epoch;
+mod markdown_review;
 mod local_issues;
 mod localfiles;
 mod customize;
@@ -34,13 +40,17 @@ mod gateway_peek;
 mod gateway_qr;
 mod git;
 mod goals;
+mod instance_backup;
 mod mobile;
 mod provider_signin;
 mod providers;
+mod review_queue;
 mod push;
+mod reasoning;
 mod rule_author;
 mod sandbox_explain;
 mod schedule;
+mod search_in_files;
 mod scheduler_presets;
 mod model;
 mod notify;
@@ -69,6 +79,7 @@ mod transcript_find;
 mod usage_audit;
 mod session_delete;
 mod session_restore;
+mod share;
 mod shell;
 mod skill_usage;
 mod side_chat;
@@ -88,7 +99,9 @@ mod turn_failure;
 mod turn_usage;
 mod turn_verify;
 mod workspace_image;
+mod workspace_trust;
 mod workspaces;
+mod workflows;
 mod workflow_run;
 use crate::shell::icon;
 use crate::child_signals::TeamMessagesFeed;
@@ -140,6 +153,7 @@ use crate::editor::DocumentPane;
 use crate::mobile::PhoneNav;
 use crate::customize::CustomizePane;
 use crate::side_chat::SideChatPanel;
+use crate::share::{ShareDialog, ShareView};
 use crate::outbox::OutboxList;
 
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
@@ -1100,6 +1114,9 @@ fn App() -> impl IntoView {
     let token = RwSignal::new(gateway::initial_token());
     provide_context(transcript_attachments::AttachmentAuth { base, token });
     let status = RwSignal::new("connecting…".to_string());
+    // Bootstrap capability `workspaceTrust` (#1781): gates the untrusted
+    // workspace badge and trust card.
+    let workspace_trust_capable = RwSignal::new(false);
     // Bootstrap capability `diag` (#1489): gates Download diagnostics.
     let diag_capable = RwSignal::new(false);
     // Bootstrap capability `ledger` (#1485): gates the Decisions tab.
@@ -1108,6 +1125,8 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // Typed config-source list (#1493), from bootstrap `configFiles`.
+    let config_files_capable = RwSignal::new(false);
     // #1375: daemon-aggregated team signals from the /v1/team poll — the
     // bounded inter-agent mail, member names for its From/To, the lead id,
     // and each child's latest escalation sentence by session id.
@@ -1220,6 +1239,7 @@ fn App() -> impl IntoView {
     });
     let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
+    let elicitations = RwSignal::new(Vec::<elicitation::Pending>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
     let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
     let panel_open = RwSignal::new(false);
@@ -1390,6 +1410,10 @@ fn App() -> impl IntoView {
     let doc_path = RwSignal::new(String::new());
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
+    // Search in files (#1406): the Files-pane box's query and a run
+    // counter the palette command bumps to start a search.
+    let sif_query = RwSignal::new(String::new());
+    let sif_run = RwSignal::new(0u32);
     let doc_editing = RwSignal::new(false);
     // Open a file in the document viewer: the one path the Files pane's
     // Open and quick-open (#1396) share.
@@ -1406,6 +1430,10 @@ fn App() -> impl IntoView {
     // a request by itself.
     let delete_target = RwSignal::new(None::<session_delete::DeleteTarget>);
     let pending_files = RwSignal::new(Vec::<chat_mode::PendingAttachment>::new());
+    // Visual annotate (#1545): marks per pending image id, and the image
+    // open in the overlay. Marks live and die with the composer session.
+    let annotate_marks: annotate::MarkStore = RwSignal::new(HashMap::new());
+    let annotate_target = RwSignal::new(None::<annotate::Target>);
     let sending = RwSignal::new(false);
     let listening = RwSignal::new(false);
     let speech_ok = chat_mode::dictation_available();
@@ -1843,12 +1871,14 @@ fn App() -> impl IntoView {
                                         }
                                     });
                                 }
+                                workspace_trust_capable.set(boot.capabilities.workspace_trust);
                                 diag_capable.set(boot.capabilities.diag);
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
                                 ledger_capable.set(boot.capabilities.ledger);
                                 crate::local_issues::set_issues_capable(boot.capabilities.issues);
                                 issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
+                                config_files_capable.set(boot.capabilities.config_files);
                                 crate::update_check::boot(b.clone(), t.clone(), boot.capabilities.update_check);
                                 skills.set(boot.skills);
                                 agent_list.set(boot.agents);
@@ -1982,6 +2012,7 @@ fn App() -> impl IntoView {
             children.set(Vec::new());
             children_note.set(String::new());
             asks.set(Vec::new());
+            elicitations.set(Vec::new());
             live_audit.set(Vec::new());
             confirm.set(None);
             wipe_on_replay.set(false);
@@ -2134,6 +2165,7 @@ fn App() -> impl IntoView {
                     };
                     note_steer(transcript_cb, &data, &on_note);
                     apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
+                    elicitation_ui::apply_elicitation_notes(&data, elicitations);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
                     lines_cb.set(transcript_cb.with_untracked(|t| t.chat_lines()));
@@ -2642,6 +2674,20 @@ fn App() -> impl IntoView {
         // draft is cleared, deduping consecutive repeats. Attachments-only
         // sends have no text and record nothing.
         prompt_history.update(|h| h.push(&text));
+        // #1545: snapshot marks for the files being sent. The composite
+        // replaces the original image in the turn; the text block rides
+        // in the same message. Marks are cleared only after success.
+        let marks_now = annotate_marks.get_untracked();
+        let annotated: HashMap<u32, Vec<annotate::Mark>> = files
+            .iter()
+            .filter(|f| f.error.is_empty())
+            .filter_map(|f| marks_now.get(&f.id).filter(|m| !m.is_empty()).map(|m| (f.id, m.clone())))
+            .collect();
+        let blocks: Vec<String> = files
+            .iter()
+            .filter_map(|f| annotated.get(&f.id).map(|m| annotate::text_block(&f.name, m)))
+            .collect();
+        let text_out = annotate::compose_message(&text, &blocks);
         // Take the composer before the first await so a repeated Enter or a
         // second click cannot post the same attachments again.
         sending.set(true);
@@ -2670,6 +2716,39 @@ fn App() -> impl IntoView {
             let mut images = Vec::new();
             for file in updated.iter_mut() {
                 if !file.error.is_empty() {
+                    continue;
+                }
+                if let Some(marks) = annotated.get(&file.id) {
+                    // Composite from the real attached image; the original
+                    // pending file is left untouched for a failed-send restore.
+                    let composed = match annotate::composite_png(&file.preview, marks).await {
+                        Ok(b64) => b64,
+                        Err(err) => {
+                            status.set(format!("annotate failed: {err}"));
+                            restore(updated, text);
+                            return;
+                        }
+                    };
+                    let name = annotate::annotated_name(&file.name);
+                    match chat_mode::upload_attachment(&b, &t, &root, &name, "image/png", &composed).await {
+                        Ok(up) => {
+                            let mime = if up.mime.is_empty() { "image/png".to_string() } else { up.mime };
+                            let shown = if up.name.is_empty() { name } else { up.name };
+                            images.push(serde_json::json!({
+                                "ref": up.reference,
+                                "mime": mime,
+                                "kind": up.kind,
+                                "name": shown,
+                                "bytes": up.bytes,
+                                "sha256": up.sha256,
+                            }));
+                        }
+                        Err(err) => {
+                            status.set(format!("attachment failed: {err}"));
+                            restore(updated, text);
+                            return;
+                        }
+                    }
                     continue;
                 }
                 if file.uploaded_ref.is_empty() {
@@ -2706,15 +2785,20 @@ fn App() -> impl IntoView {
                 }));
             }
             let body = if images.is_empty() {
-                serde_json::json!({"text": text})
+                serde_json::json!({"text": text_out})
             } else {
-                serde_json::json!({"text": text, "images": images})
+                serde_json::json!({"text": text_out, "images": images})
             };
             match outbox::post_op_with_id(&b, &t, &root, op, body, &client_id).await {
                 Ok(()) => {
                     for file in &updated {
                         chat_mode::revoke_preview(&file.preview);
                     }
+                    annotate_marks.update(|m| {
+                        for id in annotated.keys() {
+                            m.remove(id);
+                        }
+                    });
                     sending.set(false);
                 }
                 Err(err) => {
@@ -4742,6 +4826,20 @@ fn App() -> impl IntoView {
         }),
     );
     shell::bind(
+        "search-in-files.run",
+        Rc::new(move |args: &str| {
+            let q = args.trim();
+            if q.is_empty() {
+                return Err("Type the text to find.".into());
+            }
+            side_tab.set("files".into());
+            mode.set("chat".into());
+            sif_query.set(q.to_string());
+            sif_run.update(|n| *n = n.wrapping_add(1));
+            Ok(())
+        }),
+    );
+    shell::bind(
         "workspaces.change",
         Rc::new(move |_| {
             picker_open.set(true);
@@ -5012,6 +5110,7 @@ fn App() -> impl IntoView {
 
     let git_active = Memo::new(move |_| side_tab.get() == "git");
     let worktree_active = Memo::new(move |_| side_tab.get() == "worktrees");
+    let review_active = Memo::new(move |_| side_tab.get() == "review");
     // Names the open session for the chat-mode bar and the chat view's h1.
     let chat_title = Memo::new(move |_| {
         let id = active_root.get();
@@ -5084,6 +5183,7 @@ fn App() -> impl IntoView {
                 status=status
                 diag_capable=diag_capable
                 project_init_capable=project_init_capable
+                config_files_capable=config_files_capable
                 root=active_root
                 theme=theme_id
                 theme_catalog=themes_state
@@ -5130,6 +5230,9 @@ fn App() -> impl IntoView {
                 active_root=active_root
                 status=status
             />
+        </Show>
+        <Show when=move || mode.get() == "workflows" fallback=move || ()>
+            <workflows::WorkflowsPage base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "triggers" fallback=move || ()>
             <triggers::TriggersPage
@@ -5314,6 +5417,14 @@ fn App() -> impl IntoView {
                     // to the conversation. Visually hidden; the status tabs
                     // and chat-mode bar already show the session name.
                     <h1 id="chat-heading" class="sr-only">{move || chat_title.get()}</h1>
+                    // #1781: persistent untrusted-workspace badge + trust card.
+                    <workspace_trust::WorkspaceTrust
+                        base=base
+                        token=token
+                        root=active_root
+                        status=status
+                        capable=workspace_trust_capable
+                    />
                     {move || {
                         let _ = tick.get();
                         let active = active_root.get();
@@ -5363,6 +5474,8 @@ fn App() -> impl IntoView {
                             jump_line=doc_line
                             want_diff=doc_diff
                             editing=doc_editing
+                            root=active_root
+                            busy=session_busy_now
                             history=file_history
                         />
                     </Show>
@@ -5429,6 +5542,7 @@ fn App() -> impl IntoView {
                         </div>
                     </Show>
                     <Show when=move || doc_path.get().is_empty()>
+                    <ShareDialog base=base token=token session=active_root />
                     <TranscriptPane
                         transcript=transcript
                         session=active_root
@@ -5440,6 +5554,7 @@ fn App() -> impl IntoView {
                         find=find_view
                     />
                     </Show>
+                    <elicitation_ui::ElicitationCards base=base token=token root=active_root elicitations=elicitations />
                     <ApprovalCards
                         asks=asks
                         perm_mode=perm_mode
@@ -5719,6 +5834,23 @@ fn App() -> impl IntoView {
                                             (false, chat_mode::PreviewKind::Video) => view! { <video class="attach-media" controls=true preload="metadata" playsinline=true src=preview.clone()></video> }.into_any(),
                                             _ => view! { <span></span> }.into_any(),
                                         };
+                                        let show_img = !preview.is_empty();
+                                        // #1545: raster images can be annotated; the overlay
+                                        // reads the same blob URL as the thumbnail.
+                                        let can_annotate = show_img && !show_err && annotate::can_annotate(&file.mime);
+                                        let annotate_for = annotate::Target { id, name: name.clone(), preview: preview.clone() };
+                                        let mark_count = move || annotate_marks.with(|m| m.get(&id).map(|v| v.len()).unwrap_or(0));
+                                        let remove_now = move || {
+                                            pending_files.update(|rows| {
+                                                if let Some(i) = rows.iter().position(|row| row.id == id) {
+                                                    chat_mode::revoke_preview(&rows[i].preview);
+                                                    rows.remove(i);
+                                                }
+                                            });
+                                            annotate_marks.update(|m| {
+                                                m.remove(&id);
+                                            });
+                                        };
                                         view! {
                                             <span class="attach-chip">
                                                 {preview_view}
@@ -5727,14 +5859,37 @@ fn App() -> impl IntoView {
                                                     <Show when=move || show_err>
                                                         <span class="path">{error.clone()}</span>
                                                     </Show>
+                                                    <Show when=move || { mark_count() > 0 }>
+                                                        <span class="attach-marks" data-attach-marks="true">{move || {
+                                                            let n = mark_count();
+                                                            if n == 1 { "1 mark".to_string() } else { format!("{n} marks") }
+                                                        }}</span>
+                                                    </Show>
                                                 </span>
+                                                {can_annotate.then(|| view! {
+                                                    <button type="button" data-annotate-open="true" aria-label="Annotate image" on:click=move |_| {
+                                                        annotate_target.set(Some(annotate_for.clone()));
+                                                    }>"Annotate"</button>
+                                                })}
                                                 <button type="button" aria-label="Remove attachment" on:click=move |_| {
-                                                    pending_files.update(|rows| {
-                                                        if let Some(i) = rows.iter().position(|row| row.id == id) {
-                                                            chat_mode::revoke_preview(&rows[i].preview);
-                                                            rows.remove(i);
+                                                    // Unsent marks are listed before they go: removing
+                                                    // the image discards them only on an explicit yes.
+                                                    match annotate::discard_body(mark_count()) {
+                                                        None => remove_now(),
+                                                        Some(body) => {
+                                                            let opened = crate::confirm::ask(
+                                                                crate::confirm::ConfirmRequest {
+                                                                    title: "Remove image and its marks?".into(),
+                                                                    body,
+                                                                    confirm_label: "Remove".into(),
+                                                                },
+                                                                Rc::new(remove_now),
+                                                            );
+                                                            if !opened {
+                                                                status.set(crate::confirm::BUSY.into());
+                                                            }
                                                         }
-                                                    });
+                                                    }
                                                 }>"Remove"</button>
                                             </span>
                                         }
@@ -6008,6 +6163,7 @@ fn App() -> impl IntoView {
                                 </div>
                             </div>
                         </form>
+                        <annotate::AnnotateOverlay target=annotate_target store=annotate_marks />
                         <Show when=move || !model_note.get().is_empty() && !model_menu.get()>
                             <p class="hint" data-model-note="true">{move || model_note.get()}</p>
                         </Show>
@@ -6046,6 +6202,7 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "files" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("files".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("files")></span>"Files"</button>
                         <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
                         <button class=move || if side_tab.get() == "git" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("git".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("git")></span>"Git"</button>
+                        <button class=move || if side_tab.get() == "review" { "chip on" } else { "chip" } data-side-tab="review" on:click=move |_| side_tab.set("review".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Review"</button>
                         <button class=move || if side_tab.get() == "terminal" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("terminal".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("terminal")></span>"Terminal"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
@@ -6202,6 +6359,17 @@ fn App() -> impl IntoView {
                                 <p class="hint">{move || if files_path.get().is_empty() { "Working directory".into() } else { files_path.get() }}</p>
                                 <button class="secondary" on:click=move |_| load_files()>"Refresh"</button>
                             </div>
+                            <search_in_files::SearchInFiles
+                                base=base
+                                token=token
+                                query=sif_query
+                                run=sif_run
+                                on_open=Callback::new(move |(path, line): (String, u32)| {
+                                    doc_diff.set(false);
+                                    doc_line.set(line);
+                                    doc_path.set(path);
+                                })
+                            />
                             <p class="hint">"Click a file to open it. @ mentions it in chat; drag also inserts @path."</p>
                             <Show when=move || file_history.with(|h| !h.recent(1).is_empty())>
                                 <div class="files-recent" data-ev-recent=true>
@@ -6325,6 +6493,9 @@ fn App() -> impl IntoView {
                     </Show>
                     <div hidden=move || !git_active.get()>
                         <git::GitPanel base=base token=token status_line=status active=git_active />
+                    </div>
+                    <div hidden=move || !review_active.get()>
+                        <review_queue::ReviewPanel base=base token=token root=active_root busy=session_busy_now active=review_active />
                     </div>
                     <div hidden=move || !worktree_active.get()>
                         <git::WorktreePanel base=base token=token status_line=status active_root=active_root active=worktree_active />
@@ -6516,7 +6687,13 @@ mod composer_grow_history_tests {
 }
 
 fn main() {
-    leptos::mount::mount_to_body(App);
+    // A share link (#1565) gets only the read-only transcript shell: no
+    // cockpit, no session list, no gateway credential.
+    if let Some(token) = share::share_token_from_location() {
+        leptos::mount::mount_to_body(move || view! { <ShareView token=token /> });
+    } else {
+        leptos::mount::mount_to_body(App);
+    }
     // The cockpit mounted, so the static boot shell from index.html has
     // done its job. mount_to_body appends rather than replacing the body,
     // so remove the placeholder explicitly; if the wasm never runs, the
