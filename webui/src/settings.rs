@@ -166,6 +166,7 @@ pub fn SettingsPage(
                     on_pick=on_density
                 />
             </section>
+            <crate::link_patterns::LinkPatternsSettings />
             <section class="card settings-section" id="settings-project">
                 <h2 class="panel-title">"Project"</h2>
                 <crate::project_init::ProjectInit

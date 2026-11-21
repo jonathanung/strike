@@ -410,6 +410,27 @@ transcript folds away) are not searched and find does not expand
 collapsed cards to reveal a match; a case-sensitive toggle is likewise
 deferred until someone asks for it.
 
+## Text Link Patterns
+
+Shipped (#1383, slice 1): Settings → Text Link Patterns holds user rules,
+each a name, a regular expression and an absolute `https://`/`http://`
+URL template containing `{match}` (the matched text, percent-encoded).
+Rules apply at display time to plain-text chunks of the transcript and
+of rendered Markdown; an inline-code span links only when its whole
+content matches. Built-in links (literal URLs, file paths, PR/issue
+chips) take precedence and are never re-wrapped, the first matching
+rule wins in the user's order, and stored transcripts never change.
+Patterns use the `regex` crate (linear-time matching, compiled-size
+cap); a pattern that matches empty text, a non-http(s) template, a
+template whose host comes from `{match}`, and more than 50 rules are
+refused inline in Settings and never applied.
+
+Persistence choice: rules live in this browser's localStorage
+(`strike.linkPatterns`), like the other cockpit view prefs, so a phone
+and a desktop keep separate lists for now. Sharing them through the
+gateway needs a settings field on the host contract and a config key; that is
+a follow-up issue, not part of this slice.
+
 ## Not planned as a copy
 
 Stall is already a real badge when the team roster sets `budget.stall`.

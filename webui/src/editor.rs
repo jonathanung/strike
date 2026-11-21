@@ -1674,8 +1674,10 @@ fn Inlines(text: String) -> impl IntoView {
     inline_parse(&text)
         .into_iter()
         .map(|part| match part {
-            Inline::Text(t) => view! { <span>{t}</span> }.into_any(),
-            Inline::Code(t) => view! { <code>{t}</code> }.into_any(),
+            // User Text Link Patterns (#1383): plain text and whole-match
+            // code spans only.
+            Inline::Text(t) => view! { <span>{crate::link_patterns::linked_text(t)}</span> }.into_any(),
+            Inline::Code(t) => crate::link_patterns::linked_code(t, None).into_any(),
             Inline::Strong(t) => view! { <strong>{t}</strong> }.into_any(),
             Inline::Em(t) => view! { <em>{t}</em> }.into_any(),
             Inline::Link { text, href } => {

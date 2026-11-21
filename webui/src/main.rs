@@ -19,6 +19,7 @@ mod composer_triggers;
 mod diag;
 mod draft_size;
 mod editor;
+mod link_patterns;
 mod load_epoch;
 mod localfiles;
 mod customize;
