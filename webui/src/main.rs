@@ -5654,7 +5654,7 @@ fn App() -> impl IntoView {
                                     }
                                 }
                             />
-                            <prompt_sharpen::SharpenBar sharpen=sharpen />
+                            {move || prompt_sharpen::bar_view(sharpen)}
                             <textarea
                                 id="composer-input"
                                 aria-label="Message this session"

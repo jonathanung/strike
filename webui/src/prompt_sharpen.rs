@@ -266,12 +266,20 @@ impl Sharpen {
     /// Sharpen the current draft. `Err` carries the reason it did not
     /// start (also shown inline).
     pub fn start(self) -> Result<(), String> {
-        if self.phase.get_untracked() == Phase::Running {
+        let (Some(phase), Some(text), Some(root), Some(busy)) = (
+            self.phase.try_get_untracked(),
+            self.draft.try_get_untracked(),
+            self.active_root.try_get_untracked(),
+            self.busy.try_get_untracked(),
+        ) else {
+            let msg = "Sharpen is unavailable: its state was disposed. Reload the page.";
+            crate::console_error(msg);
+            return Err(msg.into());
+        };
+        if phase == Phase::Running {
             return Ok(());
         }
-        let text = self.draft.get_untracked();
-        let root = self.active_root.get_untracked();
-        if let Err(msg) = can_sharpen(&text, self.busy.get_untracked(), &root) {
+        if let Err(msg) = can_sharpen(&text, busy, &root) {
             self.phase.set(Phase::Failed(msg.to_string()));
             return Err(msg.to_string());
         }
@@ -322,18 +330,19 @@ impl Sharpen {
 }
 
 /// The sharpen strip above the composer textarea: progress, the
-/// original-vs-sharpened preview, inline errors, and Undo.
-#[component]
-pub fn SharpenBar(sharpen: Sharpen) -> impl IntoView {
+/// original-vs-sharpened preview, inline errors, and Undo. A plain
+/// function the composer calls from a reactive closure (`{move ||
+/// bar_view(sharpen)}`); it renders nothing when idle with no Undo.
+pub fn bar_view(sharpen: Sharpen) -> AnyView {
     let Sharpen { phase, undo, draft, .. } = sharpen;
     let accept = move || sharpen.accept();
     let reject = move || sharpen.reject();
-
-    let visible = move || {
-        phase.get() != Phase::Idle
-            || undo.get().is_some_and(|(_, sharpened)| draft.get() == sharpened)
-    };
-    let state = move || match phase.get() {
+    let current = phase.get();
+    let show_undo = undo.get().is_some_and(|(_, sharpened)| draft.get() == sharpened);
+    if current == Phase::Idle && !show_undo {
+        return ().into_any();
+    }
+    let state = match current {
         Phase::Idle => "undo",
         Phase::Running => "running",
         Phase::Preview(_) => "preview",
@@ -341,7 +350,6 @@ pub fn SharpenBar(sharpen: Sharpen) -> impl IntoView {
     };
 
     view! {
-        <Show when=visible>
             <div
                 class="sharpen"
                 data-feature="prompt-sharpen"
@@ -354,7 +362,7 @@ pub fn SharpenBar(sharpen: Sharpen) -> impl IntoView {
                     }
                 }
             >
-                {move || match phase.get() {
+                {match current {
                     Phase::Idle => view! {
                         <div class="sharpen-row">
                             <span class="hint">"Draft sharpened."</span>
@@ -409,8 +417,8 @@ pub fn SharpenBar(sharpen: Sharpen) -> impl IntoView {
                     }
                 }}
             </div>
-        </Show>
     }
+    .into_any()
 }
 
 #[cfg(test)]
