@@ -48,6 +48,11 @@ pub fn state() -> ArcRwSignal<FallbackState> {
     STATE.with(|s| s.clone())
 }
 
+/// Untracked snapshot for non-reactive callers (palette choices).
+pub fn current() -> FallbackState {
+    STATE.with(|s| s.get_untracked())
+}
+
 fn set(next: FallbackState) {
     STATE.with(|s| {
         if s.get_untracked() != next {

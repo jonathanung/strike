@@ -12,7 +12,7 @@ const NONE: &str = "none";
 
 fn fallback_choices() -> Vec<Choice> {
     // #1963: the row matching the current fallback says so.
-    let current = crate::fallback::state().get_untracked();
+    let current = crate::fallback::current();
     let mut rows = vec![Choice {
         id: NONE.into(),
         label: "No fallback".into(),
