@@ -1,0 +1,8 @@
+[package]
+name = "dashboard-view"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Dashboard page rendering rules: provenance marker and dash-not-zero (#1628)."
+
+[dependencies]

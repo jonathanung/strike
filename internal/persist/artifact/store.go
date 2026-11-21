@@ -122,6 +122,9 @@ func (s *Store) Create(in CreateInput) (Artifact, error) {
 	if err := validateContent(content); err != nil {
 		return Artifact{}, err
 	}
+	if err := validateTypedContent(typ, content); err != nil {
+		return Artifact{}, err
+	}
 	scope := strings.TrimSpace(in.Scope)
 	if scope == "" {
 		scope = ScopeProject
@@ -346,6 +349,11 @@ func (s *Store) Update(id, actorSession, actorRoot string, expectedVersion int, 
 	}
 	if expectedVersion != cur.Version {
 		return Artifact{}, fmt.Errorf("%w: have %d, expected %d", ErrConflict, cur.Version, expectedVersion)
+	}
+	if in.Content != nil {
+		if err := validateTypedContent(cur.Type, *in.Content); err != nil {
+			return Artifact{}, err
+		}
 	}
 
 	working := Clone(cur)

@@ -41,10 +41,19 @@ const (
 )
 
 // pushKinds are the kinds that push by default: the ones that need you.
-// Finished/failed runs stay in the centre (opt-in is a follow-up).
 var pushKinds = map[string]bool{
 	noteApproval:     true,
 	noteChildBlocked: true,
+}
+
+// pushFinishedKinds push only when NotifyPrefs.PushFinished is on (#1917).
+var pushFinishedKinds = map[string]bool{
+	noteSessionFinished: true,
+	noteChildFinished:   true,
+}
+
+func pushable(kind string, prefs NotifyPrefs) bool {
+	return pushKinds[kind] || (prefs.PushFinished && pushFinishedKinds[kind])
 }
 
 type pushSub struct {
@@ -266,8 +275,8 @@ func (p *pushStore) unsubscribe(endpoint string) (bool, error) {
 
 // buildPushPayload is the whole wire payload for one record. It reads only
 // the kind, the deep link, and the record id.
-func buildPushPayload(n Notification) ([]byte, bool) {
-	if !pushKinds[n.Kind] {
+func buildPushPayload(n Notification, prefs NotifyPrefs) ([]byte, bool) {
+	if !pushable(n.Kind, prefs) {
 		return nil, false
 	}
 	href := n.Href
@@ -299,7 +308,7 @@ func (s *Server) pushTick() {
 	if err := log.sync(); err != nil {
 		return
 	}
-	items, _, latest := log.snapshot(since)
+	items, prefs, latest := log.snapshot(since)
 	if latest < since {
 		// The centre log was reset; start over from its current end.
 		p.mu.Lock()
@@ -318,7 +327,7 @@ func (s *Server) pushTick() {
 		if !item.Banner {
 			continue
 		}
-		if body, ok := buildPushPayload(item); ok {
+		if body, ok := buildPushPayload(item, prefs); ok {
 			payloads = append(payloads, body)
 		}
 	}

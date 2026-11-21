@@ -41,6 +41,10 @@ type sessionListItem struct {
 	Status         string `json:"status,omitempty"`
 	Unread         bool   `json:"unread"`
 	LastActivityAt int64  `json:"lastActivityAt,omitempty"`
+	// PR linkage captured by the host (#1356). Empty when none.
+	PRURL    string `json:"prUrl,omitempty"`
+	PRNumber int    `json:"prNumber,omitempty"`
+	PRState  string `json:"prState,omitempty"`
 }
 
 type agentsResponse struct {
@@ -83,6 +87,7 @@ type capabilities struct {
 	Providers      bool `json:"providers"`
 	ProjectInit    bool `json:"projectInit"`
 	MCP            bool `json:"mcp"`
+	Powers         bool `json:"powers"`
 	LSP            bool `json:"lsp"`
 	Telemetry      bool `json:"telemetry"`
 	Workflows      bool `json:"workflows"`
@@ -163,8 +168,8 @@ type bootstrapResponse struct {
 
 var browserProtocolOps = []string{
 	"compact", "context.controls", "elicitation.reply", "inspect.prompt", "interrupt", "permission.reply", "question.reply",
-	"rewind", "select.agent", "select.model", "set.autonomy", "set.effort",
-	"set.fast", "set.permission_mode", "steer", "user.input",
+	"rewind", "select.agent", "select.model", "set.autonomy", "set.effort", "set.fallback_model",
+	"set.fast", "set.permission_mode", "set.verbosity", "steer", "user.input",
 	"input.queue_edit", "input.queue_cancel", "input.queue_reorder", "input.queue_send_now",
 	"workflow.start", "workflow.stop",
 }
@@ -198,6 +203,8 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 		c.Permissions = h.Permissions != nil
 		// MCP status/control is exposed via /v1/mcp*.
 		c.MCP = h.MCP != nil
+		// Powers capability packs via /v1/powers* (#1867).
+		c.Powers = h.Powers != nil
 		// Plugin lifecycle + pane contributions via /v1/plugins* and /v1/panes* (#732).
 		c.Plugins = h.Plugins != nil
 		c.Panes = h.Panes != nil
@@ -862,6 +869,9 @@ func listSessionFiles(dir string) ([]sessionListItem, error) {
 			Mtime:       info.UpdatedAt.Unix(),
 			ForkedFrom:  info.ForkedFrom,
 			WorkspaceID: info.WorkspaceID,
+			PRURL:       info.PRURL,
+			PRNumber:    info.PRNumber,
+			PRState:     session.NormalizePRState(info.PRState),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -1105,6 +1115,7 @@ func (s *Server) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
 	if s.opts.LiveHub != nil {
 		s.opts.LiveHub.RemoveForSession(id)
 	}
+	s.endPowers(id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -2070,6 +2081,7 @@ func (s *Server) handleRootClose(w http.ResponseWriter, r *http.Request) {
 	if s.terms != nil {
 		s.terms.EndSession(id)
 	}
+	s.endPowers(id, s.opts.LiveHub.LiveFor(id).SessionID())
 	s.opts.LiveHub.Remove(id)
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})
 }

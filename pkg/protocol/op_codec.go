@@ -39,6 +39,8 @@ func opType(op Op) string {
 		return "input.queue_send_now"
 	case SelectModel:
 		return "select.model"
+	case SetFallbackModel:
+		return "set.fallback_model"
 	case SelectAgent:
 		return "select.agent"
 	case SetEffort:
@@ -49,6 +51,8 @@ func opType(op Op) string {
 		return "set.permission_mode"
 	case SetFast:
 		return "set.fast"
+	case SetVerbosity:
+		return "set.verbosity"
 	case StartWorkflow:
 		return "workflow.start"
 	case StopWorkflow:
@@ -138,6 +142,8 @@ func (e OpEnvelope) Decode() (Op, error) {
 		op = &InputQueueSendNow{}
 	case "select.model":
 		op = &SelectModel{}
+	case "set.fallback_model":
+		op = &SetFallbackModel{}
 	case "select.agent":
 		op = &SelectAgent{}
 	case "set.effort":
@@ -148,6 +154,8 @@ func (e OpEnvelope) Decode() (Op, error) {
 		op = &SetPermissionMode{}
 	case "set.fast":
 		op = &SetFast{}
+	case "set.verbosity":
+		op = &SetVerbosity{}
 	case "workflow.start":
 		op = &StartWorkflow{}
 	case "workflow.stop":
@@ -214,6 +222,8 @@ func derefOp(op Op) Op {
 		return *v
 	case *SelectModel:
 		return *v
+	case *SetFallbackModel:
+		return *v
 	case *SelectAgent:
 		return *v
 	case *SetEffort:
@@ -223,6 +233,8 @@ func derefOp(op Op) Op {
 	case *SetPermissionMode:
 		return *v
 	case *SetFast:
+		return *v
+	case *SetVerbosity:
 		return *v
 	case *StartWorkflow:
 		return *v
