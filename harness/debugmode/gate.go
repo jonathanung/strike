@@ -18,8 +18,8 @@ func (e *GateError) Error() string {
 }
 
 // CheckToolCall applies the phase gate to one tool call. In the hypothesis
-// phase, edit/write/apply_patch are allowed only when every changed line is
-// tagged with Marker (instrumentation); delete and move are denied. Other
+// phase, edit and apply_patch are allowed only when every changed line is
+// tagged with Marker (instrumentation); write, delete and move are denied. Other
 // tools and other phases pass. Shell commands are not inspected here; the
 // permission layer governs bash.
 func (s *Session) CheckToolCall(name string, args json.RawMessage) error {
@@ -45,17 +45,9 @@ func checkHypothesisCall(name string, args json.RawMessage) error {
 		}
 		return nil
 	case "write":
-		var a struct {
-			Content string `json:"content"`
-		}
-		if err := json.Unmarshal(args, &a); err != nil {
-			return deny("unreadable write arguments")
-		}
-		// write replaces a whole file; only an all-instrumentation file passes.
-		if line, ok := allTagged(splitLines(a.Content)); !ok {
-			return deny(untaggedReason(line))
-		}
-		return nil
+		// write replaces a whole file and could clobber code with an
+		// all-tagged body; instrumentation goes through edit or apply_patch.
+		return deny("whole-file writes are fix edits; add tagged lines with edit or apply_patch, or confirm a hypothesis first")
 	case "apply_patch":
 		var a struct {
 			Patch string `json:"patch"`
@@ -89,44 +81,32 @@ func checkPatch(name, patch string) error {
 	return nil
 }
 
-// untaggedChange compares old and new as line multisets and reports the
-// first added or removed non-blank line that lacks Marker.
+// untaggedChange requires the untagged, non-blank lines of old and new to
+// be the same sequence, so only tagged (and blank) lines may be added,
+// removed or moved. It reports the first differing untagged line.
 func untaggedChange(oldText, newText string) (string, bool) {
-	counts := map[string]int{}
-	for _, l := range splitLines(oldText) {
-		counts[l]++
-	}
-	var added []string
-	for _, l := range splitLines(newText) {
-		if counts[l] > 0 {
-			counts[l]--
-			continue
-		}
-		added = append(added, l)
-	}
-	if line, ok := allTagged(added); !ok {
-		return line, false
-	}
-	// Whatever is left in counts was removed. Iterate old order for a
-	// deterministic first offender.
-	for _, l := range splitLines(oldText) {
-		if counts[l] > 0 {
-			counts[l]--
-			if strings.TrimSpace(l) != "" && !strings.Contains(l, Marker) {
-				return l, false
-			}
+	a, b := untagged(splitLines(oldText)), untagged(splitLines(newText))
+	for i := 0; i < len(a) || i < len(b); i++ {
+		switch {
+		case i >= len(a):
+			return b[i], false
+		case i >= len(b):
+			return a[i], false
+		case a[i] != b[i]:
+			return b[i], false
 		}
 	}
 	return "", true
 }
 
-func allTagged(lines []string) (string, bool) {
+func untagged(lines []string) []string {
+	var out []string
 	for _, l := range lines {
 		if strings.TrimSpace(l) != "" && !strings.Contains(l, Marker) {
-			return l, false
+			out = append(out, l)
 		}
 	}
-	return "", true
+	return out
 }
 
 func untaggedReason(line string) string {

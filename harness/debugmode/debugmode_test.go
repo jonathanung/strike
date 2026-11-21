@@ -184,7 +184,13 @@ func TestCheckToolCallHypothesisPhase(t *testing.T) {
 		{name: "edit removes code", tool: "edit", args: map[string]string{
 			"oldString": "a\nb\n", "newString": "a\n"}, allow: false},
 		{name: "edit bad args", tool: "edit", args: "not an object", allow: false},
-		{name: "write all tagged", tool: "write", args: map[string]string{"content": tag + "\n\n" + tag + "\n"}, allow: true},
+		{name: "edit reorders code", tool: "edit", args: map[string]string{
+			"oldString": "a()\nb()\n", "newString": "b()\na()\n" + tag}, allow: false},
+		{name: "edit tags existing code line", tool: "edit", args: map[string]string{
+			"oldString": "x := f()", "newString": "x := f() // " + Marker}, allow: false},
+		{name: "edit tagged line moves", tool: "edit", args: map[string]string{
+			"oldString": tag + "\na()\n", "newString": "a()\n" + tag + "\n"}, allow: true},
+		{name: "write all tagged still denied", tool: "write", args: map[string]string{"content": tag + "\n"}, allow: false},
 		{name: "write untagged", tool: "write", args: map[string]string{"content": "package main\n" + tag}, allow: false},
 		{name: "patch tagged", tool: "apply_patch", args: map[string]string{"patch": "*** Begin Patch\n*** Update File: a.go\n@@\n k := key(r)\n+" + tag + "\n*** End Patch\n"}, allow: true},
 		{name: "patch untagged", tool: "apply_patch", args: map[string]string{"patch": "*** Begin Patch\n*** Update File: a.go\n@@\n-k := key(r)\n+k := key(r, l)\n*** End Patch\n"}, allow: false},

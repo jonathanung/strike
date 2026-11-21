@@ -416,8 +416,8 @@ Engine state shipped, panel not drawn (#1345). `harness/debugmode` holds
 one debug session: 2–5 ranked hypotheses with attached evidence, each
 open / confirmed / refuted (confirming requires evidence). In the
 `hypothesis` phase the gate allows reads and only edits whose every
-changed line carries the `debugmode.Marker` tag; untagged edits, deletes
-and moves are denied with a reason (`*GateError`). Fix edits unlock when a
+changed line carries the `debugmode.Marker` tag; untagged edits, whole-file
+writes, deletes and moves are denied with a reason (`*GateError`). Fix edits unlock when a
 hypothesis is confirmed or the user gives an override reason, which the
 session keeps for the transcript. Ending the session requires the user to
 mark the bug fixed; it then sweeps every whole line containing the marker
