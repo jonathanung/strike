@@ -48,6 +48,7 @@ mod session_panel;
 mod storage;
 mod tab_title;
 mod task_runner;
+mod quick_open;
 mod transcript_find;
 mod usage_audit;
 mod session_delete;
@@ -1298,6 +1299,13 @@ fn App() -> impl IntoView {
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
     let doc_editing = RwSignal::new(false);
+    // Open a file in the document viewer: the one path the Files pane's
+    // Open and quick-open (#1396) share.
+    let open_doc = move |p: &str| {
+        doc_line.set(0);
+        doc_diff.set(false);
+        doc_path.set(p.to_string());
+    };
     let layout = RwSignal::new(chat_mode::normalize_layout(&load("strike.layout")));
     let sessions_drawer = RwSignal::new(false);
     let panel_drawer = RwSignal::new(false);
@@ -3616,6 +3624,17 @@ fn App() -> impl IntoView {
         selected: gateway_selected,
         refresh: Rc::new(move || refresh_meta()),
     });
+    // Quick-open (#1396): the palette's Open file… opens through the
+    // same path as the Files pane's Open (`open_doc`), so the unsaved
+    // guard sees it like any other path change.
+    crate::quick_open::set_host(crate::quick_open::QuickOpenHost {
+        base,
+        token,
+        open: Rc::new(move |p: &str| {
+            mode.set("chat".into());
+            open_doc(p);
+        }),
+    });
     crate::gateway_qr::set_host(crate::gateway_qr::PhoneHost {
         base,
         token,
@@ -4045,6 +4064,24 @@ fn App() -> impl IntoView {
         let _ = w.add_event_listener_with_callback("keydown", on_find_key.as_ref().unchecked_ref());
     }
     on_find_key.forget();
+    // Ctrl/Cmd+P opens the palette on Open file… (#1396), cockpit-wide —
+    // the quick-open convention every comparator uses. It replaces the
+    // browser's print shortcut while the cockpit is focused.
+    let on_quick_open_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if (ev.ctrl_key() || ev.meta_key())
+                && !ev.alt_key()
+                && !ev.shift_key()
+                && ev.key().eq_ignore_ascii_case("p")
+            {
+                ev.prevent_default();
+                shell::show_palette_at("open-file");
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_quick_open_key.as_ref().unchecked_ref());
+    }
+    on_quick_open_key.forget();
     // Keep the current match scrolled into view as the query or the
     // step position changes. Line appends alone do not retrigger this
     // (the list is read untracked), so streaming does not yank scroll.
@@ -5809,9 +5846,7 @@ fn App() -> impl IntoView {
                                                     if is_dir {
                                                         files_path.set(path_click.clone());
                                                     } else {
-                                                        doc_line.set(0);
-                                                        doc_diff.set(false);
-                                                        doc_path.set(path_click.clone());
+                                                        open_doc(&path_click);
                                                     }
                                                 }
                                             >{label}</button>
