@@ -13,6 +13,7 @@
 // what the page actually looked like.
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
 import { mdReviewBrowserCheck } from "./webui-md-review-check.mjs";
 import { seedSkillUsage, skillUsageCheck } from "./webui-skill-usage-check.mjs";
@@ -2156,6 +2157,7 @@ try {
     token,
     repoDir: process.cwd(),
   });
+  await agentPickerCheck({ send });
   await mdReviewBrowserCheck({
     send,
     port,
@@ -3229,6 +3231,74 @@ try {
     throw new Error(`daemon does not list issue ${smokeIssueId} as closed: ${JSON.stringify(persisted)}`);
   }
 
+  // Ideas inbox (#1323): a producer deposits a suggestion over the authed
+  // API, the palette opens the Ideas page, the row renders with its why and
+  // evidence, and Dismiss records it daemon-side so the list empties.
+  {
+    const ideasUrl = `http://127.0.0.1:${port}/v1/suggestions`;
+    const ideaAuth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const idea = {
+      title: "Smoke idea: tidy the README",
+      why: "The smoke run noticed a stale section.",
+      prompt: "Tidy the README",
+      source: "smoke.producer",
+      kind: "docs",
+      evidenceKey: "smoke:readme",
+      evidence: [{ label: "Smoke evidence", url: "https://example.com/smoke" }],
+    };
+    const ideaNoAuth = await fetch(ideasUrl, { method: "POST", body: JSON.stringify(idea) });
+    if (ideaNoAuth.status !== 401) {
+      throw new Error(`suggestions create without token = ${ideaNoAuth.status}`);
+    }
+    const created = await fetch(ideasUrl, { method: "POST", headers: ideaAuth, body: JSON.stringify(idea) });
+    if (created.status !== 201) {
+      throw new Error(`suggestions create = ${created.status} ${await created.text()}`);
+    }
+    const ideaId = (await created.json()).suggestion.id;
+    const dup = await fetch(ideasUrl, { method: "POST", headers: ideaAuth, body: JSON.stringify(idea) });
+    if (dup.status !== 200 || (await dup.json()).created !== false) {
+      throw new Error(`suggestions dedupe = ${dup.status}`);
+    }
+    await runPalette("Ideas");
+    await waitFor(
+      "ideas page lists the deposited suggestion with its why and evidence",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const row = document.querySelector('[data-idea="${ideaId}"]');
+          return JSON.stringify({
+            root: !!document.querySelector("#ideas-root"),
+            row: !!row,
+            text: row ? row.innerText : "",
+          });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        return {
+          ok: !!(p.root && p.row && p.text.includes("tidy the README") && p.text.includes("stale section") && p.text.includes("Smoke evidence")),
+          ...p,
+        };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await waitFor(
+      "ideas Dismiss empties the list",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const btn = document.querySelector('[data-idea="${ideaId}"] .ideas-dismiss');
+          if (btn && !btn.disabled) btn.click();
+          return JSON.stringify({ empty: !!document.querySelector("[data-ideas-empty]") });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        return { ok: !!p.empty, ...p };
+      },
+      { timeout: WAIT_MS, interval: 400 },
+    );
+    const ideasAfter = await (await fetch(ideasUrl, { headers: ideaAuth })).json();
+    const stored = (ideasAfter.suggestions || []).find((x) => x.id === ideaId);
+    if (!stored || stored.state !== "dismissed" || ideasAfter.open !== 0) {
+      throw new Error(`dismissed idea state = ${JSON.stringify(ideasAfter).slice(0, 400)}`);
+    }
+  }
+
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
   // that predates Goals has no palette command and fails here.
   await runPalette("Goals");
@@ -3978,6 +4048,54 @@ try {
     stageAllSeeded = false;
   }
   await clickSideTab("Git", "Staged");
+  // Pre-push review (#1487): the preview route sizes the diff and names the
+  // read-only reviewer profile, a start without confirm never spawns (400),
+  // and the Git tab's "Review this branch" panel renders the same state
+  // with its cost notice. No reviewer is spawned here.
+  {
+    const revHeaders = { Authorization: `Bearer ${token}` };
+    const revRes = await fetch(`http://127.0.0.1:${port}/v1/git/review`, { headers: revHeaders });
+    if (!revRes.ok) {
+      throw new Error(`branch review preview: HTTP ${revRes.status} ${await revRes.text()}`);
+    }
+    const rev = await revRes.json();
+    if (!["ok", "empty", "refuse"].includes(rev.state) || rev.agent !== "branch-reviewer" || rev.turns !== 1) {
+      throw new Error(`branch review preview shape: ${JSON.stringify(rev).slice(0, 300)}`);
+    }
+    const revStart = await fetch(`http://127.0.0.1:${port}/v1/git/review`, {
+      method: "POST",
+      headers: { ...revHeaders, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (revStart.status !== 400) {
+      throw new Error(`branch review start without confirm: HTTP ${revStart.status} ${await revStart.text()}`);
+    }
+    await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+    await waitFor(
+      `branch review notice renders state ${rev.state}`,
+      async () => {
+        const raw = await evaluate(`JSON.stringify((() => {
+          const n = document.querySelector("[data-review-notice]");
+          if (!n) return null;
+          const run = n.querySelector("[data-review-run]");
+          return {
+            state: n.getAttribute("data-review-state"),
+            size: (n.querySelector("[data-review-size]") || {}).textContent || "",
+            runDisabled: run ? run.disabled : null,
+          };
+        })())`);
+        const got = JSON.parse(raw || "null");
+        const ok =
+          !!got &&
+          got.state === rev.state &&
+          got.size.startsWith("Diff:") &&
+          got.runDisabled === (rev.state !== "ok");
+        return { ok, got };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+  }
   // Ship to PR (#1340): the preview route answers with an honest state
   // (CI checks out a detached merge commit, so "blocked" with a detached
   // blocker is expected there), a create without confirmPush never pushes
@@ -6233,6 +6351,75 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+
+  // Prompt sharpen (#1385): Alt+P sends the draft to the daemon's
+  // one-shot rewrite (echo stands in for the model), shows the
+  // original-vs-sharpened preview, and changes nothing until Accept.
+  // Undo restores the original; Esc on the preview rejects untouched.
+  const sharpenDraft = "fix the flaky thing";
+  const composerText = async () =>
+    evaluate(`(() => { const el = document.querySelector("#composer-input"); return el ? el.value : null; })()`);
+  await setDraft(sharpenDraft);
+  await press("p", { altKey: true });
+  await waitFor(
+    "sharpen preview with original and rewrite",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const diff = document.querySelector("[data-sharpen-diff]");
+        return JSON.stringify({
+          accept: !!document.querySelector("[data-sharpen-accept]"),
+          diff: diff ? diff.innerText : "",
+          state: document.querySelector("[data-feature=prompt-sharpen]")?.getAttribute("data-sharpen-state") || "",
+        });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: p.accept && p.diff.includes(sharpenDraft) && p.diff.includes("You said:"), ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if ((await composerText()) !== sharpenDraft) {
+    throw new Error(`sharpen changed the draft before Accept: ${JSON.stringify(await composerText())}`);
+  }
+  await evaluate(`document.querySelector("[data-sharpen-accept]")?.click()`);
+  await waitFor(
+    "accepted rewrite replaces the draft, Undo offered",
+    async () => {
+      const value = (await composerText()) || "";
+      const undo = await evaluate(`!!document.querySelector("[data-sharpen-undo]")`);
+      return { ok: value.startsWith("You said:") && value.includes(sharpenDraft) && undo, value, undo };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector("[data-sharpen-undo]")?.click()`);
+  await waitFor(
+    "undo restores the original draft",
+    async () => {
+      const value = await composerText();
+      return { ok: value === sharpenDraft, value };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await press("p", { altKey: true });
+  await waitFor(
+    "second sharpen preview",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-sharpen-accept]")`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`(() => {
+    const el = document.querySelector("[data-sharpen-accept]");
+    el?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+    return true;
+  })()`);
+  await waitFor(
+    "Esc rejects and leaves the draft byte-identical",
+    async () => {
+      const value = await composerText();
+      const open = await evaluate(`!!document.querySelector("[data-feature=prompt-sharpen]")`);
+      return { ok: !open && value === sharpenDraft, value, open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await setDraft("");
 
   // Session dials (#1572 autonomy, #1569 Fast): both start at the
   // daemon-reported default, flip only after the daemon confirms the
