@@ -1,0 +1,32 @@
+/* feature:prompt-sharpen begin */
+.sharpen {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--sharp);
+  border-radius: var(--radius-sm);
+  background: var(--ground);
+  color: var(--ink);
+  font-size: var(--type-sm);
+}
+.sharpen-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.sharpen-error { color: var(--signal); }
+.sharpen[data-sharpen-state="error"] { border-color: var(--signal); }
+.sharpen-preview { display: grid; gap: var(--space-2); }
+.sharpen-diff {
+  max-height: 40vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.sharpen-line { padding: 0 var(--space-1); }
+.sharpen-line.removed { color: var(--muted); text-decoration: line-through; }
+.sharpen-line.added { color: var(--ink); background: color-mix(in srgb, var(--sharp) 14%, transparent); }
+.sharpen-mark { color: var(--muted); user-select: none; }
+.sharpen-warn { margin: 0; }
+/* feature:prompt-sharpen end */

@@ -54,7 +54,9 @@ type opErrorResponse struct {
 }
 
 type opOKResponse struct {
-	OK              bool   `json:"ok"`
+	OK bool `json:"ok"`
+	// Duplicate: the client message id was already delivered (#1325).
+	Duplicate       bool   `json:"duplicate,omitempty"`
 	ChildSessionID  string `json:"childSessionId,omitempty"`
 	Name            string `json:"name,omitempty"`
 	DelegationID    string `json:"delegationId,omitempty"`
@@ -134,6 +136,14 @@ type capabilities struct {
 	// UpdateCheck is true when GET /v1/update can run the release probe
 	// (settings readable + probe wired). Check-only; never installs (#1583).
 	UpdateCheck bool `json:"updateCheck"`
+	// Container is true when GET /v1/container/status reports the isolation
+	// posture ladder, engine probe, workspace container and Dockerfile drift
+	// (#1584). Read-only; host mode is a first-class posture (#1290).
+	Container bool `json:"container"`
+	// WorkspaceTrust is true when GET /v1/workspace/trust reports the
+	// workspace trust state and the repo config it gates (#1781). Grant /
+	// revoke additionally need a live, non --read-only daemon.
+	WorkspaceTrust bool `json:"workspaceTrust"`
 }
 
 type bootstrapResponse struct {
@@ -152,7 +162,7 @@ type bootstrapResponse struct {
 }
 
 var browserProtocolOps = []string{
-	"compact", "context.controls", "inspect.prompt", "interrupt", "permission.reply", "question.reply",
+	"compact", "context.controls", "elicitation.reply", "inspect.prompt", "interrupt", "permission.reply", "question.reply",
 	"rewind", "select.agent", "select.model", "set.autonomy", "set.effort", "set.fallback_model",
 	"set.fast", "set.permission_mode", "steer", "user.input",
 	"input.queue_edit", "input.queue_cancel", "input.queue_reorder", "input.queue_send_now",
@@ -169,7 +179,7 @@ func (s *Server) handleBootstrap(w http.ResponseWriter, r *http.Request) {
 	// Timeline is host-safe and derived from SessionDir JSONL (always available).
 	// TeamControl shares the live gate: Ops are handled by the same engine path.
 	live := s.hasLive()
-	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live, Attachments: s.opts.Attachments != nil, Notifications: true, SideChat: s.opts.SideChat != nil, Loops: live && !s.opts.ReadOnly}
+	c := capabilities{Live: live, Roots: s.opts.LiveHub != nil, Timeline: true, Sandbox: s.hasSandbox(), Diag: live, Team: live, TeamControl: live, Attachments: s.opts.Attachments != nil, Notifications: true, SideChat: s.opts.SideChat != nil, Loops: live && !s.opts.ReadOnly, WorkspaceTrust: s.workspaceTrustCapable(), Container: s.containerCapable()}
 	var skills []map[string]any
 	if h := s.opts.Services; h != nil {
 		c.Auth, c.Catalog, c.Settings, c.History = h.Auth != nil, h.Catalog != nil, h.Settings != nil, h.History != nil
@@ -1552,12 +1562,36 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 		s.handleTeamControlOp(w, r, live, env.Type, sessionID, op)
 		return
 	}
+	// Outbox retries carry a client message id (#1325): a delivered id is
+	// acknowledged without submitting again; one mid-delivery is a 409 the
+	// client retries.
+	clientID, ok := clientMessageID(r)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: "invalid client message id"})
+		return
+	}
+	if clientID != "" {
+		switch s.clientMsgs().reserve(sessionID, clientID) {
+		case clientMsgDelivered:
+			writeJSON(w, http.StatusOK, opOKResponse{OK: true, Duplicate: true})
+			return
+		case clientMsgInFlight:
+			writeJSON(w, http.StatusConflict, opErrorResponse{Error: "message already in flight"})
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	if err := live.Submit(ctx, op); err != nil {
+		if clientID != "" {
+			s.clientMsgs().finish(sessionID, clientID, false)
+		}
 		s.recordServeOpError(r, "http", env.Type, sessionID)
 		writeJSON(w, http.StatusConflict, opErrorResponse{Error: err.Error()})
 		return
+	}
+	if clientID != "" {
+		s.clientMsgs().finish(sessionID, clientID, true)
 	}
 	s.auditOpOK(r, "http", env.Type, sessionID)
 	writeJSON(w, http.StatusOK, opOKResponse{OK: true})

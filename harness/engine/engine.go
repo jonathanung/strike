@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jonathanung/strike/harness/elicit"
 	"github.com/jonathanung/strike/harness/fn"
 	"github.com/jonathanung/strike/harness/permission"
 	"github.com/jonathanung/strike/harness/provider"
@@ -502,6 +503,7 @@ type Engine struct {
 	eventsClosed bool
 	perms        *permission.Service
 	questions    *question.Service
+	elicits      *elicit.Service
 	// verifyTriage keeps focused-rerun history per cmd gate across
 	// verification runs on this engine (#1178).
 	verifyTriage verify.Triage
@@ -927,6 +929,7 @@ func New(opts Options) *Engine {
 	}
 	e.perms.SetAskFacts(opts.WorkDir, opts.ProjectRulePath)
 	e.questions = question.New(e.emit)
+	e.elicits = elicit.New(e.emit)
 	return e
 }
 

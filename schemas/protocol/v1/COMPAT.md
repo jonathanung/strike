@@ -2,7 +2,7 @@
 
 Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protocol-schema`.
 
-- Protocol version: `1.23.0`
+- Protocol version: `1.25.0`
 - Legacy version when an envelope omits `v`: `1.0.0`
 - JSON Schema: [`schema.json`](schema.json) (`https://raw.githubusercontent.com/jonathanung/strike/main/schemas/protocol/v1/schema.json`)
 - Rust types: `webui/protocol-schema` (crate `protocol-schema`)
@@ -17,7 +17,7 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - **Minor** `protocol.Version` bumps add types or optional fields. **Major** bumps rename, remove, or change meaning. **Patch** bumps do not change encoded JSON.
 - Nil Go slices and maps encode as JSON `null`. Readers treat `null` like an empty list or map.
 
-## Event types (65)
+## Event types (67)
 
 - `admission.decided` → `AdmissionDecided`
 - `agent.contract.timeout` → `AgentContractTimeout`
@@ -35,16 +35,18 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `delegation.changed` → `DelegationChanged`
 - `diagnostic.bundle` → `DiagnosticBundle`
 - `effort.selected` → `EffortSelected`
+- `elicitation.requested` → `ElicitationRequested`
+- `elicitation.resolved` → `ElicitationResolved`
 - `engine.error` → `EngineError`
+- `fallback.selected` → `FallbackModelSelected`
 - `fast.selected` → `FastSelected`
 - `files.invalidated` → `FilesInvalidated`
 - `harness.progress` → `HarnessProgress`
 - `hook.matched` → `HookMatched`
 - `input.queued` → `InputQueued`
 - `ledger.updated` → `LedgerUpdated`
-- `model.selected` → `ModelSelected`
-- `fallback.selected` → `FallbackModelSelected`
 - `model.fallback` → `ModelFallback`
+- `model.selected` → `ModelSelected`
 - `path.overlap` → `PathOverlap`
 - `permission.asked` → `PermissionAsked`
 - `permission.decided` → `PermissionDecided`
@@ -85,10 +87,11 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `wait.resolved` → `WaitResolved`
 - `wait.started` → `WaitStarted`
 
-## Op types (32)
+## Op types (33)
 
 - `compact` → `Compact`
 - `context.controls` → `SetContextControls`
+- `elicitation.reply` → `ElicitationReply`
 - `files.changed` → `FilesChanged`
 - `input.queue_cancel` → `InputQueueCancel`
 - `input.queue_edit` → `InputQueueEdit`
@@ -102,9 +105,9 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `rewind` → `Rewind`
 - `select.agent` → `SelectAgent`
 - `select.model` → `SelectModel`
-- `set.fallback_model` → `SetFallbackModel`
 - `set.autonomy` → `SetAutonomy`
 - `set.effort` → `SetEffort`
+- `set.fallback_model` → `SetFallbackModel`
 - `set.fast` → `SetFast`
 - `set.permission_mode` → `SetPermissionMode`
 - `steer` → `Steer`

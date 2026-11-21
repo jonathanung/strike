@@ -21,6 +21,7 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		switch ev.(type) {
 		case protocol.PermissionAsked, protocol.PermissionResolved,
 			protocol.QuestionAsked, protocol.QuestionResolved,
+			protocol.ElicitationRequested,
 			protocol.ChildStarted, protocol.ChildCompleted,
 			protocol.ModelSelected,
 			// Parent re-emits child peer mail + nested roster with child
@@ -192,6 +193,11 @@ func (m *Model) applyEvent(ev protocol.Event) tea.Cmd {
 		}
 		m.refreshAwaitingPermission()
 		cmd = tea.Batch(cmd, m.broadcastContextState())
+	case protocol.ElicitationRequested:
+		// The TUI has no elicitation form yet (#1353): answer cancel so the
+		// paused MCP call settles instead of hanging, and say so.
+		m.setNotice(elicitationCancelNotice(ev.Server), true)
+		cmd = elicitationCancelCmd(m.ops, ev.RequestID)
 	case protocol.TurnCompleted:
 		m.completeAssistantCells()
 		if exp, ok := lastCell[*exploreCell](m.cells); ok {

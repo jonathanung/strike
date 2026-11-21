@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"strings"
 
 	"github.com/jonathanung/strike/internal/frontend/host"
 	"github.com/jonathanung/strike/internal/frontend/server"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/schedule"
+	"github.com/jonathanung/strike/internal/schedule/scriptrun"
+	"github.com/jonathanung/strike/internal/trust/audit"
 )
 
 // processBypassEnabled reports whether a root may carry the process
@@ -17,10 +20,22 @@ func processBypassEnabled(processSkip, unattended bool) bool {
 	return processSkip && !unattended
 }
 
+// scheduleScripts is the script fire path's wiring. A nil runner leaves
+// script runs unavailable (attach-only); a nil sink writes no script_run
+// records. The sink must be retention-bounded (openAuditSink), since an
+// every-minute schedule behind a long command appends a skip per tick.
+type scheduleScripts struct {
+	runner *scriptrun.Runner
+	sink   *audit.Sink
+	// notify posts a finished/failed run to the notification centre. It
+	// gets ids, the name, and the exit code only (never command or output).
+	notify func(scheduleID, runID, name string, exitCode *int, failed bool)
+}
+
 // openScheduleService loads the clock next to the workspace registry.
 // A nil hub leaves fires unavailable (attach-only) but the registry still
 // edits. The starter is the same rootstart.Starter triggers should call.
-func openScheduleService(dir string, hub *server.LiveHub, services *host.Services, ws *workspace.Store, cwd string) (*schedule.Service, error) {
+func openScheduleService(dir string, hub *server.LiveHub, services *host.Services, ws *workspace.Store, cwd string, scripts scheduleScripts) (*schedule.Service, error) {
 	hooks := schedule.Hooks{
 		Starter: server.NewHubStarter(hub),
 		WorkDir: func(id string) string {
@@ -68,7 +83,67 @@ func openScheduleService(dir string, hub *server.LiveHub, services *host.Service
 			return true, sum.Valid && len(sum.Phases) > 0
 		}
 	}
+	if scripts.runner != nil {
+		hooks.Script = scriptHook(scripts.runner)
+	}
+	if scripts.sink != nil {
+		hooks.Audit = scriptAuditHook(scripts.sink)
+	}
+	if notify := scripts.notify; notify != nil {
+		hooks.Notify = func(n schedule.ScriptNotice) {
+			notify(n.ScheduleID, n.RunID, n.Name, n.ExitCode, n.Failed)
+		}
+	}
 	return schedule.Open(dir, hooks, cwd)
+}
+
+// scriptHook adapts the scriptrun runner onto the clock's seam.
+func scriptHook(r *scriptrun.Runner) schedule.ScriptRunner {
+	return func(ctx context.Context, req schedule.ScriptRequest, started func(schedule.ScriptStart)) schedule.ScriptResult {
+		out := r.Run(ctx, scriptrun.Request{
+			Command:        req.Command,
+			Dir:            req.Dir,
+			Timeout:        req.Timeout,
+			SecretRefs:     req.SecretRefs,
+			PermissionMode: req.PermissionMode,
+		}, func(st scriptrun.Start) {
+			started(schedule.ScriptStart{Decision: st.Decision, Sandbox: st.Sandbox, StartedAt: st.StartedAt})
+		})
+		return schedule.ScriptResult{
+			Status:    out.Status,
+			Decision:  out.Decision,
+			Sandbox:   out.Sandbox,
+			StartedAt: out.StartedAt,
+			EndedAt:   out.EndedAt,
+			ExitCode:  out.ExitCode,
+			Output:    out.Output,
+			Error:     out.Error,
+		}
+	}
+}
+
+// scriptAuditHook writes one script_run record per clock audit event. The
+// family's redaction scrubs Command, Dir, OutputTail and Error on write.
+func scriptAuditHook(sink *audit.Sink) func(schedule.ScriptAudit) {
+	return func(rec schedule.ScriptAudit) {
+		_ = sink.Record(audit.FamilyScriptRun, "", "", "", "", audit.ScriptRunPayload{
+			ScheduleID:  rec.ScheduleID,
+			RunID:       rec.RunID,
+			Status:      rec.Status,
+			Decision:    rec.Decision,
+			Mode:        rec.Mode,
+			Sandbox:     rec.Sandbox,
+			Command:     rec.Command,
+			CommandHash: rec.CommandHash,
+			Dir:         rec.Dir,
+			StartedAt:   rec.StartedAt,
+			EndedAt:     rec.EndedAt,
+			ExitCode:    rec.ExitCode,
+			Timeout:     rec.Timeout,
+			OutputTail:  rec.OutputTail,
+			Error:       rec.Error,
+		})
+	}
 }
 
 func workspacePath(ws *workspace.Store, id string) (string, bool) {

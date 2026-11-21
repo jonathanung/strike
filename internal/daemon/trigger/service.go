@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jonathanung/strike/internal/daemon/deploywatch"
 	"github.com/jonathanung/strike/internal/daemon/rootstart"
 	"github.com/jonathanung/strike/pkg/redact"
 )
@@ -50,6 +51,8 @@ type Result struct {
 	SessionID string `json:"sessionId,omitempty"`
 	Error     string `json:"error,omitempty"`
 	Duplicate bool   `json:"duplicate,omitempty"`
+	// WatchID is the deploy watch a deploy_watch delivery created.
+	WatchID string `json:"watchId,omitempty"`
 	// pending is in-memory only. It is unexported so it cannot leak on the wire.
 	pending pending
 }
@@ -63,10 +66,21 @@ type mem struct {
 	loaded bool
 }
 
+// DeployWatches is what a deploy_watch trigger needs from the deploy-watch
+// service (#1783). *deploywatch.Service implements it.
+type DeployWatches interface {
+	Create(in deploywatch.Input) (deploywatch.Watch, error)
+	Started(ctx context.Context, id, sessionID, mode string) (deploywatch.Watch, error)
+	Cancel(id string) (deploywatch.Watch, error)
+}
+
 // Service is the trigger registry plus delivery decisions.
 type Service struct {
-	store    *Store
-	launch   rootstart.Launcher
+	store   *Store
+	launch  rootstart.Launcher
+	watches DeployWatches
+	// started tracks Started calls still posting the plan. Tests wait on it.
+	started  sync.WaitGroup
 	now      func() time.Time
 	mu       sync.Mutex
 	state    map[string]*mem
@@ -84,6 +98,17 @@ func New(store *Store, launch rootstart.Launcher) *Service {
 		adapters: map[string]Adapter{},
 	}
 }
+
+// SetDeployWatches wires the deploy-watch service. Without it deploy_watch
+// deliveries are refused.
+func (s *Service) SetDeployWatches(w DeployWatches) {
+	s.mu.Lock()
+	s.watches = w
+	s.mu.Unlock()
+}
+
+// Wait blocks until background watch-session hand-offs finish. Tests use it.
+func (s *Service) Wait() { s.started.Wait() }
 
 // SetClock overrides the clock. Tests use it.
 func (s *Service) SetClock(now func() time.Time) {
@@ -243,6 +268,10 @@ func (s *Service) Replay(ctx context.Context, id, deliveryID string) Result {
 	if err != nil {
 		return Result{Status: 404, Outcome: OutcomeError, Error: "trigger not found"}
 	}
+	if rec.Kind == KindDeployWatch {
+		// A replayed prompt would start a session with no watch behind it.
+		return Result{Status: 400, Outcome: OutcomeError, Error: "deploy watch deliveries cannot be replayed; resend the deploy event"}
+	}
 	var prior *Delivery
 	for _, row := range s.store.Deliveries(id) {
 		if row.ID == deliveryID {
@@ -394,9 +423,12 @@ func (s *Service) decide(hook Hook) (Result, *rootstart.Request) {
 		return s.reject(rec, hook, "trigger disabled", 403, OutcomeDisabled), nil
 	}
 	var parsed eventFields
+	var watchIn *deploywatch.Input
 	switch rec.Kind {
 	case KindGitHub:
 		parsed, err = githubEvent(rec.Secret, hook.Event, hook.Body, rec.Events)
+	case KindDeployWatch:
+		parsed, watchIn, err = deployEvent(rec, hook.Event, hook.Body)
 	default:
 		parsed = webhookEvent(rec.Secret, hook.Event, hook.Body)
 	}
@@ -429,9 +461,26 @@ func (s *Service) decide(hook Hook) (Result, *rootstart.Request) {
 	if res, limited := s.hold(rec.ID, st, rec.RatePerMinute, now, parsed.fields["event"]); limited {
 		return res, nil
 	}
+	var prompt, watchID string
+	if watchIn != nil {
+		if s.watches == nil {
+			return s.reject(rec, hook, "deploy watches unavailable", 503, OutcomeError), nil
+		}
+		watch, werr := s.watches.Create(*watchIn)
+		if werr != nil {
+			return s.reject(rec, hook, werr.Error(), 400, OutcomeRejected), nil
+		}
+		watchID = watch.ID
+		prompt = deploywatch.PlanPrompt(watch)
+		if rec.Prompt != "" {
+			prompt += "\n\nOperator notes for this watch:\n" + rec.Prompt
+		}
+		prompt = scrub(rec.Secret, truncate(prompt, maxPromptOut))
+	} else {
+		prompt = scrub(rec.Secret, renderPrompt(rec.Kind, rec.Prompt, parsed.fields))
+	}
 	st.hits = append(prune(st.hits, now), now)
 	st.seen[deliveryID] = struct{}{}
-	prompt := scrub(rec.Secret, renderPrompt(rec.Kind, rec.Prompt, parsed.fields))
 	req := s.request(rec, prompt, parsed.fields["event"])
 	return Result{
 		Status:  202,
@@ -444,6 +493,7 @@ func (s *Service) decide(hook Hook) (Result, *rootstart.Request) {
 			repo:        parsed.fields["repo"],
 			fingerprint: parsed.fingerprint,
 			prompt:      prompt,
+			watchID:     watchID,
 		},
 	}, &req
 }
@@ -502,6 +552,7 @@ type pending struct {
 	repo        string
 	fingerprint string
 	prompt      string
+	watchID     string
 }
 
 func (s *Service) finish(ctx context.Context, id string, res Result, req rootstart.Request) Result {
@@ -518,6 +569,7 @@ func (s *Service) finish(ctx context.Context, id string, res Result, req rootsta
 		Repo:        res.pending.repo,
 		Fingerprint: res.pending.fingerprint,
 		Prompt:      res.pending.prompt,
+		WatchID:     res.pending.watchID,
 	}
 	if err != nil {
 		delete(st.seen, res.pending.deliveryID)
@@ -525,7 +577,30 @@ func (s *Service) finish(ctx context.Context, id string, res Result, req rootsta
 		d.Reason = "session did not start"
 		d.Prompt = ""
 		s.log(id, st, d, false)
-		return Result{Status: 502, Outcome: OutcomeError, Error: "session did not start"}
+		if res.pending.watchID != "" && s.watches != nil {
+			// No session to own the watch: settle it inconclusive rather
+			// than leave an unowned watch polling. Cancel posts the
+			// verdict, so keep it off this lock.
+			watches, watchID := s.watches, res.pending.watchID
+			s.started.Add(1)
+			go func() {
+				defer s.started.Done()
+				_, _ = watches.Cancel(watchID)
+			}()
+		}
+		return Result{Status: 502, Outcome: OutcomeError, Error: "session did not start", WatchID: res.pending.watchID}
+	}
+	if res.pending.watchID != "" && s.watches != nil {
+		// Linking the session and posting the plan may call GitHub; do not
+		// hold the webhook response for it.
+		watches, watchID := s.watches, res.pending.watchID
+		bg := context.WithoutCancel(ctx)
+		s.started.Add(1)
+		go func() {
+			defer s.started.Done()
+			_, _ = watches.Started(bg, watchID, started.SessionID, started.PermissionMode)
+		}()
+		res.WatchID = watchID
 	}
 	d.SessionID = started.SessionID
 	if res.pending.fingerprint != "" {
