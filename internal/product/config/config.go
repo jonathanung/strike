@@ -103,6 +103,11 @@ type Config struct {
 	// OS backend is missing or wrap fails. Default false is fail-closed (#1030):
 	// non-off sandbox modes error with sandbox_denied instead of silent degrade.
 	SandboxAllowDegrade bool `json:"sandboxAllowDegrade,omitempty"`
+	// SandboxRuntime selects what isolates bash and the terminal panel:
+	// process (default; bwrap / sandbox-exec) | microvm (KVM microVM, Linux
+	// only). Microvm never falls back to the host and ignores
+	// sandboxAllowDegrade. Orthogonal to Sandbox (the filesystem posture).
+	SandboxRuntime string `json:"sandboxRuntime,omitempty"`
 	// Network holds application-layer egress allowlists (webfetch/websearch host/CIDR).
 	// Distinct from Sandbox Network on/off (bash OS profile). See docs/config.md.
 	Network NetworkConfig `json:"network,omitempty"`
@@ -1082,6 +1087,13 @@ func read(path string) (Config, error) {
 		}
 		c.Sandbox = mode.String()
 	}
+	if strings.TrimSpace(c.SandboxRuntime) != "" {
+		rt, ok := sandbox.ParseRuntime(c.SandboxRuntime)
+		if !ok {
+			return Config{}, fmt.Errorf("%s: unknown sandboxRuntime %q (want %s)", path, c.SandboxRuntime, sandbox.RuntimeNames())
+		}
+		c.SandboxRuntime = rt.String()
+	}
 	if c.Network.Allow != nil {
 		norm, err := sandbox.NormalizeNetworkAllow(c.Network.Allow)
 		if err != nil {
@@ -1654,6 +1666,9 @@ func merge(base, layer Config) Config {
 	// sandboxAllowDegrade: true on any layer sticks (explicit opt-in to degrade).
 	if layer.SandboxAllowDegrade {
 		base.SandboxAllowDegrade = true
+	}
+	if layer.SandboxRuntime != "" {
+		base.SandboxRuntime = layer.SandboxRuntime
 	}
 	// network.allow: non-nil layer slice replaces (including explicit []).
 	// make+copy so len-0 stays non-nil (append to nil yields nil).

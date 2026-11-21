@@ -14,6 +14,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
+import { seedSkillUsage, skillUsageCheck } from "./webui-skill-usage-check.mjs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,6 +30,25 @@ const chromePort = 9222 + (process.pid % 200);
 // ends immediately unless degrade is on before the daemon reads config.
 await mkdir(join(home, ".strike"), { recursive: true });
 await writeFile(join(home, ".strike", "config"), '{"sandboxAllowDegrade":true}\n');
+
+// Theme catalog (#1529): a user theme the daemon's GET /v1/themes lists.
+// The cockpit picker must offer it, paint it, and keep it across reload.
+const smokeTheme = {
+  id: "smoke-sunset",
+  name: "Smoke Sunset",
+  accent: { dark: "#fb923c", light: "#c2410c" },
+  background: { dark: "#1b1020", light: "#fff8f0" },
+  text: { dark: "#ffe8d0", light: "#2a1a10" },
+};
+await mkdir(join(home, ".strike", "themes"), { recursive: true });
+await writeFile(
+  join(home, ".strike", "themes", `${smokeTheme.id}.json`),
+  JSON.stringify({
+    name: smokeTheme.name,
+    id: smokeTheme.id,
+    colors: { accent: smokeTheme.accent, background: smokeTheme.background, text: smokeTheme.text },
+  }),
+);
 
 // Decision ledger seed (#1485). There is no ledger write route, and the
 // store loads its file once at open, so the file must exist before the
@@ -391,7 +411,26 @@ try {
     envLine("tool.begin", null, { callId: "c9", name: "bash", args: { command: "sleep 240" } }) +
     envLine("tool.end", "2026-10-26T06:24:00Z", { callId: "c9", name: "bash", output: "done" }) +
     envLine("text.delta", "2026-10-26T06:24:30Z", { text: "old answer" }) +
-    envLine("turn.completed", "2026-10-26T06:25:00Z", { stopReason: "end_turn" });
+    envLine("turn.completed", "2026-10-26T06:25:00Z", { stopReason: "end_turn" }) +
+    // Turn failure (#1371): an engine-error turn and a loop-guard turn,
+    // both under a minute so the elapsed check above is unchanged. Only
+    // these two may end with a [data-turn-stop] marker; the clean
+    // end_turn turns above must not.
+    envLine("user.message", "2026-10-26T06:30:00Z", { text: "failing replay turn" }) +
+    envLine("turn.started", "2026-10-26T06:30:01Z", { turnId: "tf1" }) +
+    envLine("text.delta", "2026-10-26T06:30:05Z", { text: "half answer" }) +
+    envLine("engine.error", "2026-10-26T06:30:06Z", { turnId: "tf1", message: "provider exploded" }) +
+    envLine("turn.completed", "2026-10-26T06:30:07Z", { turnId: "tf1", stopReason: "error" }) +
+    envLine("user.message", "2026-10-26T06:40:00Z", { text: "looping replay turn" }) +
+    envLine("turn.started", "2026-10-26T06:40:01Z", { turnId: "tf2" }) +
+    envLine("tool.loop_detected", "2026-10-26T06:40:05Z", {
+      turnId: "tf2",
+      reason: "identical_calls",
+      toolName: "bash",
+      count: 3,
+      message: "repeated identical failing tool calls",
+    }) +
+    envLine("turn.completed", "2026-10-26T06:40:06Z", { turnId: "tf2", stopReason: "loop_detected" });
   await writeFile(join(sessionsDir, "elapsed-session.jsonl"), elapsedSession);
   await writeFile(
     join(sessionsDir, "elapsed-session.meta.json"),
@@ -435,6 +474,33 @@ try {
   await writeFile(
     join(sessionsDir, "tail-session.meta.json"),
     JSON.stringify({ title: "Tool tail replay" }) + "\n",
+  );
+  // Verification badge (#1373) fixture: one turn per state plus a turn
+  // with no verification payload, which must render no badge.
+  const verifyTurn = (n, text, verification) =>
+    envLine("user.message", `2026-10-28T06:0${n}:00Z`, { text: `verify prompt ${n}` }) +
+    envLine("text.delta", `2026-10-28T06:0${n}:05Z`, { text }) +
+    envLine(
+      "turn.completed",
+      `2026-10-28T06:0${n}:10Z`,
+      verification ? { stopReason: "end_turn", verification } : { stopReason: "end_turn" },
+    );
+  const verifySession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-28T06:00:00Z" }) +
+    "\n" +
+    verifyTurn(1, "answer gated", { passed: true, claimed: true, verified: true, summary: "go test passed" }) +
+    verifyTurn(2, "answer claimed", { passed: false, claimed: true, verified: false }) +
+    verifyTurn(3, "answer failed", {
+      passed: false,
+      claimed: false,
+      verified: true,
+      checks: [{ kind: "cmd", value: "go test ./...", passed: false }],
+    }) +
+    verifyTurn(4, "answer ungated", null);
+  await writeFile(join(sessionsDir, "verify-session.jsonl"), verifySession);
+  await writeFile(
+    join(sessionsDir, "verify-session.meta.json"),
+    JSON.stringify({ title: "Verification replay" }) + "\n",
   );
   const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
@@ -1740,6 +1806,51 @@ try {
     "font and density",
   );
 
+  // #1583: Settings → Updates shows the effective autoupdate dial, `off`
+  // persists and the route answers "off" (no probe), and the row never
+  // claims "up to date" without a successful check.
+  await waitUntil(
+    `(() => {
+      const sec = document.querySelector('[data-section="updates"]');
+      const notify = sec?.querySelector('input[data-autoupdate="notify"]');
+      return !!notify && notify.checked && !notify.disabled && !!sec.querySelector(".update-status")?.textContent;
+    })()`,
+    "updates section shows the effective notify dial",
+  );
+  const updateRoute = async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/update`, { headers: { Authorization: `Bearer ${token}` } });
+    return { status: res.status, body: res.status === 200 ? await res.json() : null };
+  };
+  const updateCap = (await updateRoute()).status === 200;
+  await evaluate(`document.querySelector('input[data-autoupdate="off"]').click()`);
+  await waitUntil(
+    `(() => {
+      const off = document.querySelector('input[data-autoupdate="off"]');
+      const line = document.querySelector('[data-section="updates"] .update-status')?.textContent || "";
+      return off.checked && !off.disabled && (${updateCap} ? line.includes("Checks are off") : true);
+    })()`,
+    "autoupdate off saved",
+  );
+  {
+    const settings = await (await fetch(`http://127.0.0.1:${port}/v1/settings`, { headers: { Authorization: `Bearer ${token}` } })).json();
+    if (settings.autoupdateEffective !== "off") {
+      throw new Error(`autoupdate off did not persist: ${JSON.stringify(settings.autoupdateEffective)}`);
+    }
+    if (updateCap) {
+      const r = await updateRoute();
+      if (r.body?.state !== "off") throw new Error(`update route with dial off: ${JSON.stringify(r)}`);
+    }
+  }
+  await evaluate(`document.querySelector('input[data-autoupdate="notify"]').click()`);
+  await waitUntil(
+    `(() => {
+      const n = document.querySelector('input[data-autoupdate="notify"]');
+      const line = document.querySelector('[data-section="updates"] .update-status')?.textContent || "";
+      return n.checked && !n.disabled && !line.includes("Checks are off");
+    })()`,
+    "autoupdate back to notify",
+  );
+
   await waitUntil(`(() => {
     if (document.querySelector(".gw-pop")) return true;
     if (!document.querySelector('[data-nav="palette-dialog"]')) {
@@ -1760,6 +1871,29 @@ try {
     [...document.querySelectorAll(".gw-pop button")].find((b) => b.textContent === "Save").click();
     return true;
   })()`);
+  // #1539: the saved profile shows up as a read-only peek group in the
+  // Sessions list, under a Local label, badged from a real probe — here
+  // unreachable, never a fake count. The Sessions rail lives in the
+  // chat view (settings was open above), so go there first; mounting
+  // the list is itself one of the peek's refresh triggers.
+  await evaluate(`document.querySelector('[data-view="chat"]')?.click()`);
+  await waitUntil(`!!document.querySelector(".ss-panel")`, "sessions list for the peek");
+  await waitUntil(`(() => {
+    const group = [...document.querySelectorAll(".ss-peek [data-peek-gateway]")]
+      .find((el) => (el.textContent || "").includes("bad"));
+    if (!group) return false;
+    return group.getAttribute("data-peek-state") === "unreachable"
+      && (group.textContent || "").includes("Unreachable")
+      && !(group.textContent || "").includes(" running · ")
+      && !!document.querySelector(".ss-peek-local");
+  })()`, "cross-gateway peek group for the saved bad gateway");
+  // Manual refresh re-probes and lands on the same honest badge.
+  await evaluate(`document.querySelector('[data-action="peek-refresh"]')?.click()`);
+  await waitUntil(`(() => {
+    const group = [...document.querySelectorAll(".ss-peek [data-peek-gateway]")]
+      .find((el) => (el.textContent || "").includes("bad"));
+    return !!group && group.getAttribute("data-peek-state") === "unreachable";
+  })()`, "peek refresh keeps the unreachable badge");
   await waitUntil(`(() => {
     const hit = [...document.querySelectorAll("[data-command-id]")].some((el) => (el.textContent || "").includes("Switch to gateway: bad"));
     if (hit) return true;
@@ -1973,6 +2107,47 @@ try {
   if (rejected.status !== 400) {
     throw new Error(`empty attachment status ${rejected.status}`);
   }
+  // Sent attachments in the transcript (#1389): GET serves the stored
+  // blob with its stored MIME, and a user.input carrying an image + PDF
+  // renders both chips under the "you" bubble after a reload, with the
+  // image thumbnail loaded from the GET route.
+  const pngRef = JSON.parse(uploadedBody).ref;
+  const pdfB64 = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n").toString("base64");
+  const pdfUp = await fetch(`http://127.0.0.1:${port}/v1/attachments`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "smoke-spec.pdf", mime: "application/pdf", data: pdfB64 }),
+  });
+  const pdfBody = await pdfUp.text();
+  if (pdfUp.status !== 200) throw new Error(`pdf ingest failed ${pdfUp.status} ${pdfBody.slice(0, 300)}`);
+  const pdfRef = JSON.parse(pdfBody).ref;
+  const gotPng = await fetch(`http://127.0.0.1:${port}/v1/attachments/${encodeURIComponent(pngRef)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (gotPng.status !== 200 || gotPng.headers.get("content-type") !== "image/png") {
+    throw new Error(`attachment GET ${gotPng.status} ${gotPng.headers.get("content-type")}`);
+  }
+  const noAuth = await fetch(`http://127.0.0.1:${port}/v1/attachments/${encodeURIComponent(pngRef)}`);
+  if (noAuth.status !== 401) throw new Error(`attachment GET without token = ${noAuth.status}`);
+  const missingAtt = await fetch(`http://127.0.0.1:${port}/v1/attachments/att%3Asha256%3A${"0".repeat(64)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (missingAtt.status !== 404) throw new Error(`attachment GET unknown ref = ${missingAtt.status}`);
+  const sentWithFiles = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "user.input",
+      data: {
+        text: "transcript attachments smoke 1389",
+        images: [
+          { ref: pngRef, mime: "image/png", name: "smoke-shot.png" },
+          { ref: pdfRef, mime: "application/pdf", name: "smoke-spec.pdf" },
+        ],
+      },
+    }),
+  });
+  if (!sentWithFiles.ok) throw new Error(`user.input with attachments ${sentWithFiles.status} ${await sentWithFiles.text()}`);
   // Attachment honesty (#1561): on the echo provider the engine drops
   // every attachment, so the composer must say so before send (warn,
   // not block). Removing the file clears the warning.
@@ -1991,6 +2166,95 @@ try {
   );
   await evaluate(`(() => { const b = [...document.querySelectorAll(".attach-chip button")].find((x) => x.closest(".attach-chip")?.innerText.includes("honesty-shot.png")); b?.click(); return !!b; })()`);
   await waitUntil(`!document.querySelector("[data-attach-warning]")`, "attachment warning clears with the file");
+  // Office + media classification (#1390): a docx with its real browser
+  // MIME is accepted as a document, an mp4 header as video, a plain zip
+  // stays an archive, and text renamed to .docx is rejected honestly.
+  const crc32 = (buf) => {
+    let c = ~0;
+    for (const b of buf) {
+      c ^= b;
+      for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+    }
+    return ~c >>> 0;
+  };
+  const zipStored = (entries) => {
+    const locals = [];
+    const centrals = [];
+    let offset = 0;
+    for (const [name, body] of entries) {
+      const nameBuf = Buffer.from(name);
+      const data = Buffer.from(body);
+      const crc = crc32(data);
+      const local = Buffer.alloc(30);
+      local.writeUInt32LE(0x04034b50, 0);
+      local.writeUInt16LE(20, 4);
+      local.writeUInt32LE(crc, 14);
+      local.writeUInt32LE(data.length, 18);
+      local.writeUInt32LE(data.length, 22);
+      local.writeUInt16LE(nameBuf.length, 26);
+      locals.push(local, nameBuf, data);
+      const central = Buffer.alloc(46);
+      central.writeUInt32LE(0x02014b50, 0);
+      central.writeUInt16LE(20, 4);
+      central.writeUInt16LE(20, 6);
+      central.writeUInt32LE(crc, 16);
+      central.writeUInt32LE(data.length, 20);
+      central.writeUInt32LE(data.length, 24);
+      central.writeUInt16LE(nameBuf.length, 28);
+      central.writeUInt32LE(offset, 42);
+      centrals.push(central, nameBuf);
+      offset += 30 + nameBuf.length + data.length;
+    }
+    const cd = Buffer.concat(centrals);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0);
+    end.writeUInt16LE(entries.length, 8);
+    end.writeUInt16LE(entries.length, 10);
+    end.writeUInt32LE(cd.length, 12);
+    end.writeUInt32LE(offset, 16);
+    return Buffer.concat([...locals, cd, end]);
+  };
+  const docxMIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const ingest = async (name, mime, buf) => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/attachments`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name, mime, data: Buffer.from(buf).toString("base64") }),
+    });
+    return { status: res.status, body: await res.text() };
+  };
+  const docxFixture = zipStored([["[Content_Types].xml", "<Types/>"], ["word/document.xml", "<w:document/>"]]);
+  const mp4Fixture = Buffer.concat([Buffer.from("\x00\x00\x00\x18ftypisom\x00\x00\x02\x00", "latin1"), Buffer.alloc(32)]);
+  const classified = [
+    ["smoke.docx", docxMIME, docxFixture, 200, "document"],
+    ["smoke.docx", "", docxFixture, 200, "document"],
+    ["smoke.zip", "application/zip", zipStored([["README.md", "hi"]]), 200, "archive"],
+    ["smoke.mp4", "video/mp4", mp4Fixture, 200, "video"],
+    ["fake.docx", docxMIME, Buffer.from("just text, not a document\n"), 400, ""],
+  ];
+  for (const [name, mime, buf, wantStatus, wantKind] of classified) {
+    const got = await ingest(name, mime, buf);
+    const kind = got.status === 200 ? JSON.parse(got.body).kind : "";
+    if (got.status !== wantStatus || kind !== wantKind) {
+      throw new Error(`classify ${name} (${mime || "no mime"}): ${got.status} kind=${kind} body=${got.body.slice(0, 200)}`);
+    }
+  }
+  // Composer: an mp4 chip gets a <video controls> preview; removing it clears it.
+  await evaluate(`(() => {
+    const input = document.querySelector('input[data-chat-attach="true"]');
+    const bytes = Uint8Array.from(atob(${JSON.stringify(mp4Fixture.toString("base64"))}), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], "smoke-clip.mp4", { type: "video/mp4" }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  await waitUntil(
+    `(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); const v = chip && chip.querySelector("video.attach-media"); return !!v && v.controls && v.src.startsWith("blob:"); })()`,
+    "mp4 composer chip shows video controls",
+  );
+  await evaluate(`(() => { const chip = [...document.querySelectorAll(".attach-chip")].find((c) => c.innerText.includes("smoke-clip.mp4")); chip?.querySelector("button")?.click(); return !!chip; })()`);
+  await waitUntil(`![...document.querySelectorAll(".attach-chip")].some((c) => c.innerText.includes("smoke-clip.mp4"))`, "mp4 chip removed");
   await send("Runtime.evaluate", {
     expression: `localStorage.setItem("strike.token", ${JSON.stringify(token)})`,
   });
@@ -1999,6 +2263,15 @@ try {
     "cockpit reload after attachment checks (Run a command, Terminal)",
     textProbe((t) => t.includes("Run a command") && t.includes("Terminal")),
     { timeout: WAIT_MS, interval: 250 },
+  );
+  await waitUntil(
+    `(() => {
+      const box = [...document.querySelectorAll("[data-sent-attachments]")].find((el) => el.innerText.includes("smoke-shot.png"));
+      if (!box) return false;
+      const img = box.querySelector(".sx-attach-chip img");
+      return box.innerText.includes("smoke-spec.pdf") && !!img && img.src.startsWith("blob:") && img.complete && img.naturalWidth > 0;
+    })()`,
+    "sent image + PDF chips render after reload with a loaded thumbnail",
   );
 
   // Usage + Audit (#1286): open each view and confirm its controls
@@ -2465,6 +2738,193 @@ try {
     { timeout: WAIT_MS, interval: 250 },
   );
 
+  // Lessons capture (#1376): "Remember this" on a user message opens a
+  // pre-filled draft; Cancel stores nothing; Save stores a tagged lesson
+  // through /v1/memory. The entry is removed again so later memory counts
+  // are unaffected.
+  const lessonKey = "lesson-smoke-capture";
+  const memoryKeys = async () => {
+    const r = await fetch(`http://127.0.0.1:${port}/v1/memory?scope=project`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const j = await r.json();
+    return (j.entries || []).map((e) => ({ key: e.key, tags: e.tags || [], value: e.value }));
+  };
+  const openLessonDraft = async () => {
+    const clicked = await evaluate(`(() => {
+      const btn = [...document.querySelectorAll('[data-role="you"] [data-action="lesson-remember"]')].pop();
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+    if (clicked !== "clicked") throw new Error(`no Remember this action on a user message (${clicked})`);
+    await waitFor(
+      "lesson draft opens pre-filled from the message",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const d = document.querySelector('[data-lesson="draft"]');
+          if (!d) return JSON.stringify({ open: false });
+          return JSON.stringify({
+            open: true,
+            value: d.querySelector('[data-lesson="value"]').value,
+            key: d.querySelector('[data-lesson="key"]').value,
+            scope: d.querySelector('[data-lesson-scope="project"]').getAttribute("aria-pressed"),
+          });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        return { ok: !!(p.open && p.value.trim() && p.key.startsWith("lesson-") && p.scope === "true"), ...p };
+      },
+      { timeout: STEP_MS, interval: 200 },
+    );
+  };
+  const lessonBefore = (await memoryKeys()).length;
+  await openLessonDraft();
+  await evaluate(`document.querySelector('[data-lesson="cancel"]').click()`);
+  await waitFor(
+    "lesson draft cancel closes without storing",
+    async () => ({
+      ok:
+        (await evaluate(`!!document.querySelector('[data-lesson="draft"]')`)) === false &&
+        (await memoryKeys()).length === lessonBefore,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await openLessonDraft();
+  await evaluate(`(() => {
+    const el = document.querySelector('[data-lesson="key"]');
+    el.value = ${JSON.stringify(lessonKey)};
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector('[data-lesson="save"]').click();
+    return true;
+  })()`);
+  await waitFor(
+    "saved lesson is stored with the lesson tag and the draft closes",
+    async () => {
+      const rows = await memoryKeys();
+      const row = rows.find((r) => r.key === lessonKey);
+      const open = await evaluate(`!!document.querySelector('[data-lesson="draft"]')`);
+      return { ok: !!row && row.tags.includes("lesson") && !!row.value && open === false, body: JSON.stringify(row) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await fetch(`http://127.0.0.1:${port}/v1/memory/${lessonKey}?scope=project`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  // Local issues (#1500): create → listed under Open → close → listed under
+  // Closed → still closed after the panel remounts (fresh daemon read) and
+  // in the daemon's own list. An empty title is refused inline.
+  const issuesBoot = await (
+    await fetch(`http://127.0.0.1:${port}/v1/bootstrap`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (!issuesBoot.capabilities?.issues) {
+    throw new Error(`bootstrap does not advertise the issues capability: ${JSON.stringify(issuesBoot.capabilities)}`);
+  }
+  const issueRows = async () =>
+    (await evaluate(`[...document.querySelectorAll("[data-local-issues] .local-issue-row")].map((r) => [
+      r.dataset.issueId,
+      r.dataset.issueStatus,
+      r.innerText,
+    ])`)) || [];
+  const smokeIssueTitle = "smoke local issue";
+  await runPalette("Local issues");
+  await waitFor(
+    "issues panel mounts with the create form",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-local-issues] [data-issues-form]")`)) === true,
+    }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-action="issues-create"]').click()`);
+  await waitFor(
+    "empty title is refused inline",
+    async () => {
+      const t = await evaluate(`document.querySelector("[data-issues-action-error]")?.innerText || ""`);
+      return { ok: String(t).includes("Title is required"), body: t };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const fillIssue = await evaluate(`(() => {
+    const set = (sel, value) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      el.value = value;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    };
+    if (!set("[data-issues-title]", ${JSON.stringify(smokeIssueTitle)})) return "missing title";
+    if (!set("[data-issues-body]", "filed by webui-smoke")) return "missing body";
+    document.querySelector('[data-action="issues-create"]').click();
+    return "sent";
+  })()`);
+  if (fillIssue !== "sent") throw new Error(`issues create form: ${fillIssue}`);
+  let smokeIssueId = "";
+  await waitFor(
+    "created issue appears under Open",
+    async () => {
+      const rows = await issueRows();
+      const row = rows.find((r) => String(r[2]).includes(smokeIssueTitle));
+      if (row) smokeIssueId = row[0];
+      return { ok: !!row && row[1] === "open", body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-issue-id="${smokeIssueId}"] .link').click()`);
+  await waitFor(
+    "issue body expands",
+    async () => {
+      const t = await evaluate(`document.querySelector('[data-issue-body="${smokeIssueId}"]')?.innerText || ""`);
+      return { ok: String(t).includes("filed by webui-smoke"), body: t };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector('[data-issue-id="${smokeIssueId}"] [data-action="issues-close"]').click()`);
+  await waitFor(
+    "closed issue leaves the Open filter",
+    async () => {
+      const rows = await issueRows();
+      return { ok: !rows.some((r) => r[0] === smokeIssueId), body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-issues-filter="closed"]').click()`);
+  await waitFor(
+    "closed issue listed under Closed",
+    async () => {
+      const rows = await issueRows();
+      return { ok: rows.some((r) => r[0] === smokeIssueId && r[1] === "closed"), body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  // Remount: leave the tab and come back; the panel re-reads the daemon.
+  await runPalette("Memory");
+  await waitFor(
+    "issues panel unmounts on another tab",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-local-issues]")`)) === false }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await runPalette("Local issues");
+  await waitFor(
+    "issues panel remounts",
+    async () => ({ ok: (await evaluate(`!!document.querySelector('[data-issues-filter="closed"]')`)) === true }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`document.querySelector('[data-issues-filter="closed"]').click()`);
+  await waitFor(
+    "closed issue persists after the panel remounts",
+    async () => {
+      const rows = await issueRows();
+      return { ok: rows.some((r) => r[0] === smokeIssueId && r[1] === "closed"), body: JSON.stringify(rows) };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const persisted = await (
+    await fetch(`http://127.0.0.1:${port}/v1/issues?status=closed`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (!(persisted.issues || []).some((i) => String(i.ID ?? i.id) === smokeIssueId && (i.Status ?? i.status) === "closed")) {
+    throw new Error(`daemon does not list issue ${smokeIssueId} as closed: ${JSON.stringify(persisted)}`);
+  }
+
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
   // that predates Goals has no palette command and fails here.
   await runPalette("Goals");
@@ -2770,16 +3230,25 @@ try {
     throw new Error(`side chat shell did not boot ${JSON.stringify(booted)}`);
   }
 
-  const seeded = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+  // The seed carries an outbox client message id (#1325); the retry below
+  // must be acknowledged as a duplicate and never start a second turn.
+  const seedInit = {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      "X-Strike-Client-Message-Id": "smoke-seed-1325",
     },
     body: JSON.stringify({ type: "user.input", data: { text: "read the makefile" } }),
-  });
+  };
+  const seeded = await fetch(`http://127.0.0.1:${port}/v1/ops`, seedInit);
   if (!seeded.ok) {
     throw new Error(`seed user.input ${seeded.status} ${await seeded.text()}`);
+  }
+  const seedRetry = await fetch(`http://127.0.0.1:${port}/v1/ops`, seedInit);
+  const seedRetryBody = await seedRetry.text();
+  if (seedRetry.status !== 200 || !seedRetryBody.includes('"duplicate":true')) {
+    throw new Error(`outbox retry was not deduped: ${seedRetry.status} ${seedRetryBody}`);
   }
 
   await evaluate(`document.querySelector(".side-chat-open-activity").click()`);
@@ -2833,11 +3302,16 @@ try {
   };
 
   await ask("what is the agent doing?");
+  // The question shows on a pending card while the side turn runs (#1363),
+  // so wait for the settled answer before the next ask.
   const answered = await waitFor(
     "side chat to echo the asked question",
     async () => {
       const t = await panelText();
-      return { ok: t.includes("what is the agent doing?"), text: t };
+      const settled = await evaluate(
+        `document.querySelectorAll("[data-side-chat-answer]").length > 0 && !document.querySelector("[data-side-chat-pending]")`,
+      );
+      return { ok: t.includes("what is the agent doing?") && settled === true, text: t };
     },
     { timeout: STEP_MS, interval: 250 },
   );
@@ -4230,6 +4704,38 @@ try {
     },
     { timeout: WAIT_MS, interval: 250 },
   );
+  // Turn failure (#1371): the same replay ends its two failing turns with
+  // a stop marker each (error, loop_detected), in order, badged failed;
+  // the loop guard's own line names the tool; clean turns get none.
+  await waitFor(
+    "turn failure markers on the replayed failing turns only",
+    async () => {
+      const v = await evaluate(`(() => {
+        const marks = [...document.querySelectorAll("article[data-turn-stop]")];
+        const arts = [...document.querySelectorAll("article.sx-msg")];
+        const idx = (el) => arts.indexOf(el);
+        const failing = arts.find((a) => (a.innerText || "").includes("half answer"));
+        const guard = arts.find((a) => (a.innerText || "").includes("Loop guard"));
+        return {
+          reasons: marks.map((m) => m.getAttribute("data-turn-stop")).join(","),
+          titles: marks.map((m) => (m.querySelector(".sx-who")?.textContent || "").trim()).join("|"),
+          afterAnswer: !!failing && marks.length > 0 && idx(marks[0]) > idx(failing),
+          guardText: guard ? guard.innerText : "",
+          engineError: document.body.innerText.includes("provider exploded"),
+        };
+      })()`);
+      return {
+        ok:
+          v.reasons === "error,loop_detected" &&
+          v.titles === "Turn failed|Turn stopped by loop guard" &&
+          v.afterAnswer &&
+          v.guardText.includes("bash, 3 times") &&
+          v.engineError,
+        ...v,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
 
   // Live tool tail (#1374): resume the seeded tail session. The call that
   // ended shows no tail (tool.end replaced it); the call that never ended
@@ -4284,6 +4790,59 @@ try {
           v.quick,
         ...v,
       };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // Verification badge (#1373): resume the seeded session; each gated
+  // turn's final line carries the TUI label for its state, and the turn
+  // without a payload carries none.
+  let verifyClicked = "missing";
+  try {
+    await waitFor(
+      "verification badge resume row",
+      async () => {
+        verifyClicked = await evaluate(`(() => {
+          const row = document.querySelector('[data-session-id="verify-session"]');
+          const btn = row && row.querySelector(".ss-main");
+          if (!btn) return "missing";
+          btn.click();
+          return "clicked";
+        })()`);
+        return { ok: verifyClicked === "clicked", clicked: verifyClicked };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  } catch {
+    // reported below with the last observed state
+  }
+  if (verifyClicked !== "clicked") {
+    throw new Error(`verification badge resume click -> ${verifyClicked}`);
+  }
+  await waitFor(
+    "verification badges per turn state",
+    async () => {
+      const v = await evaluate(`(() => {
+        const badges = [...document.querySelectorAll(".turn-verify")].map((b) => ({
+          state: b.getAttribute("data-verify"),
+          text: b.textContent.trim(),
+          on: (b.closest("article")?.innerText || "").split("\\n").find((l) => l.startsWith("answer")) || "",
+        }));
+        const ungated = [...document.querySelectorAll("article")].find((a) =>
+          (a.innerText || "").includes("answer ungated"),
+        );
+        return {
+          badges: JSON.stringify(badges),
+          ungatedFound: Boolean(ungated),
+          ungatedBadge: Boolean(ungated && ungated.querySelector(".turn-verify")),
+        };
+      })()`);
+      const want = JSON.stringify([
+        { state: "verified", text: "verified", on: "answer gated" },
+        { state: "claimed", text: "claimed", on: "answer claimed" },
+        { state: "unverified", text: "unverified", on: "answer failed" },
+      ]);
+      return { ok: v.badges === want && v.ungatedFound && !v.ungatedBadge, ...v };
     },
     { timeout: WAIT_MS, interval: 250 },
   );
@@ -4498,6 +5057,72 @@ try {
   const schedOrig = schedAfterSave.schedules.find((s) => s.name === "Smoke schedule");
   if (!schedCopy || schedCopy.enabled !== false || !schedOrig || schedOrig.enabled !== true) {
     throw new Error(`schedule duplicate saved state copy=${JSON.stringify(schedCopy)} orig=${JSON.stringify(schedOrig)}`);
+  }
+
+  // Script schedules (#1777): Script is an explicit choice, the first
+  // submit only shows the confirm step (full command, mode, sandbox dial)
+  // and writes nothing; "Confirm and arm" creates it armed.
+  const scriptCmd = "echo smoke-script-1777";
+  await evaluate(`document.querySelector(".sched .section-head button.secondary").click()`);
+  await evaluate(`(() => {
+    const name = document.getElementById("schedule-name");
+    name.value = "Smoke script";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    const src = document.getElementById("schedule-source");
+    src.value = "script";
+    src.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  await waitFor(
+    "script command field after choosing Script",
+    async () => ({ ok: (await evaluate(`!!document.getElementById("schedule-command")`)) === true }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await evaluate(`(() => {
+    const cmd = document.getElementById("schedule-command");
+    cmd.value = ${JSON.stringify(scriptCmd)};
+    cmd.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelector(".sched-form .sched-actions .primary").click();
+  })()`);
+  await waitFor(
+    "script confirm step repeats the command, mode, and sandbox dial",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        cmd: (document.getElementById("schedule-confirm-command") || {}).textContent || "",
+        text: (document.querySelector(".sched-confirm") || {}).innerText || "",
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return {
+        ok: p.cmd === scriptCmd && (p.text || "").includes("Mode:") && (p.text || "").includes("Sandbox:"),
+        ...p,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+  const schedBeforeArm = await (
+    await fetch(`http://127.0.0.1:${port}/v1/schedules`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  if (schedBeforeArm.schedules.some((s) => s.name === "Smoke script")) {
+    throw new Error("script schedule was written before the confirm step");
+  }
+  await evaluate(`document.getElementById("schedule-confirm").click()`);
+  await waitFor(
+    "script schedule armed notice and script badge",
+    async () => {
+      const raw = await evaluate(`JSON.stringify({
+        text: document.body ? document.body.innerText : "",
+        badge: [...document.querySelectorAll(".sched-row")].some((r) => r.textContent.includes("Smoke script") && !!r.querySelector(".sched-script-badge")),
+      })`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: (p.text || "").includes("Script schedule armed") && p.badge === true, badge: p.badge };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const schedAfterArm = await (
+    await fetch(`http://127.0.0.1:${port}/v1/schedules`, { headers: { Authorization: `Bearer ${token}` } })
+  ).json();
+  const armed = schedAfterArm.schedules.find((s) => s.name === "Smoke script");
+  if (!armed || armed.source !== "script" || armed.command !== scriptCmd || !armed.armedAt || armed.overlap !== "skip") {
+    throw new Error(`script schedule armed state ${JSON.stringify(armed)}`);
   }
 
   // Scheduler presets (#1495): the section lists the daemon catalog, Apply
@@ -5282,6 +5907,7 @@ try {
     join(home, ".strike", "skills", "smoke-note.md"),
     "---\nname: smoke-note\ndescription: seeded note\n---\nSay hello from smoke.\n",
   );
+  await seedSkillUsage(home);
   await writeFile(
     join(home, ".strike", "mcp.json"),
     JSON.stringify({
@@ -5296,6 +5922,56 @@ try {
     }
     return ev.result?.result?.value;
   };
+  // #1529: pick the seeded user theme from the catalog-backed picker
+  // before the reload below, then prove it survived the reload.
+  const themeProbe = `(() => {
+    const el = document.documentElement;
+    const cs = getComputedStyle(el);
+    return JSON.stringify({
+      theme: el.getAttribute("data-theme") || "",
+      scheme: el.getAttribute("data-scheme") || "",
+      acid: cs.getPropertyValue("--acid").trim().toLowerCase(),
+      ground: cs.getPropertyValue("--ground").trim().toLowerCase(),
+      saved: localStorage.getItem("strike.theme") || "",
+      note: document.querySelector("[data-theme-catalog-note]")?.innerText || "",
+    });
+  })()`;
+  const themePainted = async (label, wantId) => {
+    let last = {};
+    for (let i = 0; i < 60; i++) {
+      last = JSON.parse(String(await evalJson(themeProbe)));
+      const side = last.scheme === "light" ? "light" : "dark";
+      const ok =
+        wantId === smokeTheme.id
+          ? last.theme === wantId &&
+            last.saved === wantId &&
+            last.acid === smokeTheme.accent[side] &&
+            last.ground === smokeTheme.background[side]
+          : last.theme === wantId && last.saved === wantId && last.acid !== smokeTheme.accent[side];
+      if (ok) return last;
+      await delay(250);
+    }
+    throw new Error(`${label}: ${JSON.stringify(last)}\n${await diagnostics()}`);
+  };
+  await evalJson(`document.querySelector('[data-action="open-settings"]')?.click()`);
+  for (let i = 0; i < 60; i++) {
+    const ready = await evalJson(`(() => {
+      const input = document.querySelector('.settings-page input[data-theme-choice="${smokeTheme.id}"]');
+      return !!input && !input.disabled && !document.querySelector("[data-theme-catalog-note]");
+    })()`);
+    if (ready === true) break;
+    if (i === 59) {
+      throw new Error(`catalog user theme missing from the settings picker: ${String(await evalJson(themeProbe))}\n${await diagnostics()}`);
+    }
+    await delay(250);
+  }
+  const pickerText = String(await evalJson(`document.querySelector(".settings-page .theme-grid")?.innerText || ""`));
+  if (!pickerText.includes(smokeTheme.name) || !pickerText.includes("User theme") || !pickerText.includes("Nord")) {
+    throw new Error(`theme picker should list the user theme beside bundled themes: ${pickerText.slice(0, 600)}`);
+  }
+  await evalJson(`document.querySelector('.settings-page input[data-theme-choice="${smokeTheme.id}"]').click()`);
+  await themePainted("user theme applied from the catalog", smokeTheme.id);
+
   await evalJson(`localStorage.setItem("strike.token", ${JSON.stringify(token)})`);
   await send("Page.reload", { ignoreCache: true });
   for (let i = 0; i < 40; i++) {
@@ -5307,6 +5983,20 @@ try {
     if (i === 39) throw new Error(`reload did not show the cockpit: ${String(body).slice(0, 300)}`);
     await delay(250);
   }
+  await themePainted("user theme persisted across reload", smokeTheme.id);
+  await evalJson(`document.querySelector('[data-action="open-settings"]')?.click()`);
+  for (let i = 0; i < 60; i++) {
+    const clicked = await evalJson(`(() => {
+      const input = document.querySelector('.settings-page input[data-theme-choice="strike"]');
+      if (!input) return false;
+      input.click();
+      return true;
+    })()`);
+    if (clicked === true) break;
+    if (i === 59) throw new Error("settings picker did not return after reload");
+    await delay(250);
+  }
+  await themePainted("back to Strike after the user theme", "strike");
 
   let customizeText = "";
   for (let i = 0; i < 40; i++) {
@@ -5321,6 +6011,7 @@ try {
   if (!customizeText.includes("smoke-note")) {
     throw new Error(`customize catalog missing smoke-note: ${customizeText.slice(0, 500)}`);
   }
+  await skillUsageCheck({ send });
 
   await evalJson(`(() => {
     const tabs = document.querySelector('[aria-label="Customize sections"]');
