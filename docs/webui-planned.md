@@ -389,8 +389,17 @@ patterns, tool output, handoff files, and verification reports are not
 copied.
 
 Per-session mute and quiet hours live in
-`PUT /v1/notifications/prefs`. They suppress browser banners. The record
-stays in the centre until this browser marks it read.
+`PUT /v1/notifications/prefs`. They suppress browser banners.
+
+Read state is daemon-side (#1392): `GET /v1/notifications` returns
+`seen: {upTo, ids}` and `POST /v1/notifications/seen` takes `{"ids":[...]}`
+(one row opened) or `{"upTo": seq}` ("Mark all read" up to the newest row
+the browser showed). A row is read when `seq <= upTo` or its id is listed.
+Reads are monotonic and shared by every browser on the gateway; ids are
+pruned to the 200-row window. Each browser keeps its own copy in
+`localStorage` as an offline cache and pushes reads made offline on the next
+load. Dismissing a row ("Clear read") stays per-browser. Not built yet:
+collapsing consecutive same-kind, same-session rows into one counted row.
 
 Not built: a third-party web-push service, and an operating-system banner
 while the browser process is quit. Nothing can wake a quit browser without
