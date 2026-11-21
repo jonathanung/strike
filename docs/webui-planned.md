@@ -445,6 +445,28 @@ opt-in push for finished or failed runs.
 A gateway drop is detected by the page (the daemon cannot deliver "I am
 gone"); it is not a JSONL record.
 
+## Share a session by link
+
+Shipped (#1565, first slice of #1056): the transcript header's Share button
+opens a dialog that mints a read-only link for the root session
+(`POST /v1/sessions/{id}/shares`, expiry 24h / 7 days (default) / 30 days,
+optional label), lists live links (`GET`), and revokes one
+(`DELETE /v1/sessions/{id}/shares/{shareId}`). The link is
+`<origin>/#share=<token>`: the token rides in the fragment, so it never
+reaches server logs or a Referer header. A browser opening it mounts only a
+read-only transcript shell, which posts the token in a JSON body to
+`POST /share/v1/transcript` (outside `/v1`; the token is not a gateway
+credential and every `/v1` route refuses it). It reads exactly the session
+bound at mint, live as it grows; no composer, approvals, panels, session list,
+or attachment downloads. Tokens are stored as SHA-256 hashes
+(`shares.json`, 0600); mint, revoke, and each first read are audit-logged
+without the token. Expired, revoked, unknown links and deleted sessions get
+one identical dead end. Children are not included (root only).
+
+Not built: redaction or selective disclosure, snapshot (frozen) links,
+accounts or comments — all stay with #1056. Links only work for someone who
+can reach the gateway (same as pairing links).
+
 ## Offline outbox
 
 Shipped (#1325, first slice): when the gateway is unreachable, a text send
@@ -496,6 +518,24 @@ Not drawn yet: the session flag in the engine turn loop, the protocol
 events, and the cockpit Debug panel (hypothesis card, instrumentation
 list, reproduce checklist, mobile chip). Bash is not inspected by the
 gate; the permission layer still governs it.
+## Steer acknowledgement
+
+Shipped (#1343): a steered message carries a marker driven only by the
+engine's durable `turn.steered` event (`webui/src/steer_ack.rs`). `boundary`
+reads "Steer acknowledged. The agent has it from its next step.",
+`cancel_restart` reads "The reply restarted with it.", and a
+`queued_fallback` steer marks the later message it was sent as. The marker
+survives reload because the event is in the JSONL. Pending (sent, not yet
+applied) is the composer's steer note: the steer has no transcript line
+until the engine applies it.
+
+Planned, not drawn: the agent's own one-line "now doing X instead of Y"
+summary and a conflict state ("this steer conflicts with my plan"). Both
+need an agent-emitted event, for example `turn.steer_ack {targetTurnId,
+summary, conflict, reason}` emitted by a model-facing acknowledgement tool,
+that does not exist yet. The cockpit's protocol gate drops unknown events,
+so nothing renders them until the engine and schema carry the event. The
+marker never derives a summary or a conflict from timing or a plan diff.
 
 ## Run with N models
 

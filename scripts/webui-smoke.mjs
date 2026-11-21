@@ -3275,6 +3275,52 @@ try {
     throw new Error(`outbox retry was not deduped: ${seedRetry.status} ${seedRetryBody}`);
   }
 
+  // #1565: share link create -> open with no credential -> revoke -> dead end.
+  {
+    const authed = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const st = await (await fetch(`http://127.0.0.1:${port}/v1/status`, { headers: authed })).json();
+    const sid = st.sessionId;
+    if (!sid) throw new Error(`share smoke: no live session id ${JSON.stringify(st)}`);
+    const sharesUrl = `http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(sid)}/shares`;
+    // The session log is written by the engine; give the seed a moment.
+    let minted;
+    for (let i = 0; i < 50; i++) {
+      minted = await fetch(sharesUrl, { method: "POST", headers: authed, body: JSON.stringify({ ttlSeconds: 3600 }) });
+      if (minted.status !== 404) break;
+      await delay(200);
+    }
+    if (minted.status !== 201) throw new Error(`share mint ${minted.status} ${await minted.text()}`);
+    const grant = await minted.json();
+    if (!grant.path || !grant.path.startsWith("/#share=") || grant.path.includes("?")) {
+      throw new Error(`share link not fragment-carried: ${grant.path}`);
+    }
+    const redeem = () =>
+      fetch(`http://127.0.0.1:${port}/share/v1/transcript`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: grant.token, after: 0 }),
+      });
+    let opened;
+    let openedBody = "";
+    for (let i = 0; i < 50; i++) {
+      opened = await redeem();
+      openedBody = await opened.text();
+      if (opened.status !== 200 || openedBody.includes("read the makefile")) break;
+      await delay(200);
+    }
+    if (opened.status !== 200 || !openedBody.includes("read the makefile")) {
+      throw new Error(`share redeem ${opened.status} ${openedBody.slice(0, 300)}`);
+    }
+    const asGateway = await fetch(`http://127.0.0.1:${port}/v1/sessions`, {
+      headers: { Authorization: `Bearer ${grant.token}` },
+    });
+    if (asGateway.status !== 401) throw new Error(`share token opened /v1/sessions: ${asGateway.status}`);
+    const revoked = await fetch(`${sharesUrl}/${encodeURIComponent(grant.id)}`, { method: "DELETE", headers: authed });
+    if (revoked.status !== 204) throw new Error(`share revoke ${revoked.status}`);
+    const dead = await redeem();
+    if (dead.status !== 404) throw new Error(`revoked share still opens: ${dead.status}`);
+  }
+
   await evaluate(`document.querySelector(".side-chat-open-activity").click()`);
 
   const panel = await waitFor(
