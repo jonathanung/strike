@@ -323,6 +323,11 @@ func (e *Engine) applyPendingSteer(turnID, mode string) {
 		Mode:         mode,
 		TargetTurnID: ps.targetTurnID,
 	})
+	target := ps.targetTurnID
+	if target == "" {
+		target = turnID
+	}
+	e.recordAppliedSteer(target)
 }
 
 // fallbackSteerToQueue converts an unapplied steer into a next-turn UserInput
@@ -1520,6 +1525,9 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 			StopWorkflow:   func() error { e.stopWorkflow(); return nil },
 			AdvancePhase:   e.advancePhase,
 			HandoffPlan:    e.handoffPlan,
+			AckSteer: func(ack tool.SteerAck) error {
+				return e.ackSteer(corr, ack)
+			},
 			ReportOutput: func(data string) {
 				if data == "" {
 					return
@@ -1990,6 +1998,9 @@ func (e *Engine) completeTurn(ctx context.Context, finishing chan struct{}, corr
 	if stopReason == "end_turn" && len(e.opts.Verify) > 0 {
 		verification = e.runSoloVerification(ctx, corr)
 	}
+	// A steer the agent never acknowledged stays at plain "acknowledged";
+	// a later turn must not answer it (#1860).
+	e.clearUnackedSteers()
 	e.emit(protocol.TurnCompleted{
 		Correlation:       corr,
 		StopReason:        stopReason,
