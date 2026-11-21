@@ -883,10 +883,40 @@ approval card unless the user is typing; a turn ending is announced
 politely. `webui/a11y.css` honours `prefers-reduced-motion` and lifts
 accent-role text on the default Strike theme to AA.
 
-Planned (#1878): agent-question announcements (the cockpit has no
-`question.asked` handler yet, so there is nothing to announce), focus
-trap and return for dialogs and the palette, a keyboard-only UAT loop, an
-automated a11y scan, and accent-text contrast for non-default themes.
+Shipped (#1878 slice 2):
+
+- **Focus trap and return** for every `aria-modal="true"` dialog from one
+  document-level helper (`webui/src/focus_trap.rs`, decisions in
+  `a11y_announce::focus`): Tab and Shift+Tab cycle inside the newest open
+  modal, the first control gets focus if the dialog focused nothing, and
+  when the dialog closes and focus was lost with it, focus returns to the
+  element that had it before. The palette's private Tab trap is gone; the
+  model menu and notifications panel are now marked `aria-modal`.
+- **Agent questions** are announced assertively ("Agent question: …") and
+  focus moves into the new question card unless the user is typing.
+- **Session status changes** are announced politely ("Session Docs:
+  Done."). Changes to Running are not announced, and the active session
+  going Idle or Waiting is left to the turn-end, approval and question
+  announcements.
+- **Accent text on every theme**: `--acid-text` is set per theme in
+  `webui/a11y.css` where `--acid` fails 4.5:1; `contrast.test.mjs` checks
+  it on ground, surface and raised for all 14 theme/scheme pairs.
+- **UAT**: the smoke cockpit pass checks focus trap and return on the
+  palette, keyboard help and confirm dialog, runs the core loop keyboard
+  only (palette → session row → composer → Allow once), and runs a
+  dependency-free DOM scan (control names, field labels, image alt,
+  duplicate ids, focusable content under `aria-hidden`, positive tabindex,
+  `lang`) over the chat, palette and primary views.
+
+Scan mode: **warn** for one release. Findings go to `a11y-scan.json` and
+`a11y-scan.md` in the `webui-uat` CI artifact and never fail the job.
+Path to blocking: fix or waive the findings in the report, then turn them
+into `check()` failures in `scripts/webui-uat/a11y.mjs`. Proposed (not
+added; needs an explicit yes because it is a new dependency): inject
+`axe-core` in the same pass for full WCAG rule coverage.
+
+Not covered yet: real screen-reader verification (NVDA/VoiceOver) and
+UAT screenshots/video of a running gateway.
 
 ## Live preview
 

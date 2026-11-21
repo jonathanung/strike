@@ -1629,6 +1629,7 @@ pub fn NotificationBell(
                     <div
                         class="notify-panel"
                         role="dialog"
+                        aria-modal="true"
                         aria-label="Notifications"
                         on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()
                     >

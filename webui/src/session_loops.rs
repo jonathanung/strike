@@ -11,8 +11,11 @@
 //! daemon validates the interval and the job (shared `pkg/loopspec`), so the
 //! client only splits the line and shows the daemon's own error sentence.
 //!
-//! Loop state is not on the event stream yet, so the rows poll the list
-//! route while a live session is open.
+//! Loop state rides the live event stream as `loops.changed` (#1944): the
+//! daemon sends the whole list after every start, stop, firing, and failed
+//! firing, and the rows replace theirs. The list route is read once when the
+//! session opens and again each time the stream (re)connects, since the event
+//! is not persisted and a reconnect may have missed one. No polling.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -24,9 +27,6 @@ use crate::api;
 use crate::model::ComposerCommand;
 
 pub const USAGE: &str = "usage: /loop <interval> <job>  |  /loop list  |  /loop stop [id]. Interval: 30s, 15m, 2h, 1h30m (1s to 168h). Loops end with the session.";
-
-/// Poll period for the loop list, in ms.
-const POLL_MS: i32 = 5_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LoopCmd {
@@ -87,6 +87,63 @@ pub struct SessionLoop {
     pub next_at: String,
     #[serde(default, rename = "lastError")]
     pub last_error: String,
+}
+
+impl From<protocol_schema::LoopState> for SessionLoop {
+    fn from(l: protocol_schema::LoopState) -> Self {
+        Self {
+            id: l.id,
+            interval: l.interval,
+            job: l.job,
+            runs: l.runs,
+            next_at: l.next_at,
+            last_error: l.last_error,
+        }
+    }
+}
+
+/// The loop list a live `loops.changed` envelope carries, or `None` for
+/// any other envelope. The live stream is per root, so the envelope is for
+/// the root whose stream delivered it (its `sessionId` is the durable
+/// session id, which need not equal the root id).
+pub fn loops_from_envelope(raw: &str) -> Option<Vec<SessionLoop>> {
+    if !raw.contains("\"loops.changed\"") {
+        return None;
+    }
+    match protocol_schema::decode_event(raw) {
+        Ok(protocol_schema::Event::LoopsChanged(ev)) => Some(ev.loops.into_iter().map(SessionLoop::from).collect()),
+        _ => None,
+    }
+}
+
+/// Replaces the rows from one envelope of `stream_root`'s live stream when
+/// it is `loops.changed` and that root is still the one shown.
+pub fn apply_loops_envelope(raw: &str, stream_root: &str, active: RwSignal<String>, loops: RwSignal<Vec<SessionLoop>>) {
+    if active.get_untracked() != stream_root {
+        return;
+    }
+    if let Some(next) = loops_from_envelope(raw) {
+        loops.set(next);
+    }
+}
+
+/// The rows after a successful start, without a refetch: the new loop is
+/// appended unless loops.changed already brought it (ids only grow).
+pub fn with_started(mut loops: Vec<SessionLoop>, started: SessionLoop) -> Vec<SessionLoop> {
+    if !started.id.is_empty() && !loops.iter().any(|l| l.id == started.id) {
+        loops.push(started);
+    }
+    loops
+}
+
+/// The rows after a successful stop, without a refetch: `Some(id)` drops
+/// that loop, `None` (stop all) clears the list.
+pub fn without_stopped(mut loops: Vec<SessionLoop>, id: Option<&str>) -> Vec<SessionLoop> {
+    match id {
+        Some(id) => loops.retain(|l| l.id != id),
+        None => loops.clear(),
+    }
+    loops
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -299,7 +356,11 @@ pub async fn run(
                 Ok(v) => {
                     let started = serde_json::from_value::<StartResponse>(v).unwrap_or_default();
                     note(started_note(&started.r#loop));
-                    refresh(base, token, root, active, loops).await;
+                    // loops.changed usually lands first; adding the row
+                    // here only when it is missing avoids a refetch.
+                    if active.get_untracked() == root {
+                        loops.update(|ls| *ls = with_started(std::mem::take(ls), started.r#loop));
+                    }
                 }
                 Err(e) => note(format!("loop: {}", daemon_error(&e))),
             }
@@ -313,7 +374,11 @@ pub async fn run(
                 Ok(v) => {
                     let stopped = serde_json::from_value::<StopResponse>(v).unwrap_or_default();
                     note(stopped_note(id.as_deref(), stopped.stopped));
-                    refresh(base, token, root, active, loops).await;
+                    // The daemon also sends loops.changed; dropping the row
+                    // here keeps the panel right without a refetch.
+                    if active.get_untracked() == root {
+                        loops.update(|ls| *ls = without_stopped(std::mem::take(ls), id.as_deref()));
+                    }
                 }
                 Err(e) => note(format!("loop: {}", daemon_error(&e))),
             }
@@ -340,50 +405,56 @@ async fn delete_value(base: &str, token: &str, path: &str) -> Result<serde_json:
     serde_json::from_str(&text).map_err(|e| e.to_string())
 }
 
+/// What a change of (root, capable, stream up) asks of the rows: clear
+/// them when the session or capability changed, and fetch the list when it
+/// can be shown and the session changed or the stream just came up.
+pub fn on_key_change(prev: Option<&(String, bool, bool)>, key: &(String, bool, bool)) -> (bool, bool) {
+    let session_changed = prev.map(|p| (&p.0, p.1) != (&key.0, key.1)).unwrap_or(true);
+    let stream_came_up = key.2 && prev.map(|p| !p.2).unwrap_or(true);
+    let fetch = key.1 && !key.0.is_empty() && (session_changed || stream_came_up);
+    (session_changed, fetch)
+}
+
 /// Loop rows for the queue pane: interval, job, run count, next fire, Stop.
-/// Polls the list while `capable` and a root is open.
+/// Kept current by `loops.changed` on the live stream (see
+/// [`apply_loops_envelope`]); the list route is read when the session
+/// changes and whenever `stream_up` turns true.
 #[component]
 pub fn LoopRows(
     base: RwSignal<String>,
     token: RwSignal<String>,
     root: RwSignal<String>,
     capable: RwSignal<bool>,
+    stream_up: RwSignal<bool>,
     loops: RwSignal<Vec<SessionLoop>>,
     note: RwSignal<String>,
 ) -> impl IntoView {
     let now = RwSignal::new(api::now_ms());
-    // Reset and re-fetch only when the session or capability actually
-    // changes: bootstrap re-sets the capability on every refresh.
-    Effect::new(move |prev: Option<(String, bool)>| {
-        let key = (root.get(), capable.get());
-        if prev.as_ref() != Some(&key) {
+    // Bootstrap re-sets the capability on every refresh, so act only on a
+    // real change of the key.
+    Effect::new(move |prev: Option<(String, bool, bool)>| {
+        let key = (root.get(), capable.get(), stream_up.get());
+        let (reset, fetch) = on_key_change(prev.as_ref(), &key);
+        if reset {
             loops.set(Vec::new());
             note.set(String::new());
-            if key.1 && !key.0.is_empty() {
-                spawn_local(refresh(
-                    base.get_untracked(),
-                    token.get_untracked(),
-                    key.0.clone(),
-                    root,
-                    loops,
-                ));
-            }
+        }
+        if fetch {
+            spawn_local(refresh(
+                base.get_untracked(),
+                token.get_untracked(),
+                key.0.clone(),
+                root,
+                loops,
+            ));
         }
         key
     });
+    // A 1s clock for the "next in" countdown only; it never fetches.
     let handle = StoredValue::new(None::<i32>);
     if let Some(window) = web_sys::window() {
-        let mut ticks = 0u32;
         let cb = Closure::<dyn FnMut()>::new(move || {
             now.set(api::now_ms());
-            ticks = ticks.wrapping_add(1);
-            if ticks % (POLL_MS / 1000) as u32 != 0 {
-                return;
-            }
-            let r = root.get_untracked();
-            if capable.get_untracked() && !r.is_empty() {
-                spawn_local(refresh(base.get_untracked(), token.get_untracked(), r, root, loops));
-            }
         });
         if let Ok(id) = window
             .set_interval_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 1000)
@@ -529,6 +600,69 @@ mod tests {
         assert!(empty.loops.is_empty());
         assert!(list_summary(&empty.loops).contains("usage: /loop"));
         assert_eq!(list_summary(&resp.loops), "1 active: l1 every 15m");
+    }
+
+    #[test]
+    fn loops_changed_envelope_replaces_the_list() {
+        let raw = r#"{"type":"loops.changed","time":"2026-11-21T10:00:00Z","v":"1.27.0","data":{"sessionId":"s1","reason":"fire","loopId":"l1","loops":[{"id":"l1","interval":"15m","intervalMs":900000,"job":"check ci","runs":3,"createdAt":"2026-11-21T09:00:00Z","nextAt":"2026-11-21T10:15:00Z","lastRunAt":"2026-11-21T10:00:00Z"}]}}"#;
+        let got = loops_from_envelope(raw).expect("loops.changed");
+        assert_eq!(got.len(), 1);
+        assert_eq!((got[0].id.as_str(), got[0].interval.as_str(), got[0].runs), ("l1", "15m", 3));
+        assert_eq!(got[0].next_at, "2026-11-21T10:15:00Z");
+        assert!(got[0].last_error.is_empty());
+
+        // Other events and junk are not loop state.
+        assert_eq!(
+            loops_from_envelope(r#"{"type":"text.delta","time":"2026-11-21T10:00:00Z","tag":"loops.changed","data":{"text":"hi"}}"#),
+            None
+        );
+        assert_eq!(loops_from_envelope("not json \"loops.changed\""), None);
+
+        // A stop that empties the session sends an empty (or null) list.
+        let empty = r#"{"type":"loops.changed","time":"2026-11-21T10:00:00Z","data":{"sessionId":"s1","reason":"stop","loops":[]}}"#;
+        assert_eq!(loops_from_envelope(empty), Some(Vec::new()));
+        let null = r#"{"type":"loops.changed","time":"2026-11-21T10:00:00Z","data":{"sessionId":"s1","reason":"close","loops":null}}"#;
+        assert_eq!(loops_from_envelope(null), Some(Vec::new()));
+    }
+
+    #[test]
+    fn start_adds_the_row_once_without_a_refetch() {
+        let row = |id: &str, runs: i64| SessionLoop { id: id.into(), runs, ..Default::default() };
+        // The event already brought l2 (with newer state): keep it.
+        let got = with_started(vec![row("l1", 0), row("l2", 4)], row("l2", 0));
+        assert_eq!(got, vec![row("l1", 0), row("l2", 4)]);
+        // Response first: append.
+        assert_eq!(with_started(vec![row("l1", 0)], row("l2", 0)), vec![row("l1", 0), row("l2", 0)]);
+        // A malformed response adds nothing.
+        assert_eq!(with_started(vec![row("l1", 0)], SessionLoop::default()), vec![row("l1", 0)]);
+    }
+
+    #[test]
+    fn stop_drops_rows_without_a_refetch() {
+        let row = |id: &str| SessionLoop { id: id.into(), ..Default::default() };
+        let cases: &[(Option<&str>, &[&str])] = &[(Some("l1"), &["l2"]), (Some("l9"), &["l1", "l2"]), (None, &[])];
+        for (id, want) in cases {
+            let got = without_stopped(vec![row("l1"), row("l2")], *id);
+            let ids: Vec<&str> = got.iter().map(|l| l.id.as_str()).collect();
+            assert_eq!(ids, want.to_vec(), "stop {id:?}");
+        }
+    }
+
+    #[test]
+    fn key_change_fetches_on_session_change_and_stream_up() {
+        let k = |root: &str, capable: bool, up: bool| (root.to_string(), capable, up);
+        // First run: reset, fetch when capable with a root.
+        assert_eq!(on_key_change(None, &k("s1", true, false)), (true, true));
+        assert_eq!(on_key_change(None, &k("", true, false)), (true, false));
+        assert_eq!(on_key_change(None, &k("s1", false, true)), (true, false));
+        // Same key (bootstrap re-set): nothing.
+        assert_eq!(on_key_change(Some(&k("s1", true, true)), &k("s1", true, true)), (false, false));
+        // Stream (re)connects: refetch, keep rows.
+        assert_eq!(on_key_change(Some(&k("s1", true, false)), &k("s1", true, true)), (false, true));
+        // Stream drops: nothing to do until it is back.
+        assert_eq!(on_key_change(Some(&k("s1", true, true)), &k("s1", true, false)), (false, false));
+        // Session switch: reset and fetch.
+        assert_eq!(on_key_change(Some(&k("s1", true, true)), &k("s2", true, true)), (true, true));
     }
 
     #[test]

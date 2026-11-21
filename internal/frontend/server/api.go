@@ -1761,6 +1761,10 @@ func (s *Server) handleLiveEvents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+	// Subscribe to stream-only events (loops.changed, #1944) before the
+	// stream opens and before the replay, so none published meanwhile is
+	// lost.
+	ephemeral := live.SubscribeEphemeral(r.Context())
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -1792,6 +1796,22 @@ func (s *Server) handleLiveEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-s.streamDone():
 			return
+		case ev, ok := <-ephemeral:
+			if !ok {
+				select {
+				case <-live.Done():
+					// Session ended: keep tailing the log as before.
+					ephemeral = nil
+					continue
+				default:
+				}
+				// This reader fell behind and was dropped. End the stream
+				// so the client reconnects and refetches loop state.
+				return
+			}
+			if err := writeEphemeralEvent(w, flusher, ev); err != nil {
+				return
+			}
 		case <-ticker.C:
 			n, err := s.writeEventsFrom(ctx, w, flusher, path, offset)
 			if err == nil && n > offset {
@@ -1799,6 +1819,25 @@ func (s *Server) handleLiveEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+// writeEphemeralEvent writes a stream-only event as an SSE message with no
+// id line: the id is the log byte offset, and this event is not in the log,
+// so the client's Last-Event-ID cursor stays on the last persisted line.
+func writeEphemeralEvent(w io.Writer, flusher http.Flusher, ev protocol.Event) error {
+	env, err := protocol.Wrap(ev)
+	if err != nil {
+		return nil // an event this build cannot encode is skipped, not fatal
+	}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return nil
+	}
+	if _, err := fmt.Fprintf(w, "data: %s\n\n", raw); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {

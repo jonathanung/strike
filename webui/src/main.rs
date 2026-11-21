@@ -37,6 +37,7 @@ mod editor;
 mod error_notice;
 mod fallback;
 mod files_invalidated;
+mod focus_trap;
 mod lessons;
 mod elicitation;
 mod elicitation_ui;
@@ -2402,6 +2403,7 @@ fn App() -> impl IntoView {
                     apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
                     elicitation_ui::apply_elicitation_notes(&data, elicitations);
                     debug_mode_ui::apply_debug_envelope(&data, debug_state);
+                    session_loops::apply_loops_envelope(&data, &titled_root, active_root, loop_rows);
                     questions_ui::apply_question_notes(&data, questions);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
@@ -3949,6 +3951,10 @@ fn App() -> impl IntoView {
     let announcer = announce::Announcer::new();
     announce::watch_asks(announcer, asks);
     announce::watch_turns(announcer, active_root, session_busy_now, transcript);
+    // #1878: agent questions, session status changes, modal focus.
+    announce::watch_questions(announcer, questions);
+    announce::watch_sessions(announcer, roots, active_root);
+    focus_trap::install();
     // Prompt sharpen (#1385): App-owned so the binding outlives the
     // chat view's remounts.
     let sharpen = prompt_sharpen::Sharpen::new(
@@ -6469,7 +6475,7 @@ fn App() -> impl IntoView {
                                 </p>
                             </Show>
                             <OutboxList outbox=outbox root=active_root gateway=gateway />
-                            <session_loops::LoopRows base=base token=token root=active_root capable=loops_capable loops=loop_rows note=loop_note />
+                            <session_loops::LoopRows base=base token=token root=active_root capable=loops_capable stream_up=stream_up loops=loop_rows note=loop_note />
                             <Show when=move || !steer_note.get().is_empty()>
                                 <p class="steer-note" role="status">{move || steer_note.get()}</p>
                             </Show>
@@ -6669,7 +6675,7 @@ fn App() -> impl IntoView {
                                     })
                                 }}
                             </Show>
-                            <input class="file-pick" type="file" data-chat-file="true" data-chat-attach="true" node_ref=file_input multiple=true
+                            <input class="file-pick" type="file" aria-label="Attach files" data-chat-file="true" data-chat-attach="true" node_ref=file_input multiple=true
                                 accept=chat_mode::ACCEPT_TYPES
                                 on:change=move |_| {
                                     if let Some(el) = file_input.get() {

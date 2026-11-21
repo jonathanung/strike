@@ -6,6 +6,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { a11yScan, dialogFocusPass, keyboardLoop } from "./a11y.mjs";
 import { delay } from "./browser.mjs";
 import { DARK_TOKENS, LIGHT_TOKENS, tokenMismatch, waitForLabels } from "./lib.mjs";
 import { encodeVideo } from "./media.mjs";
@@ -1098,6 +1099,17 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       await shoot("shell-reconnect-ok", ["desk1024", "desk1440"]);
       await capturePhoneFrame(page, phone, outDir, shots, "phone-reconnect-ok-390");
     }
+  }
+
+  if (cockpit) {
+    // #1878: dialog focus trap/return, keyboard-only core loop, and the
+    // a11y scan (warn mode; report in the UAT artifacts).
+    await viewport(1440, 900);
+    await press("Escape");
+    const a11yCtx = { page, check, waitUntil, press, shoot, log };
+    await dialogFocusPass(a11yCtx);
+    await keyboardLoop(a11yCtx);
+    await a11yScan(a11yCtx, outDir);
   }
 
   if (suite !== "smoke") {

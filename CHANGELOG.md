@@ -20,6 +20,8 @@ materially affect the shipped product.
 
 ### Added
 
+- **Session loops update live in the web cockpit** — the loop rows under the composer now change the moment a loop starts, stops, fires, or fails a firing, instead of on a 5-second poll. The daemon sends the whole list on the live event stream after every change; it is never written to the session log. Wire: `loops.changed` event (protocol 1.28.0); older clients ignore it ([#1944](https://github.com/jonathanung/strike/issues/1944)).
+
 - **Best-of-N: per-model tokens/cost and a Compare note** — each row of the comparison card shows the tokens (and cost, when the model is priced) that candidate spent; a provider that reports no usage shows nothing rather than zero. Once every run stops, **Compare** asks the parent session for a short commentary on how the results differ. It spends one turn, runs only when clicked, and never picks or applies a winner: adopting stays its own confirmed step. Wire: optional `usage` on `ChildCompleted` (protocol 1.27.0); older clients ignore it ([#1962](https://github.com/jonathanung/strike/issues/1962)).
 
 - **/loop firings are marked in the transcript** — a prompt injected by a session `/loop` now shows a `loop l1` badge on its user line in the web cockpit, live and after resume, so it no longer reads as something you typed. Ordinary sends carry no badge, and the daemon drops a client-supplied loop id so a send cannot pose as a firing. Wire: optional `loopId` on `UserInput` / `UserMessage` (protocol 1.26.0); older clients ignore it ([#1827](https://github.com/jonathanung/strike/issues/1827)).

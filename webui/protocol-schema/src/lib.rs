@@ -4,7 +4,7 @@
 // Unknown event type strings become Event::Unknown.
 // Unknown JSON fields are ignored. Missing fields are defaults.
 // Unknown op type strings return Err.
-// protocol.Version 1.27.0
+// protocol.Version 1.28.0
 
 use std::collections::HashMap;
 
@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
-pub const PROTOCOL_VERSION: &str = "1.27.0";
+pub const PROTOCOL_VERSION: &str = "1.28.0";
 pub const LEGACY_VERSION: &str = "1.0.0";
 
 /// Open string. Known writer values live in the JSON Schema.
@@ -1342,6 +1342,52 @@ pub struct LifecycleError {
     pub message: String,
     #[serde(default, rename = "sessionId")]
     pub session_id: String,
+}
+
+/// LoopState is one active session /loop on LoopsChanged, the same JSON as a row of GET /v1/sessions/{id}/loops.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct LoopState {
+    #[serde(default, rename = "id")]
+    pub id: String,
+    #[serde(default, rename = "interval")]
+    pub interval: String,
+    #[serde(default, rename = "intervalMs")]
+    pub interval_ms: i64,
+    #[serde(default, rename = "job")]
+    pub job: String,
+    #[serde(default, rename = "runs")]
+    pub runs: i64,
+    #[serde(default, rename = "createdAt")]
+    pub created_at: String,
+    #[serde(default, rename = "nextAt")]
+    pub next_at: String,
+    #[serde(default, rename = "lastRunAt")]
+    pub last_run_at: String,
+    #[serde(default, rename = "lastError")]
+    pub last_error: String,
+}
+
+/// LoopsChanged is the full list of a live session's /loop jobs after one change (start, stop, a firing, a failed firing, session close). It rides the live event stream only and is never persisted as a turn (#1944).
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct LoopsChanged {
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default, rename = "turnId")]
+    pub turn_id: String,
+    #[serde(default, rename = "providerRequestId")]
+    pub provider_request_id: String,
+    #[serde(default, rename = "attempt")]
+    pub attempt: i64,
+    #[serde(default, rename = "parentSessionId")]
+    pub parent_session_id: String,
+    #[serde(default, rename = "depth")]
+    pub depth: i64,
+    #[serde(default, rename = "reason")]
+    pub reason: String,
+    #[serde(default, rename = "loopId")]
+    pub loop_id: String,
+    #[serde(default, rename = "loops", deserialize_with = "null_as_default")]
+    pub loops: Vec<LoopState>,
 }
 
 /// MissingContextEntry reports context the child needed but did not have. Used on blocked completions so the lead can supply paths, answers, or artifact ids instead of the child hallucinating.
@@ -3130,6 +3176,7 @@ pub enum Event {
     HookMatched(HookMatched),
     InputQueued(InputQueued),
     LedgerUpdated(LedgerUpdated),
+    LoopsChanged(LoopsChanged),
     ModelFallback(ModelFallback),
     ModelSelected(ModelSelected),
     PathOverlap(PathOverlap),
@@ -3280,6 +3327,7 @@ pub fn decode_event(raw: &str) -> Result<Event, DecodeError> {
         "hook.matched" => map_event::<HookMatched>("hook.matched", &env.data, Event::HookMatched),
         "input.queued" => map_event::<InputQueued>("input.queued", &env.data, Event::InputQueued),
         "ledger.updated" => map_event::<LedgerUpdated>("ledger.updated", &env.data, Event::LedgerUpdated),
+        "loops.changed" => map_event::<LoopsChanged>("loops.changed", &env.data, Event::LoopsChanged),
         "model.fallback" => map_event::<ModelFallback>("model.fallback", &env.data, Event::ModelFallback),
         "model.selected" => map_event::<ModelSelected>("model.selected", &env.data, Event::ModelSelected),
         "path.overlap" => map_event::<PathOverlap>("path.overlap", &env.data, Event::PathOverlap),
