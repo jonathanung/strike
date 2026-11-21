@@ -40,6 +40,7 @@ mod onboarding;
 mod park;
 mod permissions_explain;
 mod steer_queue;
+mod steer_ack;
 mod model_menu;
 mod model_menu_view;
 mod session_list;

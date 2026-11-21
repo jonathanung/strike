@@ -310,6 +310,8 @@ pub struct Transcript {
     /// `sessionId` of the turn in progress (from `turn.started`), so a
     /// child session's streams are not counted on the parent's turn.
     turn_session: String,
+    /// Steer acknowledgement markers (#1343), keyed by message id.
+    pub steer_acks: crate::steer_ack::SteerAcks,
 }
 
 impl Default for Transcript {
@@ -336,6 +338,7 @@ impl Transcript {
             turn_usage: HashMap::new(),
             usage_acc: crate::turn_usage::TurnUsage::default(),
             turn_session: String::new(),
+            steer_acks: crate::steer_ack::SteerAcks::default(),
         }
     }
 
@@ -492,6 +495,7 @@ impl Transcript {
                 self.trigger_note.clear();
                 let text = field_str(&data, "text");
                 let shown = display_user_text(&strip_echo_progress(&text));
+                let (ack_text, ack_shown) = (text.clone(), shown.clone());
                 let id = self.push(Message {
                     id: 0,
                     role: Role::You,
@@ -510,8 +514,14 @@ impl Transcript {
                     at_ms,
                     turn_id: field_str(&data, "turnId"),
                 });
+                self.steer_acks.on_user_message(id, &ack_text, &ack_shown);
                 self.turn_start = Some(id);
                 self.absorb();
+            }
+            "turn.steered" => {
+                let text = field_str(&data, "text");
+                let mode = field_str(&data, "mode");
+                self.steer_acks.on_steered(&self.messages, &text, &mode);
             }
             "session.titled" => self.note_titled(&field_str(&data, "title")),
             "turn.started" => {

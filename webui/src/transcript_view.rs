@@ -667,7 +667,7 @@ pub fn TranscriptPane(
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, r.steer, fold_open, folds)}
                                 }
                             })
                         }
@@ -813,6 +813,7 @@ struct RowData {
     current: Option<crate::transcript_find::TMatch>,
     elapsed: Option<String>,
     usage: Option<(String, String)>,
+    steer: Option<crate::steer_ack::AckState>,
 }
 
 fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
@@ -840,6 +841,7 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
         usage: t
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
+        steer: t.steer_acks.get(msg.id),
     })
 }
 
@@ -1050,6 +1052,7 @@ fn message_view(
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
     turn_usage: Option<(String, String)>,
+    steer: Option<crate::steer_ack::AckState>,
     fold_open: bool,
     folds: FoldState,
 ) -> impl IntoView {
@@ -1184,6 +1187,9 @@ fn message_view(
             } else {
                 view! { <p class="sx-body">{body.clone()}</p> }.into_any()
             }}
+            {steer.map(|ack| view! {
+                <p class="steer-ack" data-steer-state=ack.key() role="note">{ack.text()}</p>
+            })}
             {if !prose && !chips.is_empty() {
                 view! {
                     <div class="sx-chips">
