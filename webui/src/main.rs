@@ -5413,13 +5413,18 @@ fn App() -> impl IntoView {
                                         let name = file.name.clone();
                                         let preview = file.preview.clone();
                                         let error = file.error.clone();
-                                        let show_img = !preview.is_empty();
                                         let show_err = !error.is_empty();
+                                        // #1390: audio/video chips get native controls over
+                                        // the same blob URL images use.
+                                        let preview_view = match (preview.is_empty(), chat_mode::preview_kind(&file.mime)) {
+                                            (false, chat_mode::PreviewKind::Image) => view! { <img src=preview.clone() alt="" /> }.into_any(),
+                                            (false, chat_mode::PreviewKind::Audio) => view! { <audio class="attach-media" controls=true preload="metadata" src=preview.clone()></audio> }.into_any(),
+                                            (false, chat_mode::PreviewKind::Video) => view! { <video class="attach-media" controls=true preload="metadata" playsinline=true src=preview.clone()></video> }.into_any(),
+                                            _ => view! { <span></span> }.into_any(),
+                                        };
                                         view! {
                                             <span class="attach-chip">
-                                                <Show when=move || show_img>
-                                                    <img src=preview.clone() alt="" />
-                                                </Show>
+                                                {preview_view}
                                                 <span>
                                                     <span class="name">{name}</span>
                                                     <Show when=move || show_err>
@@ -5456,7 +5461,7 @@ fn App() -> impl IntoView {
                                 }}
                             </Show>
                             <input class="file-pick" type="file" data-chat-file="true" data-chat-attach="true" node_ref=file_input multiple=true
-                                accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,image/svg+xml,text/plain,application/zip,application/gzip"
+                                accept=chat_mode::ACCEPT_TYPES
                                 on:change=move |_| {
                                     if let Some(el) = file_input.get() {
                                         if let Some(files) = el.files() {
