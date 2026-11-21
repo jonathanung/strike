@@ -310,6 +310,10 @@ pub struct Transcript {
     /// `sessionId` of the turn in progress (from `turn.started`), so a
     /// child session's streams are not counted on the parent's turn.
     turn_session: String,
+    /// Per-turn verification badges (#1373), keyed like `turn_elapsed` by
+    /// the turn's final message id. Only turns whose `turn.completed`
+    /// carried a verification report get an entry.
+    pub turn_verify: HashMap<u32, crate::turn_verify::TurnVerify>,
     /// Per-turn file-change summaries (#1365), keyed like `turn_elapsed`
     /// by the turn's final message id. Only turns whose `turn.completed`
     /// listed changed files get an entry.
@@ -344,9 +348,16 @@ impl Transcript {
             turn_usage: HashMap::new(),
             usage_acc: crate::turn_usage::TurnUsage::default(),
             turn_session: String::new(),
+            turn_verify: HashMap::new(),
             turn_files: HashMap::new(),
             tool_tails: HashMap::new(),
         }
+    }
+
+    /// The verification badge stamped on this message, if it is the final
+    /// line of a completed turn whose payload carried a report (#1373).
+    pub fn verify_for(&self, id: u32) -> Option<&crate::turn_verify::TurnVerify> {
+        self.turn_verify.get(&id)
     }
 
     /// The file-change summary stamped on this message, if it is the final
@@ -591,8 +602,9 @@ impl Transcript {
                 self.sweep_orphaned_at_turn_end(&field_str(&data, "turnId"));
                 self.absorb();
                 let usage = std::mem::take(&mut self.usage_acc);
+                let verify = crate::turn_verify::turn_verify(&data);
                 let files = crate::turn_files::turn_files(&data);
-                self.stamp_turn(at_ms, usage, files);
+                self.stamp_turn(at_ms, usage, verify, files);
                 // #1371: an abnormal stop gets its own end-of-turn line,
                 // pushed after the turn is stamped so the elapsed/usage
                 // labels and fork keep-counts stay on the turn's real
@@ -1080,6 +1092,7 @@ impl Transcript {
         &mut self,
         completed_ms: f64,
         usage: crate::turn_usage::TurnUsage,
+        verify: Option<crate::turn_verify::TurnVerify>,
         files: Option<crate::turn_files::TurnFiles>,
     ) {
         let Some(id) = self.turn_start else {
@@ -1116,6 +1129,11 @@ impl Transcript {
             // reported a known input or output count.
             if usage.label().is_some() {
                 self.turn_usage.insert(last_id, usage);
+            }
+            // Verification badge (#1373): same final line, from the
+            // payload only; no report, no badge.
+            if let Some(v) = verify {
+                self.turn_verify.insert(last_id, v);
             }
             // File-change summary (#1365): same final line; a turn with
             // no file changes gets no entry and renders nothing.
@@ -3322,8 +3340,8 @@ mod tests {
         assert!(matches!(blocks[0], Block::Paragraph(_)));
     }
 
-    // #1365: per-turn file-change summary.
-    fn files_turn(t: &mut Transcript, prompt: &str, done: Value) -> u32 {
+    // #1373: per-turn verification badge.
+    fn verify_turn(t: &mut Transcript, prompt: &str, done: Value) -> u32 {
         t.apply_envelope(&env("user.message", serde_json::json!({"text": prompt})));
         t.apply_envelope(&env("text.delta", serde_json::json!({"text": "answer"})));
         let last = t.messages.last().unwrap().id;
@@ -3332,29 +3350,34 @@ mod tests {
     }
 
     #[test]
-    fn file_summary_attaches_to_its_own_turn() {
+    fn verification_badge_stamps_final_line_from_payload_only() {
+        use crate::turn_verify::VerifyState;
         let mut t = Transcript::new();
-        let a = files_turn(
+        let a = verify_turn(
             &mut t,
             "one",
-            serde_json::json!({"files": [
-                {"path": "a.go", "kind": "update"},
-                {"path": "b.go", "kind": "create"}
-            ]}),
+            serde_json::json!({"verification": {"passed": true, "claimed": true, "verified": true}}),
         );
-        let b = files_turn(&mut t, "two", serde_json::json!({"files": []}));
-        let c = files_turn(
+        let b = verify_turn(
+            &mut t,
+            "two",
+            serde_json::json!({"verification": {"passed": false, "claimed": true, "verified": false}}),
+        );
+        let c = verify_turn(
             &mut t,
             "three",
-            serde_json::json!({"files": [{"path": "old.go", "kind": "delete"}]}),
+            serde_json::json!({"verification": {"passed": false, "claimed": false, "verified": true}}),
         );
-        assert_eq!(t.files_for(a).unwrap().label(), "2 files changed · 1 updated, 1 created");
-        assert!(t.files_for(b).is_none(), "empty files renders nothing");
-        assert_eq!(t.files_for(c).unwrap().deleted, vec!["old.go"]);
-        assert_eq!(t.turn_files.len(), 2);
+        let d = verify_turn(&mut t, "four", serde_json::json!({"stopReason": "end_turn"}));
+        assert_eq!(t.verify_for(a).unwrap().state, VerifyState::Verified);
+        assert_eq!(t.verify_for(b).unwrap().state, VerifyState::Claimed);
+        assert_eq!(t.verify_for(c).unwrap().state, VerifyState::Unverified);
+        assert!(t.verify_for(d).is_none(), "no payload, no badge");
+        assert_eq!(t.turn_verify.len(), 3);
+        // Only the final line of each turn carries it.
         for m in &t.messages {
-            if m.id != a && m.id != c {
-                assert!(t.files_for(m.id).is_none(), "{}", m.id);
+            if ![a, b, c].contains(&m.id) {
+                assert!(t.verify_for(m.id).is_none(), "{}", m.id);
             }
         }
     }
@@ -3425,5 +3448,42 @@ mod tests {
         t.settle_orphaned_tools();
         assert_eq!(t.messages[0].badge, NO_RESULT_BADGE);
         assert_eq!(t.tail_for(a).unwrap().text, "last words\n");
+    }
+
+    // #1365: per-turn file-change summary.
+    fn files_turn(t: &mut Transcript, prompt: &str, done: Value) -> u32 {
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": prompt})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "answer"})));
+        let last = t.messages.last().unwrap().id;
+        t.apply_envelope(&env("turn.completed", done));
+        last
+    }
+
+    #[test]
+    fn file_summary_attaches_to_its_own_turn() {
+        let mut t = Transcript::new();
+        let a = files_turn(
+            &mut t,
+            "one",
+            serde_json::json!({"files": [
+                {"path": "a.go", "kind": "update"},
+                {"path": "b.go", "kind": "create"}
+            ]}),
+        );
+        let b = files_turn(&mut t, "two", serde_json::json!({"files": []}));
+        let c = files_turn(
+            &mut t,
+            "three",
+            serde_json::json!({"files": [{"path": "old.go", "kind": "delete"}]}),
+        );
+        assert_eq!(t.files_for(a).unwrap().label(), "2 files changed · 1 updated, 1 created");
+        assert!(t.files_for(b).is_none(), "empty files renders nothing");
+        assert_eq!(t.files_for(c).unwrap().deleted, vec!["old.go"]);
+        assert_eq!(t.turn_files.len(), 2);
+        for m in &t.messages {
+            if m.id != a && m.id != c {
+                assert!(t.files_for(m.id).is_none(), "{}", m.id);
+            }
+        }
     }
 }
