@@ -12,11 +12,13 @@ export const PROPOSED_SKILL = "regenerate-smoke-fixtures";
 const OPENING = "Regenerate the smoke fixtures, rerun the linter and summarize warnings";
 
 export async function seedRepeatedWorkflow({ home, port, token }) {
-  const res = await fetch(`http://127.0.0.1:${port}/v1/local-files`, {
+  // The workspace key the scan reads for, exactly as Customize asks for it
+  // (no ?root), so seeded sessions land in the scanned workspace.
+  const res = await fetch(`http://127.0.0.1:${port}/v1/skill-proposals`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  const projectKey = (await res.json()).projectKey || "";
-  if (!projectKey) throw new Error("skill proposals: /v1/local-files returned no projectKey");
+  const projectKey = (await res.json()).workspace || "";
+  if (!projectKey) throw new Error("skill proposals: GET /v1/skill-proposals returned no workspace");
   const sessions = join(home, ".strike", "sessions");
   const now = Date.now();
   for (let i = 0; i < 3; i++) {

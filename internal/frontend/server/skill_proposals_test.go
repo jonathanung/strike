@@ -55,6 +55,7 @@ func seedRepeatedWorkflow(t *testing.T, dir, projectKey string, n int) {
 type proposalsFixture struct {
 	srv  *Server
 	work string
+	key  string
 }
 
 func newProposalsFixture(t *testing.T, readOnly bool) proposalsFixture {
@@ -71,7 +72,7 @@ func newProposalsFixture(t *testing.T, readOnly bool) proposalsFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return proposalsFixture{srv: srv, work: work}
+	return proposalsFixture{srv: srv, work: work, key: id.Key}
 }
 
 func (f proposalsFixture) call(t *testing.T, method, path, body string) (int, skillProposalsResponse, string) {
@@ -91,7 +92,7 @@ func TestSkillProposalsOptInScanAccept(t *testing.T) {
 	f := newProposalsFixture(t, false)
 
 	code, got, raw := f.call(t, http.MethodGet, "/v1/skill-proposals", "")
-	if code != http.StatusOK || got.Enabled || got.Threshold != 3 || got.WindowDays != 28 || len(got.Pending) != 0 {
+	if code != http.StatusOK || got.Enabled || got.Threshold != 3 || got.WindowDays != 28 || len(got.Pending) != 0 || got.Workspace != f.key {
 		t.Fatalf("default = %d %s", code, raw)
 	}
 	if code, _, raw := f.call(t, http.MethodPost, "/v1/skill-proposals/scan", ""); code != http.StatusConflict {

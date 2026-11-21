@@ -243,7 +243,7 @@ for each workspace until you turn it on, and it only scans when you click
 **Look now**.
 
 - **Routes**:
-  - `GET /v1/skill-proposals` returns `{enabled, threshold, windowDays, lastScan, pending}`.
+  - `GET /v1/skill-proposals` returns `{workspace, enabled, threshold, windowDays, lastScan, pending}` (`workspace` is the project key the scan reads).
   - `PATCH /v1/skill-proposals` takes `{enabled?, threshold?}`. The threshold must be 2–20; the default is 3.
   - `POST /v1/skill-proposals/scan` returns 409 while off.
   - `POST /v1/skill-proposals/dismiss` and `POST /v1/skill-proposals/accept` each take `{id}`.

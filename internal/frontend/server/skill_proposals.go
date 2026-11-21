@@ -28,6 +28,9 @@ func proposalStore() *skillpropose.Store {
 }
 
 type skillProposalsResponse struct {
+	// Workspace is the project key the scan reads sessions for: the same
+	// key sessions record in their meta (projectKey).
+	Workspace  string                  `json:"workspace"`
 	Enabled    bool                    `json:"enabled"`
 	Threshold  int                     `json:"threshold"`
 	WindowDays int                     `json:"windowDays"`
@@ -69,8 +72,9 @@ func installedSkills(dir string) map[string]bool {
 	return out
 }
 
-func proposalsView(ws skillpropose.Workspace, installed map[string]bool) skillProposalsResponse {
+func proposalsView(key string, ws skillpropose.Workspace, installed map[string]bool) skillProposalsResponse {
 	out := skillProposalsResponse{
+		Workspace:  key,
 		Enabled:    ws.Enabled,
 		Threshold:  ws.EffectiveThreshold(),
 		WindowDays: int(skillpropose.DefaultWindow / (24 * time.Hour)),
@@ -109,7 +113,7 @@ func (s *Server) handleSkillProposals(w http.ResponseWriter, r *http.Request) {
 		proposalFail(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, proposalsView(ws, installedSkills(dir)))
+	writeJSON(w, http.StatusOK, proposalsView(key, ws, installedSkills(dir)))
 }
 
 func (s *Server) handleSkillProposalSettings(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +131,7 @@ func (s *Server) handleSkillProposalSettings(w http.ResponseWriter, r *http.Requ
 		proposalFail(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, proposalsView(ws, installedSkills(dir)))
+	writeJSON(w, http.StatusOK, proposalsView(key, ws, installedSkills(dir)))
 }
 
 func (s *Server) handleSkillProposalScan(w http.ResponseWriter, r *http.Request) {
@@ -151,7 +155,7 @@ func (s *Server) handleSkillProposalScan(w http.ResponseWriter, r *http.Request)
 		proposalFail(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, proposalsView(ws, installed))
+	writeJSON(w, http.StatusOK, proposalsView(key, ws, installed))
 }
 
 func (s *Server) handleSkillProposalDismiss(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +181,7 @@ func (s *Server) handleSkillProposalDismiss(w http.ResponseWriter, r *http.Reque
 		proposalFail(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, proposalsView(ws, installedSkills(dir)))
+	writeJSON(w, http.StatusOK, proposalsView(key, ws, installedSkills(dir)))
 }
 
 // handleSkillProposalAccept installs a pending draft as a workspace skill.
