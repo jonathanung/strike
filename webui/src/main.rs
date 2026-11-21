@@ -15,6 +15,7 @@ mod approval_outcome;
 mod approvals;
 mod approvals_ui;
 mod chat_mode;
+mod child_signals;
 mod clipboard;
 mod confirm;
 mod composer_triggers;
@@ -23,7 +24,10 @@ mod draft_size;
 mod drafts;
 mod editor;
 mod lessons;
+mod elicitation;
+mod elicitation_ui;
 mod load_epoch;
+mod markdown_review;
 mod local_issues;
 mod mermaid;
 mod localfiles;
@@ -34,7 +38,9 @@ mod gateway_qr;
 mod git;
 mod goals;
 mod mobile;
+mod provider_signin;
 mod providers;
+mod push;
 mod rule_author;
 mod sandbox_explain;
 mod schedule;
@@ -47,7 +53,9 @@ mod onboarding;
 mod outbox;
 mod park;
 mod permissions_explain;
+mod plan_card;
 mod steer_queue;
+mod steer_ack;
 mod model_menu;
 mod model_menu_view;
 mod session_list;
@@ -64,6 +72,7 @@ mod transcript_find;
 mod usage_audit;
 mod session_delete;
 mod session_restore;
+mod share;
 mod shell;
 mod skill_usage;
 mod side_chat;
@@ -74,6 +83,7 @@ mod term;
 mod tool_tail;
 mod terminal;
 mod transcript;
+mod transcript_attachments;
 mod transcript_view;
 mod update_check;
 mod triggers;
@@ -81,9 +91,11 @@ mod turn_elapsed;
 mod turn_failure;
 mod turn_usage;
 mod turn_verify;
+mod workspace_image;
 mod workspaces;
 mod workflow_run;
 use crate::shell::icon;
+use crate::child_signals::TeamMessagesFeed;
 
 
 use std::cell::{Cell, RefCell};
@@ -132,6 +144,7 @@ use crate::editor::DocumentPane;
 use crate::mobile::PhoneNav;
 use crate::customize::CustomizePane;
 use crate::side_chat::SideChatPanel;
+use crate::share::{ShareDialog, ShareView};
 use crate::outbox::OutboxList;
 
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
@@ -960,6 +973,27 @@ fn short_id(id: &str) -> String {
     tail.chars().skip(count - 6).collect()
 }
 
+/// Member names by session id and escalation sentences by session id,
+/// from one team snapshot (#1375).
+fn team_signal_maps(team: &TeamSnapshot) -> (HashMap<String, String>, HashMap<String, String>) {
+    let mut names = HashMap::new();
+    let mut escalations = HashMap::new();
+    for (key, member) in &team.members {
+        let sid = if member.session_id.is_empty() {
+            key.clone()
+        } else {
+            member.session_id.clone()
+        };
+        if !member.name.is_empty() {
+            names.insert(sid.clone(), member.name.clone());
+        }
+        if let Some(esc) = &member.escalation {
+            escalations.insert(sid, child_signals::escalation_line(esc));
+        }
+    }
+    (names, escalations)
+}
+
 fn rows_from_team(prev: &[ActivityRow], team: &TeamSnapshot, now: f64) -> Vec<ActivityRow> {
     let mut rows = Vec::new();
     for (key, member) in &team.members {
@@ -1069,6 +1103,7 @@ fn apply_status_payload(
 fn App() -> impl IntoView {
     let base = RwSignal::new(load("strike.base"));
     let token = RwSignal::new(gateway::initial_token());
+    provide_context(transcript_attachments::AttachmentAuth { base, token });
     let status = RwSignal::new("connecting…".to_string());
     // Bootstrap capability `diag` (#1489): gates Download diagnostics.
     let diag_capable = RwSignal::new(false);
@@ -1078,6 +1113,13 @@ fn App() -> impl IntoView {
     let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // #1375: daemon-aggregated team signals from the /v1/team poll — the
+    // bounded inter-agent mail, member names for its From/To, the lead id,
+    // and each child's latest escalation sentence by session id.
+    let team_messages = RwSignal::new(Vec::<crate::model::TeamMessage>::new());
+    let team_names = RwSignal::new(HashMap::<String, String>::new());
+    let team_lead = RwSignal::new(String::new());
+    let team_escalations = RwSignal::new(HashMap::<String, String>::new());
     // Bootstrap capability `loops` (#1588): session /loop jobs.
     let loops_capable = RwSignal::new(false);
     let loop_rows = RwSignal::new(Vec::<session_loops::SessionLoop>::new());
@@ -1183,6 +1225,7 @@ fn App() -> impl IntoView {
     });
     let fast_on = RwSignal::new(false);
     let asks = RwSignal::new(Vec::<approvals::Ask>::new());
+    let elicitations = RwSignal::new(Vec::<elicitation::Pending>::new());
     let live_audit = RwSignal::new(Vec::<approvals::AuditLine>::new());
     let confirm = RwSignal::new(None::<approvals::PendingConfirm>);
     let panel_open = RwSignal::new(false);
@@ -1300,6 +1343,8 @@ fn App() -> impl IntoView {
         });
     });
     let queue_items = RwSignal::new(Vec::<steer_queue::QueueItem>::new());
+    // Agent plan checklist (#1354): the live todowrite list.
+    let plan = RwSignal::new(plan_card::PlanState::default());
     let queue_focus = RwSignal::new(String::new());
     let editing_id = RwSignal::new(String::new());
     let edit_draft = RwSignal::new(String::new());
@@ -1458,6 +1503,19 @@ fn App() -> impl IntoView {
                     let now = now_ms();
                     let prev = activity.get_untracked();
                     let rows = rows_from_team(&prev, &team, now);
+                    let (names, escalations) = team_signal_maps(&team);
+                    if team_names.get_untracked() != names {
+                        team_names.set(names);
+                    }
+                    if team_escalations.get_untracked() != escalations {
+                        team_escalations.set(escalations);
+                    }
+                    if team_lead.get_untracked() != team.lead_id {
+                        team_lead.set(team.lead_id.clone());
+                    }
+                    if team_messages.get_untracked() != team.messages {
+                        team_messages.set(team.messages.clone());
+                    }
                     let rows = if rows.is_empty() {
                         activity_panel(
                             &[],
@@ -1921,6 +1979,7 @@ fn App() -> impl IntoView {
             children.set(Vec::new());
             children_note.set(String::new());
             asks.set(Vec::new());
+            elicitations.set(Vec::new());
             live_audit.set(Vec::new());
             confirm.set(None);
             wipe_on_replay.set(false);
@@ -1929,6 +1988,7 @@ fn App() -> impl IntoView {
             tf_query.set(String::new());
             tf_idx.set(0);
             queue_items.set(Vec::new());
+            plan.set(plan_card::PlanState::default());
             editing_id.set(String::new());
             edit_draft.set(String::new());
             steer_note.set(String::new());
@@ -2013,6 +2073,11 @@ fn App() -> impl IntoView {
                 if let Some(data) = ev.data().as_string() {
                     note_live_title(sessions_cb, roots_cb, &titled_root, &data);
                     transcript_cb.update(|t| t.apply_envelope(&data));
+                    let mut plan_changed = false;
+                    plan.update_untracked(|p| plan_changed = p.apply_envelope(&data));
+                    if plan_changed {
+                        plan.notify();
+                    }
                     let on_note = |note: steer_queue::LiveNote| match note {
                         steer_queue::LiveNote::Queue(items) => {
                             let editing = editing_id.get_untracked();
@@ -2067,6 +2132,7 @@ fn App() -> impl IntoView {
                     };
                     note_steer(transcript_cb, &data, &on_note);
                     apply_perm_notes(&data, asks_cb, perm_mode, audit_cb);
+                    elicitation_ui::apply_elicitation_notes(&data, elicitations);
                     // Mirror into the ChatLine shape the side chat and the
                     // activity panel still consume.
                     lines_cb.set(transcript_cb.with_untracked(|t| t.chat_lines()));
@@ -5269,6 +5335,8 @@ fn App() -> impl IntoView {
                             jump_line=doc_line
                             want_diff=doc_diff
                             editing=doc_editing
+                            root=active_root
+                            busy=session_busy_now
                             history=file_history
                         />
                     </Show>
@@ -5335,6 +5403,7 @@ fn App() -> impl IntoView {
                         </div>
                     </Show>
                     <Show when=move || doc_path.get().is_empty()>
+                    <ShareDialog base=base token=token session=active_root />
                     <TranscriptPane
                         transcript=transcript
                         session=active_root
@@ -5346,6 +5415,7 @@ fn App() -> impl IntoView {
                         find=find_view
                     />
                     </Show>
+                    <elicitation_ui::ElicitationCards base=base token=token root=active_root elicitations=elicitations />
                     <ApprovalCards
                         asks=asks
                         perm_mode=perm_mode
@@ -5514,6 +5584,7 @@ fn App() -> impl IntoView {
                                 }}
                             </div>
                         </Show>
+                        <plan_card::PlanCard plan=plan />
                         <div class="steer-queue" id="steer-queue">
                             <OutboxList outbox=outbox root=active_root gateway=gateway />
                             <session_loops::LoopRows base=base token=token root=active_root capable=loops_capable loops=loop_rows note=loop_note />
@@ -6000,6 +6071,7 @@ fn App() -> impl IntoView {
                                 let name = row.name.clone();
                                 let name_chat = name.clone();
                                 let sid_chat = sid.clone();
+                                let escalation = team_escalations.with(|m| m.get(&sid).cloned());
                                 let who = name.clone();
                                 let agent = row.agent.clone();
                                 let agent_label = agent.clone();
@@ -6066,6 +6138,9 @@ fn App() -> impl IntoView {
                                                 }>"Retry"</button>
                                             </Show>
                                         </div>
+                                        {escalation.map(|line| view! {
+                                            <p class="child-escalation" data-child-escalation="true">{line}</p>
+                                        })}
                                         <Show when=move || expanded>
                                             <ChildStatusCard row=row_card.clone() />
                                         </Show>
@@ -6074,6 +6149,7 @@ fn App() -> impl IntoView {
                             }).collect_view()
                         }}
                     </ul>
+                    <TeamMessagesFeed messages=team_messages names=team_names lead_id=team_lead />
                     </div>
                     </Show>
                     <Show when=move || side_tab.get() == "files">
@@ -6396,7 +6472,13 @@ mod composer_grow_history_tests {
 }
 
 fn main() {
-    leptos::mount::mount_to_body(App);
+    // A share link (#1565) gets only the read-only transcript shell: no
+    // cockpit, no session list, no gateway credential.
+    if let Some(token) = share::share_token_from_location() {
+        leptos::mount::mount_to_body(move || view! { <ShareView token=token /> });
+    } else {
+        leptos::mount::mount_to_body(App);
+    }
     // The cockpit mounted, so the static boot shell from index.html has
     // done its job. mount_to_body appends rather than replacing the body,
     // so remove the placeholder explicitly; if the wasm never runs, the
@@ -6429,5 +6511,31 @@ mod memory_mode_tests {
             (true, "incognito".to_string())
         );
         assert_eq!(revert_memory_mode(None), (false, String::new()));
+    }
+}
+
+#[cfg(test)]
+mod team_signal_maps_tests {
+    use super::*;
+
+    #[test]
+    fn maps_names_and_escalations_by_session() {
+        let team: TeamSnapshot = serde_json::from_str(
+            r#"{"available":true,"members":{
+                "k1":{"sessionId":"c1","name":"scout","escalation":{"kind":"loop","reason":"same call x5","action":"interrupted"}},
+                "c2":{"name":""},
+                "c3":{"sessionId":"c3","name":"fixer"}
+            }}"#,
+        )
+        .unwrap();
+        let (names, escalations) = team_signal_maps(&team);
+        assert_eq!(names.get("c1").map(String::as_str), Some("scout"));
+        assert_eq!(names.get("c3").map(String::as_str), Some("fixer"));
+        assert!(!names.contains_key("c2"));
+        assert_eq!(escalations.len(), 1);
+        assert_eq!(
+            escalations.get("c1").map(String::as_str),
+            Some("Loop detected: same call x5. Action: stopped.")
+        );
     }
 }

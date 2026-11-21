@@ -1,6 +1,7 @@
 package deploywatch
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -158,16 +159,47 @@ func runState(status, conclusion string) string {
 }
 
 func (g *GitHub) get(ctx context.Context, token, path string, dst any) error {
+	return g.do(ctx, http.MethodGet, token, path, nil, dst)
+}
+
+// Comment posts body as a comment on repo's issue or PR number.
+func (g *GitHub) Comment(ctx context.Context, repo string, number int, body string) error {
+	tokenFn := g.Token
+	if tokenFn == nil {
+		tokenFn = DefaultToken
+	}
+	token := tokenFn(ctx)
+	if token == "" {
+		return errText("no GitHub token (GH_TOKEN, GITHUB_TOKEN, or gh auth)")
+	}
+	payload, err := json.Marshal(map[string]string{"body": body})
+	if err != nil {
+		return err
+	}
+	var out struct {
+		ID int64 `json:"id"`
+	}
+	return g.do(ctx, http.MethodPost, token, fmt.Sprintf("/repos/%s/issues/%d/comments", repo, number), payload, &out)
+}
+
+func (g *GitHub) do(ctx context.Context, method, token, path string, payload []byte, dst any) error {
 	base := strings.TrimRight(g.BaseURL, "/")
 	if base == "" {
 		base = DefaultGitHubAPI
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+	var rdr io.Reader
+	if payload != nil {
+		rdr = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, base+path, rdr)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
