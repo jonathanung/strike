@@ -1008,6 +1008,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "quote-message"
+version = "0.1.0"
+
+[[package]]
 name = "quote-use"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1345,6 +1349,7 @@ dependencies = [
  "load-guard",
  "protocol-schema",
  "qrcode",
+ "quote-message",
  "send_wrapper",
  "serde",
  "serde_json",

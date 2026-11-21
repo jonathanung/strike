@@ -39,6 +39,8 @@ pub struct TranscriptHandlers {
     pub retry: Callback<(String,)>,
     pub fork: Callback<(i32,)>,
     pub open_file: Callback<(String, u32)>,
+    /// Attach message `id` to the composer as a quote (#1362).
+    pub quote: Callback<(u32,)>,
 }
 
 /// Find-in-transcript state republished by the shell (#1342, unioned
@@ -312,6 +314,7 @@ pub fn TranscriptPane(
     let open_file = handlers.open_file;
     let retry = handlers.retry;
     let fork = handlers.fork;
+    let quote = handlers.quote;
     let export_timeline = handlers.export_timeline;
     let _ = (handlers.export_markdown, handlers.send);
     let regenerate = handlers.regenerate;
@@ -402,6 +405,15 @@ pub fn TranscriptPane(
                         let ok = crate::clipboard::copy_text(&text).await.is_ok();
                         note.set(crate::clipboard::transcript_copy_feedback(ok).to_string());
                     });
+                }
+            }
+            "q" => {
+                // #1362: quote the cursor line into the composer.
+                if let Some(id) = cursor.get_untracked() {
+                    if cursor_session.get_untracked() == session.get_untracked() {
+                        ev.prevent_default();
+                        quote.run((id,));
+                    }
                 }
             }
             "t" => {
@@ -667,7 +679,7 @@ pub fn TranscriptPane(
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, quote, r.quotable, r.quote, r.hits, r.current, r.elapsed, r.usage, fold_open, folds)}
                                 }
                             })
                         }
@@ -813,6 +825,10 @@ struct RowData {
     current: Option<crate::transcript_find::TMatch>,
     elapsed: Option<String>,
     usage: Option<(String, String)>,
+    /// The line can be quoted now (settled, has text) (#1362).
+    quotable: bool,
+    /// Quote this message carries and the loaded line it resolves to.
+    quote: Option<(quote_message::Quote, Option<u32>)>,
 }
 
 fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
@@ -840,6 +856,10 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
         usage: t
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
+        quotable: t.quote_source(msg.id).is_some(),
+        quote: t
+            .quote_for(msg.id)
+            .map(|q| (q.clone(), t.resolve_quote(q))),
     })
 }
 
@@ -859,6 +879,38 @@ fn after_render(f: impl FnOnce() + 'static) {
 
 /// Scrolls to message `id` after render, so a row just mounted by
 /// `reveal_row` exists when the lookup runs.
+/// Quote card above a user message that quoted a line (#1362). Click
+/// (or Enter) jumps back to the original through the same path as the
+/// palette's jump, which mounts a windowed-out row and puts the cursor
+/// highlight on it. When the original is not in the loaded transcript
+/// the card keeps the excerpt and says so instead of jumping nowhere.
+fn quote_card_view(q: &quote_message::Quote, target: Option<u32>) -> impl IntoView {
+    let label = quote_message::label(&q.role, &q.text);
+    match target {
+        Some(id) => view! {
+            <button
+                type="button"
+                class="sx-quote-card"
+                data-quote-target=id.to_string()
+                title="Jump to the quoted message"
+                on:click=move |_| {
+                    let _ = crate::shell::dispatch("transcript.jump", &id.to_string());
+                }
+            >
+                <span class="sx-quote-text">{label}</span>
+            </button>
+        }
+        .into_any(),
+        None => view! {
+            <div class="sx-quote-card sx-quote-missing" data-quote-target="">
+                <span class="sx-quote-text">{label}</span>
+                <span class="sx-quote-note">"The original message is not in this view."</span>
+            </div>
+        }
+        .into_any(),
+    }
+}
+
 fn scroll_message(id: u32) {
     after_render(move || scroll_message_now(id));
 }
@@ -1046,6 +1098,9 @@ fn message_view(
     open_file: Callback<(String, u32)>,
     retry: Callback<(String,)>,
     _fork: Callback<(i32,)>,
+    quote: Callback<(u32,)>,
+    quotable: bool,
+    quote_card: Option<(quote_message::Quote, Option<u32>)>,
     find_hits: Vec<crate::transcript_find::TMatch>,
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
@@ -1169,8 +1224,17 @@ fn message_view(
                             crate::clipboard::after_ms(2_000, move || copy_state.set(None));
                         });
                     }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
+                    {quotable.then(|| view! {
+                        <button
+                            type="button"
+                            class="sx-quiet sx-quote-btn"
+                            title="Quote this message in your next send (q)"
+                            on:click=move |_| quote.run((id,))
+                        >"Quote"</button>
+                    })}
                 </span>
             </header>
+            {quote_card.map(|(q, target)| quote_card_view(&q, target))}
             {if find_body {
                 view! { <crate::transcript_find::MarkedText text=body.clone() kind="prose" ranges=body_ranges current=cur_body /> }.into_any()
             } else if prose && crate::editor::has_markdown_table(&body) {

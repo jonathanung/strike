@@ -1306,6 +1306,9 @@ fn App() -> impl IntoView {
     // a request by itself.
     let delete_target = RwSignal::new(None::<session_delete::DeleteTarget>);
     let pending_files = RwSignal::new(Vec::<chat_mode::PendingAttachment>::new());
+    // Quote a message (#1362): the line attached to the next send. One
+    // at a time; quoting another line replaces it.
+    let quote_draft = RwSignal::new(None::<quote_message::Quote>);
     let sending = RwSignal::new(false);
     let listening = RwSignal::new(false);
     let speech_ok = chat_mode::dictation_available();
@@ -2370,6 +2373,12 @@ fn App() -> impl IntoView {
         if text.is_empty() && !ready {
             return;
         }
+        // #1362: a quote rides on the user's own words; it never sends alone.
+        let quoted = quote_draft.get_untracked();
+        if quoted.is_some() && text.is_empty() {
+            queue_note.set("Add a message to send with the quote.".into());
+            return;
+        }
         let root = active_root.get_untracked();
         if root.is_empty() {
             status.set("no live session yet".into());
@@ -2477,13 +2486,24 @@ fn App() -> impl IntoView {
                     "sha256": file.uploaded_sha,
                 }));
             }
+            // #1362: the quote travels as a delimited block ahead of the
+            // user's text, so the agent gets the exact quoted text and the
+            // stored log keeps the reference. `text` stays the user's own
+            // words for the failed-send restore.
+            let wire = match &quoted {
+                Some(q) => quote_message::compose(&q.role, q.anchor, &q.text, &text),
+                None => text.clone(),
+            };
             let body = if images.is_empty() {
-                serde_json::json!({"text": text})
+                serde_json::json!({"text": wire})
             } else {
-                serde_json::json!({"text": text, "images": images})
+                serde_json::json!({"text": wire, "images": images})
             };
             match post_op(&b, &t, &root, op, body).await {
                 Ok(()) => {
+                    if quoted.is_some() && quote_draft.get_untracked() == quoted {
+                        quote_draft.set(None);
+                    }
                     for file in &updated {
                         chat_mode::revoke_preview(&file.preview);
                     }
@@ -4151,7 +4171,31 @@ fn App() -> impl IntoView {
     })
     .into();
     let rename_for_palette = apply_title.clone();
+    // A quote's anchor is per session: switching sessions drops it.
+    Effect::new(move |prev: Option<String>| {
+        let root = active_root.get();
+        if prev.is_some_and(|p| p != root) {
+            quote_draft.set(None);
+        }
+        root
+    });
     let handlers = TranscriptHandlers {
+        quote: (move |id: u32| {
+            match transcript.with_untracked(|t| t.quote_source(id)) {
+                Some((role, anchor, text)) => {
+                    quote_draft.set(Some(quote_message::Quote { role, anchor, text }));
+                    if let Some(el) = web_sys::window()
+                        .and_then(|w| w.document())
+                        .and_then(|doc| doc.query_selector("#composer-input").ok().flatten())
+                        .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+                    {
+                        let _ = el.focus();
+                    }
+                }
+                None => ux_note.set("That line cannot be quoted until it finishes.".into()),
+            }
+        })
+        .into(),
         send: (move |text: String| {
             send_text(text);
         })
@@ -5244,6 +5288,20 @@ fn App() -> impl IntoView {
                             <Show when=move || !steer_note.get().is_empty()>
                                 <p class="steer-note" role="status">{move || steer_note.get()}</p>
                             </Show>
+                            <Show when=move || quote_draft.with(|q| q.is_some())>
+                                <div class="quote-chip" role="group" aria-label="Quoted message">
+                                    <span class="quote-chip-text">
+                                        {move || quote_draft.with(|q| q.as_ref().map(|q| quote_message::label(&q.role, &q.text)).unwrap_or_default())}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        class="quote-chip-remove"
+                                        aria-label="Remove quote"
+                                        title="Remove quote (Backspace in an empty composer)"
+                                        on:click=move |_| quote_draft.set(None)
+                                    >"×"</button>
+                                </div>
+                            </Show>
                             <Show when=move || !queue_note.get().is_empty()>
                                 <p class="steer-error" role="alert">{move || queue_note.get()}</p>
                             </Show>
@@ -5439,6 +5497,13 @@ fn App() -> impl IntoView {
                                                 }
                                             }
                                         }
+                                    } else if ev.key() == "Backspace"
+                                        && draft.get_untracked().is_empty()
+                                        && quote_draft.with_untracked(|q| q.is_some())
+                                    {
+                                        // #1362: Backspace on an empty composer removes the quote.
+                                        ev.prevent_default();
+                                        quote_draft.set(None);
                                     } else if ev.key() == "Escape" && (ac_open.get_untracked() || plus_open.get_untracked()) {
                                         ev.prevent_default();
                                         ev.stop_propagation();

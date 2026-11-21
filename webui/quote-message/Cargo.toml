@@ -1,0 +1,8 @@
+[package]
+name = "quote-message"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Quote-a-message rules for the cockpit: the delimited quote block a send carries, parsing it back out of the stored log, excerpts, and jump-back resolution."
+
+[dependencies]
