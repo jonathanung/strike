@@ -366,6 +366,35 @@ try {
     join(sessionsDir, "elapsed-session.meta.json"),
     JSON.stringify({ title: "Elapsed replay" }) + "\n",
   );
+  // Per-turn file summary (#1365) fixture: two back-to-back turns that
+  // change files and one in between that changes none.
+  const filesSession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-29T06:00:00Z" }) +
+    "\n" +
+    envLine("user.message", "2026-10-29T06:00:00Z", { text: "edit three files" }) +
+    envLine("text.delta", "2026-10-29T06:00:05Z", { text: "files answer one" }) +
+    envLine("turn.completed", "2026-10-29T06:00:10Z", {
+      stopReason: "end_turn",
+      files: [
+        { path: "README.md", kind: "update" },
+        { path: "docs/new.md", kind: "create" },
+        { path: "go.mod", kind: "update" },
+      ],
+    }) +
+    envLine("user.message", "2026-10-29T06:01:00Z", { text: "just answer" }) +
+    envLine("text.delta", "2026-10-29T06:01:05Z", { text: "files answer none" }) +
+    envLine("turn.completed", "2026-10-29T06:01:10Z", { stopReason: "end_turn", files: [] }) +
+    envLine("user.message", "2026-10-29T06:02:00Z", { text: "remove one" }) +
+    envLine("text.delta", "2026-10-29T06:02:05Z", { text: "files answer two" }) +
+    envLine("turn.completed", "2026-10-29T06:02:10Z", {
+      stopReason: "end_turn",
+      files: [{ path: "old.txt", kind: "delete" }],
+    });
+  await writeFile(join(sessionsDir, "files-session.jsonl"), filesSession);
+  await writeFile(
+    join(sessionsDir, "files-session.meta.json"),
+    JSON.stringify({ title: "File summary replay" }) + "\n",
+  );
   const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
     throw new Error(`content search ${found.status} ${found.text.slice(0, 300)}`);
@@ -3985,6 +4014,110 @@ try {
       return { ok: v.n === 1 && v.text === "took 4:12" && v.onSlow && v.body, ...v };
     },
     { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // Per-turn file summary (#1365): resume the seeded session; each turn
+  // that changed files carries one collapsed summary on its own final
+  // line, the no-change turn carries none, and expanding shows the paths
+  // grouped by kind (deleted paths are not links).
+  let filesClicked = "missing";
+  try {
+    await waitFor(
+      "file summary resume row",
+      async () => {
+        filesClicked = await evaluate(`(() => {
+          const row = document.querySelector('[data-session-id="files-session"]');
+          const btn = row && row.querySelector(".ss-main");
+          if (!btn) return "missing";
+          btn.click();
+          return "clicked";
+        })()`);
+        return { ok: filesClicked === "clicked", clicked: filesClicked };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  } catch {
+    // reported below with the last observed state
+  }
+  if (filesClicked !== "clicked") {
+    throw new Error(`file summary resume click -> ${filesClicked}`);
+  }
+  await waitFor(
+    "per-turn file summaries on the right turns",
+    async () => {
+      const v = await evaluate(`(() => {
+        const all = [...document.querySelectorAll("details.turn-files")];
+        const rows = all.map((d) => ({
+          label: (d.querySelector("summary")?.textContent || "").trim(),
+          open: d.open,
+          on: (d.closest("article")?.innerText || "").includes("files answer one")
+            ? "one"
+            : (d.closest("article")?.innerText || "").includes("files answer two")
+              ? "two"
+              : "other",
+        }));
+        const none = [...document.querySelectorAll("article")].find((a) =>
+          (a.innerText || "").includes("files answer none"),
+        );
+        let groups = "";
+        if (all[0]) {
+          groups = [...all[0].querySelectorAll("[data-turn-files-kind]")]
+            .map((g) => g.getAttribute("data-turn-files-kind") + ":" +
+              [...g.querySelectorAll("a.turn-files-path")].map((a) => a.getAttribute("data-path")).join("|"))
+            .join(";");
+        }
+        const del = all[1] ? all[1].querySelectorAll("a.turn-files-path").length : -1;
+        return {
+          rows: JSON.stringify(rows),
+          groups,
+          del,
+          noneFound: Boolean(none),
+          noneSummary: Boolean(none && none.querySelector(".turn-files")),
+        };
+      })()`);
+      const want = JSON.stringify([
+        { label: "3 files changed · 2 updated, 1 created", open: false, on: "one" },
+        { label: "1 file changed · 1 deleted", open: false, on: "two" },
+      ]);
+      return {
+        ok:
+          v.rows === want &&
+          v.groups === "updated:README.md|go.mod;created:docs/new.md" &&
+          v.del === 0 &&
+          v.noneFound &&
+          !v.noneSummary,
+        ...v,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // Clicking a summary path opens it in the document pane (#1269), then
+  // Escape closes the pane so later steps start from the transcript.
+  const filesOpen = await evaluate(`(() => {
+    const a = document.querySelector('details.turn-files a.turn-files-path[data-path="README.md"]');
+    if (!a) return "missing";
+    a.click();
+    return "clicked";
+  })()`);
+  if (filesOpen !== "clicked") {
+    throw new Error(`file summary path click -> ${filesOpen}`);
+  }
+  await waitFor(
+    "file summary path opens the document pane",
+    async () => {
+      const path = await evaluate(
+        `(document.querySelector(".ev-doc .ev-path")?.textContent || "").trim()`,
+      );
+      return { ok: path === "README.md", path };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await waitFor(
+    "document pane closes after the file summary check",
+    async () => ({ ok: await evaluate(`document.querySelector(".ev-doc") == null`) }),
+    { timeout: STEP_MS, interval: 250 },
   );
 
   const wsClicked = await send("Runtime.evaluate", {

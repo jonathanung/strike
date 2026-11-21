@@ -310,6 +310,10 @@ pub struct Transcript {
     /// `sessionId` of the turn in progress (from `turn.started`), so a
     /// child session's streams are not counted on the parent's turn.
     turn_session: String,
+    /// Per-turn file-change summaries (#1365), keyed like `turn_elapsed`
+    /// by the turn's final message id. Only turns whose `turn.completed`
+    /// listed changed files get an entry.
+    pub turn_files: HashMap<u32, crate::turn_files::TurnFiles>,
 }
 
 impl Default for Transcript {
@@ -336,7 +340,14 @@ impl Transcript {
             turn_usage: HashMap::new(),
             usage_acc: crate::turn_usage::TurnUsage::default(),
             turn_session: String::new(),
+            turn_files: HashMap::new(),
         }
+    }
+
+    /// The file-change summary stamped on this message, if it is the final
+    /// line of a completed turn that changed files (#1365).
+    pub fn files_for(&self, id: u32) -> Option<&crate::turn_files::TurnFiles> {
+        self.turn_files.get(&id)
     }
 
     /// The turn elapsed label stamped on this message, if it is the
@@ -570,7 +581,8 @@ impl Transcript {
                 self.sweep_orphaned_at_turn_end(&field_str(&data, "turnId"));
                 self.absorb();
                 let usage = std::mem::take(&mut self.usage_acc);
-                self.stamp_turn(at_ms, usage);
+                let files = crate::turn_files::turn_files(&data);
+                self.stamp_turn(at_ms, usage, files);
             }
             "tool.begin" => {
                 self.assistant_open = false;
@@ -951,7 +963,12 @@ impl Transcript {
         }
     }
 
-    fn stamp_turn(&mut self, completed_ms: f64, usage: crate::turn_usage::TurnUsage) {
+    fn stamp_turn(
+        &mut self,
+        completed_ms: f64,
+        usage: crate::turn_usage::TurnUsage,
+        files: Option<crate::turn_files::TurnFiles>,
+    ) {
         let Some(id) = self.turn_start else {
             return;
         };
@@ -986,6 +1003,11 @@ impl Transcript {
             // reported a known input or output count.
             if usage.label().is_some() {
                 self.turn_usage.insert(last_id, usage);
+            }
+            // File-change summary (#1365): same final line; a turn with
+            // no file changes gets no entry and renders nothing.
+            if let Some(f) = files {
+                self.turn_files.insert(last_id, f);
             }
         }
         self.turn_start = None;
@@ -3038,5 +3060,42 @@ mod tests {
         assert!(t.messages[0].body.contains("**world**"));
         let blocks = parse_markdown(&t.messages[0].body);
         assert!(matches!(blocks[0], Block::Paragraph(_)));
+    }
+
+    // #1365: per-turn file-change summary.
+    fn files_turn(t: &mut Transcript, prompt: &str, done: Value) -> u32 {
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": prompt})));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "answer"})));
+        let last = t.messages.last().unwrap().id;
+        t.apply_envelope(&env("turn.completed", done));
+        last
+    }
+
+    #[test]
+    fn file_summary_attaches_to_its_own_turn() {
+        let mut t = Transcript::new();
+        let a = files_turn(
+            &mut t,
+            "one",
+            serde_json::json!({"files": [
+                {"path": "a.go", "kind": "update"},
+                {"path": "b.go", "kind": "create"}
+            ]}),
+        );
+        let b = files_turn(&mut t, "two", serde_json::json!({"files": []}));
+        let c = files_turn(
+            &mut t,
+            "three",
+            serde_json::json!({"files": [{"path": "old.go", "kind": "delete"}]}),
+        );
+        assert_eq!(t.files_for(a).unwrap().label(), "2 files changed · 1 updated, 1 created");
+        assert!(t.files_for(b).is_none(), "empty files renders nothing");
+        assert_eq!(t.files_for(c).unwrap().deleted, vec!["old.go"]);
+        assert_eq!(t.turn_files.len(), 2);
+        for m in &t.messages {
+            if m.id != a && m.id != c {
+                assert!(t.files_for(m.id).is_none(), "{}", m.id);
+            }
+        }
     }
 }

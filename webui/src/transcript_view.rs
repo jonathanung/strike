@@ -667,7 +667,7 @@ pub fn TranscriptPane(
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, r.files, fold_open, folds)}
                                 }
                             })
                         }
@@ -813,6 +813,7 @@ struct RowData {
     current: Option<crate::transcript_find::TMatch>,
     elapsed: Option<String>,
     usage: Option<(String, String)>,
+    files: Option<crate::turn_files::TurnFiles>,
 }
 
 fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
@@ -840,6 +841,7 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
         usage: t
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
+        files: t.files_for(msg.id).cloned(),
     })
 }
 
@@ -1050,6 +1052,7 @@ fn message_view(
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
     turn_usage: Option<(String, String)>,
+    turn_files: Option<crate::turn_files::TurnFiles>,
     fold_open: bool,
     folds: FoldState,
 ) -> impl IntoView {
@@ -1193,6 +1196,7 @@ fn message_view(
             } else {
                 view! { <span></span> }.into_any()
             }}
+            {turn_files.map(|f| turn_files_view(f, open_file))}
             {auth_notice.then(|| {
                 let target = reconnect.clone();
                 let resend = auth_retry.clone();
@@ -1281,6 +1285,59 @@ fn message_view(
                 view! { <span></span> }.into_any()
             }}
         </article>
+    }
+}
+
+/// Per-turn file-change summary (#1365): a collapsed chip on the turn's
+/// final line, expanding in place to the paths grouped by kind. Updated
+/// and created paths open in the document pane exactly like file chips;
+/// deleted paths are plain text (there is nothing left to open).
+fn turn_files_view(
+    files: crate::turn_files::TurnFiles,
+    open_file: Callback<(String, u32)>,
+) -> impl IntoView {
+    let label = files.label();
+    let total = files.total();
+    let groups: Vec<(&'static str, Vec<String>)> = files
+        .groups()
+        .into_iter()
+        .map(|(head, paths)| (head, paths.to_vec()))
+        .collect();
+    view! {
+        <details class="turn-files" data-turn-files=total.to_string()>
+            <summary>{label}</summary>
+            {groups.into_iter().map(|(head, paths)| {
+                let deleted = head == "Deleted";
+                view! {
+                    <div class="turn-files-group" data-turn-files-kind=head.to_lowercase()>
+                        <span class="turn-files-head">{head}</span>
+                        <ul>
+                            {paths.into_iter().map(|path| {
+                                if deleted {
+                                    view! { <li><span class="turn-files-path">{path}</span></li> }.into_any()
+                                } else {
+                                    let open = path.clone();
+                                    view! {
+                                        <li>
+                                            <a
+                                                class="turn-files-path"
+                                                href="#file"
+                                                data-path=path.clone()
+                                                on:click=move |ev: web_sys::MouseEvent| {
+                                                    ev.prevent_default();
+                                                    dispatch_open_file(&open, 0);
+                                                    open_file.run((open.clone(), 0));
+                                                }
+                                            >{path}</a>
+                                        </li>
+                                    }.into_any()
+                                }
+                            }).collect_view()}
+                        </ul>
+                    </div>
+                }
+            }).collect_view()}
+        </details>
     }
 }
 
