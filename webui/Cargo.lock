@@ -152,6 +152,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2550f75b8cfac212855f6b1885455df8eaee8fe8e246b647d69146142e016084"
 
 [[package]]
+name = "composer-drafts"
+version = "0.1.0"
+
+[[package]]
 name = "config"
 version = "0.15.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1344,6 +1348,7 @@ name = "strike-webui"
 version = "0.1.0"
 dependencies = [
  "a11y-announce",
+ "composer-drafts",
  "gloo-net",
  "js-sys",
  "leptos",

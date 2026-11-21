@@ -389,8 +389,17 @@ patterns, tool output, handoff files, and verification reports are not
 copied.
 
 Per-session mute and quiet hours live in
-`PUT /v1/notifications/prefs`. They suppress browser banners. The record
-stays in the centre until this browser marks it read.
+`PUT /v1/notifications/prefs`. They suppress browser banners.
+
+Read state is daemon-side (#1392): `GET /v1/notifications` returns
+`seen: {upTo, ids}` and `POST /v1/notifications/seen` takes `{"ids":[...]}`
+(one row opened) or `{"upTo": seq}` ("Mark all read" up to the newest row
+the browser showed). A row is read when `seq <= upTo` or its id is listed.
+Reads are monotonic and shared by every browser on the gateway; ids are
+pruned to the 200-row window. Each browser keeps its own copy in
+`localStorage` as an offline cache and pushes reads made offline on the next
+load. Dismissing a row ("Clear read") stays per-browser. Not built yet:
+collapsing consecutive same-kind, same-session rows into one counted row.
 
 Not built: a third-party web-push service, and an operating-system banner
 while the browser process is quit. Nothing can wake a quit browser without
@@ -409,6 +418,25 @@ collapsed content (child-card details and long tool dumps the
 transcript folds away) are not searched and find does not expand
 collapsed cards to reveal a match; a case-sensitive toggle is likewise
 deferred until someone asks for it.
+
+## Debug mode
+
+Engine state shipped, panel not drawn (#1345). `harness/debugmode` holds
+one debug session: 2–5 ranked hypotheses with attached evidence, each
+open / confirmed / refuted (confirming requires evidence). In the
+`hypothesis` phase the gate allows reads and only edits whose every
+changed line carries the `debugmode.Marker` tag; untagged edits, whole-file
+writes, deletes and moves are denied with a reason (`*GateError`). Fix edits unlock when a
+hypothesis is confirmed or the user gives an override reason, which the
+session keeps for the transcript. Ending the session requires the user to
+mark the bug fixed; it then sweeps every whole line containing the marker
+under the workspace (skipping `.git`, binaries and files over 4 MiB) and
+closes only when a rescan finds zero.
+
+Not drawn yet: the session flag in the engine turn loop, the protocol
+events, and the cockpit Debug panel (hypothesis card, instrumentation
+list, reproduce checklist, mobile chip). Bash is not inspected by the
+gate; the permission layer still governs it.
 
 ## Not planned as a copy
 
