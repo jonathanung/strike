@@ -22,6 +22,7 @@ mod draft_size;
 mod drafts;
 mod editor;
 mod load_epoch;
+mod mermaid;
 mod localfiles;
 mod customize;
 mod gateway;

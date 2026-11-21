@@ -2870,6 +2870,109 @@ try {
     throw new Error("main composer lost its approval chip");
   }
 
+  // Mermaid diagrams (#1368). A seeded message with a flowchart (one
+  // label carrying HTML/script markup), a sequence diagram and a broken
+  // block: the valid ones render as SVG with the markup as inert text, the
+  // broken one falls back to its source with the note, and the source
+  // toggle and zoom controls round-trip.
+  const fence = "```";
+  const mermaidText = [
+    "Mermaid smoke",
+    "",
+    `${fence}mermaid`,
+    "flowchart TD",
+    "  A[Start] --> B{Ok?}",
+    "  B -->|yes| C[\"<img src=x onerror=alert(1)><b>inert</b>\"]",
+    fence,
+    "",
+    `${fence}mermaid`,
+    "sequenceDiagram",
+    "  Alice->>Bob: ping",
+    "  Bob-->>Alice: pong",
+    fence,
+    "",
+    `${fence}mermaid`,
+    "flowchart TD",
+    "  A ?? B",
+    fence,
+  ].join("\n");
+  const mermaidSeed = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ type: "user.input", data: { text: mermaidText } }),
+  });
+  if (!mermaidSeed.ok) {
+    throw new Error(`seed mermaid user.input ${mermaidSeed.status} ${await mermaidSeed.text()}`);
+  }
+  const mermaidProbe = async () => {
+    const raw = await evaluate(`(() => {
+      const flow = document.querySelector('[data-mermaid="flowchart"]');
+      const seq = document.querySelector('[data-mermaid="sequence"]');
+      const failed = document.querySelector("[data-mermaid-failed]");
+      const svg = flow ? flow.querySelector("svg") : null;
+      return JSON.stringify({
+        flow: !!svg,
+        flowText: svg ? svg.textContent : "",
+        injected: flow ? !!flow.querySelector("svg img, svg b, svg script, svg foreignObject") : false,
+        seq: seq ? (seq.querySelector("svg") || {}).textContent || "" : "",
+        failNote: failed ? (failed.querySelector(".mmd-fail-note") || {}).textContent || "" : "",
+        failSource: failed ? !!failed.querySelector("pre.sx-code") : false,
+        canvasHidden: flow ? flow.querySelector(".mmd-canvas").hidden : null,
+        sourceHidden: flow ? flow.querySelector(".mmd-source").hidden : null,
+        width: svg ? svg.getAttribute("width") : "",
+      });
+    })()`);
+    return JSON.parse(raw || "{}");
+  };
+  const mermaidShown = await waitFor(
+    "mermaid flowchart, sequence and fallback in the transcript",
+    async () => {
+      const p = await mermaidProbe();
+      return {
+        ok: p.flow && p.flowText.includes("Start") && p.flowText.includes("<b>inert</b>") && !p.injected
+          && p.seq.includes("ping") && p.seq.includes("pong")
+          && p.failNote.includes("Diagram didn't parse") && p.failSource
+          && p.canvasHidden === false && p.sourceHidden === true,
+        ...p,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  if (!mermaidShown.flow || mermaidShown.injected) {
+    throw new Error(`mermaid render check failed ${JSON.stringify(mermaidShown)}`);
+  }
+  await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-toggle]').click()`);
+  await waitFor(
+    "mermaid source toggle shows the code block",
+    async () => {
+      const p = await mermaidProbe();
+      return { ok: p.canvasHidden === true && p.sourceHidden === false, ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-toggle]').click()`);
+  await waitFor(
+    "mermaid toggle back to the diagram",
+    async () => {
+      const p = await mermaidProbe();
+      return { ok: p.canvasHidden === false && p.sourceHidden === true && p.width === "100%", ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-zoom="in"]').click()`);
+  await waitFor(
+    "mermaid zoom in sizes the diagram explicitly",
+    async () => {
+      const p = await mermaidProbe();
+      return { ok: p.width !== "100%" && Number(p.width) > 0, ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-zoom="fit"]').click()`);
+
   // Find in transcript (#1342). The seed above sent "read the makefile"
   // to the open session, so the transcript holds that word in the user
   // bubble and in the echo reply. Keyboard path only: Ctrl+F opens,
