@@ -62,6 +62,10 @@ type branchReviewPreview struct {
 	MaxBytes    int      `json:"maxBytes"`
 	Agent       string   `json:"agent"`
 	Turns       int      `json:"turns"`
+	// Security mode (#1620): "general" or "security"; Suppressed counts
+	// the branch's dismissed security findings.
+	Mode       string `json:"mode"`
+	Suppressed int    `json:"suppressed,omitempty"`
 }
 
 type branchReviewFinding struct {
@@ -69,6 +73,16 @@ type branchReviewFinding struct {
 	Path     string `json:"path"`
 	Line     int    `json:"line"`
 	Summary  string `json:"summary"`
+	// Security mode (#1620) fields; empty for general findings.
+	ID           string `json:"id,omitempty"`
+	CWE          string `json:"cwe,omitempty"`
+	Confidence   string `json:"confidence,omitempty"`
+	AttackPath   string `json:"attackPath,omitempty"`
+	Fix          string `json:"fix,omitempty"`
+	Verification string `json:"verification,omitempty"` // pending | confirmed | refuted
+	VerifyReason string `json:"verifyReason,omitempty"`
+	Suppressed   bool   `json:"suppressed,omitempty"`
+	SuppressNote string `json:"suppressReason,omitempty"`
 }
 
 type branchReviewResult struct {
@@ -86,6 +100,10 @@ type branchReviewDiff struct {
 	committed   string
 	uncommitted string
 	rules       string
+	// Security mode (#1620): optional repo security rules and the branch's
+	// dismissed findings (the reviewer is told not to raise them again).
+	secRules     string
+	suppressions []reviewSuppression
 }
 
 func (s *Server) handleGitReviewPreview(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +112,11 @@ func (s *Server) handleGitReviewPreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	base, err := optionalBaseName(r.URL.Query().Get("base"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
+	mode, err := parseReviewMode(r.URL.Query().Get("mode"))
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
@@ -107,6 +130,7 @@ func (s *Server) handleGitReviewPreview(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	s.applyReviewMode(ctx, cwd, mode, &d)
 	writeJSON(w, http.StatusOK, d.preview)
 }
 
@@ -118,6 +142,7 @@ func (s *Server) handleGitReviewStart(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Base    string `json:"base"`
 		Confirm bool   `json:"confirm"`
+		Mode    string `json:"mode"`
 	}
 	if err := decodeBody(w, r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
@@ -132,10 +157,18 @@ func (s *Server) handleGitReviewStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
 		return
 	}
+	mode, err := parseReviewMode(body.Mode)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), gitReadTimeout)
 	s.gitMu.Lock()
 	d, err := collectBranchReview(ctx, cwd, base)
 	s.gitMu.Unlock()
+	if err == nil {
+		s.applyReviewMode(ctx, cwd, mode, &d)
+	}
 	cancel()
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, opErrorResponse{Error: err.Error()})
@@ -167,6 +200,10 @@ func (s *Server) handleGitReviewStart(w http.ResponseWriter, r *http.Request) {
 		Name:      branchReviewName,
 		Isolation: "shared",
 	}
+	if mode == reviewModeSecurity {
+		op.Objective = securityReviewObjective(d)
+		op.Name = securityReviewName
+	}
 	s.handleTeamControlOp(w, r, live, "team.spawn", sessionID, op)
 }
 
@@ -188,6 +225,7 @@ func (s *Server) handleGitReviewResult(w http.ResponseWriter, r *http.Request) {
 	}
 	res := parseBranchReview(raw)
 	res.SessionID = id
+	s.annotateSecurityReview(r, &res)
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -215,7 +253,7 @@ func collectBranchReview(ctx context.Context, cwd, base string) (branchReviewDif
 	d := branchReviewDiff{preview: branchReviewPreview{
 		State: "ok", Untracked: []string{},
 		WarnBytes: branchReviewWarnBytes, MaxBytes: branchReviewMaxBytes,
-		Agent: branchReviewAgent, Turns: 1,
+		Agent: branchReviewAgent, Turns: 1, Mode: reviewModeGeneral,
 	}}
 	p := &d.preview
 	bc, err := gitBranchChanges(ctx, cwd, base, 1)
@@ -272,11 +310,17 @@ func collectBranchReview(ctx context.Context, cwd, base string) (branchReviewDif
 // repoRules returns the repository's AGENTS.md (capped), read from the git
 // top-level. Symlinks are not followed.
 func repoRules(ctx context.Context, cwd string) string {
+	return repoFile(ctx, cwd, "AGENTS.md")
+}
+
+// repoFile reads a regular file at rel under the git top-level (capped,
+// symlinks not followed); "" when absent.
+func repoFile(ctx context.Context, cwd, rel string) string {
 	top, _, err := gitRun(ctx, cwd, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return ""
 	}
-	path := filepath.Join(strings.TrimSpace(string(top)), "AGENTS.md")
+	path := filepath.Join(strings.TrimSpace(string(top)), filepath.FromSlash(rel))
 	info, err := os.Lstat(path)
 	if err != nil || !info.Mode().IsRegular() {
 		return ""
@@ -401,6 +445,10 @@ func parseBranchReview(raw []byte) branchReviewResult {
 		}
 	}
 	for _, line := range strings.Split(text.String(), "\n") {
+		if f, ok := parseSecFinding(line); ok {
+			res.Findings = append(res.Findings, f)
+			continue
+		}
 		if m := findingLine.FindStringSubmatch(line); m != nil {
 			n, _ := strconv.Atoi(m[3])
 			path := strings.Trim(strings.TrimSpace(m[2]), "`")
