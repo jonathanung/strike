@@ -600,6 +600,40 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       await click(".activity-row button.activity-main", CHILD_OBJECTIVE);
       await delay(250);
       await shoot("shell-activity", ["desk1024", "desk1440"]);
+
+      // #1375: a lead -> child message the daemon accepts is aggregated
+      // into /v1/team messages and must appear in the Activity feed.
+      const team = await fetch(`${baseURL}/v1/team?root=${encodeURIComponent(root)}`).then((r) => r.json());
+      const child = Object.values(team.members || {}).find(
+        (m) => m.name === CHILD_NAME || m.objective === CHILD_OBJECTIVE,
+      );
+      if (child?.sessionId) {
+        const sent = await fetch(`${baseURL}/v1/ops?root=${encodeURIComponent(root)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "team.message",
+            data: {
+              to: child.sessionId,
+              body: "uat feed body",
+              idempotencyKey: "uat-feed-1",
+            },
+          }),
+        });
+        const sentBody = await sent.text();
+        log(`team.message for feed: HTTP ${sent.status} ${sentBody.slice(0, 200)}`);
+        if (sent.ok) {
+          const fed = await waitUntil(
+            `[...document.querySelectorAll("[data-agent-feed] .agent-msg")].some((el) => el.innerText.includes("uat feed body"))`,
+            15000,
+            "agent message feed entry",
+          );
+          check(Boolean(fed), "accepted team.message never appeared in the agent message feed");
+          await shoot("shell-agent-feed", ["desk1024"]);
+        }
+      } else {
+        log("no child member in /v1/team; skipped agent feed check");
+      }
     }
 
     const before = await page.evaluate(
