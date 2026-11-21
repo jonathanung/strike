@@ -1,0 +1,8 @@
+[package]
+name = "composer-drafts"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Per-session composer drafts that survive session switches and reloads (#1367)."
+
+[dependencies]

@@ -9,6 +9,7 @@
 
 mod api;
 mod appearance;
+mod attachment_honesty;
 mod apps;
 mod approvals;
 mod approvals_ui;
@@ -18,8 +19,10 @@ mod confirm;
 mod composer_triggers;
 mod diag;
 mod draft_size;
+mod drafts;
 mod editor;
 mod load_epoch;
+mod local_issues;
 mod localfiles;
 mod customize;
 mod gateway;
@@ -43,11 +46,13 @@ mod steer_queue;
 mod model_menu;
 mod model_menu_view;
 mod session_list;
+mod session_loops;
 mod settings;
 mod session_panel;
 mod storage;
 mod tab_title;
 mod task_runner;
+mod quick_open;
 mod transcript_find;
 mod usage_audit;
 mod session_delete;
@@ -55,12 +60,15 @@ mod session_restore;
 mod shell;
 mod side_chat;
 mod status;
+mod status_card_view;
 mod term;
+mod tool_tail;
 mod terminal;
 mod transcript;
 mod transcript_view;
 mod triggers;
 mod turn_elapsed;
+mod turn_failure;
 mod turn_usage;
 mod workspaces;
 use crate::shell::icon;
@@ -103,6 +111,7 @@ use crate::approvals_ui::{
     apply_perm_notes, commit_autonomy, commit_session_mode, ApprovalCards, ApprovalHost,
     ApprovalMenu, AutonomyMenu,
 };
+use crate::status_card_view::{ChildStatusCard, SessionStatusCard};
 use crate::transcript::Transcript;
 use crate::transcript_view::{save_download, TranscriptHandlers, TranscriptPane};
 use crate::workspaces::WorkspacePicker;
@@ -979,13 +988,6 @@ fn rows_from_team(prev: &[ActivityRow], team: &TeamSnapshot, now: f64) -> Vec<Ac
             continue;
         }
         let state = display_state(member);
-        let mut output = member.terminal_summary.clone();
-        if !member.block_reason.is_empty() {
-            if !output.is_empty() {
-                output.push_str("\n\n");
-            }
-            output.push_str(&member.block_reason);
-        }
         let started_ms = prev
             .iter()
             .find(|p| p.session_id == session_id)
@@ -1013,10 +1015,12 @@ fn rows_from_team(prev: &[ActivityRow], team: &TeamSnapshot, now: f64) -> Vec<Ac
             agent: member.agent.clone(),
             task: member.objective.clone(),
             state,
-            output,
             elapsed_s,
             started_ms,
             expanded,
+            summary: member.terminal_summary.clone(),
+            block_reason: member.block_reason.clone(),
+            budget: model::card_budget(member),
         });
     }
     rows.sort_by(|a, b| a.name.cmp(&b.name).then(a.session_id.cmp(&b.session_id)));
@@ -1083,8 +1087,14 @@ fn App() -> impl IntoView {
     let diag_capable = RwSignal::new(false);
     // Bootstrap capability `ledger` (#1485): gates the Decisions tab.
     let ledger_capable = RwSignal::new(false);
+    // Bootstrap capability `issues` (#1500): gates the Issues tab.
+    let issues_capable = RwSignal::new(false);
     // Bootstrap capability `projectInit` (#1581): gates Create AGENTS.md.
     let project_init_capable = RwSignal::new(false);
+    // Bootstrap capability `loops` (#1588): session /loop jobs.
+    let loops_capable = RwSignal::new(false);
+    let loop_rows = RwSignal::new(Vec::<session_loops::SessionLoop>::new());
+    let loop_note = RwSignal::new(String::new());
     let mode = RwSignal::new("chat".to_string());
     // The shell palette preventDefaults its keys. This signal stays false;
     // AppsPane also bails when the event is already default_prevented.
@@ -1129,6 +1139,22 @@ fn App() -> impl IntoView {
     Effect::new(move |_| {
         let _ = draft.get();
         sync_composer_height_soon();
+    });
+    // Per-session drafts (#1367): the composer text belongs to the
+    // viewed session. Every switch — whichever of the active_root
+    // setters made it — saves the outgoing session's draft and restores
+    // the incoming one; every edit (typing, recall, send clearing it)
+    // is persisted under `strike.draft.<root>`.
+    let draft_book = StoredValue::new_local(drafts::book());
+    Effect::new(move |_| {
+        let root = active_root.get();
+        let text = draft.get();
+        if let Some(restored) = draft_book
+            .try_update_value(|book| book.sync(&root, &text))
+            .flatten()
+        {
+            draft.set(restored);
+        }
     });
     let loading = RwSignal::new(true);
     let meta_epoch = RwSignal::new(LoadEpoch::new());
@@ -1298,6 +1324,13 @@ fn App() -> impl IntoView {
     let doc_line = RwSignal::new(0u32);
     let doc_diff = RwSignal::new(false);
     let doc_editing = RwSignal::new(false);
+    // Open a file in the document viewer: the one path the Files pane's
+    // Open and quick-open (#1396) share.
+    let open_doc = move |p: &str| {
+        doc_line.set(0);
+        doc_diff.set(false);
+        doc_path.set(p.to_string());
+    };
     let layout = RwSignal::new(chat_mode::normalize_layout(&load("strike.layout")));
     let sessions_drawer = RwSignal::new(false);
     let panel_drawer = RwSignal::new(false);
@@ -1694,9 +1727,16 @@ fn App() -> impl IntoView {
                                 diag_capable.set(boot.capabilities.diag);
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
                                 ledger_capable.set(boot.capabilities.ledger);
+                                crate::local_issues::set_issues_capable(boot.capabilities.issues);
+                                issues_capable.set(boot.capabilities.issues);
                                 project_init_capable.set(boot.capabilities.project_init);
                                 skills.set(boot.skills);
-                                commands.set(boot.composer_commands);
+                                loops_capable.set(boot.capabilities.loops);
+                                commands.set(if boot.capabilities.loops {
+                                    session_loops::with_loop_commands(boot.composer_commands)
+                                } else {
+                                    boot.composer_commands
+                                });
                                 if !catalog_once.get_untracked() {
                                     catalog_once.set(true);
                                     load_model_catalog();
@@ -2331,6 +2371,31 @@ fn App() -> impl IntoView {
     };
 
     let send = move |which: steer_queue::SendWhich| {
+        // Session /loop (#1588): handled against the loops routes, never
+        // sent as a prompt, and ahead of the context hold so a full window
+        // never blocks /loop stop. Without the capability the draft is kept.
+        let loop_text = draft.get_untracked().trim().to_string();
+        if let Some(cmd) = session_loops::parse(&loop_text) {
+            ac_open.set(false);
+            let root = active_root.get_untracked();
+            if root.is_empty() {
+                status.set("no live session yet".into());
+                return;
+            }
+            if !loops_capable.get_untracked() {
+                loop_note.set("loop: this gateway cannot run loops for this session (attach-only or read-only).".into());
+                return;
+            }
+            if pending_files.get_untracked().iter().any(|f| f.error.is_empty()) {
+                loop_note.set("loop: a loop job is text only. Remove the attachments first.".into());
+                return;
+            }
+            prompt_history.update(|h| h.push(&loop_text));
+            draft.set(String::new());
+            let (b, t) = (base.get_untracked(), token.get_untracked());
+            spawn_local(session_loops::run(b, t, root, cmd, active_root, loop_rows, loop_note));
+            return;
+        }
         // Context-hold gate (mirrors send_text): when the context fit is
         // critical/full, do not dispatch and do not clear the draft or
         // pending files, so a held submit never loses typed text. This
@@ -2977,6 +3042,9 @@ fn App() -> impl IntoView {
     // confirmation when one was required.
     let on_deleted = Callback::new(move |id: String| {
         let was_live = roots.get_untracked().iter().any(|row| row.id == id);
+        // Drop the deleted session's draft (#1367) before the fallback
+        // switch below, so it is not saved back as the outgoing draft.
+        draft_book.update_value(|book| book.forget(&id));
         pins.update(|list| list.retain(|p| p != &id));
         save(
             "strike.pins",
@@ -3616,6 +3684,17 @@ fn App() -> impl IntoView {
         selected: gateway_selected,
         refresh: Rc::new(move || refresh_meta()),
     });
+    // Quick-open (#1396): the palette's Open file… opens through the
+    // same path as the Files pane's Open (`open_doc`), so the unsaved
+    // guard sees it like any other path change.
+    crate::quick_open::set_host(crate::quick_open::QuickOpenHost {
+        base,
+        token,
+        open: Rc::new(move |p: &str| {
+            mode.set("chat".into());
+            open_doc(p);
+        }),
+    });
     crate::gateway_qr::set_host(crate::gateway_qr::PhoneHost {
         base,
         token,
@@ -3662,6 +3741,16 @@ fn App() -> impl IntoView {
                 return Err("This daemon does not serve the decision ledger.".into());
             }
             side_tab.set("decisions".into());
+            Ok(())
+        }),
+    );
+    shell::bind(
+        "panel-issues",
+        Rc::new(move |_args: &str| {
+            if !issues_capable.get_untracked() {
+                return Err("Local issues are not available on this gateway.".into());
+            }
+            side_tab.set("issues".into());
             Ok(())
         }),
     );
@@ -4045,6 +4134,24 @@ fn App() -> impl IntoView {
         let _ = w.add_event_listener_with_callback("keydown", on_find_key.as_ref().unchecked_ref());
     }
     on_find_key.forget();
+    // Ctrl/Cmd+P opens the palette on Open file… (#1396), cockpit-wide —
+    // the quick-open convention every comparator uses. It replaces the
+    // browser's print shortcut while the cockpit is focused.
+    let on_quick_open_key =
+        Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
+            if (ev.ctrl_key() || ev.meta_key())
+                && !ev.alt_key()
+                && !ev.shift_key()
+                && ev.key().eq_ignore_ascii_case("p")
+            {
+                ev.prevent_default();
+                shell::show_palette_at("open-file");
+            }
+        });
+    if let Some(w) = web_sys::window() {
+        let _ = w.add_event_listener_with_callback("keydown", on_quick_open_key.as_ref().unchecked_ref());
+    }
+    on_quick_open_key.forget();
     // Keep the current match scrolled into view as the query or the
     // step position changes. Line appends alone do not retrigger this
     // (the list is read untracked), so streaming does not yank scroll.
@@ -5241,6 +5348,7 @@ fn App() -> impl IntoView {
                             </div>
                         </Show>
                         <div class="steer-queue" id="steer-queue">
+                            <session_loops::LoopRows base=base token=token root=active_root capable=loops_capable loops=loop_rows note=loop_note />
                             <Show when=move || !steer_note.get().is_empty()>
                                 <p class="steer-note" role="status">{move || steer_note.get()}</p>
                             </Show>
@@ -5339,13 +5447,18 @@ fn App() -> impl IntoView {
                                         let name = file.name.clone();
                                         let preview = file.preview.clone();
                                         let error = file.error.clone();
-                                        let show_img = !preview.is_empty();
                                         let show_err = !error.is_empty();
+                                        // #1390: audio/video chips get native controls over
+                                        // the same blob URL images use.
+                                        let preview_view = match (preview.is_empty(), chat_mode::preview_kind(&file.mime)) {
+                                            (false, chat_mode::PreviewKind::Image) => view! { <img src=preview.clone() alt="" /> }.into_any(),
+                                            (false, chat_mode::PreviewKind::Audio) => view! { <audio class="attach-media" controls=true preload="metadata" src=preview.clone()></audio> }.into_any(),
+                                            (false, chat_mode::PreviewKind::Video) => view! { <video class="attach-media" controls=true preload="metadata" playsinline=true src=preview.clone()></video> }.into_any(),
+                                            _ => view! { <span></span> }.into_any(),
+                                        };
                                         view! {
                                             <span class="attach-chip">
-                                                <Show when=move || show_img>
-                                                    <img src=preview.clone() alt="" />
-                                                </Show>
+                                                {preview_view}
                                                 <span>
                                                     <span class="name">{name}</span>
                                                     <Show when=move || show_err>
@@ -5364,9 +5477,25 @@ fn App() -> impl IntoView {
                                         }
                                     }).collect_view()}
                                 </div>
+                                {move || {
+                                    // #1561: say when the engine is known to drop a file
+                                    // before the model sees it. Warn, never block.
+                                    let rows: Vec<(String, String)> = pending_files
+                                        .get()
+                                        .into_iter()
+                                        .filter(|f| f.error.is_empty())
+                                        .map(|f| (f.name, f.mime))
+                                        .collect();
+                                    let lines = attachment_honesty::composer_warnings(&provider_name.get(), &rows);
+                                    (!lines.is_empty()).then(|| view! {
+                                        <div class="attach-warning" role="status" data-attach-warning="true">
+                                            {lines.into_iter().map(|line| view! { <p>{line}</p> }).collect_view()}
+                                        </div>
+                                    })
+                                }}
                             </Show>
                             <input class="file-pick" type="file" data-chat-file="true" data-chat-attach="true" node_ref=file_input multiple=true
-                                accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,image/svg+xml,text/plain,application/zip,application/gzip"
+                                accept=chat_mode::ACCEPT_TYPES
                                 on:change=move |_| {
                                     if let Some(el) = file_input.get() {
                                         if let Some(files) = el.files() {
@@ -5640,6 +5769,7 @@ fn App() -> impl IntoView {
                         <StatCard label="Blocked".into()>{move || blocked_count().to_string()}</StatCard>
                         <StatCard label="Tasks".into()>{move || activity.get().len().to_string()}</StatCard>
                     </div>
+                    <SessionStatusCard activity=activity roots=roots active_root=active_root children=children tick=tick />
                     <Show when=move || !team_note.get().is_empty()>
                         <p class="hint" data-team-note="true">{move || team_note.get()}</p>
                     </Show>
@@ -5685,7 +5815,7 @@ fn App() -> impl IntoView {
                                 let task_retry = row.task.clone();
                                 let headline = task_headline(&row.task);
                                 let show_task = !headline.is_empty();
-                                let output = row.output.clone();
+                                let row_card = row.clone();
                                 let expanded = row.expanded;
                                 let running = is_running(&state);
                                 let retry = can_retry(&state);
@@ -5759,7 +5889,7 @@ fn App() -> impl IntoView {
                                             </Show>
                                         </div>
                                         <Show when=move || expanded>
-                                            <pre class="output">{if output.is_empty() { "No output yet.".to_string() } else { output.clone() }}</pre>
+                                            <ChildStatusCard row=row_card.clone() />
                                         </Show>
                                     </li>
                                 }
@@ -5809,9 +5939,7 @@ fn App() -> impl IntoView {
                                                     if is_dir {
                                                         files_path.set(path_click.clone());
                                                     } else {
-                                                        doc_line.set(0);
-                                                        doc_diff.set(false);
-                                                        doc_path.set(path_click.clone());
+                                                        open_doc(&path_click);
                                                     }
                                                 }
                                             >{label}</button>
@@ -5897,6 +6025,14 @@ fn App() -> impl IntoView {
                             token=token
                             root=active_root
                             memory_mode=memory_mode
+                            status=status
+                            storage_rev=storage_rev
+                        />
+                    </Show>
+                    <Show when=move || side_tab.get() == "issues" && issues_capable.get()>
+                        <local_issues::LocalIssuesPanel
+                            base=base
+                            token=token
                             status=status
                             storage_rev=storage_rev
                         />

@@ -342,6 +342,7 @@ func bashSandboxPolicy(tc *Context) sandbox.Policy {
 
 func compiledSandboxPolicy(p sandbox.Policy) bool {
 	return p.Mode != sandbox.ModeOff ||
+		p.Runtime != sandbox.RuntimeProcess ||
 		strings.TrimSpace(p.WorkDir) != "" ||
 		p.NoWorkspaceWrite ||
 		p.NoNetwork ||

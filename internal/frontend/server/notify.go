@@ -79,6 +79,8 @@ type notificationsResponse struct {
 	Notifications []Notification `json:"notifications"`
 	Prefs         NotifyPrefs    `json:"prefs"`
 	Latest        int64          `json:"latest"`
+	// Seen is the daemon-side read state shared by every browser (#1392).
+	Seen NotifySeen `json:"seen"`
 }
 
 type notifyState struct {
@@ -93,6 +95,7 @@ type notifyLog struct {
 	sessionDir string
 	state      notifyState
 	prefs      NotifyPrefs
+	seen       NotifySeen
 	items      []Notification
 	ids        map[string]struct{}
 	now        func() time.Time
@@ -126,6 +129,7 @@ func openNotifyLog(dir, sessionDir string) *notifyLog {
 		_ = os.Chmod(dir, 0o700)
 	}
 	n.load()
+	n.loadSeen()
 	return n
 }
 
@@ -192,6 +196,7 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request) {
 		Notifications: items,
 		Prefs:         prefs,
 		Latest:        latest,
+		Seen:          log.seenState(),
 	})
 }
 
@@ -491,6 +496,12 @@ func (n *notifyLog) snapshot(since int64) ([]Notification, NotifyPrefs, int64) {
 		items = append(items, cp)
 	}
 	return items, prefs, latest
+}
+
+func (n *notifyLog) seenState() NotifySeen {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.seenSnapshotLocked()
 }
 
 func (n *notifyLog) savePrefs(prefs NotifyPrefs) error {
