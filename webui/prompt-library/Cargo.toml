@@ -1,0 +1,8 @@
+[package]
+name = "prompt-library"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Saved composer prompts with {{variable}} placeholders (#1357). Pure logic, no browser."
+
+[dependencies]

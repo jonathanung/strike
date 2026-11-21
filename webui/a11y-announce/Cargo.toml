@@ -1,0 +1,8 @@
+[package]
+name = "a11y-announce"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "What the cockpit's live regions say, and when. Pure decisions; the DOM lives in the webui crate."
+
+[dependencies]

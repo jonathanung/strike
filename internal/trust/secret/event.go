@@ -30,6 +30,10 @@ func RedactEvent(ev protocol.Event) protocol.Event {
 	case protocol.TurnSteered:
 		e.Text = redact.String(e.Text)
 		return e
+	case protocol.TurnSteerAck:
+		e.Summary = redact.String(e.Summary)
+		e.Reason = redact.String(e.Reason)
+		return e
 	case protocol.InputQueued:
 		if len(e.Items) > 0 {
 			items := make([]protocol.InputQueueItem, len(e.Items))
