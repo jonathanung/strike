@@ -67,6 +67,7 @@ mod triggers;
 mod turn_elapsed;
 mod turn_usage;
 mod workspaces;
+mod spec_authoring;
 use crate::shell::icon;
 
 
@@ -4820,6 +4821,9 @@ fn App() -> impl IntoView {
                 active_root=active_root
                 status=status
             />
+        </Show>
+        <Show when=move || mode.get() == "specs" fallback=move || ()>
+            <spec_authoring::SpecAuthoringPage base=base token=token status=status active_root=active_root mode=mode />
         </Show>
         <Show when=move || mode.get() == "triggers" fallback=move || ()>
             <triggers::TriggersPage
