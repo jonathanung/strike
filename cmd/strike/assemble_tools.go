@@ -428,10 +428,11 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 	// Plugin path/capability admission (trust remains a separate gate).
 	pluginVerdicts := config.AdmitPlugins(admitPol, config.DiscoverPlugins(cfgScope), workDir)
 	admissionVerdicts = append(admissionVerdicts, pluginVerdicts...)
-	// #1958: re-read on use so a skill installed while serve runs (an
-	// accepted skill proposal, a Customize save) is invocable at once.
+	// #1958: re-read when stale so a skill installed while serve runs (an
+	// accepted skill proposal, a Customize save) is invocable at once. The
+	// report form collects load notes instead of printing them again.
 	liveSkillCatalog := newLiveSkills(skills, func() ([]config.Skill, error) {
-		next, err := config.LoadSkillsWithError(cfgScope)
+		next, _, err := config.LoadSkillsReport(cfgScope)
 		if err != nil {
 			return nil, err
 		}
@@ -927,7 +928,7 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			SessionID: sid,
 			Select:    selectProvider,
 			PrepareInput: func(text, dir string) engine.InputPrep {
-				return composerPrepare(text, dir, liveSkillCatalog.Current(), &triggers.Sessions{
+				return composerPrepare(text, dir, liveSkillCatalog.ForInput(text), &triggers.Sessions{
 					Self: sid,
 					Read: sessionref.Reader(sessions.Dir(), sessionref.DefaultTurns),
 				})
