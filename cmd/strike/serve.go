@@ -789,6 +789,9 @@ func runServe(opts serveOptions, stdout, stderr io.Writer) error {
 		GitHub: dwGitHub,
 		Shell:  dwShell,
 		Notify: deploywatch.Poster{GitHub: dwGitHub, Launcher: rootLauncher},
+		// Confirmed regression handoffs (#1784).
+		Launcher: rootLauncher,
+		Revert:   &deploywatch.Reverter{RepoDir: cwd, GitHub: dwGitHub},
 	})
 	trigSvc.SetDeployWatches(deployWatches)
 	if !opts.readOnly {
