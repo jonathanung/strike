@@ -171,3 +171,23 @@ func normalizeKeywords(in []string) []string {
 	}
 	return out
 }
+
+// ServerConfigs returns the raw mcpServers entries from p's mcp.json, keyed
+// by server name, so the MCP layer can decode them with its own schema.
+// A pack without mcp.json returns nil.
+func ServerConfigs(p Power) (map[string]json.RawMessage, error) {
+	raw, err := os.ReadFile(filepath.Join(p.Dir, "mcp.json"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("powers: %s/mcp.json: %w", p.Dir, err)
+	}
+	var m struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("powers: %s/mcp.json: %w", p.Dir, err)
+	}
+	return m.MCPServers, nil
+}

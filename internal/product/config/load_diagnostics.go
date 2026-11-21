@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jonathanung/strike/harness/permission"
+	"github.com/jonathanung/strike/harness/safefile"
 	"github.com/jonathanung/strike/pkg/redact"
 )
 
@@ -75,19 +76,34 @@ func (c *loadCollector) add(path, severity, code, msg string, fatal bool) {
 	})
 }
 
-func (c *loadCollector) addNotes(path string, notes []fileNote) {
+// addNotes records per-file notes for path, found under source root (the
+// discovery directory it was listed from; "" for plugin files). prefix is
+// prepended to each message (for example "plugin acme.x: ").
+func (c *loadCollector) addNotes(root, path, prefix string, notes []fileNote) {
+	// Claude command files often have no frontmatter; a description is
+	// optional there. Only the .claude/commands source root is exempt, not
+	// any folder that happens to be named "commands".
+	commands := isClaudeCommandsRoot(root)
 	for _, n := range notes {
-		// Claude command files often have no frontmatter; a description
-		// is optional there.
-		if n.code == DiagMissingDescription && filepath.Base(filepath.Dir(path)) == "commands" {
+		if n.code == DiagMissingDescription && commands {
 			continue
 		}
 		severity := "warning"
 		if n.code == DiagUnreadable {
 			severity = "error"
 		}
-		c.add(path, severity, n.code, n.msg, false)
+		c.add(path, severity, n.code, prefix+n.msg, false)
 	}
+}
+
+// isClaudeCommandsRoot reports whether root is a <dir>/.claude/commands
+// discovery root.
+func isClaudeCommandsRoot(root string) bool {
+	if root == "" {
+		return false
+	}
+	root = filepath.Clean(root)
+	return filepath.Base(root) == "commands" && filepath.Base(filepath.Dir(root)) == ".claude"
 }
 
 func (c *loadCollector) addFatal(path string, err error) {
@@ -139,6 +155,12 @@ func fileFingerprint(path string) string {
 // does not recognize still loads with the whole file as the body, as
 // before, but is reported.
 func readMarkdownDoc(path string) (meta map[string]string, body string, nested permission.Ruleset, notes []fileNote, ok bool) {
+	// Refuse FIFOs, devices and sockets before opening: reading a FIFO
+	// blocks, and a rescan runs on a page load (as harness/safefile does
+	// for tools).
+	if err := safefile.CheckLeaf(path, false); err != nil {
+		return nil, "", nil, []fileNote{{code: DiagUnreadable, msg: "cannot read file: " + leafErrReason(err)}}, false
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", nil, []fileNote{{code: DiagUnreadable, msg: "cannot read file: " + readErrReason(err)}}, false
@@ -156,6 +178,19 @@ func readMarkdownDoc(path string) (meta map[string]string, body string, nested p
 		return meta, "", nested, notes, false
 	}
 	return meta, body, nested, notes, true
+}
+
+// leafErrReason names why safefile.CheckLeaf refused a path, without the
+// path itself (the diagnostic already carries it).
+func leafErrReason(err error) string {
+	switch {
+	case safefile.IsCode(err, safefile.CodeSpecialFile):
+		return "not a regular file (FIFO, device, or socket)"
+	case safefile.IsCode(err, safefile.CodeNotRegular):
+		return "not a regular file"
+	default:
+		return readErrReason(err)
+	}
 }
 
 func readErrReason(err error) string {
