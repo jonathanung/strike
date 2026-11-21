@@ -100,6 +100,7 @@ mod terminal;
 mod transcript;
 mod transcript_attachments;
 mod transcript_view;
+mod tts;
 mod update_check;
 mod triggers;
 mod turn_elapsed;
