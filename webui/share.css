@@ -1,0 +1,89 @@
+/* feature:session-share begin */
+.share-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--ground);
+  color: var(--ink);
+}
+.share-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: 10px 14px;
+  border-bottom: var(--border-width) solid var(--ink);
+  background: var(--surface);
+  font-size: var(--type-sm);
+}
+.share-transcript {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: var(--space-2);
+}
+.share-offline,
+.share-error {
+  margin: var(--space-2);
+  padding: 8px 10px;
+  border: var(--border-width) solid var(--signal);
+  border-radius: var(--radius-sm);
+  color: var(--signal);
+  font-size: var(--type-sm);
+}
+.share-dead {
+  max-width: 34rem;
+  margin: 15vh auto 0;
+  padding: var(--space-4, 24px);
+  border: var(--border-width) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.share-dead h1 { margin-top: 0; font-size: var(--type-lg, 1.25rem); }
+.share-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--ink) 35%, transparent);
+}
+.share-dialog {
+  width: min(36rem, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  padding: 16px;
+  border: var(--border-width) solid var(--ink);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+.share-dialog h2 { margin-top: 0; }
+.share-scope,
+.share-hint,
+.share-empty { color: var(--muted); font-size: var(--type-sm); }
+.share-form,
+.share-link {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: end;
+  margin: var(--space-2) 0;
+}
+.share-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--type-sm);
+}
+.share-link input { flex: 1 1 16rem; min-width: 0; }
+.share-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.share-rows li { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.share-row-label { flex: 1 1 10rem; overflow-wrap: anywhere; }
+.share-row-expiry { color: var(--muted); font-size: var(--type-sm); }
+.share-actions { display: flex; justify-content: flex-end; margin-top: var(--space-2); }
+/* feature:session-share end */

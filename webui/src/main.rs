@@ -25,6 +25,7 @@ mod drafts;
 mod editor;
 mod lessons;
 mod load_epoch;
+mod markdown_review;
 mod local_issues;
 mod localfiles;
 mod customize;
@@ -53,6 +54,7 @@ mod park;
 mod permissions_explain;
 mod plan_card;
 mod steer_queue;
+mod steer_ack;
 mod model_menu;
 mod model_menu_view;
 mod session_list;
@@ -69,6 +71,7 @@ mod transcript_find;
 mod usage_audit;
 mod session_delete;
 mod session_restore;
+mod share;
 mod shell;
 mod skill_usage;
 mod side_chat;
@@ -140,6 +143,7 @@ use crate::editor::DocumentPane;
 use crate::mobile::PhoneNav;
 use crate::customize::CustomizePane;
 use crate::side_chat::SideChatPanel;
+use crate::share::{ShareDialog, ShareView};
 use crate::outbox::OutboxList;
 
 use crate::model::{budget_elapsed, can_retry, RootsResponse};
@@ -5330,6 +5334,8 @@ fn App() -> impl IntoView {
                             jump_line=doc_line
                             want_diff=doc_diff
                             editing=doc_editing
+                            root=active_root
+                            busy=session_busy_now
                             history=file_history
                         />
                     </Show>
@@ -5396,6 +5402,7 @@ fn App() -> impl IntoView {
                         </div>
                     </Show>
                     <Show when=move || doc_path.get().is_empty()>
+                    <ShareDialog base=base token=token session=active_root />
                     <TranscriptPane
                         transcript=transcript
                         session=active_root
@@ -6464,7 +6471,13 @@ mod composer_grow_history_tests {
 }
 
 fn main() {
-    leptos::mount::mount_to_body(App);
+    // A share link (#1565) gets only the read-only transcript shell: no
+    // cockpit, no session list, no gateway credential.
+    if let Some(token) = share::share_token_from_location() {
+        leptos::mount::mount_to_body(move || view! { <ShareView token=token /> });
+    } else {
+        leptos::mount::mount_to_body(App);
+    }
     // The cockpit mounted, so the static boot shell from index.html has
     // done its job. mount_to_body appends rather than replacing the body,
     // so remove the placeholder explicitly; if the wasm never runs, the
