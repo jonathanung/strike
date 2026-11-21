@@ -416,3 +416,17 @@ Stall is already a real badge when the team roster sets `budget.stall`.
 Retry is `team.spawn` of the same objective, which starts a new child; it
 does not resume the old session. Stop is `team.child_interrupt`. None of
 these need a new panel.
+
+## Accessibility
+
+Shipped (#1337 slice 1): two global `aria-live` regions at the shell root
+(`webui/src/announce.rs`, wording in `webui/a11y-announce`) — new
+permission asks are announced assertively and focus moves to the new
+approval card unless the user is typing; a turn ending is announced
+politely. `webui/a11y.css` honours `prefers-reduced-motion` and lifts
+accent-role text on the default Strike theme to AA.
+
+Planned (#1878): agent-question announcements (the cockpit has no
+`question.asked` handler yet, so there is nothing to announce), focus
+trap and return for dialogs and the palette, a keyboard-only UAT loop, an
+automated a11y scan, and accent-text contrast for non-default themes.

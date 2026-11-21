@@ -7,6 +7,7 @@
 //! `task_runner`. Customize (skills, agents, MCP, hooks, rules) lives
 //! in `customize`.
 
+mod announce;
 mod api;
 mod appearance;
 mod apps;
@@ -64,6 +65,7 @@ mod turn_elapsed;
 mod turn_usage;
 mod workspaces;
 use crate::shell::icon;
+use crate::announce::LiveRegions;
 
 
 use std::cell::{Cell, RefCell};
@@ -3138,6 +3140,10 @@ fn App() -> impl IntoView {
         roots.get().iter().any(|r| r.id == root && r.busy)
             || (live_busy.get() && live_busy_root.get() == root)
     });
+    // #1337: approvals and turn endings reach screen readers.
+    let announcer = announce::Announcer::new();
+    announce::watch_asks(announcer, asks);
+    announce::watch_turns(announcer, active_root, session_busy_now, transcript);
 
     Effect::new(move |_| {
         if model_menu.get() {
@@ -4666,6 +4672,7 @@ fn App() -> impl IntoView {
     });
 
     view! {
+        <LiveRegions announcer=announcer />
         <ApprovalHost
             base=base
             token=token

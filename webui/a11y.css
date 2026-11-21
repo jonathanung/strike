@@ -1,0 +1,48 @@
+/* feature:a11y begin (#1337)
+   Presentation-layer accessibility pass. Loaded after the feature
+   stylesheets and before theme.css, so theme.css's block-language
+   overrides (e.g. filled .chip.on/.seg.on) still win where they apply. */
+
+/* Motion: honour the OS "reduce motion" setting across the cockpit.
+   Animations and transitions finish instantly instead of sliding,
+   scaling or looping; smooth scrolling becomes a jump. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Contrast: on the default Strike dark scheme, --acid (#7c3aed) used as
+   TEXT measures 3.23:1 on --ground — below WCAG AA 4.5:1. Text in the
+   accent role uses --acid-text: the scheme's existing light purple
+   (--highlight, #ddd6fe, ~14:1) there, and --acid itself on every other
+   theme/scheme, where it already passes. Borders and fills keep --acid. */
+:root {
+  --acid-text: var(--acid);
+}
+:root:not([data-scheme="light"]):not([data-theme]),
+:root[data-theme="strike"]:not([data-scheme="light"]) {
+  --acid-text: var(--highlight);
+}
+.seg.on,
+.chip.on,
+.pin:hover,
+.triggers-actions button.on,
+.ss-quiet:hover,
+.icon-button.on,
+.seg-choice:has(input:checked) span,
+.nav-icon.on,
+.apps-kicker,
+.ledger-link,
+.ev-kw,
+body[data-phone="1"] .phone-nav button.on,
+body[data-phone="1"][data-pull="1"] .page-header::after {
+  color: var(--acid-text);
+}
+/* feature:a11y end */
