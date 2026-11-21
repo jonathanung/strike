@@ -993,6 +993,13 @@ Response: `{ mode, state, current?, latest?, available, message?, error?, checke
 `current` (only after a successful check), `failed` (offline, rate limit, API
 error — never reported as up to date), or `unknown`. Missing capability returns
 501.
+
+The cockpit calls the route once per gateway after bootstrap reports
+`capabilities.updateCheck`, and again from **Settings → Updates** (dial change
+or *Check now*). The Updates section edits the `autoupdate` dial and states the
+result (`off`, available, up to date, or the failure reason). An `available`
+result adds one notification-centre row keyed by the release; dismissing it
+holds until a newer release. The web never installs.
 The cockpit Settings dialog loads `GET`, edits sections, and saves via `PATCH`.
 Browser color scheme (auto/dark/light) is local-only (`data-appearance` +
 `localStorage`), not a host config key.
@@ -1057,6 +1064,15 @@ A loop object carries `id`, `interval`, `intervalMs`, `job`, `runs`,
 an ordinary `user.input`: while a turn is busy it waits on the same input
 queue as a queued send, and it counts as a normal turn for usage, budgets,
 and guardrails. `GET /v1/status` carries `loops`, the active count.
+
+**Cockpit.** The composer takes the same grammar: `/loop <interval> <job>`,
+`/loop` or `/loop list`, `/loop stop [id]` (no id stops all). The line is
+handled against these routes and is never sent as a prompt; the daemon's
+error sentence shows under the composer. Active loops show as rows in the
+queue pane (id, interval, job, run count, next fire, Stop). The rows poll
+the list route every 5 s, since loop state is not on the event stream yet.
+Firings appear in the transcript as plain user prompts: `user.input` carries
+no loop id, so there is no per-firing loop badge.
 
 ### Schedules
 
@@ -1175,6 +1191,7 @@ writes remain coherent via the underlying stores; browser reads are race-safe.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/v1/files/search` | mode | Workspace file search (`q`, `limit`≤50) for `@file` completion; root-scoped via `host.Files.SearchFiles` |
+| `GET` | `/v1/sessions/{id}/reference` | mode | Size of an `@session:<id>` reference (#1550): `chars` of the exact quoted block the daemon attaches (summary + last 10 turns), `tokens` (~4 chars/token, `estimated`), `turns`, `omitted`, `hasSummary`, `self`. 404 for a missing/pruned session. Display only. |
 | `GET` | `/v1/file/view` | mode | Document read (`path`). JSON: content, sha256, mtimeUnixNano, binary, truncated, writable, writeBlock. Work-root confined; symlinks rejected. An explicit allowed-root ceiling (workspace `AllowedRoots`, when the registry grows one) also rejects paths outside that list. |
 | `PUT` | `/v1/file` | **yes** | Save one existing text file (`path`, `content`, `sha256`, `mtimeUnixNano`). 409 `conflict` when the hash or mtime moved; the body has the new revision, not the file text. Plan mode and edit/write deny rules return 403. Does not create files. Attach-only and read-only reject. |
 | `POST` | `/v1/history` | **yes** | Enqueue one prompt (`{prompt}`) into project history; blocked in attach-only. Web client calls once per accepted `user.input` (not on replay). |
