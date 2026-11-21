@@ -710,6 +710,23 @@ type QuestionResponse struct {
 	Answers []string
 }
 
+// ElicitRequest is an MCP server's elicitation/create raised mid tool call
+// (#1353). Mode is form (RequestedSchema) or url (URL).
+type ElicitRequest struct {
+	Server          string
+	Message         string
+	Mode            string
+	RequestedSchema json.RawMessage
+	URL             string
+}
+
+// ElicitResponse is the user's answer: accept (with Content on form mode),
+// decline, or cancel. It never carries or grants a permission.
+type ElicitResponse struct {
+	Action  string
+	Content json.RawMessage
+}
+
 // SessionPR is a pull request linked to the active session (from gh output).
 // State is open, merged, or closed when known (empty when unset).
 type SessionPR struct {
@@ -824,8 +841,11 @@ type Context struct {
 	// PatchCollab submits/previews/rejects/applies inspectable multi-agent patches.
 	PatchCollab func(ctx context.Context, req PatchCollabRequest) (PatchCollabResult, error)
 	// Delegate creates/lists/transitions first-class delegation lifecycle objects.
-	Delegate    func(ctx context.Context, req DelegateRequest) (DelegateResult, error)
-	AskUser     func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
+	Delegate func(ctx context.Context, req DelegateRequest) (DelegateResult, error)
+	AskUser  func(ctx context.Context, req QuestionRequest) (QuestionResponse, error)
+	// Elicit, when non-nil, pauses the calling tool until the user answers an
+	// MCP elicitation request. It always returns (cancel on ctx end).
+	Elicit      func(ctx context.Context, req ElicitRequest) ElicitResponse
 	SwitchAgent func(name string) error
 	// EnterPlanPhase starts the default plan-implement workflow at the plan phase
 	// (plan convenience adapter over StartWorkflow).

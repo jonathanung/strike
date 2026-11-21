@@ -527,6 +527,39 @@ kbd {
   border: 1px solid var(--border-muted);
   border-radius: var(--radius-sm);
 }
+/* feature:workspace-trust (#1781) */
+.workspace-trust { flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3, 12px) 0; }
+.trust-badge {
+  font-size: var(--type-sm);
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--warning);
+  color: var(--warning);
+  background: transparent;
+  cursor: pointer;
+}
+/* Overlay, never in flow: it must not push the composer (phone keyboard). */
+.trust-card {
+  position: fixed;
+  z-index: 45;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(720px, calc(100vw - 24px));
+  max-height: min(70vh, calc(var(--vv-height, 100vh) - 80px));
+  overflow: auto;
+  padding: var(--space-3, 12px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+}
+.trust-card .panel-title { margin: 0; }
+.trust-card .path { font-family: var(--font-mono, monospace); font-size: var(--type-sm); margin: 0; word-break: break-all; }
+.trust-surfaces { margin: 0; }
+.trust-surfaces dt { font-weight: 600; margin-top: var(--space-2); }
+.trust-surfaces dd { margin: 2px 0 0 var(--space-3, 12px); font-size: var(--type-sm); word-break: break-all; }
+/* feature:workspace-trust end */
 .plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .row { display: flex; gap: 8px; align-items: center; }
 .row.card, .activity-row { padding: 8px; }
@@ -3150,6 +3183,13 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 .swatch[data-theme-id="tokyo-night"] { background: #7aa2f7; }
 .swatch[data-theme-id="catppuccin"] { background: #cba6f7; }
 .theme-copy { min-width: 0; }
+/* feature:config-sources begin */
+.config-source-list { list-style: decimal; margin: var(--space-2) 0; padding-left: var(--space-5); }
+.config-source { display: grid; gap: var(--space-1); padding: var(--space-1) 0; }
+.config-source[data-exists="false"] .name { color: var(--muted); }
+.config-source .path { overflow-wrap: anywhere; }
+.config-source .meta { color: var(--muted); font-size: var(--type-sm); }
+/* feature:config-sources end */
 /* feature:themes-catalog begin */
 .theme-choice.disabled { opacity: 0.6; cursor: not-allowed; }
 .theme-catalog-note { margin: 0 0 var(--space-2); }
@@ -3272,6 +3312,111 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .files-head .hint, .changes-head .hint { margin: 0; }
 /* feature:files-refresh end */
+/* feature:search-in-files begin */
+/* #1406: Files-pane search box; matches marked with .tf-mark (transcript-find.css). */
+.sif {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.sif-bar {
+  display: flex;
+  gap: var(--space-2);
+}
+.sif-input {
+  flex: 1;
+  min-width: 0;
+}
+.sif-capped {
+  font-weight: 600;
+}
+.sif-results {
+  display: grid;
+  gap: var(--space-2);
+  max-height: 50vh;
+  overflow: auto;
+}
+.sif-path {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+  font-family: var(--mono, monospace);
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+.sif-count {
+  color: var(--muted);
+}
+.sif-hit {
+  display: flex;
+  gap: var(--space-2);
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: var(--space-1) var(--space-2);
+  color: var(--ink);
+  font-family: var(--mono, monospace);
+  font-size: 0.85em;
+  cursor: pointer;
+}
+.sif-hit:hover,
+.sif-hit:focus-visible {
+  background: var(--surface-muted);
+}
+.sif-line {
+  color: var(--muted);
+  min-width: 3ch;
+  text-align: right;
+  flex: none;
+}
+.sif-hit .ev-inline {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+/* feature:search-in-files end */
+
+/* feature:transcript-attachments begin */
+.sx-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; max-width: 100%; }
+.sx-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 6px 4px 4px;
+  background: var(--ground);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-size: var(--type-sm);
+}
+.sx-attach-chip img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: var(--surface-muted);
+}
+.sx-attach-text { display: inline-flex; flex-direction: column; min-width: 0; }
+.sx-attach-chip .name {
+  font-weight: 600;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sx-attach-chip .kind { color: var(--muted); }
+.sx-attach-state { color: var(--signal); }
+.sx-attach-missing { border-style: dashed; }
+.sx-attach-chip button { min-height: 28px; }
+/* feature:transcript-attachments end */
+/* feature:update-check begin */
+.update-mode { border: 0; padding: 0; margin: 0 0 var(--space-2); }
+.update-mode legend { margin-bottom: 4px; }
+.update-status { margin: 0 0 var(--space-2); }
+/* feature:update-check end */
 /* feature:diagnostics begin */
 /* #1404: LSP diagnostics side view + editor error badge. */
 .diag-results {
@@ -3343,44 +3488,3 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   cursor: pointer;
 }
 /* feature:diagnostics end */
-
-/* feature:transcript-attachments begin */
-.sx-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; max-width: 100%; }
-.sx-attach-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-  padding: 4px 6px 4px 4px;
-  background: var(--ground);
-  border: 1px solid var(--border-muted);
-  border-radius: var(--radius-sm);
-  color: var(--ink);
-  font-size: var(--type-sm);
-}
-.sx-attach-chip img {
-  width: 56px;
-  height: 56px;
-  object-fit: cover;
-  border-radius: 4px;
-  background: var(--surface-muted);
-}
-.sx-attach-text { display: inline-flex; flex-direction: column; min-width: 0; }
-.sx-attach-chip .name {
-  font-weight: 600;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sx-attach-chip .kind { color: var(--muted); }
-.sx-attach-state { color: var(--signal); }
-.sx-attach-missing { border-style: dashed; }
-.sx-attach-chip button { min-height: 28px; }
-/* feature:transcript-attachments end */
-/* feature:update-check begin */
-.update-mode { border: 0; padding: 0; margin: 0 0 var(--space-2); }
-.update-mode legend { margin-bottom: 4px; }
-.update-status { margin: 0 0 var(--space-2); }
-/* feature:update-check end */
