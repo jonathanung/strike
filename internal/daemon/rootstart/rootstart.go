@@ -19,6 +19,9 @@ const (
 	SourceTrigger = "trigger"
 	// SourceSchedule is Request.Source for a scheduler fire (#1276).
 	SourceSchedule = "schedule"
+	// SourceDeployWatch is Request.Source when a deploy watch posts its
+	// verdict to the watch session (#1783).
+	SourceDeployWatch = "deploy_watch"
 )
 
 // Request is one unattended prompt. Prompt is required. ContinueID resumes

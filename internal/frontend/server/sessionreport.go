@@ -255,6 +255,10 @@ func (f *sessionReportFacts) resolveApproval(id string, d protocol.Decision, ask
 	if id == "" || resolved[id] || !asked[id] {
 		return
 	}
+	if d == protocol.DecisionExpired {
+		// Died with no answer (#1387): neither allowed nor denied.
+		return
+	}
 	resolved[id] = true
 	if d == protocol.DecisionReject {
 		f.ApprovalsDenied++

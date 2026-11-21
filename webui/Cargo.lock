@@ -1340,6 +1340,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
+name = "status-card"
+version = "0.1.0"
+
+[[package]]
 name = "strike-webui"
 version = "0.1.0"
 dependencies = [
@@ -1353,6 +1357,8 @@ dependencies = [
  "send_wrapper",
  "serde",
  "serde_json",
+ "status-card",
+ "theme-catalog",
  "transcript-window",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -1423,6 +1429,10 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
 ]
+
+[[package]]
+name = "theme-catalog"
+version = "0.1.0"
 
 [[package]]
 name = "thiserror"
