@@ -498,7 +498,11 @@ func (s *Server) restoreBackupKnowledge(rep *backup.Report, recs []backupKnowled
 		if scope == "" {
 			scope = "project"
 		}
-		it := backup.Item{Section: backup.SectionKnowledge, ID: scope + ":" + rec.Path, Label: rec.Path}
+		// The store trims paths on Put, so match on the trimmed path: an
+		// untrimmed archive path must not slip past the existing-pin check
+		// and replace the target's note.
+		path := strings.TrimSpace(rec.Path)
+		it := backup.Item{Section: backup.SectionKnowledge, ID: scope + ":" + path, Label: path}
 		if k == nil {
 			it.Action, it.Detail = backup.ActionFail, "this gateway has no knowledge store"
 			rep.Add(it)
@@ -509,13 +513,18 @@ func (s *Server) restoreBackupKnowledge(rep *backup.Report, recs []backupKnowled
 			rep.Add(it)
 			continue
 		}
+		if path == "" {
+			it.Action, it.Detail = backup.ActionFail, "knowledge pin has an empty path"
+			rep.Add(it)
+			continue
+		}
 		cur, err := load(scope)
 		if err != nil {
 			it.Action, it.Detail = backup.ActionFail, secret.Redact(err.Error())
 			rep.Add(it)
 			continue
 		}
-		if have, ok := cur[rec.Path]; ok {
+		if have, ok := cur[path]; ok {
 			it.Action = backup.ActionSkip
 			if strings.TrimSpace(have.Note) == strings.TrimSpace(rec.Note) {
 				it.Detail = "identical"
@@ -527,7 +536,7 @@ func (s *Server) restoreBackupKnowledge(rep *backup.Report, recs []backupKnowled
 		}
 		it.Action = backup.ActionCreate
 		if apply {
-			if _, err := k.Put(scope, rec.Path, rec.Note, rec.Author); err != nil {
+			if _, err := k.Put(scope, path, rec.Note, rec.Author); err != nil {
 				it.Action, it.Detail = backup.ActionFail, secret.Redact(err.Error())
 				rep.Add(it)
 				continue
@@ -535,7 +544,7 @@ func (s *Server) restoreBackupKnowledge(rep *backup.Report, recs []backupKnowled
 		}
 		// A repeated path later in the same archive is reported as a skip
 		// in both modes, so the dry run matches the restore.
-		cur[rec.Path] = host.KnowledgePin{Path: rec.Path, Note: rec.Note, Scope: scope}
+		cur[path] = host.KnowledgePin{Path: path, Note: rec.Note, Scope: scope}
 		rep.Add(it)
 	}
 }

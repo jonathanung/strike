@@ -207,20 +207,38 @@ func TestBackupKnowledgeUnavailableScopes(t *testing.T) {
 		t.Fatalf("unreadable global scope not named: %+v", a.Manifest.Excluded)
 	}
 
-	// Archive carrying an unknown scope is refused per record, not applied.
-	if got := restoreKnowledgeScopeItem(t, dst, "workspace"); got.Action != backup.ActionFail {
-		t.Fatalf("unknown scope item = %+v", got)
-	}
 }
 
-func restoreKnowledgeScopeItem(t *testing.T, g *backupGateway, scope string) backup.Item {
-	t.Helper()
-	rep := backup.NewReport(backup.New(time.Now(), ""), true)
-	g.srv.restoreBackupKnowledge(rep, []backupKnowledgePin{{Scope: scope, Path: "x.md"}}, false)
-	if len(rep.Items) != 1 {
-		t.Fatalf("items = %+v", rep.Items)
+func TestBackupKnowledgeRestoreRecordChecks(t *testing.T) {
+	g := newBackupGateway(t, true)
+	if _, err := g.know.Put("project", "docs/a.md", "target note", "me"); err != nil {
+		t.Fatal(err)
 	}
-	return rep.Items[0]
+	cases := []struct {
+		name   string
+		rec    backupKnowledgePin
+		action string
+	}{
+		{"unknown scope", backupKnowledgePin{Scope: "workspace", Path: "x.md"}, backup.ActionFail},
+		{"empty path", backupKnowledgePin{Scope: "project", Path: "  "}, backup.ActionFail},
+		{"untrimmed path matches the existing pin", backupKnowledgePin{Scope: "project", Path: " docs/a.md ", Note: "archive note"}, backup.ActionSkip},
+		{"empty scope means project", backupKnowledgePin{Path: "docs/b.md"}, backup.ActionCreate},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rep := backup.NewReport(backup.New(time.Now(), ""), false)
+			g.srv.restoreBackupKnowledge(rep, []backupKnowledgePin{tc.rec}, true)
+			if len(rep.Items) != 1 || rep.Items[0].Action != tc.action {
+				t.Fatalf("items = %+v, want one %s", rep.Items, tc.action)
+			}
+		})
+	}
+	if p, _ := g.know.get("project", "docs/a.md"); p.Note != "target note" {
+		t.Fatalf("target note overwritten: %+v", p)
+	}
+	if _, ok := g.know.get("project", "docs/b.md"); !ok {
+		t.Fatal("empty-scope pin not restored to project")
+	}
 }
 
 func TestBackupKnowledgeMissingStore(t *testing.T) {
