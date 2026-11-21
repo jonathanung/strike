@@ -71,7 +71,28 @@ const MARK_OPENER = `(() => {
   return document.activeElement === el;
 })()`;
 
+// Enter as a real keyboard user presses it on a focused button: keyDown
+// with text "\r" so Chrome emits the keypress that activates the button.
+// session.press("Enter") sends no text, which only reaches keydown
+// handlers (palette input, composer).
+async function activate(page) {
+  const common = { key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 };
+  await page.send("Input.dispatchKeyEvent", { type: "keyDown", text: "\r", unmodifiedText: "\r", ...common });
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", ...common });
+  await delay(80);
+}
+
 const OPENER_FOCUSED = `document.activeElement?.getAttribute("${OPENER}") === "1"`;
+
+// Leave no palette or confirm open for the next step (Ctrl+K toggles).
+async function closeStray(ctx) {
+  for (let i = 0; i < 2; i++) {
+    const open = await ctx.page.evaluate(`Boolean(document.querySelector("[data-nav='palette-dialog'], [data-confirm='dialog']"))`);
+    if (!open) return;
+    await ctx.press("Escape");
+    await delay(150);
+  }
+}
 
 // Open a dialog from a known opener, check initial focus, Tab wrap both
 // ways and containment, close it, and check focus came back.
@@ -83,7 +104,10 @@ async function dialogFocus(ctx, { name, dialog, open, close }) {
   await open();
   const shown = await waitUntil(`Boolean(document.querySelector(${JSON.stringify(dialog)}))`, 4000, `${name} open`);
   check(Boolean(shown), `${name}: dialog did not open`);
-  if (!shown) return;
+  if (!shown) {
+    await closeStray(ctx);
+    return;
+  }
   const settled = await waitUntil(`Boolean(${probeExpr(dialog)}?.inside)`, 2000, `${name} initial focus`);
   check(Boolean(settled), `${name}: focus did not move into the dialog`);
   const start = focusReport(await page.evaluate(probeExpr(dialog)));
@@ -142,7 +166,7 @@ export async function dialogFocusPass(ctx) {
       await setInput(page, "[data-nav='palette-dialog'] input", "rotate");
       await delay(200);
       await page.evaluate(`document.querySelector('[data-command-id="gateway.rotate"]')?.focus()`);
-      await press("Enter");
+      await activate(page);
     },
     close: () => press("Escape"),
   });
@@ -166,6 +190,7 @@ export async function keyboardLoop(ctx) {
   const { page, check, waitUntil, press, log, shoot } = ctx;
   log("a11y keyboard loop");
   await page.evaluate(`document.activeElement?.blur()`);
+  await closeStray(ctx);
 
   // Approval mode back to Default so `run` asks, through the palette.
   await press("k", CTRL);
@@ -182,7 +207,7 @@ export async function keyboardLoop(ctx) {
   const row = await tabTo(ctx, `a.tagName === "BUTTON" && a.closest(".session-row.on")`, { max: 150 });
   check(row, "keyboard loop: active session row not reachable with Tab");
   if (row) {
-    await press("Enter");
+    await activate(page);
     await delay(300);
   }
 
@@ -209,7 +234,7 @@ export async function keyboardLoop(ctx) {
   check(reached, "keyboard loop: Allow once not reachable with Tab / Shift+Tab");
   if (!reached) return;
   await shoot("a11y-approval-focus", ["desk1024", "desk1440"]);
-  await press("Enter");
+  await activate(page);
   const done = await waitUntil(
     `(() => {
       const t = document.querySelector(".transcript")?.innerText || "";

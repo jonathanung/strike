@@ -6671,7 +6671,7 @@ fn App() -> impl IntoView {
                                     })
                                 }}
                             </Show>
-                            <input class="file-pick" type="file" data-chat-file="true" data-chat-attach="true" node_ref=file_input multiple=true
+                            <input class="file-pick" type="file" aria-label="Attach files" data-chat-file="true" data-chat-attach="true" node_ref=file_input multiple=true
                                 accept=chat_mode::ACCEPT_TYPES
                                 on:change=move |_| {
                                     if let Some(el) = file_input.get() {
