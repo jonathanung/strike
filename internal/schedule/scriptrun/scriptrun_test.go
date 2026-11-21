@@ -13,6 +13,7 @@ import (
 	"github.com/jonathanung/strike/harness/permission"
 	"github.com/jonathanung/strike/harness/sandbox"
 	"github.com/jonathanung/strike/harness/scheduler"
+	"github.com/jonathanung/strike/harness/tool"
 )
 
 // hostPolicy is the product defaults (bash asks) with the sandbox dial off,
@@ -149,6 +150,53 @@ func TestRunHookBlock(t *testing.T) {
 	}
 }
 
+func TestRunShellHooks(t *testing.T) {
+	cases := []struct {
+		name      string
+		hook      string
+		allowHook bool
+		wantRun   bool
+		wantErr   string
+	}{
+		{name: "allowed hook exiting 0 lets the run proceed", hook: "exit 0", allowHook: true, wantRun: true},
+		{name: "allowed hook exiting non-zero blocks", hook: "echo nope-from-hook; exit 2", allowHook: true, wantErr: "nope-from-hook"},
+		{name: "hook command not allowed blocks (nobody to ask)", hook: "exit 0", wantErr: "not allowed for unattended runs"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			extra := []permission.Rule{{Permission: "bash", Pattern: "*", Action: permission.Allow}}
+			if tc.allowHook {
+				extra = append(extra, permission.Rule{Permission: "hook", Pattern: "*", Action: permission.Allow})
+			}
+			pol := hostPolicy(extra...)
+			off := sandbox.Policy{Mode: sandbox.ModeOff}
+			pol.ShellHooks = []tool.HookDef{{Event: permission.HookEventPreToolUse, Matcher: "bash", Command: tc.hook, Sandbox: &off}}
+			var hits []permission.HookHit
+			r := runner(pol)
+			r.OnHook = func(hit permission.HookHit) { hits = append(hits, hit) }
+			starts := &startLog{}
+			res := r.Run(context.Background(), Request{Command: "touch marker", Dir: dir, Timeout: 30 * time.Second, PermissionMode: "default"}, starts.add)
+			_, statErr := os.Stat(filepath.Join(dir, "marker"))
+			if tc.wantRun {
+				if res.Status != StatusFinished || statErr != nil || starts.count() != 1 {
+					t.Fatalf("result %+v marker=%v", res, statErr)
+				}
+			} else {
+				if res.Status != StatusDenied || res.Decision != DecisionHookBlock || !strings.Contains(res.Error, tc.wantErr) {
+					t.Fatalf("result %+v", res)
+				}
+				if statErr == nil || starts.count() != 0 {
+					t.Fatal("blocked command ran")
+				}
+			}
+			if len(hits) != 1 || !strings.HasPrefix(hits[0].Action, "shell_") || hits[0].Tool != "bash" {
+				t.Fatalf("hook hits %+v", hits)
+			}
+		})
+	}
+}
+
 func TestPrepareSandboxPosture(t *testing.T) {
 	dir := t.TempDir()
 	cases := []struct {
@@ -171,7 +219,7 @@ func TestPrepareSandboxPosture(t *testing.T) {
 			pol.LockedMode = tc.locked
 			pol.AllowDegrade = true
 			pol.NetworkAllow = []string{"example.com"}
-			prep, refused := runner(pol).prepare(Request{Command: "ls", Dir: dir, PermissionMode: tc.mode})
+			prep, refused := runner(pol).prepare(context.Background(), Request{Command: "ls", Dir: dir, PermissionMode: tc.mode})
 			if refused != nil {
 				t.Fatalf("refused: %+v", refused)
 			}

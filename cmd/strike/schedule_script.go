@@ -5,6 +5,7 @@ import (
 
 	"github.com/jonathanung/strike/harness/permission"
 	"github.com/jonathanung/strike/harness/sandbox"
+	"github.com/jonathanung/strike/harness/tool"
 	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/product/project"
 	"github.com/jonathanung/strike/internal/protocol"
@@ -77,6 +78,7 @@ func scriptPolicyFromConfig(cfg config.Config, sandboxMode, tokenFile, cwd strin
 		LayerNames:   permissionLayerNames(cfg.PermissionPreset, bypass),
 		Managed:      sessionManagedRules(cfg.Managed.DenyRules, tokenFileDenyRules(tokenFile, cwd)),
 		HookRules:    cfg.HookRules(),
+		ShellHooks:   scriptShellHooks(cfg),
 		SandboxMode:  sandbox.ResolveMode(sandboxMode),
 		AllowDegrade: cfg.SandboxAllowDegrade,
 		NetworkAllow: sandbox.CloneNetworkAllow(cfg.Network.Allow),
@@ -85,4 +87,24 @@ func scriptPolicyFromConfig(cfg config.Config, sandboxMode, tokenFile, cwd strin
 		pol.LockedMode = string(cfg.PermissionMode.Normalize())
 	}
 	return pol
+}
+
+// scriptShellHooks converts the config's shell-command hooks the way
+// assemble does for an engine.
+func scriptShellHooks(cfg config.Config) []tool.HookDef {
+	hooks := cfg.ShellHooks()
+	if len(hooks) == 0 {
+		return nil
+	}
+	out := make([]tool.HookDef, 0, len(hooks))
+	for _, h := range hooks {
+		out = append(out, tool.HookDef{
+			Event:      h.Event,
+			Command:    h.Command,
+			TimeoutMs:  h.TimeoutMs,
+			Matcher:    h.Matcher,
+			FailClosed: h.FailClosed,
+		})
+	}
+	return out
 }
