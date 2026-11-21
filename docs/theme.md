@@ -212,8 +212,12 @@ active scheme, which is what `theme.Resolve()` does. `--on-accent` is not a TUI
 role. It is the label color on a filled accent control.
 
 The TUI north star stays square (`radiusWebPx: 2`, no drop shadows). The
-cockpit uses a 10px panel radius and a pill command field so panels read as
-separate surfaces. That radius is a web layout exception. Colors are not.
+cockpit follows the same contract (#1518): `--radius` is `radiusWebPx` (2px),
+`--radius-sm` is 0, and every stylesheet under `webui/` uses those tokens or 0
+— no pill or rounded literals. Panels separate with 2px borders and the hard
+offset `--shadow`, not rounding. `#FFD400` (`--sharp`) is a fill paired with
+`--on-sharp` text, never a text colour. `scripts/webui-uat/theme-drift.test.mjs`
+fails CI on drift.
 
 | TUI token | Light | Dark | CSS variable |
 |---|---|---|---|

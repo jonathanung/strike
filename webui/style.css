@@ -431,7 +431,7 @@ button.link, button.palette-row, button.suggestion, button.file-row {
   align-items: center;
   background: var(--surface);
   border: 1px solid var(--rule);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   padding: 0 12px 0 14px;
   color: var(--muted);
 }
@@ -453,15 +453,15 @@ button.link, button.palette-row, button.suggestion, button.file-row {
 kbd {
   font: 11px/1 ui-monospace, monospace;
   border: 1px solid var(--border-muted);
-  border-radius: 4px;
+  border-radius: var(--radius);
   padding: 2px 5px;
   color: var(--muted);
   background: var(--ground);
 }
 .segmented {
   display: flex;
-  border: 1px solid var(--rule);
-  border-radius: 999px;
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
   overflow: hidden;
   height: 28px;
 }
@@ -542,7 +542,7 @@ button.link { text-align: left; width: 100%; }
   display: inline-block;
   width: 8px;
   height: 8px;
-  border-radius: 99px;
+  border-radius: var(--radius-sm);
   background: var(--muted);
   flex: 0 0 auto;
 }
@@ -641,7 +641,7 @@ button.link { text-align: left; width: 100%; }
   overflow-x: auto;
 }
 .composer-bar .chip { flex: 0 0 auto; max-width: 180px; }
-.composer-bar .send { margin-left: auto; height: var(--control); border-radius: 999px; padding: 0 var(--space-3); flex: 0 0 auto; }
+.composer-bar .send { margin-left: auto; height: var(--control); border-radius: var(--radius-sm); padding: 0 var(--space-3); flex: 0 0 auto; }
 .composer .hint { margin: 0; font-size: var(--type-sm); }
 /* feature:composer-draft-size begin */
 .draft-size-warn { margin: 0; font-size: var(--type-sm); color: var(--warning); }
@@ -721,7 +721,7 @@ button.link { text-align: left; width: 100%; }
   align-items: center;
   height: 18px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0;
@@ -768,7 +768,7 @@ button.link { text-align: left; width: 100%; }
 .skeleton { display: flex; flex-direction: column; gap: 8px; padding: 8px; }
 .skeleton-line {
   height: 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: linear-gradient(90deg, var(--surface), var(--raised), var(--surface));
   background-size: 200% 100%;
   animation: shimmer 1.2s linear infinite;
@@ -805,7 +805,7 @@ button.link { text-align: left; width: 100%; }
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--border-muted);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   padding: 0 10px;
 }
 .chip.on { color: var(--acid); border-color: var(--acid); background: transparent; }
@@ -857,7 +857,7 @@ button.link { text-align: left; width: 100%; }
   padding: var(--space-2) 0;
 }
 .sessions { gap: 2px; }
-.gutter { width: 3px; align-self: stretch; border-radius: 99px; background: var(--border-muted); }
+.gutter { width: 3px; align-self: stretch; border-radius: var(--radius-sm); background: var(--border-muted); }
 .gutter-running { background: var(--accent-alt); }
 .gutter-unread { background: var(--acid); }
 .pin {
@@ -1057,7 +1057,7 @@ button.link { text-align: left; width: 100%; }
   gap: 8px;
   min-height: 30px;
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   width: 100%;
 }
 .file-row:hover { background: var(--raised); }
@@ -1611,7 +1611,7 @@ select.mode, .daemon select {
 .ss-gutter {
   width: 3px;
   align-self: stretch;
-  border-radius: 99px;
+  border-radius: var(--radius-sm);
   background: var(--border-muted);
 }
 .ss-gutter-running { background: var(--accent-alt); }
@@ -1632,7 +1632,7 @@ select.mode, .daemon select {
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--surface-muted);
   color: var(--muted);
   font-size: 11px;
@@ -1818,7 +1818,7 @@ select.mode, .daemon select {
   width: 3px;
   flex: 1;
   min-height: 18px;
-  border-radius: 99px;
+  border-radius: var(--radius-sm);
   background: var(--border-muted);
 }
 .status-gutter[data-status="running"] .status-gutter-bar { background: var(--accent-alt); }
@@ -1832,14 +1832,14 @@ select.mode, .daemon select {
 .status-unread-pip {
   width: 6px;
   height: 6px;
-  border-radius: 99px;
+  border-radius: var(--radius-sm);
   background: var(--acid);
   flex: 0 0 auto;
 }
 .status-dot {
   width: 8px;
   height: 8px;
-  border-radius: 99px;
+  border-radius: var(--radius-sm);
   background: var(--muted);
   flex: 0 0 auto;
 }
@@ -1856,7 +1856,7 @@ select.mode, .daemon select {
   align-items: center;
   height: 18px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   font-size: 11px;
   font-weight: 600;
   border: 1px solid var(--border-muted);
@@ -1888,7 +1888,7 @@ select.mode, .daemon select {
   padding: 0;
   border: 0;
   background: transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
 }
 .status-chip-hit:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
 .status-tabs {
@@ -1905,7 +1905,7 @@ select.mode, .daemon select {
   height: 28px;
   padding: 0 8px;
   border: 1px solid var(--border-muted);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--muted);
   flex: 0 0 auto;
@@ -1978,7 +1978,7 @@ select.mode, .daemon select {
 .side-chat-readonly {
   color: var(--success);
   border: 1px solid color-mix(in srgb, var(--success) 45%, var(--rule));
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   padding: 0 var(--space-2);
   font-size: var(--type-sm);
   line-height: 22px;
@@ -2209,7 +2209,7 @@ select.mode, .daemon select {
   font: 12px/1.4 ui-monospace, monospace;
   background: var(--surface-muted);
   padding: 0 4px;
-  border-radius: 4px;
+  border-radius: var(--radius);
 }
 .sx-fence {
   margin-top: 6px;
@@ -2274,7 +2274,7 @@ select.mode, .daemon select {
   height: 22px;
   padding: 0 8px;
   border: 1px solid var(--rule);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--surface-muted);
   color: var(--ink);
   font-size: var(--type-sm);
@@ -2290,7 +2290,7 @@ select.mode, .daemon select {
   height: 18px;
   padding: 0 6px;
   border: 1px solid var(--rule);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--surface-muted);
   color: var(--muted);
   font-size: 11px;
@@ -2318,7 +2318,7 @@ select.mode, .daemon select {
   height: auto;
   padding: 0;
   border: 0;
-  border-radius: 2px;
+  border-radius: var(--radius);
   background: var(--rule);
 }
 .sx-tick-you { background: var(--user); }
@@ -3065,7 +3065,7 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
   padding: 0 10px;
   color: var(--muted);
 }
-.seg-choice:has(input:checked) span { background: var(--raised); color: var(--acid); }
+.seg-choice:has(input:checked) span { background: var(--sharp); color: var(--on-sharp); }
 .file-groups { display: flex; flex-direction: column; gap: 12px; }
 .file-group h3 {
   margin: 0 0 4px;
@@ -3118,7 +3118,7 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 }
 .onboarding-lead h2 { margin: 6px 0 8px; color: var(--ink); font-size: 22px; letter-spacing: 0; text-transform: none; }
 .onboarding-lead p { margin: 0; color: var(--muted); }
-.eyebrow { margin: 0; color: var(--sharp); font-size: var(--type-sm); font-weight: 650; }
+.eyebrow { margin: 0; color: var(--ink); font-family: var(--font-display); font-size: var(--type-sm); font-weight: 650; }
 .onboarding-body { padding: 16px; min-width: 0; }
 .telemetry { margin: 0 0 8px; }
 .onboarding-actions {
