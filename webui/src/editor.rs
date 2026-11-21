@@ -453,6 +453,103 @@ pub fn find_hits(text: &str, query: &str, opts: FindOptions) -> Vec<Hit> {
     hits
 }
 
+/// Absolute byte range of `hit` in `text` (#1401 replace). `None` for
+/// a whole-line fold hit (`start == end == 0`: the matcher could not
+/// pin its exact span, so replacing it would guess), or when the hit no
+/// longer fits `text` (a stale hit list must never splice mid-char).
+pub fn hit_byte_range(text: &str, hit: &Hit) -> Option<(usize, usize)> {
+    if hit.end <= hit.start {
+        return None;
+    }
+    let idx = (hit.line as usize).checked_sub(1)?;
+    let mut off = 0usize;
+    for (i, line) in text.split('\n').enumerate() {
+        if i == idx {
+            if hit.end > line.len()
+                || !line.is_char_boundary(hit.start)
+                || !line.is_char_boundary(hit.end)
+            {
+                return None;
+            }
+            return Some((off + hit.start, off + hit.end));
+        }
+        off += line.len() + 1;
+    }
+    None
+}
+
+/// Replace one find hit (#1401): the new text and the byte offset just
+/// past the inserted replacement, where the next hit search resumes.
+/// `None` when the hit has no exact span (see `hit_byte_range`).
+pub fn replace_hit(text: &str, hit: &Hit, with: &str) -> Option<(String, usize)> {
+    let (start, end) = hit_byte_range(text, hit)?;
+    let mut out = String::with_capacity(text.len() - (end - start) + with.len());
+    out.push_str(&text[..start]);
+    out.push_str(with);
+    out.push_str(&text[end..]);
+    Some((out, start + with.len()))
+}
+
+/// Replace every exact find hit (#1401 Replace all): the new text, how
+/// many hits were replaced, and how many were skipped because they had
+/// no exact span (whole-line fold hits). Hits are applied in text
+/// order; an overlapping hit is skipped rather than double-spliced.
+pub fn replace_all_hits(text: &str, hits: &[Hit], with: &str) -> (String, usize, usize) {
+    let mut ranges = Vec::with_capacity(hits.len());
+    let mut skipped = 0usize;
+    for hit in hits {
+        match hit_byte_range(text, hit) {
+            Some(r) => ranges.push(r),
+            None => skipped += 1,
+        }
+    }
+    ranges.sort_unstable();
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0usize;
+    let mut replaced = 0usize;
+    for (start, end) in ranges {
+        if start < last {
+            skipped += 1;
+            continue;
+        }
+        out.push_str(&text[last..start]);
+        out.push_str(with);
+        last = end;
+        replaced += 1;
+    }
+    out.push_str(&text[last..]);
+    (out, replaced, skipped)
+}
+
+/// Index of the first hit at or after byte `from` in `text`, wrapping
+/// to 0 when none follows (#1401: Replace advances to the next hit, and
+/// never lands on text it just inserted). Hits without an exact span
+/// are compared by their line start.
+pub fn next_hit_index(text: &str, hits: &[Hit], from: usize) -> usize {
+    hits.iter()
+        .position(|h| {
+            let start = hit_byte_range(text, h)
+                .map(|(s, _)| s)
+                .unwrap_or_else(|| line_start_byte(text, h.line));
+            start >= from
+        })
+        .unwrap_or(0)
+}
+
+/// Status line for Replace all (#1401).
+pub fn replace_all_note(replaced: usize, skipped: usize) -> String {
+    let base = match replaced {
+        0 => "No matches replaced.".to_string(),
+        1 => "Replaced 1 match.".to_string(),
+        n => format!("Replaced {n} matches."),
+    };
+    if skipped == 0 {
+        base
+    } else {
+        format!("{base} Skipped {skipped} without an exact span; turn on Match case to replace them.")
+    }
+}
+
 /// Byte index of the start of the line containing `byte` (clamped).
 fn line_start_of(text: &str, byte: usize) -> usize {
     let byte = floor_boundary(text, byte);
@@ -2256,6 +2353,12 @@ pub fn DocumentPane(
     let whole_word = RwSignal::new(false);
     let hits = RwSignal::new(Vec::<Hit>::new());
     let hit_idx = RwSignal::new(0usize);
+    // Replace (#1401): the replacement text, its outcome note, and the
+    // byte offset a single Replace resumes from, consumed by the hit
+    // recompute so the current hit advances instead of resetting to 0.
+    let replace_text = RwSignal::new(String::new());
+    let replace_note = RwSignal::new(String::new());
+    let resume_from = RwSignal::new(None::<usize>);
     let preview = RwSignal::new(false);
     let show_diff = RwSignal::new(false);
     let agent_diff = RwSignal::new(String::new());
@@ -2361,8 +2464,16 @@ pub fn DocumentPane(
         let text = if editing.get() { draft.get() } else { content.get() };
         let q = query.get();
         let opts = FindOptions::new(match_case.get(), whole_word.get());
-        hits.set(find_hits(&text, &q, opts));
-        hit_idx.set(0);
+        let found = find_hits(&text, &q, opts);
+        let idx = match resume_from.get_untracked() {
+            Some(from) => {
+                resume_from.set(None);
+                next_hit_index(&text, &found, from)
+            }
+            None => 0,
+        };
+        hits.set(found);
+        hit_idx.set(idx);
     });
 
     Effect::new(move |_| {
@@ -2564,6 +2675,51 @@ pub fn DocumentPane(
         let cur = hit_idx.get_untracked() as i32;
         let next = (cur + delta).rem_euclid(n as i32) as usize;
         hit_idx.set(next);
+    };
+
+    // Replace (#1401): mutate only the draft, never disk — Save stays the
+    // one write path (sha/mtime conflict-checked) and Cancel restores
+    // the loaded content. Offered only while editing.
+    let replace_one = move || {
+        if !editing.get_untracked() {
+            return;
+        }
+        let hs = hits.get_untracked();
+        let Some(hit) = hs.get(hit_idx.get_untracked()) else {
+            return;
+        };
+        let text = draft.get_untracked();
+        let with = replace_text.get_untracked();
+        match replace_hit(&text, hit, &with) {
+            Some((next, _)) if next == text => {
+                replace_note.set(String::new());
+                step(1);
+            }
+            Some((next, from)) => {
+                replace_note.set(String::new());
+                resume_from.set(Some(from));
+                draft.set(next);
+            }
+            None => replace_note.set(
+                "This match has no exact span; turn on Match case to replace it.".into(),
+            ),
+        }
+    };
+
+    let replace_all = move || {
+        if !editing.get_untracked() {
+            return;
+        }
+        let hs = hits.get_untracked();
+        if hs.is_empty() {
+            return;
+        }
+        let text = draft.get_untracked();
+        let (next, replaced, skipped) = replace_all_hits(&text, &hs, &replace_text.get_untracked());
+        replace_note.set(replace_all_note(replaced, skipped));
+        if next != text {
+            draft.set(next);
+        }
     };
 
     let do_save = move || {
@@ -2877,6 +3033,7 @@ pub fn DocumentPane(
                     prop:value=move || query.get()
                     on:input=move |ev| {
                         query.set(event_target_value(&ev));
+                        replace_note.set(String::new());
                         if !query.get_untracked().is_empty() {
                             preview.set(false);
                         }
@@ -2984,6 +3141,55 @@ pub fn DocumentPane(
                     }
                 }>"Back to chat"</button>
             </div>
+            <Show when=move || editing.get()>
+                <div class="ev-replace-row" data-ev-replace-row=true>
+                    <input
+                        id="ev-replace"
+                        class="ev-replace"
+                        type="text"
+                        placeholder="Replace with"
+                        aria-label="Replace with"
+                        data-ev-replace-input=true
+                        prop:value=move || replace_text.get()
+                        on:input=move |ev| replace_text.set(event_target_value(&ev))
+                        on:keydown=move |ev: web_sys::KeyboardEvent| {
+                            if ev.key() == "Enter" {
+                                ev.prevent_default();
+                                ev.stop_propagation();
+                                if ev.ctrl_key() || ev.meta_key() {
+                                    replace_all();
+                                } else {
+                                    replace_one();
+                                }
+                            } else if ev.key() == "Escape" {
+                                // Leave the box only: Escape must not
+                                // reach the pane's edit-cancel and drop
+                                // the draft the replace just changed.
+                                ev.prevent_default();
+                                ev.stop_propagation();
+                                focus_by_id("ev-editor");
+                            }
+                        }
+                    />
+                    <button
+                        type="button"
+                        class="secondary"
+                        data-ev-replace-one=true
+                        disabled=move || hits.get().is_empty()
+                        title="Replace the current match and go to the next (Enter)"
+                        on:click=move |_| replace_one()
+                    >"Replace"</button>
+                    <button
+                        type="button"
+                        class="secondary"
+                        data-ev-replace-all=true
+                        disabled=move || hits.get().is_empty()
+                        title="Replace every match in the draft (Ctrl+Enter)"
+                        on:click=move |_| replace_all()
+                    >"Replace all"</button>
+                    <span class="ev-replace-note" data-ev-replace-note="" aria-live="polite">{move || replace_note.get()}</span>
+                </div>
+            </Show>
             <Show when=move || !status.get().is_empty()>
                 <div class="notice" role="alert" data-ev-status=true>
                     <span>{move || status.get()}</span>
@@ -3264,11 +3470,12 @@ pub fn DocumentPane(
                         conflict.set(false);
                         preview.set(false);
                         cursor_pos.set((1, 1));
+                        replace_note.set(String::new());
                         editing.set(true);
                     }
                 >"Edit"</button>
                 <Show when=move || editing.get()>
-                    <button type="button" class="secondary" on:click=move |_| {
+                    <button type="button" class="secondary" data-ev-cancel=true on:click=move |_| {
                         draft.set(content.get());
                         editing.set(false);
                         conflict.set(false);
@@ -3388,6 +3595,137 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].end, 0);
         assert!(find_hits("plain ascii\n", "Σ", FindOptions::default()).is_empty());
+    }
+
+    #[test]
+    fn hit_byte_range_maps_line_offsets_and_rejects_inexact_hits() {
+        let text = "ab\ncd alpha\n";
+        let cases: &[(Hit, Option<(usize, usize)>)] = &[
+            (Hit { line: 1, start: 0, end: 2 }, Some((0, 2))),
+            (Hit { line: 2, start: 3, end: 8 }, Some((6, 11))),
+            // Whole-line fold hit: no exact span.
+            (Hit { line: 2, start: 0, end: 0 }, None),
+            // Stale hits past the line or the text never splice.
+            (Hit { line: 1, start: 1, end: 9 }, None),
+            (Hit { line: 9, start: 0, end: 1 }, None),
+            (Hit { line: 0, start: 0, end: 1 }, None),
+        ];
+        for (hit, want) in cases {
+            assert_eq!(hit_byte_range(text, hit), *want, "{hit:?}");
+        }
+        // Mid-char offsets are refused rather than panicking.
+        assert_eq!(hit_byte_range("é\n", &Hit { line: 1, start: 1, end: 2 }), None);
+    }
+
+    #[test]
+    fn replace_hit_rewrites_only_the_current_hit() {
+        let text = "Alpha beta\nalpha gamma\n";
+        let hits = find_hits(text, "alpha", FindOptions::default());
+        assert_eq!(hits.len(), 2);
+        let (out, from) = replace_hit(text, &hits[1], "omega").unwrap();
+        assert_eq!(out, "Alpha beta\nomega gamma\n");
+        assert_eq!(from, "Alpha beta\nomega".len());
+        let (out, from) = replace_hit(text, &hits[0], "").unwrap();
+        assert_eq!(out, " beta\nalpha gamma\n");
+        assert_eq!(from, 0);
+        assert!(replace_hit(text, &Hit { line: 1, start: 0, end: 0 }, "x").is_none());
+    }
+
+    #[test]
+    fn replace_all_hits_counts_replaced_and_skipped() {
+        struct Case {
+            text: &'static str,
+            query: &'static str,
+            opts: FindOptions,
+            with: &'static str,
+            want: &'static str,
+            replaced: usize,
+            skipped: usize,
+        }
+        let cases = [
+            Case {
+                text: "foo Foo FOO\nfoo\n",
+                query: "foo",
+                opts: FindOptions::default(),
+                with: "bar",
+                want: "bar bar bar\nbar\n",
+                replaced: 4,
+                skipped: 0,
+            },
+            Case {
+                text: "foo Foo\n",
+                query: "Foo",
+                opts: FindOptions::new(true, false),
+                with: "bar",
+                want: "foo bar\n",
+                replaced: 1,
+                skipped: 0,
+            },
+            Case {
+                text: "foo food foo_x foo\n",
+                query: "foo",
+                opts: FindOptions::new(false, true),
+                with: "x",
+                want: "x food foo_x x\n",
+                replaced: 2,
+                skipped: 0,
+            },
+            // Replacement containing the query never loops.
+            Case {
+                text: "a a\n",
+                query: "a",
+                opts: FindOptions::default(),
+                with: "aa",
+                want: "aa aa\n",
+                replaced: 2,
+                skipped: 0,
+            },
+            // Non-ASCII line with a case-insensitive non-ASCII query:
+            // a whole-line fold hit, skipped and counted, text intact.
+            Case {
+                text: "Σίσυφος\nplain\n",
+                query: "σ",
+                opts: FindOptions::default(),
+                with: "s",
+                want: "Σίσυφος\nplain\n",
+                replaced: 0,
+                skipped: 1,
+            },
+        ];
+        for c in cases {
+            let hits = find_hits(c.text, c.query, c.opts);
+            let (out, replaced, skipped) = replace_all_hits(c.text, &hits, c.with);
+            assert_eq!(out, c.want, "{:?}", c.text);
+            assert_eq!((replaced, skipped), (c.replaced, c.skipped), "{:?}", c.text);
+        }
+        let (out, replaced, skipped) = replace_all_hits("abc\n", &[], "x");
+        assert_eq!((out.as_str(), replaced, skipped), ("abc\n", 0, 0));
+    }
+
+    #[test]
+    fn next_hit_index_resumes_after_the_replacement_and_wraps() {
+        let text = "x one x\nx\n";
+        let hits = find_hits(text, "x", FindOptions::default());
+        assert_eq!(hits.len(), 3);
+        assert_eq!(next_hit_index(text, &hits, 0), 0);
+        assert_eq!(next_hit_index(text, &hits, 1), 1);
+        assert_eq!(next_hit_index(text, &hits, 7), 2);
+        assert_eq!(next_hit_index(text, &hits, 100), 0);
+        assert_eq!(next_hit_index(text, &[], 0), 0);
+        // After replacing hit 0 with "xx", resuming past the insert
+        // lands on the old hit 1, not on the inserted text.
+        let (out, from) = replace_hit(text, &hits[0], "xx").unwrap();
+        let again = find_hits(&out, "x", FindOptions::default());
+        assert_eq!(next_hit_index(&out, &again, from), 2);
+        assert_eq!(again[2].line, 1);
+    }
+
+    #[test]
+    fn replace_all_note_reports_counts() {
+        assert_eq!(replace_all_note(0, 0), "No matches replaced.");
+        assert_eq!(replace_all_note(1, 0), "Replaced 1 match.");
+        assert_eq!(replace_all_note(3, 0), "Replaced 3 matches.");
+        assert!(replace_all_note(2, 1).starts_with("Replaced 2 matches. Skipped 1"));
     }
 
     #[test]

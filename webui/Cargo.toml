@@ -10,6 +10,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 protocol-schema = { path = "protocol-schema" }
 load-guard = { path = "load-guard" }
+status-card = { path = "status-card" }
 composer-drafts = { path = "composer-drafts" }
 transcript-window = { path = "transcript-window" }
 table-export = { path = "table-export" }
