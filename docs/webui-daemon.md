@@ -167,6 +167,12 @@ Status: walking skeleton on branch `worktree-rust-webui-daemon`. Not merged.
     with a separate model call and no tools. `POST /v1/sidechat/ops` refuses
     `permission.reply` and `user.input`. Turns are not written to the session
     JSONL.
+  - Prompt sharpen (Alt+P in the composer, or the palette's "Sharpen
+    prompt") sends only the draft and the workspace path to
+    `POST /v1/prompt/sharpen`, a one-shot with the session's selected model
+    and no tools. The rewrite is shown as an original-vs-sharpened preview;
+    Accept replaces the draft (Undo restores it until send), Reject keeps it.
+    Nothing is written to the session JSONL and no run starts.
   - Schedule and a multi-gateway hub are
     documented in [webui-planned.md](webui-planned.md), not drawn as empty
     panels. Memory, knowledge, and artifacts are drawn from the live routes.

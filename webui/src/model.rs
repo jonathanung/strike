@@ -150,6 +150,10 @@ pub struct LiveStatus {
     pub cwd: String,
     #[serde(default)]
     pub effort: String,
+    /// The running agent (#1563), from the daemon's last `agent.selected`.
+    /// Empty when not reported; the chip then says unknown, never a guess.
+    #[serde(default)]
+    pub agent: String,
     /// Session exit-gate policy the daemon reports on every status
     /// (#1572). Empty until the daemon reports one; the UI normalizes
     /// empty to the `supervised` default rather than inventing a mode.
@@ -232,6 +236,15 @@ pub struct LoadWarning {
     pub fingerprint: String,
 }
 
+/// One selectable agent from bootstrap `agents` (#1563). The daemon's
+/// `AgentInfo`; `description` is omitted when empty.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+pub struct AgentInfo {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct SkillInfo {
     pub name: String,
@@ -280,6 +293,9 @@ pub struct BootstrapCapabilities {
     /// present, live engine, and not `--read-only`.
     #[serde(default, rename = "projectInit")]
     pub project_init: bool,
+    /// True when the daemon wires plugin lifecycle (`/v1/plugins*`, #1570).
+    #[serde(default)]
+    pub plugins: bool,
     /// True when the daemon serves the typed config-source list
     /// (`GET /v1/config-sources`, #1493).
     #[serde(default, rename = "configFiles")]
@@ -583,6 +599,9 @@ pub struct Bootstrap {
     pub status: Option<LiveStatus>,
     #[serde(default)]
     pub skills: Vec<SkillInfo>,
+    /// Selectable agents for the live session (#1563), default first.
+    #[serde(default)]
+    pub agents: Vec<AgentInfo>,
     #[serde(default, rename = "composerCommands")]
     pub composer_commands: Vec<ComposerCommand>,
     #[serde(default)]
@@ -1668,6 +1687,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn bootstrap_plugins_capability() {
+        let on: Bootstrap = serde_json::from_str(r#"{"capabilities":{"plugins":true,"panes":true}}"#).unwrap();
+        assert!(on.capabilities.plugins);
+        let off: Bootstrap = serde_json::from_str(r#"{"capabilities":{}}"#).unwrap();
+        assert!(!off.capabilities.plugins);
+    }
+
+    #[test]
     fn config_sources_decode_in_daemon_order() {
         let reply: ConfigSourcesReply = serde_json::from_str(
             r#"{"sources":[
@@ -2150,6 +2177,26 @@ mod tests {
         assert_eq!(w.fingerprint, "abc");
         let boot: Bootstrap = serde_json::from_str(r#"{}"#).unwrap();
         assert!(boot.load_warnings.is_empty());
+    }
+
+    #[test]
+    fn bootstrap_reads_agents_and_the_current_agent() {
+        let boot: Bootstrap = serde_json::from_str(
+            r#"{"status":{"agent":"build"},"agents":[{"name":"build"},{"name":"plan","description":"Read-only"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(boot.status.map(|s| s.agent), Some("build".to_string()));
+        assert_eq!(
+            boot.agents,
+            vec![
+                AgentInfo { name: "build".into(), description: String::new() },
+                AgentInfo { name: "plan".into(), description: "Read-only".into() },
+            ]
+        );
+        // Older daemons: no agents and no status agent read as empty.
+        let boot: Bootstrap = serde_json::from_str(r#"{"status":{}}"#).unwrap();
+        assert!(boot.agents.is_empty());
+        assert_eq!(boot.status.map(|s| s.agent), Some(String::new()));
     }
 
     #[test]
