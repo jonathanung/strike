@@ -308,6 +308,32 @@ page. Plugin install and removal stay on `/v1/plugins`. The composer expands
 `$skill` through the daemon (see Composer triggers); this page is where those
 files are inspected and edited.
 
+## Powers
+
+The daemon side is in place but no chip is drawn yet (#1347).
+`internal/integrate/powers` loads packs from
+`<workspace>/.strike/powers/<pack>/` and `~/.strike/powers/<pack>/`, and
+the workspace copy wins on a name clash. Each pack is an Agent Plugins
+package: `plugin.json` holds `name` and `keywords`, `mcp.json` holds
+`mcpServers`, and `skills/<name>/SKILL.md` holds skills. These are
+references by name, not copies.
+
+A pack is suggested when a keyword appears in the prompt as a whole word
+or phrase. Packs that are muted or already active are not suggested, and
+nothing activates on its own. Activation is per session and
+reference-counted: packs that share a server keep it until the last one is
+deactivated, and ending one session never disconnects another session's
+servers. If a server fails to connect, it is listed as failed and left
+out of the session, and the chip and the tool set read the same result.
+If a pack names a deny-listed server, the whole pack stays inactive and
+the reason is shown.
+
+Not built yet:
+- a `Connector` connected to the MCP session manager, and the daemon routes for it;
+- the composer chip row with context cost (#1259);
+- pack membership on Customize;
+- goal-declared Powers (#1284).
+
 ## Composer triggers
 
 `user.input` and `steer` expand in the daemon (`internal/composer/triggers`,

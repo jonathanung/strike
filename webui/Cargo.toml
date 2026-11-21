@@ -11,6 +11,7 @@ serde_json = "1"
 a11y-announce = { path = "a11y-announce" }
 protocol-schema = { path = "protocol-schema" }
 load-guard = { path = "load-guard" }
+status-card = { path = "status-card" }
 composer-drafts = { path = "composer-drafts" }
 transcript-window = { path = "transcript-window" }
 js-sys = "0.3"

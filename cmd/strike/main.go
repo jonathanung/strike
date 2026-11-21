@@ -25,6 +25,7 @@ type cliOptions struct {
 	model                      string
 	effort                     string
 	sandbox                    string // --sandbox: off|read-only|workspace-write
+	sandboxRuntime             string // --sandbox-runtime: process|microvm
 	iKnow                      bool   // --i-know: allow yolo with sandbox off
 	auto                       bool   // --auto: skip permission asks; network.allow stays
 	dangerouslySkipPermissions bool   // --dangerously-skip-permissions: skip asks + bypass network.allow
@@ -105,6 +106,14 @@ var optionSpecs = []optionSpec{
 		description: "OS process sandbox for bash (off|read-only|workspace-write); overrides config",
 		register: func(fs *flag.FlagSet, opts *cliOptions) {
 			fs.StringVar(&opts.sandbox, "sandbox", "", "")
+		},
+	},
+	{
+		names:       []string{"sandbox-runtime"},
+		valueName:   "runtime",
+		description: "what isolates bash and the terminal (process|microvm); microvm never falls back to the host; overrides config",
+		register: func(fs *flag.FlagSet, opts *cliOptions) {
+			fs.StringVar(&opts.sandboxRuntime, "sandbox-runtime", "", "")
 		},
 	},
 	{
@@ -383,6 +392,12 @@ func parseCLIOptions(args []string) (cliOptions, error) {
 	if opts.continueSession && opts.sessionID != "" {
 		return cliOptions{}, fmt.Errorf("cannot combine --continue and --session")
 	}
+	opts.sandboxRuntime = strings.TrimSpace(opts.sandboxRuntime)
+	if opts.sandboxRuntime != "" {
+		if _, err := parseSandboxRuntimeFlag(opts.sandboxRuntime); err != nil {
+			return cliOptions{}, err
+		}
+	}
 	opts.sandbox = strings.TrimSpace(opts.sandbox)
 	if opts.sandbox != "" {
 		// Validate early so --help-adjacent typos fail before assemble.
@@ -434,6 +449,33 @@ func resolveSandboxMode(cfgValue, cliValue string, managedLocked bool) (string, 
 		return "", fmt.Errorf("unknown sandbox %q (want %s)", cfgValue, sandbox.ModeNames())
 	}
 	return mode.String(), nil
+}
+
+// parseSandboxRuntimeFlag validates a --sandbox-runtime value.
+func parseSandboxRuntimeFlag(value string) (string, error) {
+	rt, ok := sandbox.ParseRuntime(value)
+	if !ok || strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("unknown sandbox runtime %q (want %s)", value, sandbox.RuntimeNames())
+	}
+	return rt.String(), nil
+}
+
+// resolveSandboxRuntime picks CLI --sandbox-runtime over config (default
+// process), then rejects microvm with sandbox off. A managed (MDM) runtime
+// ignores the CLI flag.
+func resolveSandboxRuntime(cfgValue, cliValue, sandboxMode string, managedLocked bool) (string, error) {
+	value := cfgValue
+	if !managedLocked && strings.TrimSpace(cliValue) != "" {
+		value = cliValue
+	}
+	rt, ok := sandbox.ParseRuntime(value)
+	if !ok {
+		return "", fmt.Errorf("unknown sandboxRuntime %q (want %s)", value, sandbox.RuntimeNames())
+	}
+	if err := sandbox.CheckRuntimeMode(sandbox.ResolveMode(sandboxMode), rt); err != nil {
+		return "", err
+	}
+	return rt.String(), nil
 }
 
 func prevalidateCLIOptions(args []string, fs *flag.FlagSet) error {
