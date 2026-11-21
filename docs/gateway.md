@@ -529,3 +529,14 @@ per watch (a repeat returns the recorded result as `fixSession` or
   through the repository's normal review and CI gates; Strike never merges
   it. A revert that does not apply cleanly is reported; open a fix session
   instead.
+
+### Cockpit verdict card
+
+A watch session is an ordinary session: it is listed, steerable, and
+cancellable like any other (#1785). When the active session is a watch
+session, the chat column shows a verdict card above the transcript:
+watching (with the failure threshold), healthy, regression, or
+inconclusive, with each check's latest state and evidence. On a
+regression the card offers **Open fix session** and **Draft revert PR**;
+each asks for confirmation first and then calls the routes above. The card
+refreshes every 15 seconds and immediately on a session switch.
