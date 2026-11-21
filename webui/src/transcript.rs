@@ -883,6 +883,30 @@ impl Transcript {
                 });
             }
             "artifact.updated" => self.artifact_updates = self.artifact_updates.wrapping_add(1),
+            "model.fallback" => {
+                // #1350: a different model continued this turn. Name both
+                // so no reply is attributed to the wrong model.
+                let (title, body) = crate::fallback::notice_text(&data);
+                self.push(Message {
+                    id: 0,
+                    role: Role::Notice,
+                    title,
+                    body,
+                    badge: "fallback".into(),
+                    detail: field_str(&data, "error"),
+                    key: String::new(),
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: String::new(),
+                    reconnect: String::new(),
+                    at_ms,
+                    attachments: Vec::new(),
+                    turn_id: field_str(&data, "turnId"),
+                });
+            }
             "files.invalidated" => self.note_files_invalidated(&data, at_ms),
             "compaction.started"
             | "compaction.completed"

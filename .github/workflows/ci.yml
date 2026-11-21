@@ -103,6 +103,7 @@ jobs:
           cargo test --manifest-path webui/load-guard/Cargo.toml --locked
           cargo test --manifest-path webui/md-review/Cargo.toml --locked
           cargo test --manifest-path webui/transcript-window/Cargo.toml --locked
+          cargo test --manifest-path webui/dashboard-view/Cargo.toml --locked
           cargo test --manifest-path webui/edit-resend/Cargo.toml --locked
           cargo test --manifest-path webui/ideas-inbox/Cargo.toml --locked
           cargo test --manifest-path webui/status-card/Cargo.toml --locked
@@ -127,15 +128,6 @@ jobs:
       - name: Harness eval report (soft)
         continue-on-error: true
         run: HARNESS_EVAL_REPORT=$RUNNER_TEMP/harness-eval-report.json make harness-eval
-
-      # Message pins host tests (own step, outside the shared crate list).
-      - name: Message pins crate tests
-        run: |
-          set -euo pipefail
-          if ! command -v cargo >/dev/null; then
-            [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
-          fi
-          cargo test --manifest-path webui/message-pins/Cargo.toml --locked
 
       # Soft coverage report only — do not hard-fail CI on the floor yet.
       # Local gate: make cover-check (COVER_MIN in Makefile).

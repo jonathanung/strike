@@ -1043,7 +1043,11 @@ pub fn CustomizePane(
                             let id_dismiss = p.id.clone();
                             let edit = p.clone();
                             let evidence = crate::skill_proposals::evidence_text(&p);
-                            let rows: Vec<String> = p.sessions.iter().map(crate::skill_proposals::evidence_row).collect();
+                            let rows: Vec<(String, String)> = p
+                                .sessions
+                                .iter()
+                                .map(|e| (e.session_id.clone(), crate::skill_proposals::evidence_row(e)))
+                                .collect();
                             view! {
                                 <article class="cz-proposal" data-cz-proposal=id>
                                     <header>
@@ -1055,7 +1059,26 @@ pub fn CustomizePane(
                                     <details>
                                         <summary>"Evidence sessions and draft"</summary>
                                         <ul class="cz-proposal-evidence">
-                                            {rows.into_iter().map(|r| view! { <li>{r}</li> }).collect_view()}
+                                            {rows.into_iter().map(|(sid, text)| {
+                                                // #1913: each evidence row opens its session in the cockpit.
+                                                if !crate::skill_proposals::openable(&sid) {
+                                                    return view! { <li>{text}</li> }.into_any();
+                                                }
+                                                let title = format!("Open session {sid}");
+                                                let sid_attr = sid.clone();
+                                                view! {
+                                                    <li>
+                                                        <button type="button" class="link cz-proposal-session" data-cz-proposal-session=sid_attr title=title
+                                                            on:click=move |_| {
+                                                                let _ = crate::shell::set_view("chat");
+                                                                if let Err(e) = crate::shell::open_session(&sid) {
+                                                                    proposals_note.set(e);
+                                                                }
+                                                            }
+                                                        >{text}</button>
+                                                    </li>
+                                                }.into_any()
+                                            }).collect_view()}
                                         </ul>
                                         <pre class="cz-diff">{p.body.clone()}</pre>
                                     </details>
