@@ -241,6 +241,10 @@ pub struct BootstrapCapabilities {
     /// (`GET /v1/ledger`, #1485); gates the Decisions storage tab.
     #[serde(default)]
     pub ledger: bool,
+    /// True when the daemon serves the project-local issues tracker
+    /// (`/v1/issues*`, #1500); gates the Issues storage tab.
+    #[serde(default)]
+    pub issues: bool,
     /// True when `/v1/init` can write AGENTS.md (#1581): host init service
     /// present, live engine, and not `--read-only`.
     #[serde(default, rename = "projectInit")]
@@ -249,6 +253,10 @@ pub struct BootstrapCapabilities {
     /// state and the repo config it gates (#1781).
     #[serde(default, rename = "workspaceTrust")]
     pub workspace_trust: bool,
+    /// True when `/v1/sessions/{id}/loops` can start and stop session
+    /// loops (#1588): live engine and not `--read-only`.
+    #[serde(default)]
+    pub loops: bool,
 }
 
 /// One `/v1/init` reply (#1581). `exists` with a non-empty `error` is the
