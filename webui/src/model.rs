@@ -429,7 +429,7 @@ impl ContainerStatusReply {
     pub fn container_line(&self) -> String {
         let c = &self.container;
         if !self.runtime.available {
-            return format!("{}: not checked (no runtime).", c.name);
+            return format!("{}: not checked (runtime unavailable).", c.name);
         }
         match c.status.as_str() {
             "absent" | "" => format!("{}: no container for this workspace.", c.name),
@@ -1869,7 +1869,7 @@ mod tests {
         .unwrap();
         assert_eq!(r.ladder.iter().filter(|g| g.active).count(), 1);
         assert!(r.runtime_line().contains("Host mode is the active, supported posture"));
-        assert_eq!(r.container_line(), "strike-repo-abc: not checked (no runtime).");
+        assert_eq!(r.container_line(), "strike-repo-abc: not checked (runtime unavailable).");
         assert_eq!(r.drift_line(), "Not ejected (Dockerfile.devcontainer not present).");
         assert_eq!(
             r.posture_note(),
