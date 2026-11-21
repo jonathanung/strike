@@ -40,6 +40,7 @@ mod outcome;
 mod project_init;
 mod onboarding;
 mod park;
+mod preview;
 mod permissions_explain;
 mod steer_queue;
 mod model_menu;
@@ -5663,6 +5664,7 @@ fn App() -> impl IntoView {
                         <button class=move || if side_tab.get() == "changes" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("changes".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("changes")></span>"Changes"</button>
                         <button class=move || if side_tab.get() == "git" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("git".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("git")></span>"Git"</button>
                         <button class=move || if side_tab.get() == "terminal" { "chip on" } else { "chip" } on:click=move |_| side_tab.set("terminal".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("terminal")></span>"Terminal"</button>
+                        <button class=move || if side_tab.get() == "preview" { "chip on" } else { "chip" } data-side-tab="preview" on:click=move |_| side_tab.set("preview".into())><span class="icon-slot" aria-hidden="true" inner_html=icon("preview")></span>"Preview"</button>
                     </div>
                     <Show when=move || side_tab.get() == "activity">
                     <div class="activity">
@@ -5946,6 +5948,9 @@ fn App() -> impl IntoView {
                             workspace_id=active_workspace
                             session_id=active_root
                         />
+                    </Show>
+                    <Show when=move || side_tab.get() == "preview">
+                        <preview::PreviewPanel base=base token=token />
                     </Show>
                 </aside>
             </div>

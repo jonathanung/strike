@@ -195,6 +195,9 @@ type Server struct {
 	// terms is the side-panel PTY manager.
 	terms *terminal.Manager
 
+	// preview is the selected live-preview target (#1341).
+	preview previewState
+
 	seenOnce sync.Once
 	seen     *SeenStore
 
@@ -662,6 +665,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/terminals/{id}/ticket", s.handleTerminalTicket)
 	s.mux.HandleFunc("GET /v1/terminals/{id}/stream", s.handleTerminalStream)
 	s.mux.HandleFunc("DELETE /v1/terminals/{id}", s.handleTerminalDelete)
+	// Live preview (#1341): user-selected loopback port, proxied under an
+	// unguessable per-port path. See preview.go for the boundary rules.
+	s.mux.HandleFunc("GET /v1/preview/ports", s.handlePreviewPorts)
+	s.mux.HandleFunc("GET /v1/preview", s.handlePreviewGet)
+	s.mux.HandleFunc("PUT /v1/preview", s.handlePreviewPut)
+	s.mux.HandleFunc("DELETE /v1/preview", s.handlePreviewDelete)
+	s.mux.HandleFunc(previewPathPrefix, s.handlePreviewProxy)
 	// Unknown API routes (#1452): these method-less patterns are less
 	// specific than every registered /v1 route, so they only answer paths
 	// no handler claimed (the handler itself synthesises a JSON 405 for a

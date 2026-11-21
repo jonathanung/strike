@@ -425,3 +425,22 @@ Stall is already a real badge when the team roster sets `budget.stall`.
 Retry is `team.spawn` of the same objective, which starts a new child; it
 does not resume the old session. Stop is `team.child_interrupt`. None of
 these need a new panel.
+
+## Live preview
+
+The side panel **Preview** tab (#1341) proxies one user-picked loopback port
+through the daemon (`/preview/<key>/`, see `docs/web.md`). Known limits of
+slice 1:
+
+- Apps that load assets from absolute paths (`/src/main.ts`) need their base
+  path set to the prefix shown in the pane (Vite `base`, Next `basePath`).
+  The prefix stays the same for a given port for the life of the daemon.
+- The frame runs in an opaque origin (sandbox without `allow-same-origin`).
+  Apps that need cookies, `localStorage`, or a same-origin HMR websocket may
+  partly fail. Websocket upgrades are proxied, but a dev server that checks
+  `Origin` sees `null`.
+- An app that refuses framing (`X-Frame-Options: DENY`, `frame-ancestors
+  'none'`) is reported in the pane with an open-in-browser link. The pane
+  does not strip those headers.
+- The chosen port is not persisted per workspace yet. The agent cannot
+  navigate the pane or read it.

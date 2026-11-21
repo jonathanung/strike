@@ -13,6 +13,7 @@
 // what the page actually looked like.
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -3039,6 +3040,63 @@ try {
     }
   } catch {
     stageAllSeeded = false;
+  }
+  // #1341: Preview tab. A real loopback fixture server is picked by
+  // typing its port. The pane labels the proxied destination, the
+  // daemon proxies the fixture under the pane's sandboxed path, and a
+  // port with no listener is reported in the pane, not left blank.
+  {
+    const fixture = createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end("<h1>smoke preview fixture</h1>");
+    });
+    await new Promise((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+    const fixturePort = fixture.address().port;
+    const closedServer = createServer();
+    await new Promise((resolve) => closedServer.listen(0, "127.0.0.1", resolve));
+    const closedPort = closedServer.address().port;
+    await new Promise((resolve) => closedServer.close(resolve));
+    try {
+      await clickSideTab("Preview", "Listening on this gateway");
+      const pickPort = async (n) => {
+        await evaluate(`(() => {
+          const input = document.querySelector('[data-preview-manual]');
+          const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+          set.call(input, ${JSON.stringify(String(n))});
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          document.querySelector('[data-action="preview-open"]').click();
+          return true;
+        })()`);
+      };
+      await pickPort(fixturePort);
+      await waitUntil(
+        `!!document.querySelector('[data-preview-destination="127.0.0.1:${fixturePort}"]') && !!document.querySelector('iframe.preview-frame')`,
+        "preview frame for the fixture port",
+      );
+      const frame = await evaluate(`JSON.stringify({
+        src: document.querySelector('iframe.preview-frame').getAttribute("src"),
+        sandbox: document.querySelector('iframe.preview-frame').getAttribute("sandbox"),
+      })`);
+      const { src, sandbox } = JSON.parse(frame);
+      if (!sandbox || sandbox.includes("allow-same-origin") || !src.includes("/preview/")) {
+        throw new Error(`preview frame attributes src=${src} sandbox=${sandbox}`);
+      }
+      const proxied = await fetch(new URL(src, `http://127.0.0.1:${port}`));
+      const proxiedText = await proxied.text();
+      const proxiedCSP = proxied.headers.get("content-security-policy") || "";
+      if (!proxied.ok || !proxiedText.includes("smoke preview fixture") || !proxiedCSP.includes("sandbox")) {
+        throw new Error(`preview proxy status=${proxied.status} csp=${proxiedCSP} body=${proxiedText.slice(0, 200)}`);
+      }
+      await pickPort(closedPort);
+      await waitUntil(
+        `!!document.querySelector('[data-preview-unreachable]') && document.body.innerText.includes("127.0.0.1:${closedPort}") && !document.querySelector('iframe.preview-frame')`,
+        "preview reports a port with no listener",
+      );
+      await evaluate(`document.querySelector('[data-action="preview-stop"]').click()`);
+      await waitUntil(`!!document.querySelector('[data-preview-empty]')`, "preview stopped");
+    } finally {
+      await new Promise((resolve) => fixture.close(resolve));
+    }
   }
   await clickSideTab("Git", "Staged");
   // Git panel small wins (#1427/#1432/#1435): the path filter exists,
