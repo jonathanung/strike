@@ -2457,6 +2457,22 @@ select.mode, .daemon select {
   .task-col { max-height: none; }
 }
 /* feature:task-runner end */
+/* feature:plan-edit begin */
+.plan-edit-form { display: flex; flex-direction: column; gap: var(--space-2); margin: 0 0 var(--space-3); }
+.plan-edit-form label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: var(--type-sm); }
+.plan-edit-form input, .plan-edit-form textarea {
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  min-height: var(--control);
+  color: var(--ink);
+}
+.plan-edit-form textarea { min-height: 96px; resize: vertical; font-family: var(--mono, monospace); }
+.plan-edit-bar { align-items: center; margin: 0 0 var(--space-2); }
+.plan-status-pick { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--muted); font-size: var(--type-sm); }
+.plan-edit-error { color: var(--signal); }
+/* feature:plan-edit end */
 
 /* feature:scheduler begin */
 .sched {
