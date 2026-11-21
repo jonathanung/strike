@@ -3674,7 +3674,8 @@ try {
         canvasHidden: flow ? flow.querySelector(".mmd-canvas").hidden : null,
         sourceHidden: flow ? flow.querySelector(".mmd-source").hidden : null,
         width: svg ? svg.getAttribute("width") : "",
-        fit: svg ? svg.classList.contains("mmd-fit") : null,
+        fit: flow ? flow.querySelector(".mmd-canvas").classList.contains("mmd-z2") : null,
+        shown: svg ? Math.round(svg.getBoundingClientRect().width) : 0,
         styleAttr: svg ? svg.getAttribute("style") : null,
       });
     })()`);
@@ -3715,13 +3716,13 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
-  const fitWidth = Number((await mermaidProbe()).width);
+  const fitWidth = (await mermaidProbe()).shown;
   await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-zoom="in"]').click()`);
   await waitFor(
     "mermaid zoom in sizes the diagram explicitly",
     async () => {
       const p = await mermaidProbe();
-      return { ok: p.fit === false && Number(p.width) > fitWidth, ...p };
+      return { ok: p.fit === false && p.shown > fitWidth, ...p };
     },
     { timeout: STEP_MS, interval: 200 },
   );

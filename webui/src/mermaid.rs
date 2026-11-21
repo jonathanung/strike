@@ -10,8 +10,6 @@
 //! outside the subset — shows the original code block plus a short
 //! "Diagram didn't parse" note; never an error box, never a blank region.
 
-use std::sync::Arc;
-
 use leptos::prelude::*;
 use mermaid_lite::{Scene, Shape, Stroke};
 
@@ -35,6 +33,11 @@ pub fn step_zoom(idx: usize, up: bool) -> usize {
     } else {
         idx.saturating_sub(1)
     }
+}
+
+/// Class list for the canvas at zoom step `idx`.
+pub fn canvas_class(idx: usize) -> String {
+    format!("mmd-canvas mmd-z{}", idx.min(ZOOMS.len() - 1))
 }
 
 /// Note under a block that did not render.
@@ -140,34 +143,13 @@ pub fn MermaidBlock(source: String, children: Children) -> impl IntoView {
     let (w, h) = (scene.width, scene.height);
     let kind = scene.kind;
     let label = scene_label(&scene);
-    let shapes: Arc<Vec<Shape>> = Arc::new(scene.shapes);
-    // Sizing goes through the width/height attributes and a class, never
-    // a `style` attribute: the server CSP is `style-src 'self'`. Fit uses
-    // the natural size and `.mmd-fit` caps it at the column width (never
-    // upscaled); other steps size explicitly and the canvas scrolls.
-    // The <svg> is rebuilt per zoom step with static attributes: SVG
-    // `className`/`width`/`height` are read-only animated properties, so
-    // reactive attribute updates on the element itself are avoided.
-    let diagram = move || {
-        let z = zoom.get();
-        let class = if z == FIT { "mmd-svg mmd-fit" } else { "mmd-svg" };
-        let width = format!("{:.0}", w * ZOOMS[z]);
-        let height = format!("{:.0}", h * ZOOMS[z]);
-        let body = shapes.iter().cloned().map(shape_view).collect_view();
-        view! {
-            <svg
-                class=class
-                role="img"
-                aria-label=label.clone()
-                viewBox=format!("0 0 {w:.1} {h:.1}")
-                preserveAspectRatio="xMinYMin meet"
-                width=width
-                height=height
-            >
-                {body}
-            </svg>
-        }
-    };
+    let shapes = scene.shapes.into_iter().map(shape_view).collect_view();
+    // The <svg> keeps static attributes (natural size); zoom is a class
+    // on the HTML canvas wrapper (`mmd-z0`..`mmd-z6`, CSS `zoom` steps,
+    // `mmd-z2` = Fit capped at the column width). Updating attributes on
+    // the svg element itself did not take effect, and a `style` attribute
+    // is refused by the server CSP (`style-src 'self'`).
+    let canvas_cls = move || canvas_class(zoom.get());
     view! {
         <div class="mmd" data-mermaid=kind>
             <div class="sx-fence-bar mmd-bar" role="toolbar" aria-label="Diagram controls">
@@ -190,8 +172,18 @@ pub fn MermaidBlock(source: String, children: Children) -> impl IntoView {
                     {move || toggle_label(source_on.get())}
                 </button>
             </div>
-            <div class="mmd-canvas" tabindex="0" aria-label="Diagram canvas; scroll to pan" hidden=move || source_on.get()>
-                {diagram}
+            <div class=canvas_cls tabindex="0" aria-label="Diagram canvas; scroll to pan" hidden=move || source_on.get()>
+                <svg
+                    class="mmd-svg"
+                    role="img"
+                    aria-label=label
+                    viewBox=format!("0 0 {w:.1} {h:.1}")
+                    preserveAspectRatio="xMinYMin meet"
+                    width=format!("{w:.0}")
+                    height=format!("{h:.0}")
+                >
+                    {shapes}
+                </svg>
             </div>
             <div class="mmd-source" hidden=move || !source_on.get()>{code}</div>
         </div>
@@ -220,6 +212,13 @@ mod tests {
         assert_eq!(step_zoom(0, false), 0);
         assert_eq!(step_zoom(ZOOMS.len() - 1, true), ZOOMS.len() - 1);
         assert_eq!(ZOOMS[FIT], 1.0);
+    }
+
+    #[test]
+    fn canvas_class_tracks_zoom_step() {
+        assert_eq!(canvas_class(FIT), "mmd-canvas mmd-z2");
+        assert_eq!(canvas_class(0), "mmd-canvas mmd-z0");
+        assert_eq!(canvas_class(99), "mmd-canvas mmd-z6");
     }
 
     #[test]

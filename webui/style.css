@@ -3077,7 +3077,15 @@ button.linkish:disabled { color: var(--muted); cursor: default; text-decoration:
 .mmd-canvas { overflow: auto; max-width: 100%; max-height: 70vh; padding: var(--space-2); }
 .mmd-canvas:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
 .mmd-svg { display: block; max-width: none; }
-.mmd-svg.mmd-fit { max-width: 100%; height: auto; }
+/* Zoom steps (ZOOMS in mermaid.rs); z2 is Fit: natural size capped at
+   the column width, never upscaled. */
+.mmd-z2 .mmd-svg { max-width: 100%; height: auto; }
+.mmd-z0 .mmd-svg { zoom: 0.5; }
+.mmd-z1 .mmd-svg { zoom: 0.75; }
+.mmd-z3 .mmd-svg { zoom: 1.25; }
+.mmd-z4 .mmd-svg { zoom: 1.5; }
+.mmd-z5 .mmd-svg { zoom: 2; }
+.mmd-z6 .mmd-svg { zoom: 3; }
 .mmd-zoom { display: inline-flex; gap: 4px; }
 .mmd-zoom[hidden] { display: none; }
 .mmd-source > .sx-fence, .mmd-failed > .sx-fence { margin: 0; border: 0; }
