@@ -109,6 +109,15 @@ fn focus_is_field() -> bool {
     matches!(el.tag_name().to_ascii_lowercase().as_str(), "input" | "textarea" | "select")
 }
 
+/// The slice of `GET /v1/bootstrap` Customize reads (#1386): skill and
+/// agent load diagnostics, rescanned by the daemon on every request so a
+/// fixed file drops out on the next catalog load.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct BootWarnings {
+    load_warnings: Vec<crate::model::LoadWarning>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 struct Catalog {
@@ -484,6 +493,7 @@ pub fn CustomizePane(
 ) -> impl IntoView {
     let section = RwSignal::new("skills".to_string());
     let catalog = RwSignal::new(Catalog::default());
+    let load_warnings = RwSignal::new(Vec::<crate::model::LoadWarning>::new());
     // #1442: per-skill run counts. None until a report loads; rows then show
     // no usage line instead of claiming "Never used".
     let usage = RwSignal::new(None::<crate::skill_usage::Report>);
@@ -541,6 +551,11 @@ pub fn CustomizePane(
                     err.set(String::new());
                 }
                 Err(e) => err.set(e),
+            }
+            // A failed bootstrap read keeps the last list rather than
+            // claiming the files are fine.
+            if let Ok(boot) = get_json::<BootWarnings>(&b, &t, "/v1/bootstrap").await {
+                load_warnings.set(boot.load_warnings);
             }
             match get_json::<crate::skill_usage::Report>(&b, &t, "/v1/customize/skill-usage").await {
                 Ok(report) => usage.set(Some(report)),
@@ -907,6 +922,43 @@ pub fn CustomizePane(
                     </Show>
                 </header>
                 <p class="hint">{move || section_blurb(&section.get())}</p>
+                {move || {
+                    // #1386: files the loaders flagged for this section,
+                    // with the reason and how to fix it.
+                    let sec = section.get();
+                    let all = load_warnings.get();
+                    let rows: Vec<crate::model::LoadWarning> =
+                        crate::load_warnings::for_section(&all, &sec).into_iter().cloned().collect();
+                    if rows.is_empty() {
+                        return ().into_any();
+                    }
+                    let heading = crate::load_warnings::section_heading(&sec, rows.len());
+                    view! {
+                        <div class="cz-load-warn" role="status" data-cz-load-warnings=sec>
+                            <h3 class="cz-load-warn-head">{heading}</h3>
+                            <ul>
+                                {rows.into_iter().map(|w| {
+                                    let hint = crate::load_warnings::fix_hint(&w);
+                                    let label = crate::load_warnings::code_label(&w.code);
+                                    let file = if w.file.is_empty() { w.path.clone() } else { w.file.clone() };
+                                    let fatal = w.fatal;
+                                    view! {
+                                        <li data-cz-load-warning=w.code.clone() data-fatal=fatal.to_string()>
+                                            <span class="cz-row-title">{file}</span>
+                                            <span class="badge">{label}</span>
+                                            <Show when=move || fatal>
+                                                <span class="badge cz-load-fatal">"Failed the whole load"</span>
+                                            </Show>
+                                            <p class="cz-load-warn-msg">{w.message.clone()}</p>
+                                            <p class="hint">{hint}</p>
+                                            <p class="hint cz-path">{w.path.clone()}</p>
+                                        </li>
+                                    }
+                                }).collect_view()}
+                            </ul>
+                        </div>
+                    }.into_any()
+                }}
                 <Show when=move || !catalog.get().work_dir.is_empty()>
                     <p class="hint cz-dir">{move || format!("Directory {}", catalog.get().work_dir)}</p>
                 </Show>
