@@ -170,6 +170,15 @@ const SUGGESTIONS: [Suggestion; 6] = [
     },
 ];
 
+/// The text a quote carries: what Copy copies, else the body.
+fn quote_text(m: &Message) -> &str {
+    if m.copy_text.trim().is_empty() {
+        &m.body
+    } else {
+        &m.copy_text
+    }
+}
+
 pub fn suggestions() -> &'static [Suggestion] {
     &SUGGESTIONS
 }
@@ -435,21 +444,26 @@ impl Transcript {
     /// or streaming (only settled lines can be quoted) or has no text.
     pub fn quote_source(&self, id: u32) -> Option<(String, usize, String)> {
         let idx = self.messages.iter().position(|m| m.id == id)?;
+        if !self.quotable_at(idx) {
+            return None;
+        }
         let m = &self.messages[idx];
-        let streaming = m.role == Role::Strike && self.assistant_open && idx + 1 == self.messages.len();
-        if m.badge == "running" || streaming {
-            return None;
-        }
-        let text = if m.copy_text.trim().is_empty() {
-            m.body.clone()
-        } else {
-            m.copy_text.clone()
+        let ordinal = *self.origin.get(&m.id)?;
+        Some((m.role.class().to_string(), ordinal, quote_text(m).to_string()))
+    }
+
+    /// Cheap per-row check the view runs on every render: the message
+    /// at `idx` is settled, has text and a recorded origin.
+    pub fn quotable_at(&self, idx: usize) -> bool {
+        let Some(m) = self.messages.get(idx) else {
+            return false;
         };
-        if text.trim().is_empty() {
-            return None;
-        }
-        let ordinal = *self.origin.get(&id)?;
-        Some((m.role.class().to_string(), ordinal, text))
+        let streaming =
+            m.role == Role::Strike && self.assistant_open && idx + 1 == self.messages.len();
+        m.badge != "running"
+            && !streaming
+            && !quote_text(m).trim().is_empty()
+            && self.origin.contains_key(&m.id)
     }
 
     /// The loaded message a quote points at, or `None` when the
@@ -460,16 +474,11 @@ impl Transcript {
             .iter()
             .filter_map(|m| {
                 let ordinal = *self.origin.get(&m.id)?;
-                let text = if m.copy_text.trim().is_empty() {
-                    m.body.as_str()
-                } else {
-                    m.copy_text.as_str()
-                };
                 Some(quote_message::Candidate {
                     id: m.id,
                     ordinal,
                     role: m.role.class(),
-                    text,
+                    text: quote_text(m),
                 })
             })
             .collect();

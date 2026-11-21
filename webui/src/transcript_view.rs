@@ -857,7 +857,7 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
         usage: t
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
-        quotable: t.quote_source(msg.id).is_some(),
+        quotable: t.quotable_at(idx),
         quote: t
             .quote_for(msg.id)
             .map(|q| (q.clone(), t.resolve_quote(q))),
