@@ -50,9 +50,13 @@ const costIncludes = (text) => `(() => {
 export async function bestOfNCheck({ send }) {
   await evalValue(
     send,
-    `(() => { const b = [...document.querySelectorAll("button")].find((el) => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
+    `(() => { document.querySelector('[data-view="chat"]')?.click(); const b = [...document.querySelectorAll("button")].find((el) => el.textContent.trim() === "Back to chat"); if (b) b.click(); return "ok"; })()`,
   );
-  await waitFor(send, `(() => document.querySelector("textarea") ? "ok" : "no composer")()`, "composer");
+  await waitFor(
+    send,
+    `(() => { if (document.querySelector("textarea")) return "ok"; document.querySelector('[data-view="chat"]')?.click(); return "no composer, view=" + (document.querySelector("[data-view].active, [data-view][aria-current]")?.getAttribute("data-view") || "?"); })()`,
+    "composer",
+  );
 
   // Palette → "Run with N models…".
   await evalValue(send, `(() => { if (!document.querySelector('[data-nav="palette-dialog"]')) document.querySelector('[data-nav="palette"]')?.click(); return "ok"; })()`);
