@@ -374,7 +374,9 @@ func atoiDefault(s string, def int) int {
 }
 
 func reviewGitDiff(ctx context.Context, cwd, rel string) ([]reviewFileDiff, bool, error) {
-	args := []string{"diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/"}
+	// quotePath=false keeps UTF-8 names readable; git still quotes names
+	// with control characters, which parseReviewDiff lists without hunks.
+	args := []string{"-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/"}
 	if rel != "" {
 		args = append(args, "--", rel)
 	}
@@ -503,8 +505,9 @@ func (s *Server) handleReviewGet(w http.ResponseWriter, r *http.Request) {
 	var doc reviewDoc
 	if body.SessionID != "" {
 		if doc, err = s.review.get(body.SessionID); err != nil {
-			writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
-			return
+			// Still show the diff; the stored review is what failed.
+			body.Reason = "stored review unavailable: " + err.Error()
+			doc = reviewDoc{}
 		}
 	}
 	for _, f := range files {
