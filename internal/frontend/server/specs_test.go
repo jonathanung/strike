@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -110,7 +111,7 @@ func TestSpecLifecycleOverHTTP(t *testing.T) {
 		v = version(t, out)
 		return out
 	}
-	vs := func() string { return itoa(v) }
+	vs := func() string { return strconv.Itoa(v) }
 	step(http.MethodPost, "/v1/specs/export/phases/requirements", `{"status":"approved","expectedVersion":`+vs()+`}`)
 	step(http.MethodPut, "/v1/specs/export/design", `{"design":"# Design","expectedVersion":`+vs()+`}`)
 	step(http.MethodPost, "/v1/specs/export/phases/design", `{"status":"approved","expectedVersion":`+vs()+`}`)
@@ -155,9 +156,4 @@ func TestSpecLifecycleOverHTTP(t *testing.T) {
 	if code != http.StatusOK || len(list["specs"].([]any)) != 1 {
 		t.Fatalf("list = %d %v", code, list)
 	}
-}
-
-func itoa(n int) string {
-	b, _ := json.Marshal(n)
-	return string(b)
 }
