@@ -547,6 +547,20 @@ fn activate_gateway(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The live saved-profile list once App has installed the host, so
+/// other surfaces (the #1539 peek) refresh when a profile is added or
+/// removed instead of only on remount.
+pub fn profiles_signal() -> Option<RwSignal<Vec<Profile>>> {
+    host().map(|h| h.profiles)
+}
+
+/// Switch to a saved gateway through the same pick path the palette's
+/// "Switch to gateway" uses, for callers outside the switcher (the
+/// Sessions list cross-gateway peek, #1539).
+pub fn switch_to(id: &str) -> Result<(), String> {
+    activate_gateway(id)
+}
+
 fn forget_gateway(id: &str) -> Result<(), String> {
     if id == "this" || id.is_empty() {
         return Err("This gateway stays.".into());
