@@ -626,7 +626,8 @@ the worktree patch, verification outcome when gates ran). A per-run
 --check` first; a patch that does not apply changes nothing and leaves
 the run undecided. Runs live in daemon memory (last 32).
 
-Cockpit (#1881): the palette's **Run with N models…** opens a picker in
+Cockpit (#1881): **Run with N models…** (command palette, or the composer
+model menu) opens a picker in
 the chat column (prompt, 2–4 models as `model` or `model@effort`, turns and
 minutes per run, "may edit files"). It shows the N× cost and the per-run
 budget before anything runs. Each run gets a comparison card with live
@@ -635,8 +636,7 @@ Cancel all, Adopt (confirmed) and Keep none (confirmed). Wording and
 parsing live in `webui/best-of-n` (unit-tested in CI); the browser check
 is `scripts/webui-best-of-n-check.mjs`.
 
-Not built yet: an entry in the composer model menu (the palette is the
-way in), parent-agent commentary on how the results differ, and
+Not built yet: parent-agent commentary on how the results differ, and
 per-candidate tokens/cost (`child.completed` does not carry usage today).
 
 ## MCP elicitation
