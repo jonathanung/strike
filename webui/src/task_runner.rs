@@ -541,7 +541,13 @@ pub fn TaskRunner(
             return;
         }
         let plan_id = selected.get_untracked();
-        if plan_id.is_empty() || edit_busy.get_untracked() {
+        if plan_id.is_empty() {
+            return;
+        }
+        if edit_busy.get_untracked() {
+            edit_error.set("Another plan edit is still saving. Try again when it finishes.".into());
+            // Re-render the board so controls show the daemon's state.
+            run.update(|_| {});
             return;
         }
         edit_busy.set(true);
@@ -562,7 +568,12 @@ pub fn TaskRunner(
                     }
                     refresh_plans();
                 }
-                Err(err) => edit_error.set(plan_error(&err)),
+                Err(err) => {
+                    edit_error.set(plan_error(&err));
+                    // A refused status pick must not keep showing the value
+                    // the daemon rejected: re-render from the last run.
+                    run.update(|_| {});
+                }
             }
         });
     };
