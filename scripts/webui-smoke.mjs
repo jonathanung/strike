@@ -288,6 +288,44 @@ try {
       throw new Error(`second client read state = ${JSON.stringify(other.seen)} latest=${latest}`);
     }
   }
+  // #1488: the away-briefing watermark is daemon-side (shared by every
+  // device), authed, forward-only, and clamped to the daemon clock. It is
+  // left at daemon now so the cockpit below opens with no briefing.
+  {
+    const briefUrl = `http://127.0.0.1:${port}/v1/briefing/seen`;
+    const auth = { Authorization: `Bearer ${token}` };
+    const json = { ...auth, "Content-Type": "application/json" };
+    const briefNoAuth = await fetch(briefUrl);
+    if (briefNoAuth.status !== 401) {
+      throw new Error(`briefing/seen without token = ${briefNoAuth.status}`);
+    }
+    const fresh = await (await fetch(briefUrl, { headers: auth })).json();
+    if (fresh.seenAt !== 0 || !(fresh.now > 0)) {
+      throw new Error(`fresh briefing watermark = ${JSON.stringify(fresh)}`);
+    }
+    const mark = fresh.now - 60 * 60 * 1000;
+    const post = async (seenAt) => {
+      const res = await fetch(briefUrl, { method: "POST", headers: json, body: JSON.stringify({ seenAt }) });
+      if (res.status !== 200) {
+        throw new Error(`briefing/seen POST ${seenAt} = ${res.status} ${await res.text()}`);
+      }
+      return res.json();
+    };
+    const first = await post(mark);
+    const back = await post(mark - 1000);
+    const peer = await (await fetch(briefUrl, { headers: auth })).json();
+    if (first.seenAt !== mark || back.seenAt !== mark || peer.seenAt !== mark) {
+      throw new Error(`briefing watermark first=${first.seenAt} back=${back.seenAt} peer=${peer.seenAt} want=${mark}`);
+    }
+    const ahead = await post(Date.now() + 24 * 60 * 60 * 1000);
+    if (!(ahead.seenAt > mark) || ahead.seenAt > ahead.now) {
+      throw new Error(`briefing watermark not clamped to daemon now: ${JSON.stringify(ahead)}`);
+    }
+    const bad = await fetch(briefUrl, { method: "POST", headers: json, body: '{"seenAt":0}' });
+    if (bad.status !== 400) {
+      throw new Error(`briefing/seen zero = ${bad.status}`);
+    }
+  }
   // #1564: Web Push registry. No real push service is contacted: the https
   // endpoint below is never reachable and is removed straight away.
   {
@@ -557,6 +595,30 @@ try {
   await writeFile(
     join(sessionsDir, "elapsed-session.meta.json"),
     JSON.stringify({ title: "Elapsed replay" }) + "\n",
+  );
+  // files.invalidated (#1380) fixture: a replayed turn with two
+  // back-to-back invalidations (five distinct paths). The cockpit must
+  // render ONE muted notice (merged, capped at three names) and refetch
+  // the open Files panel once.
+  const invalidatedSession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-26T07:00:00Z" }) +
+    "\n" +
+    envLine("user.message", "2026-10-26T07:00:00Z", { text: "touch the tree" }) +
+    envLine("turn.started", "2026-10-26T07:00:01Z", {}) +
+    envLine("files.invalidated", "2026-10-26T07:00:02Z", {
+      paths: ["src/a.go", "src/b.go"],
+      reason: "external",
+    }) +
+    envLine("files.invalidated", "2026-10-26T07:00:03Z", {
+      paths: ["src/b.go", "src/c.go", "src/d.go", "src/e.go"],
+      reason: "external",
+    }) +
+    envLine("text.delta", "2026-10-26T07:00:04Z", { text: "tree touched" }) +
+    envLine("turn.completed", "2026-10-26T07:00:05Z", { stopReason: "end_turn" });
+  await writeFile(join(sessionsDir, "invalidated-session.jsonl"), invalidatedSession);
+  await writeFile(
+    join(sessionsDir, "invalidated-session.meta.json"),
+    JSON.stringify({ title: "Invalidated replay" }) + "\n",
   );
   // Live tool tail (#1374) fixture: turn 1's call streams a chunk and
   // then ends (the final output replaces the tail); turn 2's chatty call
@@ -996,6 +1058,14 @@ try {
     throw new Error(
       `cockpit check failed missing=${missingText.join(",")} acid=${acid} ground=${ground} status=${statusId} chip=${chip} title=${title} version=${version} text=${text.slice(0, 400)}\n${await diagnostics()}`,
     );
+  }
+  // #1488: the watermark was just set to daemon now, so the away gap is
+  // under the threshold: no catch-up panel (empty delta = cockpit as today).
+  {
+    const panel = await evaluate(`!!document.querySelector("[data-briefing]")`);
+    if (panel) {
+      throw new Error(`away briefing shown with no away gap\n${await diagnostics()}`);
+    }
   }
   // Approvals (#1266): mode menu, Yolo confirm + Escape, and the
   // permission-rules API confirm gates. Runs while the boot session is
@@ -5172,6 +5242,80 @@ try {
     },
     { timeout: STEP_MS, interval: 250 },
   );
+  // Global transcript search (#1355): the palette opens the overlay; a
+  // query with no matches says so; a content match in a session shows a
+  // highlighted snippet; picking it opens that session and hands the
+  // query to find-in-transcript.
+  {
+    const api = await fetch(`http://127.0.0.1:${port}/v1/search?q=coral%20bookmark`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = await api.json();
+    if (!api.ok || !(body.hits || []).some((h) => h.id === "beta-session")) {
+      throw new Error(`global search API ${api.status} ${JSON.stringify(body).slice(0, 300)}`);
+    }
+    await runPalette("Search all sessions");
+    // The command takes an optional query, so the first Enter opens its
+    // argument prompt; a second Enter submits it empty and opens the overlay.
+    await evaluate(`(() => {
+      const input = document.querySelector('[data-nav="palette-dialog"] input');
+      input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+    await waitFor(
+      "global search overlay",
+      async () => ({ ok: (await evaluate(`!!document.querySelector("#gs-input")`)) === true }),
+      { timeout: STEP_MS, interval: 150 },
+    );
+    const gsSearch = async (q) => {
+      await evaluate(`(() => {
+        const input = document.querySelector("#gs-input");
+        const proto = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+        proto.set.call(input, ${JSON.stringify(q)});
+        input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+        document.querySelector("[data-gs-submit]").click();
+        return true;
+      })()`);
+    };
+    await gsSearch("zzqx nothing matches this");
+    await waitFor(
+      "global search no-results state",
+      async () => {
+        const t = (await evaluate(`document.querySelector("[data-gs-status]")?.innerText || ""`)) || "";
+        return { ok: t.startsWith("No matches in"), t };
+      },
+      { timeout: WAIT_MS, interval: 200 },
+    );
+    await gsSearch("coral bookmark");
+    const hitInfo = await waitFor(
+      "global search hit with highlighted snippet",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const hit = document.querySelector('[data-gs-hit="beta-session"]');
+          return JSON.stringify({ found: !!hit, mark: hit?.querySelector("mark")?.textContent || "" });
+        })()`);
+        const v = JSON.parse(raw || "{}");
+        return { ok: v.found && v.mark.toLowerCase() === "coral bookmark", ...v };
+      },
+      { timeout: WAIT_MS, interval: 200 },
+    );
+    if (!hitInfo.found) throw new Error("global search hit missing");
+    await evaluate(`document.querySelector('[data-gs-hit="beta-session"]').click()`);
+    await waitFor(
+      "global search opens the session and hands off to find-in-transcript",
+      async () => {
+        const raw = await evaluate(`(() => JSON.stringify({
+          overlay: !!document.querySelector("#gs-input"),
+          selected: document.querySelector('[data-session-id][aria-selected="true"]')?.getAttribute("data-session-id") || "",
+          find: document.querySelector("#tf-search")?.value || "",
+        }))()`);
+        const v = JSON.parse(raw || "{}");
+        return { ok: !v.overlay && v.selected === "beta-session" && v.find === "coral bookmark", ...v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await evaluate(`document.querySelector("[data-tf-close]")?.click()`);
+  }
   // Search in files (#1406): seed a fixture dir under the daemon's work
   // dir, search from the Files-pane box, and check: matches grouped by
   // file with marked text, the no-results state, the capped state (per-
@@ -6108,6 +6252,79 @@ try {
     },
     { timeout: WAIT_MS, interval: 250 },
   );
+
+  // files.invalidated (#1380): with the Files tab open, add a file to the
+  // daemon's work dir, then open the seeded replay session. The replayed
+  // invalidations must produce exactly one merged, capped notice, and the
+  // open Files panel must refetch (the new file appears) with no manual
+  // Refresh. DOM probes use textContent so a collapsed side panel in the
+  // current layout cannot hide the result.
+  const invalidatedFile = "smoke-files-invalidated.tmp";
+  const invalidatedPath = join(process.cwd(), invalidatedFile);
+  await rm(invalidatedPath, { force: true });
+  try {
+    const filesTab = await evaluate(`(() => {
+      const btn = [...document.querySelectorAll(".side-tabs button")].find((b) => (b.textContent || "").includes("Files"));
+      if (!btn) return "missing";
+      btn.click();
+      return "clicked";
+    })()`);
+    if (filesTab !== "clicked") {
+      throw new Error(`files.invalidated: Files side tab ${filesTab}\n${await diagnostics()}`);
+    }
+    const fileRows = `[...document.querySelectorAll(".files .file-row")].map((b) => (b.textContent || "").trim())`;
+    await waitFor(
+      "files.invalidated: Files panel loaded before the change",
+      async () => {
+        const v = await evaluate(`(() => { const rows = ${fileRows}; return { n: rows.length, has: rows.includes(${JSON.stringify(invalidatedFile)}) }; })()`);
+        return { ok: v.n > 0 && !v.has, ...v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await writeFile(invalidatedPath, "changed outside the transcript\n");
+    let invalidatedClicked = "missing";
+    try {
+      await waitFor(
+        "files.invalidated resume row",
+        async () => {
+          invalidatedClicked = await evaluate(`(() => {
+            const row = document.querySelector('[data-session-id="invalidated-session"]');
+            const btn = row && row.querySelector(".ss-main");
+            if (!btn) return "missing";
+            btn.click();
+            return "clicked";
+          })()`);
+          return { ok: invalidatedClicked === "clicked", clicked: invalidatedClicked };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+    } catch {
+      // Reported by the throw below with the last observed state.
+    }
+    if (invalidatedClicked !== "clicked") {
+      throw new Error(`files.invalidated resume click -> ${invalidatedClicked}`);
+    }
+    await waitFor(
+      "files.invalidated: one merged notice and a refreshed Files panel",
+      async () => {
+        const v = await evaluate(`(() => {
+          const notices = [...document.querySelectorAll('article[data-kind="files.invalidated"]')];
+          const rows = ${fileRows};
+          return {
+            n: notices.length,
+            text: notices[0] ? (notices[0].textContent || "") : "",
+            replayed: (document.body.textContent || "").includes("tree touched"),
+            has: rows.includes(${JSON.stringify(invalidatedFile)}),
+          };
+        })()`);
+        const want = "files changed — agent will re-read: src/a.go, src/b.go, src/c.go +2 more";
+        return { ok: v.n === 1 && v.text.includes(want) && v.replayed && v.has, ...v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  } finally {
+    await rm(invalidatedPath, { force: true });
+  }
 
   // Per-turn file summary (#1365): resume the seeded session; each turn
   // that changed files carries one collapsed summary on its own final
