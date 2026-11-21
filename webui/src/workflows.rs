@@ -337,7 +337,7 @@ pub fn WorkflowsPage(
                     validate_note.set(String::new());
                     saved_note.set(String::new());
                 }
-                Err(e) => notice.set(format!("Format failed: {}", daemon_error(&e))),
+                Err(e) => saved_note.set(format!("Format failed: {}", daemon_error(&e))),
             }
         });
     };
@@ -353,11 +353,11 @@ pub fn WorkflowsPage(
                         review.set(Some(r));
                         reviewed_text.set(text);
                     }
-                    Err(e) => notice.set(format!("Unreadable review: {e}")),
+                    Err(e) => saved_note.set(format!("Unreadable review: {e}")),
                 },
                 Err(e) => {
                     review.set(None);
-                    notice.set(format!("Review failed: {}", daemon_error(&e)));
+                    saved_note.set(format!("Review failed: {}", daemon_error(&e)));
                 }
             }
         });
