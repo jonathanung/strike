@@ -84,6 +84,17 @@ type ScriptAudit struct {
 	Error       string
 }
 
+// ScriptNotice is what the notification centre learns about a script run:
+// ids, the schedule's name, and the exit code. The command and the output
+// are deliberately not fields.
+type ScriptNotice struct {
+	ScheduleID string
+	RunID      string
+	Name       string
+	ExitCode   *int
+	Failed     bool
+}
+
 // scriptRunning reports whether id is in the in-flight set.
 func (s *Service) scriptRunning(id string) bool {
 	s.mu.Lock()
@@ -317,6 +328,15 @@ func (s *Service) finishScript(sch Schedule, req ScriptRequest, out ScriptResult
 		Sandbox: out.Sandbox, Dir: req.Dir, StartedAt: out.StartedAt, EndedAt: out.EndedAt,
 		ExitCode: cloneInt(out.ExitCode), OutputTail: preview, Error: out.Error,
 	})
+	if s.hooks.Notify != nil && (out.Status == StatusFinished || out.Status == StatusFailed) {
+		s.hooks.Notify(ScriptNotice{
+			ScheduleID: sch.ID,
+			RunID:      req.RunID,
+			Name:       sch.Name,
+			ExitCode:   cloneInt(out.ExitCode),
+			Failed:     out.Status == StatusFailed,
+		})
+	}
 }
 
 // audit fills the schedule-level fields and hands rec to Hooks.Audit.
