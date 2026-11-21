@@ -7,6 +7,11 @@
 //! (the daemon's load-free enumeration: names and command lines, never env
 //! or headers), with Grant / Keep untrusted. The workspace is always the
 //! live root's own directory; the browser never names a path.
+//!
+//! A saved decision applies when the daemon reloads (#1834): while it is
+//! pending, a "Reload to apply" badge stays up on every root and the card
+//! offers "Reload strike serve", which stops every session and project
+//! process and restarts the daemon with the same flags.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -125,14 +130,48 @@ pub fn WorkspaceTrust(
         });
     };
 
+    // Apply asks the daemon to restart under the saved decision. Running
+    // turns stop; sessions are saved and can be resumed after the reload.
+    let apply = move || {
+        if busy.get_untracked() {
+            return;
+        }
+        let (b, t, r) = (
+            base.get_untracked(),
+            token.get_untracked(),
+            root.get_untracked(),
+        );
+        busy.set(true);
+        error.set(String::new());
+        spawn_local(async move {
+            match call_trust(&b, &t, &r, Some("apply")).await {
+                Ok(v) => {
+                    if v.reloading {
+                        status.set("reloading strike serve to apply workspace trust".to_string());
+                    } else if !v.error.is_empty() {
+                        error.set(v.error.clone());
+                    }
+                    reply.set(Some(v));
+                }
+                Err(e) => {
+                    error.set(e.clone());
+                    status.set(format!("workspace trust reload failed: {e}"));
+                }
+            }
+            busy.set(false);
+        });
+    };
+
     // Keep untrusted changes nothing on disk: it closes the card and the
     // badge stays up.
     let keep_untrusted = move || card_open.set(false);
 
     let badge_visible = move || reply.get().map(|v| v.badge_visible()).unwrap_or(false);
+    let reload_offered = move || reply.get().map(|v| v.reload_offered()).unwrap_or(false);
+    let reloading = move || reply.get().map(|v| v.reloading).unwrap_or(false);
 
     view! {
-        <Show when=move || capable.get() && (badge_visible() || card_open.get())>
+        <Show when=move || capable.get() && (badge_visible() || reload_offered() || card_open.get())>
             <div class="workspace-trust">
                 <Show when=badge_visible>
                     <button
@@ -146,12 +185,25 @@ pub fn WorkspaceTrust(
                         "Untrusted workspace"
                     </button>
                 </Show>
+                <Show when=move || reload_offered() && !badge_visible()>
+                    <button
+                        type="button"
+                        class="trust-badge"
+                        data-action="workspace-trust-reload-badge"
+                        aria-expanded=move || if card_open.get() { "true" } else { "false" }
+                        title="Workspace trust changed; this daemon still runs the config it started with"
+                        on:click=move |_| card_open.update(|o| *o = !*o)
+                    >
+                        "Reload to apply trust"
+                    </button>
+                </Show>
                 <Show when=move || card_open.get()>
                     <section class="trust-card card" role="region" aria-label="Workspace trust">
                         {move || reply.get().map(|v| {
                             let sections = v.surfaces.sections();
                             let root_text = v.root.clone();
                             let restart = v.restart_required;
+                            let can_reload = v.can_reload;
                             let mutable = v.mutable && !v.untrustable;
                             view! {
                                 <h2 class="panel-title">
@@ -167,10 +219,12 @@ pub fn WorkspaceTrust(
                                     }
                                 >
                                     <p class="hint" role="status">
-                                        {if restart {
-                                            "Trust saved. Restart strike serve to load this config; running sessions keep the config they started with."
+                                        {if !restart {
+                                            "Trust saved. This config is active."
+                                        } else if can_reload {
+                                            "Trust saved. Reload strike serve to load this config: running turns stop, sessions are kept and can be resumed."
                                         } else {
-                                            "Trust saved. New sessions load this config."
+                                            "Trust saved. Restart strike serve to load this config; running sessions keep the config they started with."
                                         }}
                                     </p>
                                 </Show>
@@ -205,6 +259,17 @@ pub fn WorkspaceTrust(
                                     on:click=move |_| keep_untrusted()
                                 >
                                     "Keep untrusted"
+                                </button>
+                            </Show>
+                            <Show when=move || reload_offered() || reloading()>
+                                <button
+                                    type="button"
+                                    class="primary"
+                                    data-action="workspace-trust-apply"
+                                    disabled=move || busy.get() || reloading()
+                                    on:click=move |_| apply()
+                                >
+                                    {move || if reloading() { "Reloading…" } else { "Reload strike serve" }}
                                 </button>
                             </Show>
                             <Show when=move || granted.get()>
