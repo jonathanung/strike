@@ -410,6 +410,25 @@ transcript folds away) are not searched and find does not expand
 collapsed cards to reveal a match; a case-sensitive toggle is likewise
 deferred until someone asks for it.
 
+## Debug mode
+
+Engine state shipped, panel not drawn (#1345). `harness/debugmode` holds
+one debug session: 2–5 ranked hypotheses with attached evidence, each
+open / confirmed / refuted (confirming requires evidence). In the
+`hypothesis` phase the gate allows reads and only edits whose every
+changed line carries the `debugmode.Marker` tag; untagged edits, deletes
+and moves are denied with a reason (`*GateError`). Fix edits unlock when a
+hypothesis is confirmed or the user gives an override reason, which the
+session keeps for the transcript. Ending the session requires the user to
+mark the bug fixed; it then sweeps every whole line containing the marker
+under the workspace (skipping `.git`, binaries and files over 4 MiB) and
+closes only when a rescan finds zero.
+
+Not drawn yet: the session flag in the engine turn loop, the protocol
+events, and the cockpit Debug panel (hypothesis card, instrumentation
+list, reproduce checklist, mobile chip). Bash is not inspected by the
+gate; the permission layer still governs it.
+
 ## Not planned as a copy
 
 Stall is already a real badge when the team roster sets `budget.stall`.
