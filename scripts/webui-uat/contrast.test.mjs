@@ -69,3 +69,31 @@ test("chat view exposes a main landmark, an h1 and a named composer", () => {
   assert.match(src, /id="composer-input"\s+aria-label="Message this session"/);
   assert.match(css, /\.sr-only \{/);
 });
+
+test("accent-role text meets AA on the default Strike theme (#1337)", () => {
+  // a11y.css: --acid-text is --highlight on Strike dark (where --acid as
+  // text was 3.23:1) and --acid elsewhere. Non-default themes: #1516.
+  const a11y = webui("a11y.css");
+  assert.match(a11y, /--acid-text:\s*var\(--highlight\)/);
+  assert.match(a11y, /\.chip\.on,[\s\S]*color:\s*var\(--acid-text\)/);
+  const strike = themes(css).filter((t) => t.theme === "strike");
+  for (const t of strike) {
+    const fg = t.scheme === "dark" ? t.tokens.highlight : t.tokens.acid;
+    for (const bg of ["ground", "surface", "raised"]) {
+      const r = ratio(fg, t.tokens[bg]);
+      assert.ok(r >= 4.5, `strike/${t.scheme} accent text ${fg} on ${bg} ${t.tokens[bg]} = ${r.toFixed(2)}`);
+    }
+  }
+  // The pair this replaces really did fail.
+  const dark = strike.find((t) => t.scheme === "dark").tokens;
+  assert.ok(ratio(dark.acid, dark.ground) < 4.5);
+});
+
+test("reduced motion is honoured globally (#1337)", () => {
+  const a11y = webui("a11y.css");
+  assert.match(a11y, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(a11y, /animation-duration:\s*0\.01ms !important/);
+  assert.match(a11y, /transition-duration:\s*0\.01ms !important/);
+  const index = webui("index.html");
+  assert.ok(index.indexOf("a11y.css") > 0 && index.indexOf("a11y.css") < index.indexOf("theme.css"), "a11y.css must load before theme.css");
+});

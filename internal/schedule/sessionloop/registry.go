@@ -33,9 +33,10 @@ var (
 // submitTimeout bounds one firing's hand-off to the session.
 const submitTimeout = 5 * time.Second
 
-// SubmitFunc injects job into the session as a user prompt. It must queue
-// behind a busy turn rather than interleave (the engine's UserInput FIFO).
-type SubmitFunc func(ctx context.Context, job string) error
+// SubmitFunc injects job into the session as a user prompt fired by loop id
+// (carried as UserInput.LoopID so transcripts can badge it, #1827). It must
+// queue behind a busy turn rather than interleave (the engine's UserInput FIFO).
+type SubmitFunc func(ctx context.Context, id, job string) error
 
 // Loop is a host-safe snapshot of one active loop.
 type Loop struct {
@@ -205,7 +206,7 @@ func (r *Registry) fire(id string, gen int) {
 	r.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), submitTimeout)
-	err := r.submit(ctx, job)
+	err := r.submit(ctx, id, job)
 	cancel()
 
 	r.mu.Lock()

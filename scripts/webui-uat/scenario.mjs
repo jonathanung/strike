@@ -728,6 +728,39 @@ export async function runScenario({ page, baseURL, outDir, video, goldens, updat
       "echoed composer message",
     );
     check(Boolean(echoed), "transcript never showed the echo");
+    // #1337: global live regions exist at the shell root, and the echo
+    // turn ending is announced politely.
+    const live = await page.evaluate(`(() => {
+      const p = document.querySelector('#a11y-polite[aria-live="polite"]');
+      const a = document.querySelector('#a11y-assertive[aria-live="assertive"]');
+      return { polite: Boolean(p), assertive: Boolean(a) };
+    })()`);
+    check(live.polite && live.assertive, "global aria-live regions missing");
+    const announced = await waitUntil(
+      `(() => {
+        const p = document.querySelector("#a11y-polite");
+        return Boolean(p) && /Turn (finished|ended)/.test(p.textContent || "");
+      })()`,
+      8000,
+      "turn-end announcement",
+    );
+    check(Boolean(announced), "turn end was not announced in the polite live region");
+    // #1337: with reduced motion emulated, transitions and animations finish instantly.
+    await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    const motion = await page.evaluate(`(() => {
+      const el = document.querySelector("button.send") || document.querySelector("button");
+      if (!el) return null;
+      const cs = getComputedStyle(el);
+      const secs = (v) => Math.max(...v.split(",").map((x) => parseFloat(x) * (x.trim().endsWith("ms") ? 0.001 : 1)));
+      return {
+        matches: matchMedia("(prefers-reduced-motion: reduce)").matches,
+        transition: secs(cs.transitionDuration),
+        animation: secs(cs.animationDuration),
+      };
+    })()`);
+    check(Boolean(motion && motion.matches), "reduced-motion emulation did not apply");
+    check(Boolean(motion) && motion.transition <= 0.001 && motion.animation <= 0.001, `reduced motion not honoured: ${JSON.stringify(motion)}`);
+    await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
     await shoot("shell-composer-sent", ["desk1024", "desk1440"]);
 
     await waitUntil(
