@@ -96,7 +96,7 @@ func lastCompleted(t *testing.T, evs []protocol.Event) protocol.TurnCompleted {
 }
 
 func TestFallbackAnswersTheTurnAndPrimaryIsRetriedNextTurn(t *testing.T) {
-	primary := &failingProvider{err: errors.New("primary overloaded")}
+	primary := &failingProvider{err: errors.New("primary rejected the request")}
 	backup := &fastRecordingProvider{}
 	eng := newFallbackEngine(t, map[string]provider.Provider{"primary": primary, "backup": backup})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -127,7 +127,7 @@ func TestFallbackAnswersTheTurnAndPrimaryIsRetriedNextTurn(t *testing.T) {
 		if fb != want {
 			t.Errorf("turn %d: ModelFallback = %+v, want %+v", turn, fb, want)
 		}
-		if !strings.Contains(fb.Error, "primary overloaded") {
+		if !strings.Contains(fb.Error, "primary rejected the request") {
 			t.Errorf("turn %d: ModelFallback.Error = %q", turn, fb.Error)
 		}
 		if fb.TurnID == "" {
