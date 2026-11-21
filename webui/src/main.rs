@@ -63,6 +63,7 @@ mod triggers;
 mod turn_elapsed;
 mod turn_usage;
 mod workspaces;
+mod workflows;
 use crate::shell::icon;
 
 
@@ -4763,6 +4764,9 @@ fn App() -> impl IntoView {
                 active_root=active_root
                 status=status
             />
+        </Show>
+        <Show when=move || mode.get() == "workflows" fallback=move || ()>
+            <workflows::WorkflowsPage base=base token=token status=status />
         </Show>
         <Show when=move || mode.get() == "triggers" fallback=move || ()>
             <triggers::TriggersPage
