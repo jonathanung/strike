@@ -105,6 +105,7 @@ jobs:
           cargo test --manifest-path webui/edit-resend/Cargo.toml --locked
           cargo test --manifest-path webui/status-card/Cargo.toml --locked
           cargo test --manifest-path webui/composer-drafts/Cargo.toml --locked
+          cargo test --manifest-path webui/theme-catalog/Cargo.toml --locked
 
       # E3.2 prompt regression: verbose report of tool/turn/token deltas.
       # Non-blocking for now (test itself soft-fails metric drift unless

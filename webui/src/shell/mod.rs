@@ -24,7 +24,7 @@ pub use host::{
 pub use icon::icon;
 #[allow(unused_imports)]
 pub use registry::{
-    replace_prefixed, Argument, Choice, Command, CommandRun, ConfirmSpec, Group, PaletteUsage,
+    choices_in_argument_step_only, replace_prefixed, Argument, Choice, Command, CommandRun, ConfirmSpec, Group, PaletteUsage,
     ShellHook, Shortcut, TopRegion, TopSlot,
 };
 
