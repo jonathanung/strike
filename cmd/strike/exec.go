@@ -473,6 +473,13 @@ func (s *headlessState) handleEvent(
 		case ops <- reply:
 		case <-interrupted:
 		}
+	case protocol.ElicitationRequested:
+		// No one can fill a form headlessly: cancel so the MCP call settles.
+		fmt.Fprintln(stderr, "strike: MCP server "+e.Server+" asked for input; cancelled (headless run)")
+		select {
+		case ops <- protocol.ElicitationReply{RequestID: e.RequestID, Action: protocol.ElicitationCancel}:
+		case <-interrupted:
+		}
 	case protocol.EngineError:
 		*turnErr = errors.New(e.Message)
 		s.errMsg = e.Message

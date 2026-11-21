@@ -492,7 +492,13 @@ impl Transcript {
         // are skipped, and a known event whose payload does not match the
         // schema is dropped. Parsing below still reads the raw object.
         match protocol_schema::decode_event(raw) {
-            Ok(protocol_schema::Event::Unknown { .. }) | Err(_) => return,
+            Ok(protocol_schema::Event::Unknown { .. }) => return,
+            Err(_) => {
+                // #1359: a compaction/budget payload the schema rejects
+                // still leaves a title-only marker where it happened.
+                self.apply_malformed_mark(raw);
+                return;
+            }
             Ok(_) => {}
         }
         let v: Value = match serde_json::from_str(raw) {
@@ -518,13 +524,16 @@ impl Transcript {
                 self.trigger_note.clear();
                 let text = field_str(&data, "text");
                 let shown = display_user_text(&strip_echo_progress(&text));
+                // #1324: a review-queue turn is labelled as a review, not
+                // shown as if the operator had typed it.
+                let review = crate::review_queue::is_review_turn(&text);
                 let (ack_text, ack_shown) = (text.clone(), shown.clone());
                 let id = self.push(Message {
                     id: 0,
                     role: Role::You,
-                    title: "You".into(),
+                    title: if review { "Review".into() } else { "You".into() },
                     body: shown.clone(),
-                    badge: String::new(),
+                    badge: if review { "review".into() } else { String::new() },
                     detail: String::new(),
                     key: String::new(),
                     call_id: String::new(),
@@ -820,11 +829,24 @@ impl Transcript {
                     copy_text: body,
                     reconnect: String::new(),
                     at_ms,
+                    attachments: Vec::new(),
                     turn_id: field_str(&data, "turnId"),
                     attachments: Vec::new(),
                 });
             }
             "artifact.updated" => self.artifact_updates = self.artifact_updates.wrapping_add(1),
+            "compaction.started"
+            | "compaction.completed"
+            | "context.fit_warning"
+            | "session.budget_warning" => {
+                if self.foreign_session(&data) {
+                    return;
+                }
+                if let Some(mark) = crate::compaction_marks::mark(typ, &data) {
+                    self.assistant_open = false;
+                    self.push_mark(mark, at_ms, field_str(&data, "turnId"));
+                }
+            }
             "engine.error" => {
                 let message = field_str(&data, "message");
                 if message.is_empty() {
@@ -967,6 +989,7 @@ impl Transcript {
                     copy_text: permission,
                     reconnect: String::new(),
                     at_ms,
+                    attachments: Vec::new(),
                     turn_id: String::new(),
                     attachments: Vec::new(),
                 });
@@ -1022,6 +1045,54 @@ impl Transcript {
             keep_events: -1,
             retry_text: String::new(),
             copy_text: body,
+            reconnect: String::new(),
+            at_ms,
+            turn_id,
+            attachments: Vec::new(),
+        });
+    }
+
+    /// Minimal marker for a compaction/budget envelope whose payload the
+    /// generated schema rejected (#1359). Anything else stays dropped.
+    fn apply_malformed_mark(&mut self, raw: &str) {
+        let Ok(v) = serde_json::from_str::<Value>(raw) else {
+            return;
+        };
+        let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let Some(mark) = crate::compaction_marks::minimal(typ) else {
+            return;
+        };
+        let at_ms = v
+            .get("time")
+            .and_then(|t| t.as_str())
+            .map(crate::model::rfc3339_to_ms)
+            .unwrap_or(0.0);
+        self.assistant_open = false;
+        self.push_mark(mark, at_ms, String::new());
+    }
+
+    /// One compaction/budget marker line (#1359): a notice whose summary
+    /// and residue sit in the collapsed detail fold.
+    fn push_mark(&mut self, mark: crate::compaction_marks::Mark, at_ms: f64, turn_id: String) {
+        let copy = if mark.body.is_empty() {
+            mark.title.clone()
+        } else {
+            format!("{}\n{}", mark.title, mark.body)
+        };
+        self.push(Message {
+            id: 0,
+            role: Role::Notice,
+            title: mark.title,
+            body: mark.body,
+            badge: mark.badge,
+            detail: mark.detail,
+            key: mark.key,
+            call_id: String::new(),
+            diff: None,
+            chips: Vec::new(),
+            keep_events: -1,
+            retry_text: String::new(),
+            copy_text: copy,
             reconnect: String::new(),
             at_ms,
             turn_id,
@@ -2267,6 +2338,134 @@ pub fn provider_auth_headline(provider: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn notices(t: &Transcript) -> Vec<(String, String)> {
+        t.messages
+            .iter()
+            .filter(|m| m.role == Role::Notice)
+            .map(|m| (m.title.clone(), m.key.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn compaction_and_budget_markers_render_inline_in_order() {
+        // Real envelope shapes, as the engine emits them mid-session.
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "long task"})));
+        t.apply_envelope(&env("turn.started", serde_json::json!({"turnId": "t1", "sessionId": "s1"})));
+        t.apply_envelope(&env(
+            "context.fit_warning",
+            serde_json::json!({"sessionId": "s1", "turnId": "t1", "estimatedTokens": 180000,
+                "contextLimit": 200000, "level": "warn", "message": "context is getting full"}),
+        ));
+        t.apply_envelope(&env(
+            "compaction.started",
+            serde_json::json!({"sessionId": "s1", "turnId": "t1", "reason": "threshold", "strategy": "summarize"}),
+        ));
+        t.apply_envelope(&env(
+            "compaction.completed",
+            serde_json::json!({"sessionId": "s1", "turnId": "t1", "reason": "threshold",
+                "strategy": "summarize", "removed": 6, "kept": 2, "summary": "Earlier work summarised.",
+                "residue": {"schemaVersion": "1", "facts": [{"id": "f1", "text": "tests pass"}]}}),
+        ));
+        t.apply_envelope(&env(
+            "session.budget_warning",
+            serde_json::json!({"sessionId": "s1", "level": "80", "kind": "cost_usd",
+                "costUsd": 4.0, "maxCostUsd": 5.0, "ratio": 0.8, "message": "80% of session budget"}),
+        ));
+        t.apply_envelope(&env("text.delta", serde_json::json!({"text": "done"})));
+        t.apply_envelope(&env("turn.completed", serde_json::json!({"turnId": "t1", "stopReason": "end_turn"})));
+        let roles: Vec<Role> = t.messages.iter().map(|m| m.role).collect();
+        assert_eq!(
+            roles,
+            [Role::You, Role::Notice, Role::Notice, Role::Notice, Role::Notice, Role::Strike]
+        );
+        assert_eq!(
+            notices(&t),
+            [
+                ("Context near limit".to_string(), "compaction:fit".to_string()),
+                ("Compacting context".to_string(), "compaction:started".to_string()),
+                ("Context compacted".to_string(), "compaction:completed".to_string()),
+                ("Budget warning".to_string(), "compaction:budget".to_string()),
+            ]
+        );
+        let done = &t.messages[3];
+        assert!(done.body.starts_with("Removed 6 messages, kept 2 messages"), "{}", done.body);
+        assert!(done.detail.contains("Summary\nEarlier work summarised."));
+        assert!(done.detail.contains("Facts kept\n- tests pass"));
+        assert!(!protocol_leak(&visible(&t)), "{}", visible(&t));
+    }
+
+    #[test]
+    fn malformed_compaction_payload_degrades_to_minimal_marker() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("user.message", serde_json::json!({"text": "go"})));
+        // `removed` as a string fails the generated schema.
+        t.apply_envelope(&env("compaction.completed", serde_json::json!({"removed": "lots"})));
+        t.apply_envelope(&env("session.budget_warning", serde_json::json!("not an object")));
+        // `null` counts pass the daemon's Go decoder but not the schema.
+        t.apply_envelope(&env(
+            "compaction.completed",
+            serde_json::json!({"reason": "manual", "removed": null}),
+        ));
+        // Legacy payload: no counts, no strategy — still a marker.
+        t.apply_envelope(&env("compaction.completed", serde_json::json!({"reason": "manual"})));
+        // A malformed event this module does not own stays dropped.
+        t.apply_envelope(&env("tool.end", serde_json::json!({"isError": "nope"})));
+        t.apply_envelope(r#"{"type":"compaction.started","data":"#);
+        let got = notices(&t);
+        assert_eq!(
+            got,
+            [
+                ("Context compacted".to_string(), "compaction:completed".to_string()),
+                ("Budget warning".to_string(), "compaction:budget".to_string()),
+                ("Context compacted".to_string(), "compaction:completed".to_string()),
+                ("Context compacted".to_string(), "compaction:completed".to_string()),
+            ]
+        );
+        assert_eq!(t.messages[1].body, "");
+        assert_eq!(t.messages[3].body, "");
+        assert_eq!(t.messages[4].body, "Requested manually");
+        assert_eq!(t.messages.len(), 5);
+    }
+
+    #[test]
+    fn foreign_session_compaction_adds_no_marker() {
+        let mut t = Transcript::new();
+        t.apply_envelope(&env("turn.started", serde_json::json!({"sessionId": "root"})));
+        t.apply_envelope(&env(
+            "compaction.completed",
+            serde_json::json!({"sessionId": "child", "removed": 1, "kept": 1}),
+        ));
+        assert!(notices(&t).is_empty());
+        t.apply_envelope(&env(
+            "compaction.completed",
+            serde_json::json!({"sessionId": "root", "removed": 1, "kept": 1}),
+        ));
+        assert_eq!(notices(&t).len(), 1);
+    }
+
+    #[test]
+    fn markers_replay_identically() {
+        let lines = [
+            env_at("user.message", serde_json::json!({"text": "a"}), "2026-10-26T06:00:00Z"),
+            env_at("compaction.started", serde_json::json!({"reason": "manual", "strategy": "trim"}), "2026-10-26T06:00:01Z"),
+            env_at("compaction.completed", serde_json::json!({"reason": "manual", "strategy": "trim", "removed": 4, "kept": 3}), "2026-10-26T06:00:02Z"),
+            env_at("context.fit_warning", serde_json::json!({"level": "critical", "estimatedTokens": 9, "contextLimit": 8}), "2026-10-26T06:00:03Z"),
+        ];
+        let build = || {
+            let mut t = Transcript::new();
+            for l in &lines {
+                t.apply_envelope(l);
+            }
+            t
+        };
+        let (a, b) = (build(), build());
+        assert_eq!(a.messages, b.messages);
+        let stamps: Vec<f64> = a.messages.iter().map(|m| m.at_ms).collect();
+        assert!(stamps.windows(2).all(|w| w[0] < w[1]), "{stamps:?}");
+        assert_eq!(a.messages[3].title, "Context over limit");
+    }
 
     /// #1371: one turn ending with `stopReason`, after a short answer.
     fn turn_ending(stop: Value) -> Transcript {

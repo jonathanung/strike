@@ -50,6 +50,7 @@ pub fn SettingsPage(
     on_cleared: impl Fn() + Copy + Send + Sync + 'static,
     diag_capable: RwSignal<bool>,
     project_init_capable: RwSignal<bool>,
+    config_files_capable: RwSignal<bool>,
     root: RwSignal<String>,
 ) -> impl IntoView {
     let _ = (gateway, mode, on_cleared);
@@ -184,6 +185,15 @@ pub fn SettingsPage(
                     capable=project_init_capable
                 />
             </section>
+            <section class="card settings-section" id="settings-config-sources">
+                <h2 class="panel-title">"Config sources"</h2>
+                <crate::config_sources::ConfigSources
+                    base=base
+                    token=token
+                    root=root
+                    capable=config_files_capable
+                />
+            </section>
             <section class="card settings-section">
                 <h2 class="panel-title">"Diagnostics"</h2>
                 <crate::diag::DiagDownload
@@ -193,6 +203,10 @@ pub fn SettingsPage(
                     status=status
                     diag_capable=diag_capable
                 />
+            </section>
+            <section class="card settings-section" id="settings-backup">
+                <h2 class="panel-title">"Backup"</h2>
+                <crate::instance_backup::InstanceBackup base=base token=token status=status />
             </section>
             <Show when=move || show_files.get()>
                 <section class="card settings-section" id="settings-files">
