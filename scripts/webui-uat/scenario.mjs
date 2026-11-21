@@ -61,6 +61,7 @@ async function composerAt(page, check, viewport, grab) {
     [1024, 594],
     [1440, 900],
     [390, 844],
+    [360, 800],
   ];
   for (const [width, height] of sizes) {
     await viewport(width, height);
