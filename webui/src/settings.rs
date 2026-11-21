@@ -203,6 +203,10 @@ pub fn SettingsPage(
                     diag_capable=diag_capable
                 />
             </section>
+            <section class="card settings-section" id="settings-backup">
+                <h2 class="panel-title">"Backup"</h2>
+                <crate::instance_backup::InstanceBackup base=base token=token status=status />
+            </section>
             <Show when=move || show_files.get()>
                 <section class="card settings-section" id="settings-files">
                     <h2 class="panel-title">"Data locations"</h2>
