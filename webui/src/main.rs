@@ -50,6 +50,7 @@ mod gateway_peek;
 mod gateway_qr;
 mod git;
 mod global_search;
+mod guardrails;
 mod goals;
 mod ideas;
 mod identity;
