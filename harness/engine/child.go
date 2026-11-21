@@ -525,6 +525,7 @@ func (e *Engine) spawnChildInner(ctx context.Context, req tool.TaskRequest, exis
 		InitialTitled:              title != "",
 		SandboxMode:                e.opts.SandboxMode,
 		SandboxAllowDegrade:        e.opts.SandboxAllowDegrade,
+		SandboxRuntime:             e.opts.SandboxRuntime,
 		NetworkAllow:               e.opts.NetworkAllow,
 		BashSecrets:                e.opts.BashSecrets,
 		Audit:                      e.opts.Audit,

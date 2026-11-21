@@ -347,7 +347,11 @@ func (m *Manager) Create(spec CreateSpec) (Info, error) {
 	}
 	sandboxPolicy.WorkDir = root
 	wrap := sandbox.WrapResult([]string{bash, "-i"}, sandboxPolicy)
-	if wrap.Degraded && sandboxPolicy.Mode != sandbox.ModeOff && !sandboxPolicy.AllowDegrade {
+	if sandboxPolicy.DenyDegraded(wrap) {
+		if sandboxPolicy.Runtime == sandbox.RuntimeMicroVM {
+			// No host shell when the user picked microvm and it is down.
+			return Info{}, tool.ErrSandboxDenied(sandboxPolicy.DeniedMessage(wrap))
+		}
 		return Info{}, errors.New("OS sandbox is required for this shell and is unavailable")
 	}
 	argv := wrap.Argv

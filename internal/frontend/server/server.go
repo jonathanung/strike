@@ -218,6 +218,9 @@ type Server struct {
 	// notifyOnce lazily opens the redacted notification log under SessionDir.
 	notifyOnce sync.Once
 	notifyLog  *notifyLog
+	// clientMsgOnce lazily opens the outbox client-message-id dedupe (#1325).
+	clientMsgOnce  sync.Once
+	clientMsgStore *clientMsgDedupe
 
 	// tokenHash is the sha256 of the daemon token file last observed.
 	// A change appends a token-rotation audit entry. The token is not stored.
@@ -655,6 +658,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/notifications", s.handleNotifications)
 	s.mux.HandleFunc("GET /v1/notifications/stream", s.handleNotificationStream)
 	s.mux.HandleFunc("PUT /v1/notifications/prefs", s.handleNotificationPrefs)
+	s.mux.HandleFunc("POST /v1/notifications/seen", s.handleNotificationSeen)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
 	s.mux.HandleFunc("GET /v1/terminals", s.handleTerminalsList)
 	s.mux.HandleFunc("POST /v1/terminals", s.handleTerminalCreate)
@@ -941,7 +945,7 @@ func (s *Server) applyCORS(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", origin)
 		w.Header().Set("Vary", "Origin")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, "+clientMessageHeader)
 	}
 }
 
