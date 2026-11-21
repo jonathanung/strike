@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/jonathanung/strike/internal/product/config"
 	"github.com/jonathanung/strike/internal/product/project"
@@ -44,6 +45,10 @@ type WorkspaceTrustAssembly struct {
 	Root    string
 	Trusted bool
 }
+
+// workspaceTrustMu serializes this daemon's open-mutate-save cycles on the
+// trust file so two concurrent POSTs cannot drop each other's grant.
+var workspaceTrustMu sync.Mutex
 
 // workspaceTrustRequest is the POST body. The workspace is never taken from
 // the request: it is always the live root's own working directory, so a
@@ -166,6 +171,8 @@ func (s *Server) handleWorkspaceTrustPost(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	workspaceTrustMu.Lock()
+	defer workspaceTrustMu.Unlock()
 	store, err := workspacetrust.Open(s.opts.WorkspaceTrustPath)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, opErrorResponse{Error: err.Error()})
