@@ -762,7 +762,7 @@ func (e *Engine) runTurn(ctx context.Context, text, display string, images []pro
 		e.maybePruneToolResults()
 		e.maybeThresholdCompact(ctx, turnID)
 		e.maybeEmitFitWarning(turnID)
-		outcome, reqCorr, err := e.streamModel(ctx, turnID)
+		outcome, reqCorr, err := e.streamWithFallback(ctx, turnID)
 		if err != nil {
 			// If canceled with a pending steer, fall back to next-turn queue
 			// rather than dropping the guidance (visible TurnSteered event).
@@ -1932,6 +1932,9 @@ func (e *Engine) failTurn(ctx context.Context, err error, corr protocol.Correlat
 // report attaches on the same terminal event (claim ≠ verified). Gates honor
 // ctx so cancelAndJoinTurn / turn timeout can abort a hung cmd gate.
 func (e *Engine) completeTurn(ctx context.Context, finishing chan struct{}, corr protocol.Correlation, stopReason string) {
+	// A fallback answers one turn only (#1350); the next turn tries the
+	// primary again.
+	e.restorePrimary()
 	close(finishing)
 	files := turnFileChanges(e.turnDiff.Snapshot())
 	e.checkpoints.CommitTurn()

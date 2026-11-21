@@ -21,6 +21,7 @@ mod diag;
 mod draft_size;
 mod drafts;
 mod editor;
+mod fallback;
 mod load_epoch;
 mod localfiles;
 mod customize;
@@ -1711,6 +1712,7 @@ fn App() -> impl IntoView {
                                                 .to_string(),
                                         );
                                     }
+                                    crate::fallback::seed(&st.fallback_provider, &st.fallback_model);
                                     session_cwd.set(st.cwd);
                                     live_busy.set(st.busy);
                                     live_busy_root.set(root);
@@ -1880,6 +1882,7 @@ fn App() -> impl IntoView {
         // session's Fast/autonomy across the switch.
         fast_on.set(false);
         autonomy.set("supervised".to_string());
+        crate::fallback::reset();
         autonomy_menu.set(false);
         context_used.set(0);
         context_limit.set(0);
@@ -2015,6 +2018,7 @@ fn App() -> impl IntoView {
                         note_after: model_note_after.get_untracked(),
                     };
                     let next = reduce_envelope(prev, &data);
+                    crate::fallback::observe(&data);
                     provider_name.set(next.provider);
                     model_name.set(next.model);
                     effort_level.set(next.effort);
@@ -5640,6 +5644,7 @@ fn App() -> impl IntoView {
                                     model_menu.set(false);
                                     autonomy_menu.update(|v| *v = !*v);
                                 }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
+                                <crate::fallback::FallbackChip base=base token=token active_root=active_root status=status busy=Signal::derive(move || session_busy_now.get()) />
                                 <Show when=move || fast_on.get()>
                                     <span class="composer-glance" data-fast-status="true" title="Fast (priority service tier) is on for this session, as confirmed by the daemon. The current provider may not support priority tier.">"Fast · on"</span>
                                 </Show>

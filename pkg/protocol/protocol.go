@@ -425,6 +425,15 @@ type SelectModel struct {
 	Model    string `json:"model,omitempty"`
 }
 
+// SetFallbackModel picks the session fallback model (#1350). When a request
+// to the primary model still fails after retries, the fallback answers that
+// turn only and the next turn tries the primary again. An empty Provider
+// clears the fallback. Rejected while a turn is running.
+type SetFallbackModel struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model,omitempty"`
+}
+
 // SelectAgent switches the active agent (system prompt + optional
 // provider/model pins). Rejected while a turn is running.
 type SelectAgent struct {
@@ -532,6 +541,7 @@ func (InputQueueCancel) isOp()        {}
 func (InputQueueReorder) isOp()       {}
 func (InputQueueSendNow) isOp()       {}
 func (SelectModel) isOp()             {}
+func (SetFallbackModel) isOp()        {}
 func (SelectAgent) isOp()             {}
 func (SetEffort) isOp()               {}
 func (SetAutonomy) isOp()             {}
@@ -1522,6 +1532,33 @@ type ModelSelected struct {
 	Model    string `json:"model"`
 }
 
+// FallbackModelSelected confirms the session fallback model after each
+// SetFallbackModel. An empty Provider means no fallback is set.
+type FallbackModelSelected struct {
+	Correlation
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+// ModelFallback marks a turn that the fallback model continued because the
+// primary failed (#1350). Both models are named so a transcript never
+// attributes a reply to the wrong model. Error is the primary's failure.
+type ModelFallback struct {
+	Correlation
+	PrimaryProvider  string `json:"primaryProvider"`
+	PrimaryModel     string `json:"primaryModel"`
+	FallbackProvider string `json:"fallbackProvider"`
+	FallbackModel    string `json:"fallbackModel"`
+	Reason           string `json:"reason"`
+	Error            string `json:"error,omitempty"`
+}
+
+// ModelFallback reasons. Unavailable: the primary failed after retries
+// (provider error, rate limit, timeout); the fallback answers this turn only.
+const (
+	ModelFallbackReasonUnavailable = "unavailable"
+)
+
 // AgentSelected confirms the active agent.
 type AgentSelected struct {
 	Correlation
@@ -2174,6 +2211,8 @@ func (VerificationStarted) isEvent()     {}
 func (VerificationCompleted) isEvent()   {}
 func (HarnessProgress) isEvent()         {}
 func (ModelSelected) isEvent()           {}
+func (FallbackModelSelected) isEvent()   {}
+func (ModelFallback) isEvent()           {}
 func (AgentSelected) isEvent()           {}
 func (PhaseChanged) isEvent()            {}
 func (PlanHandoff) isEvent()             {}

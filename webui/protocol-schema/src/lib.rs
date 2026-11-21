@@ -891,6 +891,27 @@ pub struct Envelope {
     pub data: Value,
 }
 
+/// FallbackModelSelected confirms the session fallback model after each SetFallbackModel. An empty Provider means no fallback is set.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct FallbackModelSelected {
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default, rename = "turnId")]
+    pub turn_id: String,
+    #[serde(default, rename = "providerRequestId")]
+    pub provider_request_id: String,
+    #[serde(default, rename = "attempt")]
+    pub attempt: i64,
+    #[serde(default, rename = "parentSessionId")]
+    pub parent_session_id: String,
+    #[serde(default, rename = "depth")]
+    pub depth: i64,
+    #[serde(default, rename = "provider")]
+    pub provider: String,
+    #[serde(default, rename = "model")]
+    pub model: String,
+}
+
 /// FastSelected confirms the session priority-tier preference after SetFast.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct FastSelected {
@@ -1166,6 +1187,35 @@ pub struct MissingContextEntry {
     pub item_id: String,
     #[serde(default, rename = "detail")]
     pub detail: String,
+}
+
+/// ModelFallback marks a turn that the fallback model continued because the primary failed (#1350). Both models are named so a transcript never attributes a reply to the wrong model. Error is the primary's failure.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct ModelFallback {
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    #[serde(default, rename = "turnId")]
+    pub turn_id: String,
+    #[serde(default, rename = "providerRequestId")]
+    pub provider_request_id: String,
+    #[serde(default, rename = "attempt")]
+    pub attempt: i64,
+    #[serde(default, rename = "parentSessionId")]
+    pub parent_session_id: String,
+    #[serde(default, rename = "depth")]
+    pub depth: i64,
+    #[serde(default, rename = "primaryProvider")]
+    pub primary_provider: String,
+    #[serde(default, rename = "primaryModel")]
+    pub primary_model: String,
+    #[serde(default, rename = "fallbackProvider")]
+    pub fallback_provider: String,
+    #[serde(default, rename = "fallbackModel")]
+    pub fallback_model: String,
+    #[serde(default, rename = "reason")]
+    pub reason: String,
+    #[serde(default, rename = "error")]
+    pub error: String,
 }
 
 /// ModelSelected confirms the active provider/model, at startup (if an initial selection succeeded) and after each SelectModel.
@@ -2031,6 +2081,15 @@ pub struct SetEffort {
     pub level: Effort,
 }
 
+/// SetFallbackModel picks the session fallback model (#1350). When a request to the primary model still fails after retries, the fallback answers that turn only and the next turn tries the primary again. An empty Provider clears the fallback. Rejected while a turn is running.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct SetFallbackModel {
+    #[serde(default, rename = "provider")]
+    pub provider: String,
+    #[serde(default, rename = "model")]
+    pub model: String,
+}
+
 /// SetFast toggles OpenAI priority (fast) service tier for subsequent turns. Rejected while a turn is running. Providers and models that do not support priority tier ignore the flag silently.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct SetFast {
@@ -2828,6 +2887,8 @@ pub enum Event {
     InputQueued(InputQueued),
     LedgerUpdated(LedgerUpdated),
     ModelSelected(ModelSelected),
+    FallbackModelSelected(FallbackModelSelected),
+    ModelFallback(ModelFallback),
     PathOverlap(PathOverlap),
     PermissionAsked(PermissionAsked),
     PermissionDecided(PermissionDecided),
@@ -2887,6 +2948,7 @@ pub enum Op {
     Rewind(Rewind),
     SelectAgent(SelectAgent),
     SelectModel(SelectModel),
+    SetFallbackModel(SetFallbackModel),
     SetAutonomy(SetAutonomy),
     SetEffort(SetEffort),
     SetFast(SetFast),
@@ -2966,6 +3028,8 @@ pub fn decode_event(raw: &str) -> Result<Event, DecodeError> {
         "input.queued" => map_event::<InputQueued>("input.queued", &env.data, Event::InputQueued),
         "ledger.updated" => map_event::<LedgerUpdated>("ledger.updated", &env.data, Event::LedgerUpdated),
         "model.selected" => map_event::<ModelSelected>("model.selected", &env.data, Event::ModelSelected),
+        "fallback.selected" => map_event::<FallbackModelSelected>("fallback.selected", &env.data, Event::FallbackModelSelected),
+        "model.fallback" => map_event::<ModelFallback>("model.fallback", &env.data, Event::ModelFallback),
         "path.overlap" => map_event::<PathOverlap>("path.overlap", &env.data, Event::PathOverlap),
         "permission.asked" => map_event::<PermissionAsked>("permission.asked", &env.data, Event::PermissionAsked),
         "permission.decided" => map_event::<PermissionDecided>("permission.decided", &env.data, Event::PermissionDecided),
@@ -3056,6 +3120,7 @@ pub fn decode_op(raw: &str) -> Result<Op, DecodeError> {
         "rewind" => map_op::<Rewind>("rewind", data.clone(), Op::Rewind),
         "select.agent" => map_op::<SelectAgent>("select.agent", data.clone(), Op::SelectAgent),
         "select.model" => map_op::<SelectModel>("select.model", data.clone(), Op::SelectModel),
+        "set.fallback_model" => map_op::<SetFallbackModel>("set.fallback_model", data.clone(), Op::SetFallbackModel),
         "set.autonomy" => map_op::<SetAutonomy>("set.autonomy", data.clone(), Op::SetAutonomy),
         "set.effort" => map_op::<SetEffort>("set.effort", data.clone(), Op::SetEffort),
         "set.fast" => map_op::<SetFast>("set.fast", data.clone(), Op::SetFast),

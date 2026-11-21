@@ -215,6 +215,7 @@ JSON objects with a `type` and optional `data`:
 | `select.model` | `{ "provider", "model?" }` |
 | `set.permission_mode` | `{ "mode": "default\|plan\|accept-edits\|yolo" }` |
 | `set.autonomy` | `{ "mode": "supervised\|agent\|checks\|skip-all" }` |
+| `set.fallback_model` | `{ "provider", "model?" }` — session fallback model (#1350); empty provider clears. Confirmed by `fallback.selected`; a turn the fallback answered emits `model.fallback` `{ primaryProvider, primaryModel, fallbackProvider, fallbackModel, reason: "unavailable", error? }`. Status: `fallbackProvider` / `fallbackModel` |
 | `team.spawn` | `{ "idempotencyKey", "objective", "agent?", "name?", "isolation?", "budget?", "rootSessionId?" }` |
 | `team.message` | `{ "idempotencyKey", "to", "body", "kind?", "urgency?", "taskId?" }` |
 | `team.broadcast` | `{ "idempotencyKey", "body", "urgency?", "taskId?" }` |

@@ -17,8 +17,12 @@ type Restored struct {
 	Model    string
 	Agent    string
 	Effort   protocol.Effort
-	Priority bool
-	Titled   bool
+	// FallbackProvider / FallbackModel are the last FallbackModelSelected
+	// (#1350); empty provider means none.
+	FallbackProvider string
+	FallbackModel    string
+	Priority         bool
+	Titled           bool
 	// Autonomy is the last AutonomySelected mode; empty means unset (caller
 	// keeps the engine default of supervised).
 	Autonomy protocol.Autonomy
@@ -198,6 +202,9 @@ func restoreEvents(events []protocol.Event, keep func(protocol.Event) bool) Rest
 		case protocol.ModelSelected:
 			r.Provider = e.Provider
 			r.Model = e.Model
+		case protocol.FallbackModelSelected:
+			r.FallbackProvider = e.Provider
+			r.FallbackModel = e.Model
 		case protocol.AgentSelected:
 			r.Agent = e.Name
 			// Matches permission.Service.SetAgentRules: agent switch clears
@@ -336,6 +343,10 @@ func restoreCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 	case protocol.EngineError:
 		return e.Correlation, true
 	case protocol.ModelSelected:
+		return e.Correlation, true
+	case protocol.FallbackModelSelected:
+		return e.Correlation, true
+	case protocol.ModelFallback:
 		return e.Correlation, true
 	case protocol.AgentSelected:
 		return e.Correlation, true

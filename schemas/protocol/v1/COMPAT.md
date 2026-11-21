@@ -17,7 +17,7 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - **Minor** `protocol.Version` bumps add types or optional fields. **Major** bumps rename, remove, or change meaning. **Patch** bumps do not change encoded JSON.
 - Nil Go slices and maps encode as JSON `null`. Readers treat `null` like an empty list or map.
 
-## Event types (63)
+## Event types (65)
 
 - `admission.decided` → `AdmissionDecided`
 - `agent.contract.timeout` → `AgentContractTimeout`
@@ -43,6 +43,8 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `input.queued` → `InputQueued`
 - `ledger.updated` → `LedgerUpdated`
 - `model.selected` → `ModelSelected`
+- `fallback.selected` → `FallbackModelSelected`
+- `model.fallback` → `ModelFallback`
 - `path.overlap` → `PathOverlap`
 - `permission.asked` → `PermissionAsked`
 - `permission.decided` → `PermissionDecided`
@@ -83,7 +85,7 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `wait.resolved` → `WaitResolved`
 - `wait.started` → `WaitStarted`
 
-## Op types (31)
+## Op types (32)
 
 - `compact` → `Compact`
 - `context.controls` → `SetContextControls`
@@ -100,6 +102,7 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `rewind` → `Rewind`
 - `select.agent` → `SelectAgent`
 - `select.model` → `SelectModel`
+- `set.fallback_model` → `SetFallbackModel`
 - `set.autonomy` → `SetAutonomy`
 - `set.effort` → `SetEffort`
 - `set.fast` → `SetFast`

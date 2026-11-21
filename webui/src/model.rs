@@ -152,6 +152,11 @@ pub struct LiveStatus {
     /// empty to the `supervised` default rather than inventing a mode.
     #[serde(default)]
     pub autonomy: String,
+    /// Session fallback model (#1350); empty when none is set.
+    #[serde(default, rename = "fallbackProvider")]
+    pub fallback_provider: String,
+    #[serde(default, rename = "fallbackModel")]
+    pub fallback_model: String,
     #[serde(default)]
     pub busy: bool,
     #[serde(default, rename = "contextUsed")]

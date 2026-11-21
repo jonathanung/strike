@@ -728,6 +728,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPriority    bool
 			initialTitled      bool
 			initialAutonomy    protocol.Autonomy
+			initialFallbackP   string
+			initialFallbackM   string
 			initialPermMode    = cfg.PermissionMode
 			initialPhaseWF     string
 			initialPhaseIndex  int
@@ -756,6 +758,8 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 			initialPriority = restored.Priority
 			initialTitled = restored.Titled
 			initialAutonomy = restored.Autonomy
+			initialFallbackP = restored.FallbackProvider
+			initialFallbackM = restored.FallbackModel
 			// Managed permissionMode wins over session resume (enterprise lock).
 			if !cfg.Managed.PermissionMode {
 				initialPermMode = restored.PermissionMode
@@ -957,15 +961,17 @@ func assemble(opts cliOptions, requireProvider bool) (*assembled, error) {
 				}
 				return p
 			}(),
-			InitialProvider:       initialProvider,
-			InitialModel:          initialModel,
-			InitialEffort:         initialEffort,
-			InitialAutonomy:       initialAutonomy,
-			InitialPermissionMode: initialPermMode,
-			SandboxMode:           sandboxMode,
-			SandboxAllowDegrade:   cfg.SandboxAllowDegrade,
-			NetworkAllow:          sessionNetworkAllow(cfg.Network.Allow, opts.skipNetworkAllow() && !unattended),
-			BashSecrets:           cloneBashSecrets(cfg.BashSecrets),
+			InitialProvider:         initialProvider,
+			InitialModel:            initialModel,
+			InitialEffort:           initialEffort,
+			InitialAutonomy:         initialAutonomy,
+			InitialFallbackProvider: initialFallbackP,
+			InitialFallbackModel:    initialFallbackM,
+			InitialPermissionMode:   initialPermMode,
+			SandboxMode:             sandboxMode,
+			SandboxAllowDegrade:     cfg.SandboxAllowDegrade,
+			NetworkAllow:            sessionNetworkAllow(cfg.Network.Allow, opts.skipNetworkAllow() && !unattended),
+			BashSecrets:             cloneBashSecrets(cfg.BashSecrets),
 			ContentGuard: tool.ContentGuardSettings{
 				Mode:       cfg.ContentGuard.Mode,
 				PathAllow:  append([]string(nil), cfg.ContentGuard.PathAllow...),

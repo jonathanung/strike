@@ -833,6 +833,10 @@ func eventCorrelation(ev protocol.Event) (protocol.Correlation, bool) {
 		return e.Correlation, true
 	case protocol.FastSelected:
 		return e.Correlation, true
+	case protocol.FallbackModelSelected:
+		return e.Correlation, true
+	case protocol.ModelFallback:
+		return e.Correlation, true
 	case protocol.UsageReported:
 		return e.Correlation, true
 	case protocol.CompactionStarted:

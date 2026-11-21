@@ -723,6 +723,29 @@ impl Transcript {
                 self.upsert_child(card);
             }
             "artifact.updated" => self.artifact_updates = self.artifact_updates.wrapping_add(1),
+            "model.fallback" => {
+                // #1350: a different model continued this turn. Name both
+                // so no reply is attributed to the wrong model.
+                let (title, body) = crate::fallback::notice_text(&data);
+                self.push(Message {
+                    id: 0,
+                    role: Role::Notice,
+                    title,
+                    body,
+                    badge: "fallback".into(),
+                    detail: field_str(&data, "error"),
+                    key: String::new(),
+                    call_id: String::new(),
+                    diff: None,
+                    chips: Vec::new(),
+                    keep_events: -1,
+                    retry_text: String::new(),
+                    copy_text: String::new(),
+                    reconnect: String::new(),
+                    at_ms,
+                    turn_id: field_str(&data, "turnId"),
+                });
+            }
             "engine.error" => {
                 let message = field_str(&data, "message");
                 if message.is_empty() {
