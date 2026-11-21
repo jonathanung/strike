@@ -194,6 +194,16 @@
               "name": "name",
               "type": "string",
               "omitEmpty": true
+            },
+            {
+              "name": "delivery",
+              "type": "string",
+              "omitEmpty": true
+            },
+            {
+              "name": "deliveryReason",
+              "type": "string",
+              "omitEmpty": true
             }
           ]
         },

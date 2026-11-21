@@ -471,11 +471,6 @@
     max-width: none;
   }
 
-  body[data-phone="1"] .composer-chips {
-    padding-right: 24px;
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
-    mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
-  }
 }
 
 /* feature:composer-wrap begin (#1508)
@@ -514,6 +509,47 @@
 body:not([data-phone="1"]) .chat > .composer { flex: 0 0 auto; }
 .chat > .transcript { min-height: 0; }
 /* feature:composer-wrap end */
+
+/* feature:phone-safety-chip begin (#1924)
+   Phones fold Approval and Autonomy into one safety chip (non-default
+   values named, danger-styled per #1572; defaults read just "Safety")
+   that opens "+", where both pickers live. The Style chip folds into the
+   "+" Response style row. The row is then "+" · Model · Safety · Send on
+   one 44px line at 360px: no sideways scroll, no fade, nothing clipped.
+   The model name ellipsizes instead of pushing the safety chip off
+   screen. */
+.composer-chips .safety-glance { display: none; }
+body[data-phone="1"] .composer-chips {
+  overflow: hidden;
+}
+body[data-phone="1"] .composer-chips .safety-glance {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+body[data-phone="1"] .composer-chips .chip.plus {
+  flex: 0 0 auto;
+}
+body[data-phone="1"] .composer-chips .composer-glance:not(.safety-glance) {
+  display: inline-block;
+  flex: 0 1 auto;
+  min-width: 0;
+  line-height: 42px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+body[data-phone="1"] .composer-bar .steer-actions {
+  flex: 0 0 auto;
+}
+/* Last and at least as specific as the shrink rule above, so the folded
+   chips stay hidden. */
+body[data-phone="1"] .composer-chips .composer-glance[data-approval-status],
+body[data-phone="1"] .composer-chips .composer-glance[data-autonomy-status],
+body[data-phone="1"] .composer-chips .composer-glance[data-verbosity-status] {
+  display: none;
+}
+/* feature:phone-safety-chip end */
 
 .phone-nav {
   display: none;

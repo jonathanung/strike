@@ -7,6 +7,11 @@
 //! kinds get a name + kind chip with a Download action. A ref that does
 //! not parse, or a fetch that fails, renders an honest "unavailable"
 //! state instead of a broken image.
+//!
+//! Each chip also shows the engine's per-turn delivery decision (#1814):
+//! sent to the model, or not sent with the engine's reason. Logs written
+//! before the daemon recorded it say "Delivery not reported"; the state is
+//! never inferred client-side.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -33,6 +38,45 @@ pub struct SentAttachment {
     pub mime: String,
     pub reference: String,
     pub bytes: i64,
+    pub delivery: String,
+    pub delivery_reason: String,
+}
+
+/// The engine's delivery decision for one attachment, as recorded on
+/// `user.message` (#1814).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Delivery {
+    Sent,
+    Dropped(String),
+    Unreported,
+}
+
+/// Delivery as the daemon reported it. Absent or unknown values are
+/// `Unreported`; nothing is guessed from the MIME type or the model.
+pub fn delivery(item: &SentAttachment) -> Delivery {
+    match item.delivery.as_str() {
+        "sent" => Delivery::Sent,
+        "dropped" => Delivery::Dropped(item.delivery_reason.clone()),
+        _ => Delivery::Unreported,
+    }
+}
+
+/// Visible delivery line for a chip.
+pub fn delivery_label(d: &Delivery) -> String {
+    match d {
+        Delivery::Sent => "Sent to model".into(),
+        Delivery::Dropped(reason) if reason.trim().is_empty() => "Not sent".into(),
+        Delivery::Dropped(reason) => format!("Not sent: {}", reason.trim()),
+        Delivery::Unreported => "Delivery not reported".into(),
+    }
+}
+
+fn delivery_attr(d: &Delivery) -> &'static str {
+    match d {
+        Delivery::Sent => "sent",
+        Delivery::Dropped(_) => "dropped",
+        Delivery::Unreported => "unreported",
+    }
 }
 
 fn str_field(v: &Value, key: &str) -> String {
@@ -58,6 +102,8 @@ pub fn parse_images(data: &Value) -> Vec<SentAttachment> {
                 mime: str_field(row, "mime"),
                 reference: str_field(row, "ref"),
                 bytes: row.get("bytes").and_then(|b| b.as_i64()).unwrap_or(0),
+                delivery: str_field(row, "delivery"),
+                delivery_reason: str_field(row, "deliveryReason"),
             };
             (!item.reference.is_empty() || !item.name.is_empty()).then_some(item)
         })
@@ -103,11 +149,12 @@ pub fn kind_label(item: &SentAttachment) -> String {
     }
 }
 
-fn chip_class(missing: bool) -> &'static str {
-    if missing {
-        "sx-attach-chip sx-attach-missing"
-    } else {
-        "sx-attach-chip"
+fn chip_class(missing: bool, dropped: bool) -> &'static str {
+    match (missing, dropped) {
+        (true, true) => "sx-attach-chip sx-attach-missing sx-attach-dropped",
+        (true, false) => "sx-attach-chip sx-attach-missing",
+        (false, true) => "sx-attach-chip sx-attach-dropped",
+        (false, false) => "sx-attach-chip",
     }
 }
 
@@ -176,6 +223,10 @@ fn sent_chip(item: SentAttachment, auth: Option<AttachmentAuth>) -> impl IntoVie
     let name = chip_name(&item);
     let kind = kind_label(&item);
     let kind_attr = kind.clone();
+    let sent_state = delivery(&item);
+    let dropped = matches!(sent_state, Delivery::Dropped(_));
+    let sent_attr = delivery_attr(&sent_state);
+    let sent_label = delivery_label(&sent_state);
     let path = attachment_path(&item.reference);
     let thumb_wanted = is_thumbnail(&item.mime);
     let mime = item.mime.clone();
@@ -223,7 +274,7 @@ fn sent_chip(item: SentAttachment, auth: Option<AttachmentAuth>) -> impl IntoVie
         });
     };
     view! {
-        <span class=move || chip_class(unavailable()) data-attach-kind=kind_attr>
+        <span class=move || chip_class(unavailable(), dropped) data-attach-kind=kind_attr data-attach-delivery=sent_attr>
             {move || match thumb.get() {
                 Thumb::Ready(url) if thumb_wanted => view! { <img src=url alt="" /> }.into_any(),
                 _ => view! { <span></span> }.into_any(),
@@ -231,6 +282,7 @@ fn sent_chip(item: SentAttachment, auth: Option<AttachmentAuth>) -> impl IntoVie
             <span class="sx-attach-text">
                 <span class="name" title=name.clone()>{name.clone()}</span>
                 <span class="kind">{kind}</span>
+                <span class="sx-attach-delivery" title=sent_label.clone()>{sent_label.clone()}</span>
                 <Show when=move || unavailable() && thumb_wanted>
                     <span class="sx-attach-state">"Unavailable"</span>
                 </Show>
@@ -312,5 +364,36 @@ mod tests {
         assert_eq!(chip_name(&bare), "attachment");
         assert_eq!(kind_label(&bare), "zip");
         assert_eq!(kind_label(&SentAttachment::default()), "file");
+    }
+
+    #[test]
+    fn delivery_is_read_never_inferred() {
+        let data = serde_json::json!({
+            "images": [
+                {"ref": format!("att:sha256:{HEX}"), "mime": "image/png", "name": "a.png", "delivery": "sent"},
+                {"mime": "image/png", "name": "b.png", "delivery": "dropped", "deliveryReason": "selected model does not support image attachments"},
+                {"mime": "application/pdf", "name": "c.pdf"},
+                {"mime": "image/png", "name": "d.png", "delivery": "maybe"},
+                {"mime": "image/png", "name": "e.png", "delivery": "dropped"},
+            ]
+        });
+        let got: Vec<Delivery> = parse_images(&data).iter().map(delivery).collect();
+        assert_eq!(
+            got,
+            vec![
+                Delivery::Sent,
+                Delivery::Dropped("selected model does not support image attachments".into()),
+                Delivery::Unreported,
+                Delivery::Unreported,
+                Delivery::Dropped(String::new()),
+            ]
+        );
+        let labels: Vec<String> = got.iter().map(delivery_label).collect();
+        assert_eq!(labels[0], "Sent to model");
+        assert_eq!(labels[1], "Not sent: selected model does not support image attachments");
+        assert_eq!(labels[2], "Delivery not reported");
+        assert_eq!(labels[4], "Not sent");
+        assert_eq!(chip_class(false, true), "sx-attach-chip sx-attach-dropped");
+        assert_eq!(chip_class(false, false), "sx-attach-chip");
     }
 }

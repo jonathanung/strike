@@ -1,0 +1,73 @@
+/* feature:away-briefing begin (#1488) */
+/* "While you were away": a quiet, non-modal roll-up above the chat. On a
+   phone it collapses to a one-line chip that expands. Existing tokens only. */
+.away-briefing {
+  margin: 8px;
+  padding: 8px;
+  border: var(--border-width) solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: var(--type-sm);
+}
+.away-briefing .away-chip { display: none; }
+.away-briefing .away-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.away-briefing .away-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+.away-briefing .away-group {
+  min-width: 0;
+  padding: 6px;
+  border: var(--border-width) solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+.away-briefing .away-group[data-away-group="finished"] { border-color: var(--success); }
+.away-briefing .away-group[data-away-group="failed"] { border-color: var(--signal); }
+.away-briefing .away-group[data-away-group="waiting"] { border-color: var(--warning); }
+.away-briefing .away-group[data-away-group="schedules"] { border-color: var(--accent-alt); }
+.away-briefing .away-group h3 {
+  margin: 0 0 4px;
+  font-size: var(--type-sm);
+}
+.away-briefing .away-count { font-variant-numeric: tabular-nums; }
+.away-briefing .away-row,
+.away-briefing li {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  min-width: 0;
+}
+.away-briefing .away-label { overflow-wrap: anywhere; }
+.away-briefing .away-detail {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.away-briefing .row-actions { margin-top: 8px; }
+@media (max-width: 480px) {
+  .away-briefing .away-chip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: 0;
+    color: inherit;
+    padding: 0;
+  }
+  .away-briefing .away-body { display: none; }
+  .away-briefing.away-open .away-body { display: block; margin-top: 8px; }
+  .away-briefing .away-head strong { display: none; }
+  .away-briefing .away-chip-text { color: var(--muted); }
+}
+/* feature:away-briefing end */

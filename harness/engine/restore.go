@@ -174,7 +174,7 @@ func restoreEvents(events []protocol.Event, keep func(protocol.Event) bool) Rest
 			msgs = append(msgs, provider.Message{
 				Role:   provider.RoleUser,
 				Text:   e.Text,
-				Images: protocolImagesToProvider(e.Images),
+				Images: protocolImagesToProvider(restorableImages(e.Images)),
 			})
 		case protocol.TextDelta:
 			ensure(e.ProviderRequestID)
@@ -320,6 +320,20 @@ func restoreEvents(events []protocol.Event, keep func(protocol.Event) bool) Rest
 
 // restoreRootEvent reports whether ev belongs to the root conversation
 // (not a child/subagent lineage). Events without correlation are treated as root.
+// restorableImages drops attachments the engine recorded as not sent
+// (#1814), so resumed history matches what the model actually saw. Older
+// logs without a delivery decision keep every attachment, as before.
+func restorableImages(images []protocol.ImageAttachment) []protocol.ImageAttachment {
+	var out []protocol.ImageAttachment
+	for _, img := range images {
+		if img.Delivery == protocol.AttachmentDeliveryDropped {
+			continue
+		}
+		out = append(out, img)
+	}
+	return out
+}
+
 func restoreRootEvent(ev protocol.Event) bool {
 	corr, ok := restoreCorrelation(ev)
 	if !ok {

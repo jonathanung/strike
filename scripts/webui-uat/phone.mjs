@@ -352,10 +352,23 @@ export async function runPhoneScreens({ page, outDir, video, check, shots }) {
   await shot(page, recorder, shotDir, shots, "phone-sessions-390");
 
   check(await clickNav(page, "Chat"), "no Chat phone-nav button");
-  const approvalH = await minControl(page, "[data-approval-status]");
-  check(approvalH >= 44, `approval status height ${approvalH} < 44`);
-  const approvalText = await page.evaluate(`document.querySelector("[data-approval-status]")?.textContent || ""`);
-  check(approvalText.includes("Approval ·"), "approval status missing on the phone composer");
+  // #1924: phones fold Approval and Autonomy into one safety chip that
+  // opens "+", where both pickers live.
+  const safetyH = await minControl(page, "[data-safety-status]");
+  check(safetyH >= 44, `safety status height ${safetyH} < 44`);
+  const safetyAria = await page.evaluate(`document.querySelector("[data-safety-status]")?.getAttribute("aria-label") || ""`);
+  check(safetyAria.includes("Approval: ") && safetyAria.includes("Autonomy: "), `safety chip does not name approval and autonomy: ${safetyAria}`);
+  await page.evaluate(`document.querySelector("[data-safety-status]")?.click()`);
+  await delay(200);
+  const plusRows = await page.evaluate(`Boolean(document.querySelector("[data-plus-approval]")) && Boolean(document.querySelector("[data-plus-autonomy]"))`);
+  check(plusRows, "safety chip did not open + with the Approval and Autonomy rows");
+  await page.evaluate(`document.querySelector("[data-plus-approval]")?.click()`);
+  await delay(200);
+  const approvalMenu = await page.evaluate(`Boolean(document.querySelector(".approvals-menu"))`);
+  check(approvalMenu, "+ Approval row did not open the approval picker");
+  // Re-picking the current mode closes the picker without a change.
+  await page.evaluate(`document.querySelector(".approvals-menu .palette-row.on")?.click()`);
+  await delay(100);
   await page.evaluate(`document.querySelector("[data-nav='phone-more']")?.click()`);
   await delay(200);
   const yolo = await page.evaluate(`Boolean(document.querySelector('[data-command-id="mode-yolo"]'))`);
