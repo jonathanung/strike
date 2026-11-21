@@ -258,6 +258,30 @@ try {
       throw new Error(`second client read state = ${JSON.stringify(other.seen)} latest=${latest}`);
     }
   }
+  // #1564: Web Push registry. No real push service is contacted: the https
+  // endpoint below is never reachable and is removed straight away.
+  {
+    const authed = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const base = `http://127.0.0.1:${port}/v1/notifications`;
+    const keyRes = await fetch(`${base}/push-key`, { headers: authed });
+    const key = keyRes.status === 200 ? (await keyRes.json()).publicKey : "";
+    if (!/^[A-Za-z0-9_-]{86,88}$/.test(key || "")) throw new Error(`push-key ${keyRes.status} ${key}`);
+    const noAuth = await fetch(`${base}/push-key`);
+    if (noAuth.status !== 401) throw new Error(`push-key without token = ${noAuth.status}`);
+    // A real browser key pair is not needed for registry checks; reuse the
+    // daemon's own public key as a valid P-256 point.
+    const sub = (endpoint) => JSON.stringify({ endpoint, expirationTime: null, keys: { p256dh: key, auth: "BTBZMqHH6r4Tts7J_aSIgg" } });
+    const plain = await fetch(`${base}/push-subscriptions`, { method: "POST", headers: authed, body: sub("http://push.invalid/x") });
+    if (plain.status !== 400) throw new Error(`plain-http push endpoint accepted: ${plain.status}`);
+    const added = await fetch(`${base}/push-subscriptions`, { method: "POST", headers: authed, body: sub("https://push.invalid/smoke") });
+    if (added.status !== 201) throw new Error(`push subscribe ${added.status} ${await added.text()}`);
+    const status = await (await fetch(base, { headers: authed })).json();
+    if (!status.push || status.push.subscriptions !== 1 || JSON.stringify(status).includes("push.invalid")) {
+      throw new Error(`push status ${JSON.stringify(status.push)}`);
+    }
+    const removed = await fetch(`${base}/push-subscriptions`, { method: "DELETE", headers: authed, body: JSON.stringify({ endpoint: "https://push.invalid/smoke" }) });
+    if (removed.status !== 204) throw new Error(`push unsubscribe ${removed.status}`);
+  }
   const healthBody = await (await fetch(`http://127.0.0.1:${port}/health`)).json();
   if (!healthBody.ok || !(healthBody.now > 0)) {
     throw new Error(`health missing now: ${JSON.stringify(healthBody)}`);
@@ -2107,6 +2131,47 @@ try {
   if (rejected.status !== 400) {
     throw new Error(`empty attachment status ${rejected.status}`);
   }
+  // Sent attachments in the transcript (#1389): GET serves the stored
+  // blob with its stored MIME, and a user.input carrying an image + PDF
+  // renders both chips under the "you" bubble after a reload, with the
+  // image thumbnail loaded from the GET route.
+  const pngRef = JSON.parse(uploadedBody).ref;
+  const pdfB64 = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n").toString("base64");
+  const pdfUp = await fetch(`http://127.0.0.1:${port}/v1/attachments`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "smoke-spec.pdf", mime: "application/pdf", data: pdfB64 }),
+  });
+  const pdfBody = await pdfUp.text();
+  if (pdfUp.status !== 200) throw new Error(`pdf ingest failed ${pdfUp.status} ${pdfBody.slice(0, 300)}`);
+  const pdfRef = JSON.parse(pdfBody).ref;
+  const gotPng = await fetch(`http://127.0.0.1:${port}/v1/attachments/${encodeURIComponent(pngRef)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (gotPng.status !== 200 || gotPng.headers.get("content-type") !== "image/png") {
+    throw new Error(`attachment GET ${gotPng.status} ${gotPng.headers.get("content-type")}`);
+  }
+  const noAuth = await fetch(`http://127.0.0.1:${port}/v1/attachments/${encodeURIComponent(pngRef)}`);
+  if (noAuth.status !== 401) throw new Error(`attachment GET without token = ${noAuth.status}`);
+  const missingAtt = await fetch(`http://127.0.0.1:${port}/v1/attachments/att%3Asha256%3A${"0".repeat(64)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (missingAtt.status !== 404) throw new Error(`attachment GET unknown ref = ${missingAtt.status}`);
+  const sentWithFiles = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      type: "user.input",
+      data: {
+        text: "transcript attachments smoke 1389",
+        images: [
+          { ref: pngRef, mime: "image/png", name: "smoke-shot.png" },
+          { ref: pdfRef, mime: "application/pdf", name: "smoke-spec.pdf" },
+        ],
+      },
+    }),
+  });
+  if (!sentWithFiles.ok) throw new Error(`user.input with attachments ${sentWithFiles.status} ${await sentWithFiles.text()}`);
   // Attachment honesty (#1561): on the echo provider the engine drops
   // every attachment, so the composer must say so before send (warn,
   // not block). Removing the file clears the warning.
@@ -2222,6 +2287,15 @@ try {
     "cockpit reload after attachment checks (Run a command, Terminal)",
     textProbe((t) => t.includes("Run a command") && t.includes("Terminal")),
     { timeout: WAIT_MS, interval: 250 },
+  );
+  await waitUntil(
+    `(() => {
+      const box = [...document.querySelectorAll("[data-sent-attachments]")].find((el) => el.innerText.includes("smoke-shot.png"));
+      if (!box) return false;
+      const img = box.querySelector(".sx-attach-chip img");
+      return box.innerText.includes("smoke-spec.pdf") && !!img && img.src.startsWith("blob:") && img.complete && img.naturalWidth > 0;
+    })()`,
+    "sent image + PDF chips render after reload with a loaded thumbnail",
   );
 
   // Usage + Audit (#1286): open each view and confirm its controls
