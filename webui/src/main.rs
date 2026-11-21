@@ -91,6 +91,7 @@ mod turn_failure;
 mod turn_usage;
 mod turn_verify;
 mod workspace_image;
+mod workspace_trust;
 mod workspaces;
 mod workflow_run;
 use crate::shell::icon;
@@ -1104,6 +1105,9 @@ fn App() -> impl IntoView {
     let token = RwSignal::new(gateway::initial_token());
     provide_context(transcript_attachments::AttachmentAuth { base, token });
     let status = RwSignal::new("connecting…".to_string());
+    // Bootstrap capability `workspaceTrust` (#1781): gates the untrusted
+    // workspace badge and trust card.
+    let workspace_trust_capable = RwSignal::new(false);
     // Bootstrap capability `diag` (#1489): gates Download diagnostics.
     let diag_capable = RwSignal::new(false);
     // Bootstrap capability `ledger` (#1485): gates the Decisions tab.
@@ -1840,6 +1844,7 @@ fn App() -> impl IntoView {
                                         }
                                     });
                                 }
+                                workspace_trust_capable.set(boot.capabilities.workspace_trust);
                                 diag_capable.set(boot.capabilities.diag);
                                 crate::storage::set_ledger_capable(boot.capabilities.ledger);
                                 ledger_capable.set(boot.capabilities.ledger);
@@ -5285,6 +5290,14 @@ fn App() -> impl IntoView {
                     // to the conversation. Visually hidden; the status tabs
                     // and chat-mode bar already show the session name.
                     <h1 id="chat-heading" class="sr-only">{move || chat_title.get()}</h1>
+                    // #1781: persistent untrusted-workspace badge + trust card.
+                    <workspace_trust::WorkspaceTrust
+                        base=base
+                        token=token
+                        root=active_root
+                        status=status
+                        capable=workspace_trust_capable
+                    />
                     {move || {
                         let _ = tick.get();
                         let active = active_root.get();

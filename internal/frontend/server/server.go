@@ -109,6 +109,17 @@ type Options struct {
 	Sandbox *SandboxSnapshot
 	// ReadOnly rejects mutating protocol ops (POST /v1/ops and WS op frames).
 	ReadOnly bool
+	// WorkspaceTrustPath is the workspace trust store file
+	// (~/.strike/workspace-trust.json) behind GET/POST /v1/workspace/trust
+	// (#1781). Empty disables the routes (501).
+	WorkspaceTrustPath string
+	// WorkspaceTrustAssembled is the workspace this daemon's sessions were
+	// assembled for and the trust decision they were built with. Every root
+	// of one strike serve shares that assembly (session worktrees included),
+	// so when set it is the workspace /v1/workspace/trust reports and
+	// changes, and a decision that differs from Trusted sets
+	// restartRequired. Nil (attach-only) falls back to the live root's CWD.
+	WorkspaceTrustAssembled *WorkspaceTrustAssembly
 	// WorkDir is the process working directory. Customize uses it as the
 	// workspace scope when no live session is attached. Apps uses it as the
 	// git workspace for GitHub triage. The browser cannot choose it. Empty
@@ -666,6 +677,8 @@ func (s *Server) routes() {
 	// Project init (#1581): AGENTS.md bootstrap via host.ProjectInit.
 	s.mux.HandleFunc("GET /v1/init", s.handleProjectInitGet)
 	s.mux.HandleFunc("POST /v1/init", s.handleProjectInitPost)
+	s.mux.HandleFunc("GET /v1/workspace/trust", s.handleWorkspaceTrustGet)
+	s.mux.HandleFunc("POST /v1/workspace/trust", s.handleWorkspaceTrustPost)
 	s.mux.HandleFunc("POST /v1/attachments", s.handleAttachmentIngest)
 	s.mux.HandleFunc("GET /v1/attachments/{ref}", s.handleAttachmentGet)
 	s.mux.HandleFunc("POST /v1/ops", s.handleOps)

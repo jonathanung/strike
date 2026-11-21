@@ -296,3 +296,27 @@ func TestDefaultPath(t *testing.T) {
 		t.Fatalf("DefaultPath = %q", got)
 	}
 }
+
+func TestUntrustable(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	proj := t.TempDir()
+	cases := []struct {
+		name string
+		root string
+		want bool
+	}{
+		{name: "filesystem root", root: string(filepath.Separator), want: true},
+		{name: "home", root: home, want: true},
+		{name: "project", root: proj, want: false},
+		{name: "child of home", root: filepath.Join(home, "repo"), want: false},
+		{name: "empty", root: "", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Untrustable(tc.root); got != tc.want {
+				t.Fatalf("Untrustable(%q) = %v, want %v", tc.root, got, tc.want)
+			}
+		})
+	}
+}
