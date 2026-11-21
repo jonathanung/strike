@@ -19,6 +19,11 @@ use super::rank::{best_score, command_score};
 pub type CommandRun = Rc<dyn Fn(&str) -> Result<(), String>>;
 pub type Predicate = Rc<dyn Fn() -> bool>;
 pub type ChoiceList = Rc<dyn Fn() -> Vec<Choice>>;
+/// Second-step rows that depend on the typed text (#1396 Open file…):
+/// called with the step's query on every keystroke. Unlike `choices`,
+/// these rows live only in the command's own step — they are never
+/// promoted into the root list, so they cannot displace commands.
+pub type QueryChoiceList = Rc<dyn Fn(&str) -> Vec<Choice>>;
 
 /// Palette heading. Order is the empty-query order after Recent and Frequent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -256,6 +261,7 @@ struct Registry {
     commands: Vec<Command>,
     slots: Vec<TopSlot>,
     shortcuts: Vec<Shortcut>,
+    query_choices: Vec<(&'static str, QueryChoiceList)>,
 }
 
 impl Registry {
@@ -273,6 +279,36 @@ impl Registry {
         } else {
             self.slots.push(slot);
         }
+    }
+
+    fn upsert_query_choices(&mut self, id: &'static str, list: QueryChoiceList) {
+        if let Some(index) = self.query_choices.iter().position(|(k, _)| *k == id) {
+            self.query_choices[index].1 = list;
+        } else {
+            self.query_choices.push((id, list));
+        }
+    }
+
+    fn step_rows(&self, id: &str, query: &str) -> Vec<Choice> {
+        if let Some(list) = self.query_choice_list(id) {
+            return filter_choices(query, &list(query));
+        }
+        let Some(load) = self
+            .commands
+            .iter()
+            .find(|cmd| cmd.id == id)
+            .and_then(|cmd| cmd.choices.clone())
+        else {
+            return Vec::new();
+        };
+        filter_choices(query, &load())
+    }
+
+    fn query_choice_list(&self, id: &str) -> Option<QueryChoiceList> {
+        self.query_choices
+            .iter()
+            .find(|(k, _)| *k == id)
+            .map(|(_, list)| list.clone())
     }
 
     fn upsert_shortcut(&mut self, shortcut: Shortcut) {
@@ -532,6 +568,19 @@ impl ShellHook {
         self.registry.upsert_shortcut(shortcut);
     }
 
+    /// Give command `id` query-driven second-step rows (#1396). The
+    /// command still needs an `argument` so the palette opens its step;
+    /// selecting a row calls `run` with that row's id. The same `id`
+    /// replaces the previous list.
+    pub fn query_choices(&mut self, id: &'static str, list: impl Fn(&str) -> Vec<Choice> + 'static) {
+        self.registry.upsert_query_choices(id, Rc::new(list));
+    }
+
+    #[allow(dead_code)]
+    pub fn step_rows(&self, id: &str, query: &str) -> Vec<Choice> {
+        self.registry.step_rows(id, query)
+    }
+
     #[allow(dead_code)]
     pub fn query(&self, raw: &str, usage: &PaletteUsage) -> Vec<PaletteGroup> {
         self.registry.query(raw, usage)
@@ -560,6 +609,21 @@ pub fn replace_prefixed(prefix: &str, cmds: Vec<Command>) {
             reg.upsert_command(cmd);
         }
     });
+}
+
+/// Rows for command `id`'s second step at `query`: its query-driven
+/// list when one is registered (#1396), else its static `choices`, both
+/// ranked by `filter_choices`. Empty when the command has neither.
+pub fn step_rows(id: &str, query: &str) -> Vec<Choice> {
+    // Call the lists outside the registry borrow: a list may read
+    // signals or other registry state.
+    if let Some(list) = REG.with(|reg| reg.borrow().query_choice_list(id)) {
+        return filter_choices(query, &list(query));
+    }
+    let Some(load) = command(id).and_then(|cmd| cmd.choices) else {
+        return Vec::new();
+    };
+    filter_choices(query, &load())
 }
 
 pub fn command(id: &str) -> Option<Command> {
@@ -747,6 +811,65 @@ mod tests {
             .and_then(|g| g.hits.first())
             .map(|h| h.id.as_str());
         assert_eq!(first, Some("mode-plan"), "groups: {groups:?}");
+    }
+
+    #[test]
+    fn query_choices_see_the_step_text_and_stay_out_of_the_root_list() {
+        use std::cell::RefCell;
+        let mut hook = ShellHook::new();
+        hook.command(
+            cmd("open-file", Group::Navigate, "Open file…", 1).argument(Argument {
+                placeholder: "File name",
+                required: true,
+            }),
+        );
+        let seen = Rc::new(RefCell::new(Vec::<String>::new()));
+        let log = seen.clone();
+        hook.query_choices("open-file", move |q| {
+            log.borrow_mut().push(q.to_string());
+            vec![
+                Choice {
+                    id: "src/deep/nested/widget.rs".into(),
+                    label: "widget.rs".into(),
+                    detail: "src/deep/nested".into(),
+                },
+                Choice {
+                    id: "README.md".into(),
+                    label: "README.md".into(),
+                    detail: String::new(),
+                },
+            ]
+        });
+        let rows = hook.step_rows("open-file", "widg");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "src/deep/nested/widget.rs");
+        assert_eq!(seen.borrow().as_slice(), ["widg"]);
+        // Empty step text lists every row the source returned.
+        assert_eq!(hook.step_rows("open-file", "").len(), 2);
+        // A root query never surfaces query-driven rows as choices.
+        let groups = hook.query("widget", &PaletteUsage::default());
+        assert!(
+            groups.iter().all(|g| g.hits.iter().all(|h| h.args.is_empty())),
+            "groups: {groups:?}"
+        );
+        // Unknown ids and commands without lists have no rows.
+        assert!(hook.step_rows("nope", "x").is_empty());
+    }
+
+    #[test]
+    fn step_rows_falls_back_to_static_choices() {
+        let mut hook = ShellHook::new();
+        hook.command(
+            cmd("switch-model", Group::Model, "Switch model…", 1).choices(|| {
+                vec![Choice {
+                    id: "echo\thaiku".into(),
+                    label: "Haiku".into(),
+                    detail: "echo".into(),
+                }]
+            }),
+        );
+        assert_eq!(hook.step_rows("switch-model", "hai").len(), 1);
+        assert!(hook.step_rows("switch-model", "zzzz").is_empty());
     }
 
     #[test]
