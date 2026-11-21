@@ -44,6 +44,8 @@ func (e *Engine) handleOp(ctx context.Context, op protocol.Op) {
 		e.handleSelect(op)
 	case protocol.SetFallbackModel:
 		e.handleSetFallback(op)
+	case protocol.ReturnToPrimary:
+		e.handleReturnToPrimary()
 	case protocol.SelectAgent:
 		if e.turnActive() {
 			e.emit(protocol.EngineError{
@@ -351,6 +353,10 @@ func (e *Engine) setProvider(name string, p provider.Provider, model string) {
 	// A user (or agent) model switch is never a fallback event; it also
 	// ends any fallback hold so the new pick is not undone at turn end.
 	e.primaryHold = nil
+	if e.fallbackSticky {
+		e.fallbackSticky = false
+		e.emitFallbackSelected()
+	}
 	e.prov, e.provName, e.model = p, name, model
 	e.refreshContextWindow()
 	e.emitSelected(protocol.ModelSelected{

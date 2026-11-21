@@ -760,6 +760,7 @@ Go `FallbackModelSelected`.
 | `depth` | number | yes |
 | `provider` | string |  |
 | `model` | string |  |
+| `active` | bool | yes |
 
 #### `model.fallback`
 
@@ -779,6 +780,7 @@ Go `ModelFallback`.
 | `fallbackModel` | string |  |
 | `reason` | string |  |
 | `error` | string | yes |
+| `sticky` | bool | yes |
 
 #### `agent.selected`
 

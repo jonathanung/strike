@@ -41,6 +41,8 @@ func opType(op Op) string {
 		return "select.model"
 	case SetFallbackModel:
 		return "set.fallback_model"
+	case ReturnToPrimary:
+		return "fallback.return"
 	case SelectAgent:
 		return "select.agent"
 	case SetEffort:
@@ -146,6 +148,8 @@ func (e OpEnvelope) Decode() (Op, error) {
 		op = &SelectModel{}
 	case "set.fallback_model":
 		op = &SetFallbackModel{}
+	case "fallback.return":
+		op = &ReturnToPrimary{}
 	case "select.agent":
 		op = &SelectAgent{}
 	case "set.effort":
@@ -227,6 +231,8 @@ func derefOp(op Op) Op {
 	case *SelectModel:
 		return *v
 	case *SetFallbackModel:
+		return *v
+	case *ReturnToPrimary:
 		return *v
 	case *SelectAgent:
 		return *v

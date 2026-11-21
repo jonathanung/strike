@@ -4,6 +4,11 @@
 //! `fallback.selected`. A turn the fallback answered is marked in the
 //! transcript from the daemon's `model.fallback` event (see
 //! `transcript.rs`), naming both models.
+//!
+//! #1922: when the primary refuses, the session stays on the fallback
+//! (`model.fallback` with `sticky`, `fallback.selected` with `active`). The
+//! chip then reads "On fallback" and offers Return to primary, which posts
+//! `fallback.return`.
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -15,6 +20,8 @@ use crate::api::post_op;
 pub struct FallbackState {
     pub provider: String,
     pub model: String,
+    /// The session runs on the fallback until Return to primary (#1922).
+    pub active: bool,
 }
 
 impl FallbackState {
@@ -49,37 +56,50 @@ pub fn reset() {
     set(FallbackState::default());
 }
 
-/// Seed from status (`fallbackProvider`, `fallbackModel`). An unreported
-/// fallback leaves the state alone so it cannot undo a replayed pick.
-pub fn seed(provider: &str, model: &str) {
+/// Seed from status (`fallbackProvider`, `fallbackModel`,
+/// `fallbackActive`). An unreported fallback leaves the state alone so it
+/// cannot undo a replayed pick.
+pub fn seed(provider: &str, model: &str, active: bool) {
     if provider.trim().is_empty() {
         return;
     }
     set(FallbackState {
         provider: provider.trim().to_string(),
         model: model.trim().to_string(),
+        active,
     });
 }
 
-/// Reduce one envelope: only a root `fallback.selected` changes the state.
+/// Reduce one envelope: a root `fallback.selected` replaces the state; a
+/// root sticky `model.fallback` (#1922) marks the session as running on the
+/// fallback.
 pub fn reduce(state: FallbackState, raw: &str) -> FallbackState {
-    if !raw.contains("fallback.selected") {
+    if !raw.contains("fallback") {
         return state;
     }
     let Ok(v) = serde_json::from_str::<Value>(raw) else {
         return state;
     };
-    if v.get("type").and_then(Value::as_str) != Some("fallback.selected") {
+    let typ = v.get("type").and_then(Value::as_str).unwrap_or("");
+    if typ != "fallback.selected" && typ != "model.fallback" {
         return state;
     }
     let data = v.get("data").cloned().unwrap_or(Value::Null);
     if data.get("depth").and_then(Value::as_i64).unwrap_or(0) > 0 {
         return state;
     }
+    let flag = |k: &str| data.get(k).and_then(Value::as_bool).unwrap_or(false);
+    if typ == "model.fallback" {
+        if !flag("sticky") {
+            return state;
+        }
+        return FallbackState { active: true, ..state };
+    }
     let text = |k: &str| data.get(k).and_then(Value::as_str).unwrap_or("").trim().to_string();
     FallbackState {
         provider: text("provider"),
         model: text("model"),
+        active: flag("active"),
     }
 }
 
@@ -104,6 +124,14 @@ pub fn notice_text(data: &Value) -> (String, String) {
     let primary = model_label(&text("primaryProvider"), &text("primaryModel"));
     let why = match text("reason").as_str() {
         "unavailable" | "" => "unavailable",
+        "refused" => {
+            return (
+                "Model fallback".into(),
+                format!(
+                    "Answered by {fallback} — {primary} refused. The session stays on {fallback} until you use Return to primary on the composer chip."
+                ),
+            )
+        }
         other => return ("Model fallback".into(), format!("Answered by {fallback} — {primary} {other}")),
     };
     ("Model fallback".into(), format!("Answered by {fallback} — {primary} {why}"))
@@ -111,6 +139,34 @@ pub fn notice_text(data: &Value) -> (String, String) {
 
 /// Palette command id; the chip opens the palette at it.
 pub const COMMAND: &str = "model.fallback";
+
+/// Op that ends a session-sticky fallback (#1922).
+pub const RETURN_OP: &str = "fallback.return";
+
+/// Composer chip label: says plainly when the session is running on the
+/// fallback rather than merely having one configured.
+pub fn chip_text(st: &FallbackState) -> String {
+    if st.active {
+        format!("On fallback · {}", st.label())
+    } else {
+        format!("Fallback · {}", st.label())
+    }
+}
+
+fn chip_title(st: &FallbackState) -> String {
+    if st.active {
+        format!(
+            "The session model refused a request, so {} answers every turn until you use Return to primary. Click to change or remove the fallback.",
+            st.label()
+        )
+    } else {
+        format!(
+            "If the session model is unavailable after retries, {} answers that turn and the next turn tries the session model again. If it refuses, the session stays on {} until you return. Click to change or remove.",
+            st.label(),
+            st.label()
+        )
+    }
+}
 
 /// Decode the palette's dispatch argument: "" clears, otherwise
 /// `provider` + tab + `model` (the catalog choice id).
@@ -173,13 +229,32 @@ pub fn FallbackChip(
     };
     let text = {
         let st = st.clone();
-        move || format!("Fallback · {}", st.get().label())
+        move || chip_text(&st.get())
     };
-    let title = move || {
-        format!(
-            "If the session model is unavailable after retries, {} answers that turn and the next turn tries the session model again. Click to change or remove.",
-            st.get().label()
-        )
+    let active = {
+        let st = st.clone();
+        move || st.get().active
+    };
+    let active_attr = {
+        let st = st.clone();
+        move || if st.get().active { "true" } else { "false" }
+    };
+    let title = move || chip_title(&st.get());
+    let return_to_primary = move |_: web_sys::MouseEvent| {
+        let root = active_root.get_untracked();
+        if root.is_empty() {
+            return;
+        }
+        if busy.get_untracked() {
+            status.set("This turn is still running. Return to primary waits until it finishes.".into());
+            return;
+        }
+        let (b, t) = (base.get_untracked(), token.get_untracked());
+        spawn_local(async move {
+            if let Err(e) = post_op(&b, &t, &root, RETURN_OP, json!({})).await {
+                status.set(format!("Still on the fallback model: {e}"));
+            }
+        });
     };
     view! {
         <Show when=shown>
@@ -187,9 +262,19 @@ pub fn FallbackChip(
                 type="button"
                 class="composer-glance"
                 data-fallback-status="true"
+                data-fallback-active=active_attr.clone()
                 title=title.clone()
                 on:click=move |_| crate::shell::show_palette_at(COMMAND)
             >{text.clone()}</button>
+            <Show when=active.clone()>
+                <button
+                    type="button"
+                    class="composer-glance"
+                    data-fallback-return="true"
+                    title="Send the next turn to the session model again"
+                    on:click=return_to_primary
+                >"Return to primary"</button>
+            </Show>
         </Show>
     }
 }
@@ -199,7 +284,43 @@ mod tests {
     use super::*;
 
     fn fs(p: &str, m: &str) -> FallbackState {
-        FallbackState { provider: p.into(), model: m.into() }
+        FallbackState { provider: p.into(), model: m.into(), active: false }
+    }
+
+    fn on(p: &str, m: &str) -> FallbackState {
+        FallbackState { active: true, ..fs(p, m) }
+    }
+
+    #[test]
+    fn reduce_tracks_sticky_fallback() {
+        let cases = [
+            (fs("openai", "gpt"), r#"{"type":"model.fallback","data":{"reason":"refused","sticky":true}}"#, on("openai", "gpt")),
+            (fs("openai", "gpt"), r#"{"type":"model.fallback","data":{"reason":"unavailable"}}"#, fs("openai", "gpt")),
+            (fs("openai", "gpt"), r#"{"type":"model.fallback","data":{"sticky":true,"depth":2}}"#, fs("openai", "gpt")),
+            (on("openai", "gpt"), r#"{"type":"fallback.selected","data":{"provider":"openai","model":"gpt"}}"#, fs("openai", "gpt")),
+            (fs("openai", "gpt"), r#"{"type":"fallback.selected","data":{"provider":"openai","model":"gpt","active":true}}"#, on("openai", "gpt")),
+        ];
+        for (start, raw, want) in cases {
+            assert_eq!(reduce(start, raw), want, "{raw}");
+        }
+    }
+
+    #[test]
+    fn refused_notice_says_the_session_stays() {
+        let data = serde_json::json!({
+            "primaryProvider": "anthropic", "primaryModel": "a1",
+            "fallbackProvider": "openai", "fallbackModel": "g1",
+            "reason": "refused", "sticky": true
+        });
+        let (_, body) = notice_text(&data);
+        assert!(body.starts_with("Answered by openai/g1 — anthropic/a1 refused."), "{body}");
+        assert!(body.contains("Return to primary"), "{body}");
+    }
+
+    #[test]
+    fn chip_text_says_when_on_fallback() {
+        assert_eq!(chip_text(&fs("openai", "gpt")), "Fallback · openai/gpt");
+        assert_eq!(chip_text(&on("openai", "gpt")), "On fallback · openai/gpt");
     }
 
     #[test]

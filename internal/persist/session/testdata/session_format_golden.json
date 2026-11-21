@@ -2015,6 +2015,11 @@
         {
           "name": "model",
           "type": "string"
+        },
+        {
+          "name": "active",
+          "type": "bool",
+          "omitEmpty": true
         }
       ]
     },
@@ -2075,6 +2080,11 @@
         {
           "name": "error",
           "type": "string",
+          "omitEmpty": true
+        },
+        {
+          "name": "sticky",
+          "type": "bool",
           "omitEmpty": true
         }
       ]

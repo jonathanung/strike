@@ -1855,8 +1855,11 @@
     },
     "FallbackModelSelected": {
       "additionalProperties": true,
-      "description": "FallbackModelSelected confirms the session fallback model after each SetFallbackModel. An empty Provider means no fallback is set.",
+      "description": "FallbackModelSelected confirms the session fallback model after each SetFallbackModel or ReturnToPrimary. An empty Provider means no fallback is set. Active is true while the session runs on the fallback after a refusal (#1922); false means the primary answers the next turn.",
       "properties": {
+        "active": {
+          "type": "boolean"
+        },
         "attempt": {
           "type": "integer"
         },
@@ -3985,6 +3988,24 @@
           "additionalProperties": true,
           "properties": {
             "data": {
+              "$ref": "#/$defs/ReturnToPrimary"
+            },
+            "type": {
+              "const": "fallback.return"
+            },
+            "v": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": true,
+          "properties": {
+            "data": {
               "$ref": "#/$defs/FilesChanged"
             },
             "type": {
@@ -4727,6 +4748,9 @@
         },
         "sessionId": {
           "type": "string"
+        },
+        "sticky": {
+          "type": "boolean"
         },
         "turnId": {
           "type": "string"
@@ -5700,6 +5724,12 @@
         "kind",
         "text"
       ],
+      "type": "object"
+    },
+    "ReturnToPrimary": {
+      "additionalProperties": true,
+      "description": "ReturnToPrimary ends a session-sticky fallback (#1922): after the primary refused, later turns stay on the fallback until this op puts the primary back. A no-op confirmation when the session is already on its primary. Rejected while a turn is running.",
+      "properties": {},
       "type": "object"
     },
     "Rewind": {
@@ -7749,7 +7779,7 @@
   "title": "Strike event envelope",
   "x-strike-event-count": 70,
   "x-strike-legacy-version": "1.0.0",
-  "x-strike-op-count": 35,
+  "x-strike-op-count": 36,
   "x-strike-protocol-version": "1.26.0",
   "x-strike-unknown-event": "valid",
   "x-strike-unknown-field": "ignore",

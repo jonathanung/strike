@@ -512,6 +512,12 @@ type SetFallbackModel struct {
 	Model    string `json:"model,omitempty"`
 }
 
+// ReturnToPrimary ends a session-sticky fallback (#1922): after the primary
+// refused, later turns stay on the fallback until this op puts the primary
+// back. A no-op confirmation when the session is already on its primary.
+// Rejected while a turn is running.
+type ReturnToPrimary struct{}
+
 // SelectAgent switches the active agent (system prompt + optional
 // provider/model pins). Rejected while a turn is running.
 type SelectAgent struct {
@@ -627,6 +633,7 @@ func (InputQueueReorder) isOp()       {}
 func (InputQueueSendNow) isOp()       {}
 func (SelectModel) isOp()             {}
 func (SetFallbackModel) isOp()        {}
+func (ReturnToPrimary) isOp()         {}
 func (SelectAgent) isOp()             {}
 func (SetEffort) isOp()               {}
 func (SetAutonomy) isOp()             {}
@@ -1657,11 +1664,14 @@ type ModelSelected struct {
 }
 
 // FallbackModelSelected confirms the session fallback model after each
-// SetFallbackModel. An empty Provider means no fallback is set.
+// SetFallbackModel or ReturnToPrimary. An empty Provider means no fallback
+// is set. Active is true while the session runs on the fallback after a
+// refusal (#1922); false means the primary answers the next turn.
 type FallbackModelSelected struct {
 	Correlation
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
+	Active   bool   `json:"active,omitempty"`
 }
 
 // ModelFallback marks a turn that the fallback model continued because the
@@ -1675,12 +1685,18 @@ type ModelFallback struct {
 	FallbackModel    string `json:"fallbackModel"`
 	Reason           string `json:"reason"`
 	Error            string `json:"error,omitempty"`
+	// Sticky is true when the session stays on the fallback for later turns
+	// until ReturnToPrimary (reason refused, #1922).
+	Sticky bool `json:"sticky,omitempty"`
 }
 
 // ModelFallback reasons. Unavailable: the primary failed after retries
 // (provider error, rate limit, timeout); the fallback answers this turn only.
+// Refused: the primary declined the request; the session stays on the
+// fallback (Sticky) until ReturnToPrimary.
 const (
 	ModelFallbackReasonUnavailable = "unavailable"
+	ModelFallbackReasonRefused     = "refused"
 )
 
 // AgentSelected confirms the active agent.

@@ -827,3 +827,43 @@ func TestSystemBlocksBreakpointPlacement(t *testing.T) {
 		})
 	}
 }
+
+// TestStreamMapsRefusalStopReason pins #1922: the Messages API "refusal"
+// stop reason is the typed provider refusal; others pass through.
+func TestStreamMapsRefusalStopReason(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want string
+	}{
+		{"refusal", provider.StopReasonRefusal},
+		{"end_turn", "end_turn"},
+		{"max_tokens", "max_tokens"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			body := `{"stop_reason":"` + tt.raw + `","content":[{"type":"text","text":"no"}]}`
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			}))
+			defer srv.Close()
+			p := &Provider{Client: baseClientForTest(), baseURL: srv.URL}
+			stream, err := p.Stream(context.Background(), provider.Request{Model: "claude-opus-5"})
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+			var stop string
+			for ev := range stream {
+				switch ev.Type {
+				case provider.EventDone:
+					stop = ev.StopReason
+				case provider.EventError:
+					t.Fatalf("stream error: %v", ev.Err)
+				}
+			}
+			if stop != tt.want {
+				t.Errorf("stop reason = %q, want %q", stop, tt.want)
+			}
+		})
+	}
+}

@@ -42,6 +42,7 @@ func TestWrapDecodeRoundTrip(t *testing.T) {
 		ModelSelected{Correlation: corr, Provider: "echo", Model: "echo"},
 		FallbackModelSelected{Correlation: corr, Provider: "openai", Model: "gpt"},
 		ModelFallback{Correlation: corr, PrimaryProvider: "anthropic", PrimaryModel: "a", FallbackProvider: "openai", FallbackModel: "gpt", Reason: ModelFallbackReasonUnavailable, Error: "overloaded"},
+		ModelFallback{Correlation: corr, PrimaryProvider: "anthropic", PrimaryModel: "a", FallbackProvider: "openai", FallbackModel: "gpt", Reason: ModelFallbackReasonRefused, Sticky: true},
 		AgentSelected{Correlation: corr, Name: "build"},
 		PhaseChanged{Correlation: corr, Workflow: "plan-implement", Phase: "plan", Index: 0, Gate: "user", Source: "builtin", Fingerprint: "abc123"},
 		PhaseChanged{Correlation: corr, Workflow: "gone", Phase: "step", Index: 0, Fingerprint: "old", Status: PhaseStatusMissing},

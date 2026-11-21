@@ -1046,7 +1046,7 @@ pub struct Envelope {
     pub data: Value,
 }
 
-/// FallbackModelSelected confirms the session fallback model after each SetFallbackModel. An empty Provider means no fallback is set.
+/// FallbackModelSelected confirms the session fallback model after each SetFallbackModel or ReturnToPrimary. An empty Provider means no fallback is set. Active is true while the session runs on the fallback after a refusal (#1922); false means the primary answers the next turn.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct FallbackModelSelected {
     #[serde(default, rename = "sessionId")]
@@ -1065,6 +1065,8 @@ pub struct FallbackModelSelected {
     pub provider: String,
     #[serde(default, rename = "model")]
     pub model: String,
+    #[serde(default, rename = "active")]
+    pub active: bool,
 }
 
 /// FastSelected confirms the session priority-tier preference after SetFast.
@@ -1375,6 +1377,8 @@ pub struct ModelFallback {
     pub reason: String,
     #[serde(default, rename = "error")]
     pub error: String,
+    #[serde(default, rename = "sticky")]
+    pub sticky: bool,
 }
 
 /// ModelSelected confirms the active provider/model, at startup (if an initial selection succeeded) and after each SelectModel.
@@ -1916,6 +1920,11 @@ pub struct ResidueItem {
     pub file_refs: Vec<String>,
     #[serde(default, rename = "ledgerId")]
     pub ledger_id: String,
+}
+
+/// ReturnToPrimary ends a session-sticky fallback (#1922): after the primary refused, later turns stay on the fallback until this op puts the primary back. A no-op confirmation when the session is already on its primary. Rejected while a turn is running.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+pub struct ReturnToPrimary {
 }
 
 /// Rewind removes the last completed user↔assistant turn from model-facing history. When RestoreFiles is true, also restores per-file checkpoints captured before mutating tools in that turn (never git reset --hard). Rejected while a turn is running.
@@ -3158,6 +3167,7 @@ pub enum Op {
     SetContextControls(SetContextControls),
     DebugControl(DebugControl),
     ElicitationReply(ElicitationReply),
+    ReturnToPrimary(ReturnToPrimary),
     FilesChanged(FilesChanged),
     InputQueueCancel(InputQueueCancel),
     InputQueueEdit(InputQueueEdit),
@@ -3338,6 +3348,7 @@ pub fn decode_op(raw: &str) -> Result<Op, DecodeError> {
         "context.controls" => map_op::<SetContextControls>("context.controls", data.clone(), Op::SetContextControls),
         "debug.control" => map_op::<DebugControl>("debug.control", data.clone(), Op::DebugControl),
         "elicitation.reply" => map_op::<ElicitationReply>("elicitation.reply", data.clone(), Op::ElicitationReply),
+        "fallback.return" => map_op::<ReturnToPrimary>("fallback.return", data.clone(), Op::ReturnToPrimary),
         "files.changed" => map_op::<FilesChanged>("files.changed", data.clone(), Op::FilesChanged),
         "input.queue_cancel" => map_op::<InputQueueCancel>("input.queue_cancel", data.clone(), Op::InputQueueCancel),
         "input.queue_edit" => map_op::<InputQueueEdit>("input.queue_edit", data.clone(), Op::InputQueueEdit),

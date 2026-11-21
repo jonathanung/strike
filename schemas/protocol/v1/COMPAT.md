@@ -90,12 +90,13 @@ Generated from `pkg/protocol`. Do not edit by hand. Regenerate with `make protoc
 - `wait.resolved` → `WaitResolved`
 - `wait.started` → `WaitStarted`
 
-## Op types (35)
+## Op types (36)
 
 - `compact` → `Compact`
 - `context.controls` → `SetContextControls`
 - `debug.control` → `DebugControl`
 - `elicitation.reply` → `ElicitationReply`
+- `fallback.return` → `ReturnToPrimary`
 - `files.changed` → `FilesChanged`
 - `input.queue_cancel` → `InputQueueCancel`
 - `input.queue_edit` → `InputQueueEdit`

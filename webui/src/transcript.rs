@@ -998,6 +998,9 @@ impl Transcript {
                 // #1350: a different model continued this turn. Name both
                 // so no reply is attributed to the wrong model.
                 let (title, body) = crate::fallback::notice_text(&data);
+                // The fallback's answer starts its own bubble, below the
+                // notice, even if the primary streamed refusal prose.
+                self.assistant_open = false;
                 self.push(Message {
                     id: 0,
                     role: Role::Notice,

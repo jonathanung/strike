@@ -2042,7 +2042,7 @@ fn App() -> impl IntoView {
                                                 .to_string(),
                                         );
                                     }
-                                    crate::fallback::seed(&st.fallback_provider, &st.fallback_model);
+                                    crate::fallback::seed(&st.fallback_provider, &st.fallback_model, st.fallback_active);
                                     crate::verbosity::seed(&st.verbosity, &st.verbosity_delivery);
                                     wf_run.set(workflow_run::WorkflowRun::from_status(
                                         &st.workflow,

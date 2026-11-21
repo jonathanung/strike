@@ -51,7 +51,10 @@ const (
 )
 
 // Model fallback reasons (#1350).
-const ModelFallbackReasonUnavailable = pub.ModelFallbackReasonUnavailable
+const (
+	ModelFallbackReasonUnavailable = pub.ModelFallbackReasonUnavailable
+	ModelFallbackReasonRefused     = pub.ModelFallbackReasonRefused
+)
 
 // Verbosity dial (#1369).
 type Verbosity = pub.Verbosity
@@ -173,6 +176,7 @@ type (
 	InputQueueSendNow       = pub.InputQueueSendNow
 	SelectModel             = pub.SelectModel
 	SetFallbackModel        = pub.SetFallbackModel
+	ReturnToPrimary         = pub.ReturnToPrimary
 	SelectAgent             = pub.SelectAgent
 	SetEffort               = pub.SetEffort
 	SetAutonomy             = pub.SetAutonomy
