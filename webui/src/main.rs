@@ -29,6 +29,7 @@ mod gateway;
 mod gateway_qr;
 mod git;
 mod goals;
+mod ideas;
 mod mobile;
 mod providers;
 mod rule_author;
@@ -4819,6 +4820,9 @@ fn App() -> impl IntoView {
         <Show when=move || mode.get() == "goals" fallback=move || ()>
             <goals::GoalsPane base=base token=token />
         </Show>
+        <Show when=move || mode.get() == "ideas" fallback=move || ()>
+            <ideas::IdeasPage base=base token=token draft=draft active_root=active_root mode=mode />
+        </Show>
         <Show when=move || mode.get() == "tasks" fallback=move || ()>
             <task_runner::TaskRunner
                 base=base
@@ -4939,6 +4943,7 @@ fn App() -> impl IntoView {
                     panel_drawer.set(false);
                 }></button>
                 <aside class="rail">
+                    <ideas::IdeasBadge base=base token=token mode=mode />
 <SessionPanel
                         base=base
                         token=token

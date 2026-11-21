@@ -2687,6 +2687,74 @@ try {
     throw new Error(`daemon does not list issue ${smokeIssueId} as closed: ${JSON.stringify(persisted)}`);
   }
 
+  // Ideas inbox (#1323): a producer deposits a suggestion over the authed
+  // API, the palette opens the Ideas page, the row renders with its why and
+  // evidence, and Dismiss records it daemon-side so the list empties.
+  {
+    const ideasUrl = `http://127.0.0.1:${port}/v1/suggestions`;
+    const ideaAuth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const idea = {
+      title: "Smoke idea: tidy the README",
+      why: "The smoke run noticed a stale section.",
+      prompt: "Tidy the README",
+      source: "smoke.producer",
+      kind: "docs",
+      evidenceKey: "smoke:readme",
+      evidence: [{ label: "Smoke evidence", url: "https://example.com/smoke" }],
+    };
+    const ideaNoAuth = await fetch(ideasUrl, { method: "POST", body: JSON.stringify(idea) });
+    if (ideaNoAuth.status !== 401) {
+      throw new Error(`suggestions create without token = ${ideaNoAuth.status}`);
+    }
+    const created = await fetch(ideasUrl, { method: "POST", headers: ideaAuth, body: JSON.stringify(idea) });
+    if (created.status !== 201) {
+      throw new Error(`suggestions create = ${created.status} ${await created.text()}`);
+    }
+    const ideaId = (await created.json()).suggestion.id;
+    const dup = await fetch(ideasUrl, { method: "POST", headers: ideaAuth, body: JSON.stringify(idea) });
+    if (dup.status !== 200 || (await dup.json()).created !== false) {
+      throw new Error(`suggestions dedupe = ${dup.status}`);
+    }
+    await runPalette("Ideas");
+    await waitFor(
+      "ideas page lists the deposited suggestion with its why and evidence",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const row = document.querySelector('[data-idea="${ideaId}"]');
+          return JSON.stringify({
+            root: !!document.querySelector("#ideas-root"),
+            row: !!row,
+            text: row ? row.innerText : "",
+          });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        return {
+          ok: !!(p.root && p.row && p.text.includes("tidy the README") && p.text.includes("stale section") && p.text.includes("Smoke evidence")),
+          ...p,
+        };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await waitFor(
+      "ideas Dismiss empties the list",
+      async () => {
+        const raw = await evaluate(`(() => {
+          const btn = document.querySelector('[data-idea="${ideaId}"] .ideas-dismiss');
+          if (btn && !btn.disabled) btn.click();
+          return JSON.stringify({ empty: !!document.querySelector("[data-ideas-empty]") });
+        })()`);
+        const p = JSON.parse(raw || "{}");
+        return { ok: !!p.empty, ...p };
+      },
+      { timeout: WAIT_MS, interval: 400 },
+    );
+    const ideasAfter = await (await fetch(ideasUrl, { headers: ideaAuth })).json();
+    const stored = (ideasAfter.suggestions || []).find((x) => x.id === ideaId);
+    if (!stored || stored.state !== "dismissed" || ideasAfter.open !== 0) {
+      throw new Error(`dismissed idea state = ${JSON.stringify(ideasAfter).slice(0, 400)}`);
+    }
+  }
+
   // Goals + Autopilot (#1300, #1593). The view is palette-only. A bundle
   // that predates Goals has no palette command and fails here.
   await runPalette("Goals");
