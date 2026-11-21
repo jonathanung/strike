@@ -79,6 +79,16 @@ replaces a command, including a builtin.
 | `confirm` | `Some(ConfirmSpec { title, body, confirm_label })` opens the shared dialog in `webui/src/confirm.rs` before `run`. Use it for destructive work. The button that performs the same work should call `confirm::ask` too, and `run` should not ask a second time. |
 | `run` | `Fn(&str) -> Result<(), String>`. `Err` stays in the palette as an alert. `Ok` closes it and records a recent and a use count. |
 
+**Query-driven choices.** `ShellHook::query_choices(id, |query| rows)` gives
+command `id` second-step rows computed from the typed step text (the closure
+runs on every keystroke and may read signals, so rows can arrive
+asynchronously). The command still needs an `argument` so the palette opens
+its step; the palette ranks the rows with the same fuzzy filter as `choices`,
+and selecting one calls `run` with its id. Unlike `choices`, these rows are
+never promoted into the root list, so they cannot displace commands. “Open
+file…” (`src/shell/contrib/quick_open.rs`, #1396) uses it for daemon file
+search.
+
 ### Moving a control behind the palette
 
 1. Add `reg.command(...)` in `webui/src/shell/contrib/<feature>.rs`. Pick the group above. Do not add a second id for a command that already exists.

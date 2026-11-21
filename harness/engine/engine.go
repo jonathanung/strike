@@ -142,6 +142,9 @@ type Options struct {
 	// SandboxAllowDegrade permits unsandboxed bash when the OS backend is
 	// unavailable. Default false is fail-closed (#1030).
 	SandboxAllowDegrade bool
+	// SandboxRuntime is process (default) or microvm. Microvm never degrades
+	// to the host. Set by the user via config/CLI only.
+	SandboxRuntime string
 	// NetworkAllow is the config network.allow host/CIDR list for
 	// webfetch/websearch/browser. Empty means unrestricted public hosts. Copied onto
 	// tool.Context and sandbox.Policy.NetworkAllow for /sandbox explain.
