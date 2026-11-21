@@ -69,14 +69,11 @@ pub fn WorkspaceTrust(
     let error = RwSignal::new(String::new());
     let busy = RwSignal::new(false);
     let card_open = RwSignal::new(false);
-    // Workspace roots the user chose to keep untrusted this page load: the
-    // card stays closed for them, the badge stays up.
-    let kept = RwSignal::new(Vec::<String>::new());
     let granted = RwSignal::new(false);
 
     // Re-read whenever the capability or the live root changes. The card
-    // opens on its own the first time an untrusted workspace with repo
-    // config shows up.
+    // only opens from the badge: it is an overlay and never takes the
+    // composer's room (phone keyboard viewport).
     Effect::new(move |_| {
         let ok = capable.get();
         let r = root.get();
@@ -90,11 +87,7 @@ pub fn WorkspaceTrust(
         let (b, t) = (base.get_untracked(), token.get_untracked());
         spawn_local(async move {
             match call_trust(&b, &t, &r, None).await {
-                Ok(v) => {
-                    let show = v.badge_visible() && !kept.get_untracked().contains(&v.root);
-                    card_open.set(show);
-                    reply.set(Some(v));
-                }
+                Ok(v) => reply.set(Some(v)),
                 Err(e) => error.set(e),
             }
         });
@@ -132,16 +125,9 @@ pub fn WorkspaceTrust(
         });
     };
 
-    let keep_untrusted = move || {
-        if let Some(v) = reply.get_untracked() {
-            kept.update(|k| {
-                if !k.contains(&v.root) {
-                    k.push(v.root.clone());
-                }
-            });
-        }
-        card_open.set(false);
-    };
+    // Keep untrusted changes nothing on disk: it closes the card and the
+    // badge stays up.
+    let keep_untrusted = move || card_open.set(false);
 
     let badge_visible = move || reply.get().map(|v| v.badge_visible()).unwrap_or(false);
 

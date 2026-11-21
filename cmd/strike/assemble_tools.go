@@ -84,8 +84,8 @@ type assembled struct {
 	// or when the repo ships none) (#1352).
 	trustNotice string
 	// trustDir / trustRoot / trustedAtStart record the workspace and trust
-	// decision this assembly was built with, so the cockpit trust card acts on that workspace and
-	// can say a later grant or revoke needs a restart (#1781).
+	// decision this assembly was built with, so the cockpit trust card acts
+	// on that workspace and can say a grant/revoke needs a restart (#1781).
 	trustDir       string
 	trustRoot      string
 	trustedAtStart bool
