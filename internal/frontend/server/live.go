@@ -478,6 +478,10 @@ type StatusSnapshot struct {
 	Agent     string `json:"agent,omitempty"`
 	Effort    string `json:"effort,omitempty"`
 	Autonomy  string `json:"autonomy,omitempty"`
+	// FallbackProvider / FallbackModel are the session fallback model
+	// (#1350); empty when none is set.
+	FallbackProvider string `json:"fallbackProvider,omitempty"`
+	FallbackModel    string `json:"fallbackModel,omitempty"`
 	// Verbosity is the session response style (#1369; empty = default) and
 	// VerbosityDelivery how it reaches the model (none|instruction).
 	Verbosity         string `json:"verbosity,omitempty"`
@@ -1031,6 +1035,9 @@ func (l *Live) applyStatus(ev protocol.Event) {
 		l.status.Effort = string(e.Level)
 	case protocol.AutonomySelected:
 		l.status.Autonomy = string(e.Mode)
+	case protocol.FallbackModelSelected:
+		l.status.FallbackProvider = e.Provider
+		l.status.FallbackModel = e.Model
 	case protocol.VerbositySelected:
 		l.status.Verbosity = string(e.Level)
 		l.status.VerbosityDelivery = e.Delivery

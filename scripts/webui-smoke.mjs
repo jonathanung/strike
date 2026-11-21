@@ -7594,6 +7594,45 @@ try {
     },
     { timeout: STEP_MS, interval: 200 },
   );
+
+  // Model fallback (#1350): no chip until a fallback is confirmed by the
+  // daemon; picking a catalog model shows it, "No fallback" removes it.
+  // (The failover itself is covered by harness/engine fallback tests with
+  // a provider that really fails.)
+  await waitFor(
+    "no fallback chip by default",
+    async () => {
+      const has = await evaluate(`!!document.querySelector('[data-fallback-status]')`);
+      return { ok: has === false, has };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await palettePick("model.fallback");
+  await delay(250);
+  await evaluate(`(() => {
+    const row = [...document.querySelectorAll('[data-choice-id]')].find((el) => (el.getAttribute("data-choice-id") || "").includes("\t"));
+    if (row) row.click();
+    return !!row;
+  })()`);
+  await waitFor(
+    "fallback chip appears on daemon confirmation",
+    async () => {
+      const chip = await evaluate(`document.querySelector('[data-fallback-status]')?.textContent || ""`);
+      return { ok: chip.startsWith("Fallback · ") && chip.length > "Fallback · ".length, chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await palettePick("model.fallback");
+  await delay(250);
+  await evaluate(`document.querySelector('[data-choice-id="none"]')?.click()`);
+  await waitFor(
+    "fallback chip clears on daemon confirmation",
+    async () => {
+      const has = await evaluate(`!!document.querySelector('[data-fallback-status]')`);
+      return { ok: has === false, has };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
   await palettePick("model.fast");
   await delay(250);
   await evaluate(`document.querySelector('[data-choice-id="on"]')?.click()`);

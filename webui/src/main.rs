@@ -31,6 +31,7 @@ mod diagnostics;
 mod draft_size;
 mod drafts;
 mod editor;
+mod fallback;
 mod files_invalidated;
 mod lessons;
 mod elicitation;
@@ -2000,6 +2001,7 @@ fn App() -> impl IntoView {
                                                 .to_string(),
                                         );
                                     }
+                                    crate::fallback::seed(&st.fallback_provider, &st.fallback_model);
                                     crate::verbosity::seed(&st.verbosity, &st.verbosity_delivery);
                                     wf_run.set(workflow_run::WorkflowRun::from_status(
                                         &st.workflow,
@@ -2218,6 +2220,7 @@ fn App() -> impl IntoView {
         // session's Fast/autonomy across the switch.
         fast_on.set(false);
         autonomy.set("supervised".to_string());
+        crate::fallback::reset();
         crate::verbosity::reset();
         autonomy_menu.set(false);
         wf_run.set(workflow_run::WorkflowRun::default());
@@ -2391,6 +2394,7 @@ fn App() -> impl IntoView {
                         wf_run.set(wf_next);
                     }
                     let next = reduce_envelope(prev, &data);
+                    crate::fallback::observe(&data);
                     crate::verbosity::observe(&data);
                     provider_name.set(next.provider);
                     model_name.set(next.model);
@@ -6738,6 +6742,7 @@ fn App() -> impl IntoView {
                                     model_menu.set(false);
                                     autonomy_menu.update(|v| *v = !*v);
                                 }>{move || format!("Autonomy · {}", crate::model::autonomy_label(&autonomy.get()))}</button>
+                                <crate::fallback::FallbackChip base=base token=token active_root=active_root status=status busy=Signal::derive(move || session_busy_now.get()) />
                                 <crate::verbosity::VerbosityChip base=base token=token active_root=active_root status=status busy=Signal::derive(move || session_busy_now.get()) />
                                 // #1574: the live workflow run, only while the
                                 // daemon reports one. Stop asks first.
