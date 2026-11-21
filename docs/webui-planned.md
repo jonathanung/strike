@@ -583,6 +583,16 @@ that does not exist yet. The cockpit's protocol gate drops unknown events,
 so nothing renders them until the engine and schema carry the event. The
 marker never derives a summary or a conflict from timing or a plan diff.
 
+## Container actions (#1584 follow-up)
+
+Settings → Isolation (`GET /v1/container/status`) is read-only: posture
+ladder, engine probe, workspace container (`strike container status`),
+ejected-Dockerfile drift and detected manifests. Not drawn: eject,
+drift fix, and container start/stop/build from the web, and the
+`strike container ls --all` list of every managed container on the engine.
+Host mode stays a first-class posture (#1290); nothing here changes a
+default.
+
 ## Run with N models
 
 Orchestration core shipped, card not drawn (#1346).
@@ -660,6 +670,39 @@ Not built:
 - Timeouts. An unanswered question blocks until answered, dismissed, or the
   turn is stopped (recommended default: keep blocking).
 
+## Pre-push review
+
+"Review this branch" in the Git tab (#1487) sizes the branch diff first
+(`GET /v1/git/review`: committed `base...HEAD` plus uncommitted changes,
+untracked file names, one model turn, warn above 60 KB, refuse above the
+200 KB diff cap). "Run review" (`POST /v1/git/review {confirm:true}`) spawns
+a fresh-context child through the normal `team.spawn` path with the
+built-in `branch-reviewer` agent, whose denies (write, edit, bash, task,
+verify, browser, web, MCP, store writes) the engine enforces for children,
+fed the diff, the repo's AGENTS.md and the findings format. The daemon parses
+`FINDING | severity | path:line | scenario` lines and the `VERDICT:` line from
+the child's transcript (`GET /v1/git/review/{id}`); each finding opens its
+file at the line. No review store, no autofix, no merge gate. Not in this
+slice: the `/review` composer trigger (#1275), a cross-model reviewer (team
+spawn has no per-child model), and Ship to PR's warn-on-blocking hook.
+
+## Security review mode
+
+"Review this branch" has a Security mode (#1620): the same read-only
+`branch-reviewer` child, fed a security instruction set (injection, authn/
+authz bypass, committed secrets, SSRF/redirects, unsafe deserialization,
+vulnerable dependency changes, entry→sink tracing), the repo's AGENTS.md and
+an optional `.strike/security-rules.md`. Findings carry an ID, CWE, severity,
+confidence, attack path, file:line and a draft fix. When the reviewer
+finishes, a second fresh child (`POST /v1/git/review/{id}/verify`) tries to
+refute each finding; only confirmed findings render as confirmed, refuted
+ones collapse under "Not verified" with the reason, and only a confirmed
+critical/high finding makes the verdict blocking. Dismissing a finding
+requires a one-line reason and suppresses it (same file + CWE, anchor ±3
+lines) on later security reviews of the same branch
+(`/v1/git/review-suppressions`, stored in the session dir); suppressions are
+listed and removable. Not in this slice: SARIF/JSONL export, PR-scoped
+suppressions (#1356 follow-up), an authoring UI for security rules.
 
 ## Not planned as a copy
 
@@ -677,3 +720,30 @@ goals/autopilot state, workspaces and their rules, issues, plans and the
 ledger are not in archive version 1; the manifest names them as
 `not-yet-included`. Passphrase encryption is not offered: the file says
 `"encrypted": false` and secrets are excluded regardless.
+
+## Read replies aloud
+
+Assistant replies have a **Read aloud** control (#1384) that uses the
+browser's own `speechSynthesis` (on-device voices when available). Voice and
+speed are in Settings → Voice and stored in the browser. Not in slice 1: a
+gateway-hosted Piper endpoint, auto-play, reading tool output, and stopping
+playback on a gateway disconnect (a page unload stops it).
+
+## Live preview
+
+The side panel **Preview** tab (#1341) proxies one user-picked loopback port
+through the daemon (`/preview/<key>/`, see `docs/web.md`). Known limits of
+slice 1:
+
+- Apps that load assets from absolute paths (`/src/main.ts`) need their base
+  path set to the prefix shown in the pane (Vite `base`, Next `basePath`).
+  The prefix stays the same for a given port for the life of the daemon.
+- The frame runs in an opaque origin (sandbox without `allow-same-origin`).
+  Apps that need cookies, `localStorage`, or a same-origin HMR websocket may
+  partly fail. Websocket upgrades are proxied, but a dev server that checks
+  `Origin` sees `null`.
+- An app that refuses framing (`X-Frame-Options: DENY`, `frame-ancestors
+  'none'`) is reported in the pane with an open-in-browser link. The pane
+  does not strip those headers.
+- The chosen port is not persisted per workspace yet. The agent cannot
+  navigate the pane or read it.

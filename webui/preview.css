@@ -1,0 +1,13 @@
+/* feature:live-preview begin */
+.preview-panel { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1 1 auto; }
+.preview-pick .chips { flex-wrap: wrap; }
+.preview-manual { display: flex; gap: 6px; align-items: center; }
+.preview-manual input { width: 7ch; }
+.preview-chrome { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; }
+.preview-dest { font-family: var(--mono, monospace); color: var(--ink); border: 1px solid var(--border-muted); border-radius: 4px; padding: 2px 6px; }
+.preview-stage { flex: 1 1 auto; min-height: 320px; display: flex; justify-content: center; overflow: auto; background: var(--surface-muted); border: 1px solid var(--border-muted); border-radius: 6px; }
+.preview-frame { border: 0; background: var(--ground); height: 100%; min-height: 320px; }
+.preview-desktop { width: 100%; }
+.preview-tablet { width: 768px; max-width: 100%; }
+.preview-phone { width: 390px; max-width: 100%; }
+/* feature:live-preview end */

@@ -14,7 +14,15 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { agentPickerCheck } from "./webui-agent-picker-check.mjs";
+import { createServer } from "node:http";
 import { editorBrowserCheck } from "./webui-editor-check.mjs";
+import { seedRepeatedWorkflow, skillProposalsCheck } from "./webui-skill-proposals-check.mjs";
+import {
+  BROKEN_SKILL,
+  BROKEN_SKILL_BODY,
+  loadWarningCustomizeCheck,
+  loadWarningNoticeCheck,
+} from "./webui-load-warnings-check.mjs";
 import { mdReviewBrowserCheck } from "./webui-md-review-check.mjs";
 import { seedSkillUsage, skillUsageCheck } from "./webui-skill-usage-check.mjs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -615,6 +623,35 @@ try {
   await writeFile(
     join(sessionsDir, "verify-session.meta.json"),
     JSON.stringify({ title: "Verification replay" }) + "\n",
+  );
+  // Per-turn file summary (#1365) fixture: two back-to-back turns that
+  // change files and one in between that changes none.
+  const filesSession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-29T06:00:00Z" }) +
+    "\n" +
+    envLine("user.message", "2026-10-29T06:00:00Z", { text: "edit three files" }) +
+    envLine("text.delta", "2026-10-29T06:00:05Z", { text: "files answer one" }) +
+    envLine("turn.completed", "2026-10-29T06:00:10Z", {
+      stopReason: "end_turn",
+      files: [
+        { path: "README.md", kind: "update" },
+        { path: "docs/new.md", kind: "create" },
+        { path: "go.mod", kind: "update" },
+      ],
+    }) +
+    envLine("user.message", "2026-10-29T06:01:00Z", { text: "just answer" }) +
+    envLine("text.delta", "2026-10-29T06:01:05Z", { text: "files answer none" }) +
+    envLine("turn.completed", "2026-10-29T06:01:10Z", { stopReason: "end_turn", files: [] }) +
+    envLine("user.message", "2026-10-29T06:02:00Z", { text: "remove one" }) +
+    envLine("text.delta", "2026-10-29T06:02:05Z", { text: "files answer two" }) +
+    envLine("turn.completed", "2026-10-29T06:02:10Z", {
+      stopReason: "end_turn",
+      files: [{ path: "old.txt", kind: "delete" }],
+    });
+  await writeFile(join(sessionsDir, "files-session.jsonl"), filesSession);
+  await writeFile(
+    join(sessionsDir, "files-session.meta.json"),
+    JSON.stringify({ title: "File summary replay" }) + "\n",
   );
   const found = await call("GET", "/v1/session-list/search?q=coral%20bookmark");
   if (found.status !== 200 || !found.text.includes("beta-session") || !found.text.includes("content")) {
@@ -2502,8 +2539,10 @@ try {
   });
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
   await waitUntil(
+    // Right after Page.navigate the new document may not have a body yet;
+    // read it as empty so the wait retries instead of throwing.
     `(() => {
-      const t = document.body.innerText;
+      const t = document.body?.innerText ?? "";
       const sent = [...document.querySelectorAll("[data-sent-attachments]")].some((el) => el.innerText.includes("annotate-shot-annotated.png"));
       if (sent && t.includes("annotate smoke 1545") && t.includes("Annotations on annotate-shot.png") && t.includes('[pin x=50%, y=50%] "move this button"')) return true;
       const msgs = [...document.querySelectorAll(".sx-msg")].slice(-3).map((m) => m.innerText.slice(0, 300));
@@ -2629,6 +2668,109 @@ try {
       };
     },
     { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // LSP diagnostics (#1404). First the real daemon: the pane must show
+  // the daemon's own empty/unavailable text verbatim. Then a stubbed
+  // /v1/diagnostics payload (CDP Fetch interception): entries grouped by
+  // file, the editor badge counting errors only, and click-to-line
+  // landing in the document viewer.
+  const daemonDiagTexts = [
+    "no language servers configured (add lsp.servers in config)",
+    "no live language servers (see servers status; try retry)",
+    "no diagnostics",
+    "lsp capability unavailable on this host",
+  ];
+  await runPalette("Code diagnostics");
+  await waitFor(
+    "diagnostics pane shows the daemon's own note",
+    async () => {
+      const v = await evaluate(`(() => {
+        const pane = document.querySelector("[data-diagnostics-pane]");
+        const note = document.querySelector("[data-diag-note]");
+        const err = document.querySelector("[data-diag-error] span");
+        return {
+          pane: !!pane,
+          text: ((note && note.textContent) || (err && err.textContent) || "").trim(),
+        };
+      })()`);
+      return { ok: v.pane && daemonDiagTexts.includes(v.text), ...v };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  const diagStub = JSON.stringify({
+    diagnostics: [
+      { path: "cmd/strike/main.go", line: 10, character: 1, severity: "error", source: "smoke", code: "E1", message: "smoke diag error ten" },
+      { path: "cmd/strike/main.go", line: 12, character: 3, severity: "warning", source: "smoke", message: "smoke diag warning twelve" },
+      { path: "go.mod", line: 1, character: 1, severity: "error", source: "smoke", message: "smoke diag go mod" },
+    ],
+    count: 3,
+  });
+  const onDiagPaused = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.method !== "Fetch.requestPaused") return;
+    send("Fetch.fulfillRequest", {
+      requestId: msg.params.requestId,
+      responseCode: 200,
+      responseHeaders: [{ name: "Content-Type", value: "application/json" }],
+      body: Buffer.from(diagStub).toString("base64"),
+    });
+  };
+  ws.addEventListener("message", onDiagPaused);
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*/v1/diagnostics*", requestStage: "Request" }] });
+  try {
+    await waitFor(
+      "stubbed diagnostics grouped by file",
+      async () => {
+        const v = await evaluate(`(() => {
+          const files = [...document.querySelectorAll("[data-diag-file]")].map((el) => el.getAttribute("data-diag-file"));
+          const entries = [...document.querySelectorAll(".diag-entry")].map((b) => b.getAttribute("data-diag-path") + ":" + b.getAttribute("data-diag-line"));
+          if (files.length === 0) document.querySelector("[data-diag-refresh]")?.click();
+          return { files, entries };
+        })()`);
+        return {
+          ok: v.files.join(",") === "cmd/strike/main.go,go.mod" && v.entries.join(",") === "cmd/strike/main.go:10,cmd/strike/main.go:12,go.mod:1",
+          ...v,
+        };
+      },
+      { timeout: WAIT_MS, interval: 500 },
+    );
+    const diagClicked = await evaluate(`(() => {
+      const b = document.querySelector('.diag-entry[data-diag-path="cmd/strike/main.go"][data-diag-line="10"]');
+      if (!b) return "missing";
+      b.click();
+      return "clicked";
+    })()`);
+    if (diagClicked !== "clicked") {
+      throw new Error(`diagnostics entry ${diagClicked}`);
+    }
+    await waitFor(
+      "diagnostic click opens the file at its line, badge counts errors only",
+      async () => {
+        const v = await evaluate(`(() => {
+          const doc = document.querySelector('[data-ev-root="open"]');
+          const badge = document.querySelector("[data-diag-badge]");
+          return {
+            path: doc ? doc.getAttribute("data-ev-path") || "" : "",
+            lines: doc ? doc.querySelectorAll(".ev-line").length : 0,
+            badge: badge ? (badge.textContent || "").trim() : "",
+          };
+        })()`);
+        return { ok: v.path.endsWith("cmd/strike/main.go") && v.lines >= 10 && v.badge === "1 error", ...v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  } finally {
+    await send("Fetch.disable", {});
+    ws.removeEventListener("message", onDiagPaused);
+  }
+  // Close the document again: the viewer takes the transcript's place,
+  // and later steps read transcript rows.
+  await evaluate(`document.querySelector("[data-ev-back]")?.click()`);
+  await waitFor(
+    "diagnostics check closes the document viewer",
+    async () => ({ ok: (await evaluate(`!document.querySelector('[data-ev-root="open"]')`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
   );
 
   await runPalette("Memory");
@@ -3764,6 +3906,163 @@ try {
     throw new Error("main composer lost its approval chip");
   }
 
+  // #1384: read replies aloud. The speech engine is mocked at the browser
+  // boundary (CI Chrome has no reliable voices): an on-device voice reads
+  // the cleaned reply and marks the line playing until the engine ends;
+  // with no voices the control explains instead of pretending to play.
+  await evaluate(`(() => {
+    const spoken = [];
+    window.__ttsSpoken = spoken;
+    window.__ttsVoices = [{ name: "Smoke Voice", lang: "en-US", localService: true, default: true, voiceURI: "smoke-voice" }];
+    window.SpeechSynthesisUtterance = function (text) { this.text = text; };
+    const fake = {
+      current: null,
+      getVoices() { return window.__ttsVoices; },
+      speak(u) { spoken.push(u.text); this.current = u; },
+      cancel() { const u = this.current; this.current = null; if (u && u.onerror) u.onerror({ error: "canceled" }); },
+      pause() {}, resume() {},
+    };
+    Object.defineProperty(window, "speechSynthesis", { configurable: true, value: fake });
+    return true;
+  })()`);
+  await waitUntil(
+    `!!document.querySelector('article[data-role="strike"] [data-action="read-aloud"]')`,
+    "read-aloud control on an assistant reply",
+  );
+  const ttsRoles = await evaluate(`JSON.stringify([...document.querySelectorAll('[data-action="read-aloud"]')].map((b) => b.closest("article")?.getAttribute("data-role")))`);
+  if (JSON.parse(ttsRoles).some((r) => r !== "strike")) {
+    throw new Error(`read-aloud on non-assistant lines: ${ttsRoles}`);
+  }
+  await evaluate(`document.querySelector('article[data-role="strike"] [data-action="read-aloud"]').focus()`);
+  await evaluate(`document.activeElement.click()`);
+  await waitUntil(
+    `window.__ttsSpoken.length === 1 && window.__ttsSpoken[0].length > 0 && !window.__ttsSpoken[0].includes("\u0060\u0060\u0060") && !!document.querySelector('article[data-role="strike"] .sx-tts[data-tts-playing="true"]') && document.activeElement.textContent.includes("Stop")`,
+    "read-aloud plays and marks the line",
+  );
+  await evaluate(`(() => { const u = window.speechSynthesis.current; window.speechSynthesis.current = null; u.onend({}); return true; })()`);
+  await waitUntil(
+    `!document.querySelector('.sx-tts[data-tts-playing="true"]') && document.querySelector('article[data-role="strike"] [data-action="read-aloud"]').textContent.includes("Read aloud")`,
+    "read-aloud clears when the engine finishes",
+  );
+  await evaluate(`window.__ttsVoices = []; document.querySelector('article[data-role="strike"] [data-action="read-aloud"]').click()`);
+  await waitUntil(
+    `!!document.querySelector('[data-tts-note]') && document.querySelector('[data-tts-note]').textContent.includes("no speech voice") && window.__ttsSpoken.length === 1`,
+    "read-aloud explains when no voice is available",
+  );
+
+  // Mermaid diagrams (#1368). A seeded message with a flowchart (one
+  // label carrying HTML/script markup), a sequence diagram and a broken
+  // block: the valid ones render as SVG with the markup as inert text, the
+  // broken one falls back to its source with the note, and the source
+  // toggle and zoom controls round-trip.
+  const fence = "```";
+  const mermaidText = [
+    "Mermaid smoke",
+    "",
+    `${fence}mermaid`,
+    "flowchart TD",
+    "  A[Start] --> B{Ok?}",
+    "  B -->|yes| C[\"<img src=x onerror=alert(1)><b>inert</b>\"]",
+    fence,
+    "",
+    `${fence}mermaid`,
+    "sequenceDiagram",
+    "  Alice->>Bob: ping",
+    "  Bob-->>Alice: pong",
+    fence,
+    "",
+    `${fence}mermaid`,
+    "flowchart TD",
+    "  A ?? B",
+    fence,
+  ].join("\n");
+  const mermaidSeed = await fetch(`http://127.0.0.1:${port}/v1/ops`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ type: "user.input", data: { text: mermaidText } }),
+  });
+  if (!mermaidSeed.ok) {
+    throw new Error(`seed mermaid user.input ${mermaidSeed.status} ${await mermaidSeed.text()}`);
+  }
+  const mermaidProbe = async () => {
+    const raw = await evaluate(`(() => {
+      const flow = document.querySelector('[data-mermaid="flowchart"]');
+      const seq = document.querySelector('[data-mermaid="sequence"]');
+      const failed = document.querySelector("[data-mermaid-failed]");
+      const svg = flow ? flow.querySelector("svg") : null;
+      return JSON.stringify({
+        flow: !!svg,
+        flowText: svg ? svg.textContent : "",
+        injected: flow ? !!flow.querySelector("svg img, svg b, svg script, svg foreignObject") : false,
+        seq: seq ? (seq.querySelector("svg") || {}).textContent || "" : "",
+        failNote: failed ? (failed.querySelector(".mmd-fail-note") || {}).textContent || "" : "",
+        failSource: failed ? !!failed.querySelector("pre.sx-code") : false,
+        canvasHidden: flow ? flow.querySelector(".mmd-canvas").hidden : null,
+        sourceHidden: flow ? flow.querySelector(".mmd-source").hidden : null,
+        width: svg ? svg.getAttribute("width") : "",
+        fit: flow ? flow.querySelector(".mmd-canvas").classList.contains("mmd-z2") : null,
+        shown: svg ? Math.round(svg.getBoundingClientRect().width) : 0,
+        styleAttr: svg ? svg.getAttribute("style") : null,
+      });
+    })()`);
+    return JSON.parse(raw || "{}");
+  };
+  const mermaidShown = await waitFor(
+    "mermaid flowchart, sequence and fallback in the transcript",
+    async () => {
+      const p = await mermaidProbe();
+      return {
+        ok: p.flow && p.flowText.includes("Start") && p.flowText.includes("<b>inert</b>") && !p.injected
+          && p.seq.includes("ping") && p.seq.includes("pong")
+          && p.failNote.includes("Diagram didn't parse") && p.failSource
+          && p.canvasHidden === false && p.sourceHidden === true,
+        ...p,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  if (!mermaidShown.flow || mermaidShown.injected) {
+    throw new Error(`mermaid render check failed ${JSON.stringify(mermaidShown)}`);
+  }
+  await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-toggle]').click()`);
+  await waitFor(
+    "mermaid source toggle shows the code block",
+    async () => {
+      const p = await mermaidProbe();
+      return { ok: p.canvasHidden === true && p.sourceHidden === false, ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-toggle]').click()`);
+  await waitFor(
+    "mermaid toggle back to the diagram",
+    async () => {
+      const p = await mermaidProbe();
+      return { ok: p.canvasHidden === false && p.sourceHidden === true && p.fit === true && p.styleAttr === null, ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  const fitWidth = (await mermaidProbe()).shown;
+  // The message row can re-render when its turn finishes (elapsed/usage
+  // land), which remounts the block at Fit; click again while still at
+  // Fit so the check measures zoom, not that remount.
+  await waitFor(
+    "mermaid zoom in sizes the diagram explicitly",
+    async () => {
+      let p = await mermaidProbe();
+      if (p.fit) {
+        await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-zoom="in"]').click()`);
+        p = await mermaidProbe();
+      }
+      return { ok: p.fit === false && p.shown > fitWidth, ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector('[data-mermaid="flowchart"] [data-mermaid-zoom="fit"]').click()`);
+
   // Find in transcript (#1342). The seed above sent "read the makefile"
   // to the open session, so the transcript holds that word in the user
   // bubble and in the echo reply. Keyboard path only: Ctrl+F opens,
@@ -3934,7 +4233,151 @@ try {
   } catch {
     stageAllSeeded = false;
   }
+  // #1341: Preview tab. A real loopback fixture server is picked by
+  // typing its port. The pane labels the proxied destination, the
+  // daemon proxies the fixture under the pane's sandboxed path, and a
+  // port with no listener is reported in the pane, not left blank.
+  {
+    const fixture = createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end("<h1>smoke preview fixture</h1>");
+    });
+    await new Promise((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+    const fixturePort = fixture.address().port;
+    const closedServer = createServer();
+    await new Promise((resolve) => closedServer.listen(0, "127.0.0.1", resolve));
+    const closedPort = closedServer.address().port;
+    await new Promise((resolve) => closedServer.close(resolve));
+    try {
+      await clickSideTab("Preview", "Listening on this gateway");
+      const pickPort = async (n) => {
+        await evaluate(`(() => {
+          const input = document.querySelector('[data-preview-manual]');
+          const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+          set.call(input, ${JSON.stringify(String(n))});
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          document.querySelector('[data-action="preview-open"]').click();
+          return true;
+        })()`);
+      };
+      await pickPort(fixturePort);
+      await waitUntil(
+        `!!document.querySelector('[data-preview-destination="127.0.0.1:${fixturePort}"]') && !!document.querySelector('iframe.preview-frame')`,
+        "preview frame for the fixture port",
+      );
+      const frame = await evaluate(`JSON.stringify({
+        src: document.querySelector('iframe.preview-frame').getAttribute("src"),
+        sandbox: document.querySelector('iframe.preview-frame').getAttribute("sandbox"),
+      })`);
+      const { src, sandbox } = JSON.parse(frame);
+      if (!sandbox || sandbox.includes("allow-same-origin") || !src.includes("/preview/")) {
+        throw new Error(`preview frame attributes src=${src} sandbox=${sandbox}`);
+      }
+      const proxied = await fetch(new URL(src, `http://127.0.0.1:${port}`));
+      const proxiedText = await proxied.text();
+      const proxiedCSP = proxied.headers.get("content-security-policy") || "";
+      if (!proxied.ok || !proxiedText.includes("smoke preview fixture") || !proxiedCSP.includes("sandbox")) {
+        throw new Error(`preview proxy status=${proxied.status} csp=${proxiedCSP} body=${proxiedText.slice(0, 200)}`);
+      }
+      await pickPort(closedPort);
+      await waitUntil(
+        `!!document.querySelector('[data-preview-unreachable]') && document.body.innerText.includes("127.0.0.1:${closedPort}") && !document.querySelector('iframe.preview-frame')`,
+        "preview reports a port with no listener",
+      );
+      await evaluate(`document.querySelector('[data-action="preview-stop"]').click()`);
+      await waitUntil(`!!document.querySelector('[data-preview-empty]')`, "preview stopped");
+    } finally {
+      await new Promise((resolve) => fixture.close(resolve));
+    }
+  }
   await clickSideTab("Git", "Staged");
+  // Pre-push review (#1487): the preview route sizes the diff and names the
+  // read-only reviewer profile, a start without confirm never spawns (400),
+  // and the Git tab's "Review this branch" panel renders the same state
+  // with its cost notice. No reviewer is spawned here.
+  {
+    const revHeaders = { Authorization: `Bearer ${token}` };
+    const revRes = await fetch(`http://127.0.0.1:${port}/v1/git/review`, { headers: revHeaders });
+    if (!revRes.ok) {
+      throw new Error(`branch review preview: HTTP ${revRes.status} ${await revRes.text()}`);
+    }
+    const rev = await revRes.json();
+    if (!["ok", "empty", "refuse"].includes(rev.state) || rev.agent !== "branch-reviewer" || rev.turns !== 1) {
+      throw new Error(`branch review preview shape: ${JSON.stringify(rev).slice(0, 300)}`);
+    }
+    const revStart = await fetch(`http://127.0.0.1:${port}/v1/git/review`, {
+      method: "POST",
+      headers: { ...revHeaders, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (revStart.status !== 400) {
+      throw new Error(`branch review start without confirm: HTTP ${revStart.status} ${await revStart.text()}`);
+    }
+    await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+    await waitFor(
+      `branch review notice renders state ${rev.state}`,
+      async () => {
+        const raw = await evaluate(`JSON.stringify((() => {
+          const n = document.querySelector("[data-review-notice]");
+          if (!n) return null;
+          const run = n.querySelector("[data-review-run]");
+          return {
+            state: n.getAttribute("data-review-state"),
+            size: (n.querySelector("[data-review-size]") || {}).textContent || "",
+            runDisabled: run ? run.disabled : null,
+          };
+        })())`);
+        const got = JSON.parse(raw || "null");
+        const ok =
+          !!got &&
+          got.state === rev.state &&
+          got.size.startsWith("Diff:") &&
+          got.runDisabled === (rev.state !== "ok");
+        return { ok, got };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+    // Security mode (#1620): the toggle re-sizes with two turns (reviewer +
+    // verifier) and names the verifier; the suppressions route answers for
+    // the current branch (CI's detached checkout gets a plain 409). No
+    // reviewer or verifier is spawned here.
+    {
+      const secRes = await fetch(`http://127.0.0.1:${port}/v1/git/review?mode=security`, { headers: revHeaders });
+      const sec = await secRes.json();
+      if (!secRes.ok || sec.mode !== "security" || sec.turns !== 2) {
+        throw new Error(`security review preview: HTTP ${secRes.status} ${JSON.stringify(sec).slice(0, 300)}`);
+      }
+      const supRes = await fetch(`http://127.0.0.1:${port}/v1/git/review-suppressions`, { headers: revHeaders });
+      if (![200, 409].includes(supRes.status)) {
+        throw new Error(`review suppressions: HTTP ${supRes.status} ${await supRes.text()}`);
+      }
+      const noReason = await fetch(`http://127.0.0.1:${port}/v1/git/review-suppressions`, {
+        method: "POST",
+        headers: { ...revHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "a.go", cwe: "CWE-89", line: 1, reason: " " }),
+      });
+      if (![400, 409].includes(noReason.status)) {
+        throw new Error(`suppression without a reason accepted: HTTP ${noReason.status}`);
+      }
+      await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+      await evaluate(`(() => { document.querySelector("[data-review-mode-security]").click(); return true; })()`);
+      await waitFor(
+        "security review notice names the verifier",
+        async () => {
+          const raw = await evaluate(`JSON.stringify((() => {
+            const n = document.querySelector("[data-review-notice]");
+            return n ? { text: n.textContent || "", state: n.getAttribute("data-review-state") } : null;
+          })())`);
+          const got = JSON.parse(raw || "null");
+          return { ok: !!got && got.text.includes("independent verifier") && got.text.includes("2 model turns") && got.state === sec.state, got };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+      await evaluate(`(() => { document.querySelector("[data-review-mode-general]").click(); return true; })()`);
+      await evaluate(`(() => { document.querySelector("[data-review-open]").click(); return true; })()`);
+    }
+  }
   // Ship to PR (#1340): the preview route answers with an honest state
   // (CI checks out a detached merge commit, so "blocked" with a detached
   // blocker is expected there), a create without confirmPush never pushes
@@ -5613,6 +6056,110 @@ try {
     { timeout: WAIT_MS, interval: 250 },
   );
 
+  // Per-turn file summary (#1365): resume the seeded session; each turn
+  // that changed files carries one collapsed summary on its own final
+  // line, the no-change turn carries none, and expanding shows the paths
+  // grouped by kind (deleted paths are not links).
+  let filesClicked = "missing";
+  try {
+    await waitFor(
+      "file summary resume row",
+      async () => {
+        filesClicked = await evaluate(`(() => {
+          const row = document.querySelector('[data-session-id="files-session"]');
+          const btn = row && row.querySelector(".ss-main");
+          if (!btn) return "missing";
+          btn.click();
+          return "clicked";
+        })()`);
+        return { ok: filesClicked === "clicked", clicked: filesClicked };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+  } catch {
+    // reported below with the last observed state
+  }
+  if (filesClicked !== "clicked") {
+    throw new Error(`file summary resume click -> ${filesClicked}`);
+  }
+  await waitFor(
+    "per-turn file summaries on the right turns",
+    async () => {
+      const v = await evaluate(`(() => {
+        const all = [...document.querySelectorAll("details.turn-files")];
+        const rows = all.map((d) => ({
+          label: (d.querySelector("summary")?.textContent || "").trim(),
+          open: d.open,
+          on: (d.closest("article")?.innerText || "").includes("files answer one")
+            ? "one"
+            : (d.closest("article")?.innerText || "").includes("files answer two")
+              ? "two"
+              : "other",
+        }));
+        const none = [...document.querySelectorAll("article")].find((a) =>
+          (a.innerText || "").includes("files answer none"),
+        );
+        let groups = "";
+        if (all[0]) {
+          groups = [...all[0].querySelectorAll("[data-turn-files-kind]")]
+            .map((g) => g.getAttribute("data-turn-files-kind") + ":" +
+              [...g.querySelectorAll("a.turn-files-path")].map((a) => a.getAttribute("data-path")).join("|"))
+            .join(";");
+        }
+        const del = all[1] ? all[1].querySelectorAll("a.turn-files-path").length : -1;
+        return {
+          rows: JSON.stringify(rows),
+          groups,
+          del,
+          noneFound: Boolean(none),
+          noneSummary: Boolean(none && none.querySelector(".turn-files")),
+        };
+      })()`);
+      const want = JSON.stringify([
+        { label: "3 files changed · 2 updated, 1 created", open: false, on: "one" },
+        { label: "1 file changed · 1 deleted", open: false, on: "two" },
+      ]);
+      return {
+        ok:
+          v.rows === want &&
+          v.groups === "updated:README.md|go.mod;created:docs/new.md" &&
+          v.del === 0 &&
+          v.noneFound &&
+          !v.noneSummary,
+        ...v,
+      };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+
+  // Clicking a summary path opens it in the document pane (#1269), then
+  // Escape closes the pane so later steps start from the transcript.
+  const filesOpen = await evaluate(`(() => {
+    const a = document.querySelector('details.turn-files a.turn-files-path[data-path="README.md"]');
+    if (!a) return "missing";
+    a.click();
+    return "clicked";
+  })()`);
+  if (filesOpen !== "clicked") {
+    throw new Error(`file summary path click -> ${filesOpen}`);
+  }
+  await waitFor(
+    "file summary path opens the document pane",
+    async () => {
+      const path = await evaluate(
+        `(document.querySelector(".ev-doc .ev-path")?.textContent || "").trim()`,
+      );
+      return { ok: path === "README.md", path };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  await evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await waitFor(
+    "document pane closes after the file summary check",
+    async () => ({ ok: await evaluate(`document.querySelector(".ev-doc") == null`) }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+
   const wsClicked = await send("Runtime.evaluate", {
     expression: `(() => {
       const btn = document.querySelector(".ws-open");
@@ -6191,6 +6738,75 @@ try {
     { timeout: STEP_MS, interval: 200 },
   );
 
+  // Prompt sharpen (#1385): Alt+P sends the draft to the daemon's
+  // one-shot rewrite (echo stands in for the model), shows the
+  // original-vs-sharpened preview, and changes nothing until Accept.
+  // Undo restores the original; Esc on the preview rejects untouched.
+  const sharpenDraft = "fix the flaky thing";
+  const composerText = async () =>
+    evaluate(`(() => { const el = document.querySelector("#composer-input"); return el ? el.value : null; })()`);
+  await setDraft(sharpenDraft);
+  await press("p", { altKey: true });
+  await waitFor(
+    "sharpen preview with original and rewrite",
+    async () => {
+      const raw = await evaluate(`(() => {
+        const diff = document.querySelector("[data-sharpen-diff]");
+        return JSON.stringify({
+          accept: !!document.querySelector("[data-sharpen-accept]"),
+          diff: diff ? diff.innerText : "",
+          state: document.querySelector("[data-feature=prompt-sharpen]")?.getAttribute("data-sharpen-state") || "",
+        });
+      })()`);
+      const p = JSON.parse(raw || "{}");
+      return { ok: p.accept && p.diff.includes(sharpenDraft) && p.diff.includes("You said:"), ...p };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if ((await composerText()) !== sharpenDraft) {
+    throw new Error(`sharpen changed the draft before Accept: ${JSON.stringify(await composerText())}`);
+  }
+  await evaluate(`document.querySelector("[data-sharpen-accept]")?.click()`);
+  await waitFor(
+    "accepted rewrite replaces the draft, Undo offered",
+    async () => {
+      const value = (await composerText()) || "";
+      const undo = await evaluate(`!!document.querySelector("[data-sharpen-undo]")`);
+      return { ok: value.startsWith("You said:") && value.includes(sharpenDraft) && undo, value, undo };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`document.querySelector("[data-sharpen-undo]")?.click()`);
+  await waitFor(
+    "undo restores the original draft",
+    async () => {
+      const value = await composerText();
+      return { ok: value === sharpenDraft, value };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await press("p", { altKey: true });
+  await waitFor(
+    "second sharpen preview",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-sharpen-accept]")`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await evaluate(`(() => {
+    const el = document.querySelector("[data-sharpen-accept]");
+    el?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+    return true;
+  })()`);
+  await waitFor(
+    "Esc rejects and leaves the draft byte-identical",
+    async () => {
+      const value = await composerText();
+      const open = await evaluate(`!!document.querySelector("[data-feature=prompt-sharpen]")`);
+      return { ok: !open && value === sharpenDraft, value, open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await setDraft("");
+
   // Session dials (#1572 autonomy, #1569 Fast): both start at the
   // daemon-reported default, flip only after the daemon confirms the
   // op, and skip-all goes through its confirm first.
@@ -6673,6 +7289,7 @@ try {
     join(home, ".strike", "skills", "smoke-note.md"),
     "---\nname: smoke-note\ndescription: seeded note\n---\nSay hello from smoke.\n",
   );
+  await writeFile(join(home, ".strike", "skills", `${BROKEN_SKILL}.md`), BROKEN_SKILL_BODY);
   await seedSkillUsage(home);
   await writeFile(
     join(home, ".strike", "mcp.json"),
@@ -6738,7 +7355,10 @@ try {
   await evalJson(`document.querySelector('.settings-page input[data-theme-choice="${smokeTheme.id}"]').click()`);
   await themePainted("user theme applied from the catalog", smokeTheme.id);
 
-  await evalJson(`localStorage.setItem("strike.token", ${JSON.stringify(token)})`);
+  // The page polls bootstrap every 2s and may already have announced the
+  // seeded broken skill; forget announced fingerprints so the reload's
+  // session-start notice is deterministic (#1386).
+  await evalJson(`(() => { localStorage.setItem("strike.token", ${JSON.stringify(token)}); localStorage.removeItem("strike.loadWarningsSeen"); return true; })()`);
   await send("Page.reload", { ignoreCache: true });
   for (let i = 0; i < 40; i++) {
     const body = await evalJson(`document.body ? document.body.innerText : ""`);
@@ -6749,6 +7369,7 @@ try {
     if (i === 39) throw new Error(`reload did not show the cockpit: ${String(body).slice(0, 300)}`);
     await delay(250);
   }
+  await loadWarningNoticeCheck({ send });
   await themePainted("user theme persisted across reload", smokeTheme.id);
   await evalJson(`document.querySelector('[data-action="open-settings"]')?.click()`);
   for (let i = 0; i < 60; i++) {
@@ -6777,6 +7398,7 @@ try {
   if (!customizeText.includes("smoke-note")) {
     throw new Error(`customize catalog missing smoke-note: ${customizeText.slice(0, 500)}`);
   }
+  await loadWarningCustomizeCheck({ send });
   await skillUsageCheck({ send });
 
   // #1570: Customize > Plugins lifecycle lists GET /v1/plugins, and remove
@@ -6950,6 +7572,9 @@ try {
     const docHead = docEv.result?.result?.value || JSON.stringify(docEv).slice(0, 600);
     throw new Error(`mcp form did not mask env err=${extra} doc=${docHead} values=${values.slice(0, 300)} body=${mcpText.slice(0, 300)}`);
   }
+
+  await seedRepeatedWorkflow({ home, port, token });
+  await skillProposalsCheck({ send, repoDir: process.cwd() });
 
   console.log("webui-smoke ok");
 } catch (err) {

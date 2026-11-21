@@ -13,9 +13,11 @@ load-guard = { path = "load-guard" }
 ideas-inbox = { path = "ideas-inbox" }
 md-review = { path = "md-review" }
 status-card = { path = "status-card" }
+mermaid-lite = { path = "mermaid-lite" }
 composer-drafts = { path = "composer-drafts" }
 signin-flow = { path = "signin-flow" }
 transcript-window = { path = "transcript-window" }
+edit-resend = { path = "edit-resend" }
 theme-catalog = { path = "theme-catalog" }
 js-sys = "0.3"
 send_wrapper = "0.6"

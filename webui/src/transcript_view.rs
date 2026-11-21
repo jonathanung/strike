@@ -39,6 +39,8 @@ pub struct TranscriptHandlers {
     pub retry: Callback<(String,)>,
     pub fork: Callback<(i32,)>,
     pub open_file: Callback<(String, u32)>,
+    /// "Edit & resend" on the newest user message (#1361).
+    pub edit_last: Callback<(u32,)>,
 }
 
 /// Find-in-transcript state republished by the shell (#1342, unioned
@@ -319,6 +321,9 @@ pub fn TranscriptPane(
     let open_file = handlers.open_file;
     let retry = handlers.retry;
     let fork = handlers.fork;
+    let edit_last = handlers.edit_last;
+    // Only the newest user message offers Edit & resend (#1361).
+    let last_you = Memo::new(move |_| transcript.with(|t| t.last_user_id()));
     let export_timeline = handlers.export_timeline;
     let _ = (handlers.export_markdown, handlers.send);
     let regenerate = handlers.regenerate;
@@ -708,7 +713,7 @@ pub fn TranscriptPane(
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
                                     {above.map(|text| reasoning_block(text, false))}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, r.hits, r.current, r.elapsed, r.usage, r.verify, r.steer, r.tail, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, edit_last, last_you, r.hits, r.current, r.elapsed, r.usage, r.verify, r.files, r.steer, r.tail, fold_open, folds)}
                                     {after.map(|text| reasoning_block(text, false))}
                                 }
                             })
@@ -866,6 +871,7 @@ struct RowData {
     usage: Option<(String, String)>,
     reasoning: Option<String>,
     verify: Option<crate::turn_verify::TurnVerify>,
+    files: Option<crate::turn_files::TurnFiles>,
     steer: Option<crate::steer_ack::AckState>,
     tail: Option<crate::tool_tail::ToolTail>,
 }
@@ -897,6 +903,7 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
         reasoning: t.reasoning.for_message(msg.id).map(str::to_owned),
         verify: t.verify_for(msg.id).cloned(),
+        files: t.files_for(msg.id).cloned(),
         steer: t.steer_acks.get(msg.id),
         tail: t.tail_for(msg.id).cloned(),
     })
@@ -1119,11 +1126,14 @@ fn message_view(
     open_file: Callback<(String, u32)>,
     retry: Callback<(String,)>,
     _fork: Callback<(i32,)>,
+    edit_last: Callback<(u32,)>,
+    last_you: Memo<Option<u32>>,
     find_hits: Vec<crate::transcript_find::TMatch>,
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
     turn_usage: Option<(String, String)>,
     turn_verify: Option<crate::turn_verify::TurnVerify>,
+    turn_files: Option<crate::turn_files::TurnFiles>,
     steer: Option<crate::steer_ack::AckState>,
     tail: Option<crate::tool_tail::ToolTail>,
     fold_open: bool,
@@ -1168,6 +1178,9 @@ fn message_view(
     let stamp_full = line_full_time(msg.at_ms);
     let has_stamp = !stamp.is_empty();
     let prose = matches!(msg.role, Role::You | Role::Strike);
+    // Edit & resend needs a composer: never on the read-only share view.
+    let is_you = msg.role == Role::You
+        && use_context::<crate::share::ReadOnlyTranscript>().is_none();
     // Find-in-transcript (#1342): this message's match ranges, split by
     // field. When a field has ranges it renders through MarkedText —
     // the same trade #1398 made on the old bubble path: markdown / link
@@ -1221,6 +1234,9 @@ fn message_view(
     // shown only while the page's capture gate (memory mode) allows it.
     let lesson_gate = use_context::<crate::lessons::CaptureGate>();
     let lesson_text = (msg.role == Role::You && !copy_text.trim().is_empty()).then(|| copy_text.clone());
+    // #1384: assistant replies get a read-aloud control beside Copy.
+    // Tool, child, and system lines are not read.
+    let speak = (msg.role == Role::Strike && !copy_text.trim().is_empty()).then(|| copy_text.clone());
     // Per-button copy feedback (#1582): the label only reads "Copied"
     // once the awaited clipboard write resolves; a rejection reads
     // "Copy failed" instead of silence. Reverts after 2s.
@@ -1265,6 +1281,16 @@ fn message_view(
                             crate::clipboard::after_ms(2_000, move || copy_state.set(None));
                         });
                     }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
+                    {is_you.then(|| view! {
+                        <Show when=move || last_you.get() == Some(id)>
+                            <button
+                                type="button"
+                                class="sx-quiet sx-edit-resend"
+                                title="Load this message into the composer to edit and resend it (Ctrl/Cmd+Up)"
+                                on:click=move |_| edit_last.run((id,))
+                            >"Edit & resend"</button>
+                        </Show>
+                    })}
                     {lesson_text.zip(lesson_gate).map(|(text, gate)| view! {
                         <Show when=move || gate.0.get()>
                             <button type="button" class="sx-quiet" data-action="lesson-remember"
@@ -1275,6 +1301,7 @@ fn message_view(
                                 }>"Remember this"</button>
                         </Show>
                     })}
+                    {speak.map(|text| view! { <crate::tts::ReadAloud id=id text=text /> })}
                 </span>
             </header>
             {if find_body {
@@ -1305,6 +1332,7 @@ fn message_view(
             {(!sent_attachments.is_empty()).then(|| view! {
                 <crate::transcript_attachments::SentAttachments items=sent_attachments.clone() />
             })}
+            {turn_files.map(|f| turn_files_view(f, open_file))}
             {tail.map(crate::tool_tail::tail_view)}
             {auth_notice.then(|| {
                 let target = reconnect.clone();
@@ -1399,6 +1427,60 @@ fn message_view(
     }
 }
 
+/// Per-turn file-change summary (#1365): a collapsed chip on the turn's
+/// final line, expanding in place to the paths grouped by kind. Updated
+/// and created paths open in the document pane exactly like file chips;
+/// deleted paths are plain text (there is nothing left to open).
+fn turn_files_view(
+    files: crate::turn_files::TurnFiles,
+    open_file: Callback<(String, u32)>,
+) -> impl IntoView {
+    let label = files.label();
+    let total = files.total();
+    let groups: Vec<(&'static str, Vec<String>)> = files
+        .groups()
+        .into_iter()
+        .map(|(head, paths)| (head, paths.to_vec()))
+        .collect();
+    view! {
+        <details class="turn-files" data-turn-files=total.to_string()>
+            <summary>{label}</summary>
+            {groups.into_iter().map(|(head, paths)| {
+                let deleted = head == "Deleted";
+                view! {
+                    <div class="turn-files-group" data-turn-files-kind=head.to_lowercase()>
+                        <span class="turn-files-head">{head}</span>
+                        <ul>
+                            {paths.into_iter().map(|path| {
+                                if deleted {
+                                    view! { <li><span class="turn-files-path">{path}</span></li> }.into_any()
+                                } else {
+                                    let open = path.clone();
+                                    let attr = path.clone();
+                                    view! {
+                                        <li>
+                                            <a
+                                                class="turn-files-path"
+                                                href="#file"
+                                                data-path=attr
+                                                on:click=move |ev: web_sys::MouseEvent| {
+                                                    ev.prevent_default();
+                                                    dispatch_open_file(&open, 0);
+                                                    open_file.run((open.clone(), 0));
+                                                }
+                                            >{path}</a>
+                                        </li>
+                                    }.into_any()
+                                }
+                            }).collect_view()}
+                        </ul>
+                    </div>
+                }
+            }).collect_view()}
+        </details>
+    }
+}
+
 fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl IntoView {
     blocks
         .into_iter()
@@ -1432,6 +1514,7 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                     }
                 }
                 Block::Code { lang, text } => {
+                    let mermaid = crate::mermaid::is_mermaid(&lang).then(|| text.clone());
                     let copy = text.clone();
                     // #1575: known fence languages get the file viewer's
                     // `ev-*` token spans; unknown/empty stay plain text.
@@ -1439,7 +1522,7 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                     // Same honest per-button feedback as the message
                     // Copy button (#1582).
                     let copy_state = RwSignal::new(None::<bool>);
-                    view! {
+                    let fence = view! {
                         <div class="sx-fence">
                             <div class="sx-fence-bar">
                                 <span class="sx-lang">{lang}</span>
@@ -1454,7 +1537,16 @@ fn blocks_view(blocks: Vec<Block>, open_file: Callback<(String, u32)>) -> impl I
                             </div>
                             <pre class="sx-code">{code}</pre>
                         </div>
-                    }.into_any()
+                    };
+                    // Mermaid fence → diagram, with this code block as the
+                    // source view and the parse-failure fallback (#1368).
+                    match mermaid {
+                        Some(source) => view! {
+                            <crate::mermaid::MermaidBlock source=source>{fence}</crate::mermaid::MermaidBlock>
+                        }
+                        .into_any(),
+                        None => fence.into_any(),
+                    }
                 }
             }
         })

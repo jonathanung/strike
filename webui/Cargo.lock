@@ -282,6 +282,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "669a445ee724c5c69b1b06fe0b63e70a1c84bc9bb7d9696cd4f4e3ec45050408"
 
 [[package]]
+name = "edit-resend"
+version = "0.1.0"
+
+[[package]]
 name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -868,6 +872,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
+name = "mermaid-lite"
+version = "0.1.0"
+
+[[package]]
 name = "next_tuple"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1360,12 +1368,14 @@ name = "strike-webui"
 version = "0.1.0"
 dependencies = [
  "composer-drafts",
+ "edit-resend",
  "gloo-net",
  "ideas-inbox",
  "js-sys",
  "leptos",
  "load-guard",
  "md-review",
+ "mermaid-lite",
  "protocol-schema",
  "qrcode",
  "send_wrapper",
