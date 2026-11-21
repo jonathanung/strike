@@ -1,0 +1,71 @@
+/* feature:mcp-elicitation begin */
+/* MCP elicitation cards (#1353): a paused tool asks for input. Same
+   surface as the approval cards; tokens only. */
+.elicit-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+}
+.elicit-card {
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, var(--rule));
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  max-height: 60vh;
+  overflow: auto;
+}
+.elicit-card:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.elicit-card header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.elicit-settled {
+  border-color: var(--rule);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--type-sm);
+}
+.elicit-message {
+  margin: var(--space-2) 0 0;
+  color: var(--ink);
+  font-size: var(--type-md);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.elicit-safety {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: var(--type-sm);
+}
+.elicit-url {
+  margin: var(--space-2) 0 0;
+  overflow-wrap: anywhere;
+}
+.elicit-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.elicit-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--type-sm);
+  color: var(--ink);
+}
+.elicit-field input[type="checkbox"] { align-self: flex-start; }
+.elicit-error {
+  margin: var(--space-2) 0 0;
+  color: var(--danger);
+  font-size: var(--type-sm);
+}
+.elicit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+body[data-phone="1"] .elicit-actions button { min-height: 44px; flex: 1 1 auto; }
+/* feature:mcp-elicitation end */
