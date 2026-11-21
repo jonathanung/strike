@@ -1112,7 +1112,9 @@ fn message_view(
     let stamp_full = line_full_time(msg.at_ms);
     let has_stamp = !stamp.is_empty();
     let prose = matches!(msg.role, Role::You | Role::Strike);
-    let is_you = msg.role == Role::You;
+    // Edit & resend needs a composer: never on the read-only share view.
+    let is_you = msg.role == Role::You
+        && use_context::<crate::share::ReadOnlyTranscript>().is_none();
     // Find-in-transcript (#1342): this message's match ranges, split by
     // field. When a field has ranges it renders through MarkedText —
     // the same trade #1398 made on the old bubble path: markdown / link
