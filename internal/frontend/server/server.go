@@ -32,6 +32,7 @@ import (
 	"github.com/jonathanung/strike/internal/frontend/server/terminal"
 	"github.com/jonathanung/strike/internal/persist/attachment"
 	"github.com/jonathanung/strike/internal/persist/session"
+	"github.com/jonathanung/strike/internal/persist/suggestion"
 	"github.com/jonathanung/strike/internal/persist/taskrun"
 	"github.com/jonathanung/strike/internal/persist/workspace"
 	"github.com/jonathanung/strike/internal/product/version"
@@ -245,6 +246,11 @@ type Server struct {
 	// clientMsgOnce lazily opens the outbox client-message-id dedupe (#1325).
 	clientMsgOnce  sync.Once
 	clientMsgStore *clientMsgDedupe
+
+	// suggestOnce lazily opens the Ideas inbox store (#1323).
+	suggestOnce  sync.Once
+	suggestStore *suggestion.Store
+	suggestErr   error
 
 	// tokenHash is the sha256 of the daemon token file last observed.
 	// A change appends a token-rotation audit entry. The token is not stored.
@@ -717,6 +723,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/notifications/push-subscriptions", s.handlePushSubscribe)
 	s.mux.HandleFunc("DELETE /v1/notifications/push-subscriptions", s.handlePushUnsubscribe)
 	s.mux.HandleFunc("POST /v1/notifications/seen", s.handleNotificationSeen)
+	s.mux.HandleFunc("GET /v1/suggestions", s.handleSuggestionsList)
+	s.mux.HandleFunc("POST /v1/suggestions", s.handleSuggestionCreate)
+	s.mux.HandleFunc("PUT /v1/suggestions/prefs", s.handleSuggestionPrefs)
+	s.mux.HandleFunc("POST /v1/suggestions/{id}/accept", s.handleSuggestionAccept)
+	s.mux.HandleFunc("POST /v1/suggestions/{id}/dismiss", s.handleSuggestionDismiss)
+	s.mux.HandleFunc("POST /v1/suggestions/{id}/snooze", s.handleSuggestionSnooze)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWS)
 	s.mux.HandleFunc("GET /v1/terminals", s.handleTerminalsList)
 	s.mux.HandleFunc("POST /v1/terminals", s.handleTerminalCreate)
