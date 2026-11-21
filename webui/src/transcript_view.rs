@@ -1181,6 +1181,8 @@ fn message_view(
     let auth_notice =
         msg.role == Role::Notice && msg.badge == crate::transcript::PROVIDER_AUTH_CODE;
     let reconnect = msg.reconnect.clone();
+    // Notice subtype hook for scoped CSS (#1380 mutes files.invalidated).
+    let notice_kind = (msg.role == Role::Notice && !msg.key.is_empty()).then(|| msg.key.clone());
     // #1371: end-of-turn failure markers carry their stop reason as a
     // hook for scoped styling and browser checks; every other line has
     // no attribute.
@@ -1267,7 +1269,7 @@ fn message_view(
         && keep > 0
         && use_context::<crate::share::ReadOnlyTranscript>().is_none();
     view! {
-        <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role data-turn-stop=turn_stop data-compaction=compaction>
+        <article id=format!("tf-line-{idx}") data-msg=id class=class data-role=role data-kind=notice_kind data-turn-stop=turn_stop data-compaction=compaction>
             <header>
                 {if find_title {
                     view! { <span class="sx-who"><crate::transcript_find::MarkedText text=title.clone() kind="inline" ranges=title_ranges current=cur_title /></span> }.into_any()
