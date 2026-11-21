@@ -220,3 +220,18 @@ func messagesText(msgs []provider.Message) string {
 	}
 	return b.String()
 }
+
+func TestSideChatModelReportsUsage(t *testing.T) {
+	model := newSideChatModel(echo.New(), "echo", nil)
+	got, err := model.Answer(context.Background(), server.SideChatPrompt{
+		System:   "rewrite",
+		Question: "Draft prompt to sharpen:\n\nfix the flaky thing",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Echo always reports an estimated usage on EventDone.
+	if got.InputTokens <= 0 || got.OutputTokens <= 0 || !got.UsageEstimated {
+		t.Fatalf("usage not carried: %#v", got)
+	}
+}

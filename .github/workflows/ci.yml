@@ -103,7 +103,7 @@ jobs:
           cargo test --manifest-path webui/load-guard/Cargo.toml --locked
           cargo test --manifest-path webui/md-review/Cargo.toml --locked
           cargo test --manifest-path webui/transcript-window/Cargo.toml --locked
-          cargo test --manifest-path webui/quote-message/Cargo.toml --locked
+          cargo test --manifest-path webui/ideas-inbox/Cargo.toml --locked
           cargo test --manifest-path webui/status-card/Cargo.toml --locked
           cargo test --manifest-path webui/composer-drafts/Cargo.toml --locked
           cargo test --manifest-path webui/theme-catalog/Cargo.toml --locked
@@ -116,6 +116,15 @@ jobs:
       - name: Prompt regression report (soft)
         continue-on-error: true
         run: make prompt-reg
+
+      # Quote message host tests (own step, outside the shared crate list).
+      - name: Quote message crate tests
+        run: |
+          set -euo pipefail
+          if ! command -v cargo >/dev/null; then
+            [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+          fi
+          cargo test --manifest-path webui/quote-message/Cargo.toml --locked
 
       # #807 harness eval: correctness/safety/recovery/latency-cost report.
       # Scenarios also run hard under Test above. This step is the verbose
