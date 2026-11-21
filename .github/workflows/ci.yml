@@ -217,7 +217,8 @@ jobs:
   # runs against the PR's UI, not main's committed bundle.
   webui-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    # +10 min for the host-target webui unit test build.
+    timeout-minutes: 45
     env:
       # Keep in sync with webui-bundle.yml (nix dev shell fenix stable +
       # nixpkgs trunk). trunk fetches wasm-opt per webui/Trunk.toml; do not
@@ -303,6 +304,15 @@ jobs:
       # webui-bundle.yml before it commits.
       - name: Check built webui bundle matches sources
         run: node scripts/check-webui-bundle.mjs
+
+      # The main webui crate is bin-only (src/main.rs), so there is no --lib
+      # target. Its #[cfg(test)] modules are pure-Rust unit tests: build and
+      # run them on the host (x86_64) target. leptos/web-sys/wasm-bindgen
+      # compile natively; tests must not call into JS (that panics off wasm).
+      # Shares webui/target with the trunk build via the cache above.
+      - name: Webui crate unit tests (host)
+        working-directory: webui
+        run: cargo test --locked --bin strike-webui
 
       - name: Build strike
         run: go build -o strike ./cmd/strike
