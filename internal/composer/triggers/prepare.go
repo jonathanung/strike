@@ -121,7 +121,14 @@ func Commands() []Command {
 }
 
 // Prepare classifies text. skills are matched by name. files may be nil.
+// @session tokens are left as text (see PrepareWith).
 func Prepare(text string, files ScopedRead, skills []Skill) Outcome {
+	return PrepareWith(text, files, skills, nil)
+}
+
+// PrepareWith is Prepare plus @session expansion (#1550). sessions may be
+// nil.
+func PrepareWith(text string, files ScopedRead, skills []Skill, sessions *Sessions) Outcome {
 	raw := strings.TrimSpace(text)
 	if raw == "" {
 		return Outcome{}
@@ -137,9 +144,9 @@ func Prepare(text string, files ScopedRead, skills []Skill) Outcome {
 			return renderSkill(sk, args, raw, files)
 		}
 		// Unknown $name is ordinary text ($5, a ticker, a typo).
-		return expandPlain(raw, files)
+		return expandPlain(raw, files, sessions)
 	}
-	return expandPlain(raw, files)
+	return expandPlain(raw, files, sessions)
 }
 
 func prepareShell(raw string) Outcome {
@@ -329,8 +336,11 @@ func renderSkill(sk Skill, args, display string, files ScopedRead) Outcome {
 	return Outcome{Action: ActionText, ModelText: expanded, Display: display, Notices: notices}
 }
 
-func expandPlain(raw string, files ScopedRead) Outcome {
+func expandPlain(raw string, files ScopedRead, sessions *Sessions) Outcome {
 	expanded, notices := expandFileMentions(raw, files)
+	withSessions, sessionNotices := expandSessionMentions(expanded, sessions)
+	expanded = withSessions
+	notices = append(notices, sessionNotices...)
 	if expanded == raw && len(notices) == 0 {
 		return Outcome{}
 	}
@@ -364,6 +374,11 @@ func findFileMentions(s string) []fileMention {
 				i = at + 1
 				continue
 			}
+		}
+		// "@session:<id>" is a session reference (#1550), not a file.
+		if end, _, ok := sessionTokenEnd(s, at); ok {
+			i = end
+			continue
 		}
 		pathStart := at + 1
 		if pathStart >= len(s) {
@@ -449,14 +464,14 @@ func endAttachment(s string) int {
 		}
 		header := s[len("--- "):headerEnd]
 		kind, _, ok := strings.Cut(header, ": ")
-		if !ok || (kind != "file" && kind != "folder") {
+		if !ok || !fenceKind(kind) {
 			return -1
 		}
 		return headerEnd + 4
 	}
 	header := s[len("--- "):headerEnd]
 	kind, path, ok := strings.Cut(header, ": ")
-	if !ok || (kind != "file" && kind != "folder") || path == "" {
+	if !ok || !fenceKind(kind) || path == "" {
 		return -1
 	}
 	bodyStart := headerEnd + len(" ---\n")
@@ -530,6 +545,12 @@ func expandFileMentions(text string, files ScopedRead) (string, []string) {
 		return text, notices
 	}
 	return text + blocks.String(), notices
+}
+
+// fenceKind reports an attachment fence whose body is opaque to mention
+// scanning: @file / @folder bodies and @session blocks (#1550).
+func fenceKind(kind string) bool {
+	return kind == "file" || kind == "folder" || kind == "session"
 }
 
 func alreadyAttached(text, path string) bool {
