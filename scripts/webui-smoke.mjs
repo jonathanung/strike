@@ -597,6 +597,19 @@ try {
     join(sessionsDir, "elapsed-session.meta.json"),
     JSON.stringify({ title: "Elapsed replay" }) + "\n",
   );
+  // Regenerate title (#1370) fixture: the auto-title came from the first
+  // prompt, and the conversation has since drifted.
+  await writeFile(
+    join(sessionsDir, "retitle-session.jsonl"),
+    line("fix the login bug") +
+      JSON.stringify({ type: "session.titled", time: "2026-10-26T06:00:01Z", data: { title: "fix the login bug" } }) +
+      "\n" +
+      line("split the session store into packages"),
+  );
+  await writeFile(
+    join(sessionsDir, "retitle-session.meta.json"),
+    JSON.stringify({ title: "fix the login bug" }) + "\n",
+  );
   // files.invalidated (#1380) fixture: a replayed turn with two
   // back-to-back invalidations (five distinct paths). The cockpit must
   // render ONE muted notice (merged, capped at three names) and refetch
@@ -620,6 +633,23 @@ try {
   await writeFile(
     join(sessionsDir, "invalidated-session.meta.json"),
     JSON.stringify({ title: "Invalidated replay" }) + "\n",
+  );
+  // Diagnostics refresh on files.invalidated (#1894): a second replay
+  // with a burst of two invalidations, resumed while the diagnostics pane
+  // is shown; the cockpit must refetch /v1/diagnostics exactly once.
+  const invalidatedDiagSession =
+    JSON.stringify({ type: "session.header", schemaVersion: 1, time: "2026-10-26T07:10:00Z" }) +
+    "\n" +
+    envLine("user.message", "2026-10-26T07:10:00Z", { text: "touch the tree for lsp" }) +
+    envLine("turn.started", "2026-10-26T07:10:01Z", {}) +
+    envLine("files.invalidated", "2026-10-26T07:10:02Z", { paths: ["src/a.go"], reason: "external" }) +
+    envLine("files.invalidated", "2026-10-26T07:10:03Z", { paths: ["src/b.go"], reason: "external" }) +
+    envLine("text.delta", "2026-10-26T07:10:04Z", { text: "lsp tree touched" }) +
+    envLine("turn.completed", "2026-10-26T07:10:05Z", { stopReason: "end_turn" });
+  await writeFile(join(sessionsDir, "invalidated-diag-session.jsonl"), invalidatedDiagSession);
+  await writeFile(
+    join(sessionsDir, "invalidated-diag-session.meta.json"),
+    JSON.stringify({ title: "Invalidated diagnostics replay" }) + "\n",
   );
   // Live tool tail (#1374) fixture: turn 1's call streams a chunk and
   // then ends (the final output replaces the tail); turn 2's chatty call
@@ -660,6 +690,24 @@ try {
     join(sessionsDir, "tail-session.meta.json"),
     JSON.stringify({ title: "Tool tail replay" }) + "\n",
   );
+  // Session rewind (#1336) fixture: two completed turns; the second ran an
+  // uncovered (bash) mutation, so a code restore must be acknowledged.
+  await writeFile(
+    join(sessionsDir, "rewind-session.jsonl"),
+    envLine("user.message", "2026-10-26T07:00:00Z", { text: "add login" }) +
+      envLine("turn.started", "2026-10-26T07:00:01Z", {}) +
+      envLine("text.delta", "2026-10-26T07:00:02Z", { text: "added" }) +
+      envLine("turn.completed", "2026-10-26T07:00:03Z", { stopReason: "end_turn", files: [{ path: "auth/login.go", kind: "create" }] }) +
+      envLine("user.message", "2026-10-26T07:01:00Z", { text: "run the migration script" }) +
+      envLine("turn.started", "2026-10-26T07:01:01Z", {}) +
+      envLine("text.delta", "2026-10-26T07:01:02Z", { text: "migrated" }) +
+      envLine("turn.completed", "2026-10-26T07:01:03Z", {
+        stopReason: "end_turn",
+        files: [{ path: "db/schema.sql", kind: "update" }],
+        uncovered: ["bash"],
+      }),
+  );
+  await writeFile(join(sessionsDir, "rewind-session.meta.json"), JSON.stringify({ title: "Rewind fixture" }) + "\n");
   // Verification badge (#1373) fixture: one turn per state plus a turn
   // with no verification payload, which must render no badge.
   const verifyTurn = (n, text, verification) =>
@@ -2089,6 +2137,59 @@ try {
     "font and density",
   );
 
+  // #1577: Settings → Guardrails renders daemon-reported effective values,
+  // a tightening change PATCHes /v1/settings and re-reads it, an invalid
+  // value shows the daemon's reason, and a loosening change confirms first.
+  await waitUntil(
+    `(() => {
+      const g = document.querySelector('[data-section="guardrails"]');
+      if (!g) return "no guardrails section";
+      const t = g.querySelector('[data-effective="turnTimeoutS"]')?.textContent || "";
+      const c = g.querySelector('[data-effective="maxSessionCostUSD"]')?.textContent || "";
+      const host = g.querySelector('[data-dial="childIsolation"] input[data-choice="shared"]');
+      return t.includes("1800s") && c === "unlimited" && !!host && host.checked && !host.disabled;
+    })()`,
+    "guardrails group shows daemon defaults",
+  );
+  const guardSubmit = (key, value) => evaluate(`(() => {
+    const row = document.querySelector('[data-dial="${key}"]');
+    const input = row.querySelector("input");
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    set.call(input, ${JSON.stringify(value)});
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    row.querySelector('[data-action="guard-save"]').click();
+    return true;
+  })()`);
+  const guardDaemon = async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/v1/settings`, { headers: { Authorization: `Bearer ${token}` } });
+    return res.json();
+  };
+  await guardSubmit("maxSessionCostUSD", "5");
+  await waitUntil(
+    `document.querySelector('[data-effective="maxSessionCostUSD"]')?.textContent === "$5" && !document.querySelector(".confirm-dialog")`,
+    "guardrail cost cap saved without confirm",
+  );
+  if ((await guardDaemon()).maxSessionCostUSD !== 5) {
+    throw new Error("guardrail cost cap did not persist to /v1/settings");
+  }
+  await guardSubmit("maxSessionCostUSD", "lots");
+  await waitUntil(
+    `(document.querySelector('[data-guard-error="maxSessionCostUSD"]')?.textContent || "").includes("maxSessionCostUSD") && document.querySelector('[data-effective="maxSessionCostUSD"]')?.textContent === "$5"`,
+    "guardrail invalid value shows the daemon reason",
+  );
+  await guardSubmit("maxSessionCostUSD", "off");
+  await waitUntil(
+    `(document.getElementById("confirm-body")?.textContent || "").includes("Max session cost")`,
+    "guardrail loosening asks to confirm",
+  );
+  await evaluate(`document.querySelector('[data-confirm="accept"]').click()`);
+  await waitUntil(
+    `document.querySelector('[data-effective="maxSessionCostUSD"]')?.textContent === "unlimited" && !document.querySelector('[data-guard-error="maxSessionCostUSD"]')`,
+    "guardrail cost cap removed after confirm",
+  );
+  if ((await guardDaemon()).maxSessionCostUSD !== 0) {
+    throw new Error("guardrail cost cap removal did not persist to /v1/settings");
+  }
   // #1583: Settings → Updates shows the effective autoupdate dial, `off`
   // persists and the route answers "off" (no probe), and the row never
   // claims "up to date" without a successful check.
@@ -2844,6 +2945,89 @@ try {
     { timeout: STEP_MS, interval: 200 },
   );
 
+  // Notification grouping (#1826): stub GET /v1/notifications with two
+  // consecutive child.finished rows for one session plus an unrelated
+  // row. The centre must show one counted, unread group; opening it
+  // expands the members, clears the dot, and marks both read with one
+  // POST /v1/notifications/seen (captured, not sent to the daemon).
+  const notifyStub = JSON.stringify({
+    notifications: [
+      { id: "smoke-grp-2", seq: 9002, kind: "child.finished", sessionId: "smoke-grp-s1", title: "smoke child two finished", at: "2026-11-01T10:02:00Z" },
+      { id: "smoke-grp-1", seq: 9001, kind: "child.finished", sessionId: "smoke-grp-s1", title: "smoke child one finished", at: "2026-11-01T10:01:00Z" },
+      { id: "smoke-grp-0", seq: 9000, kind: "approval.needed", sessionId: "smoke-grp-s2", title: "smoke approval", at: "2026-11-01T10:00:00Z" },
+    ],
+    prefs: { enabled: false, quiet: { enabled: false, start: "22:00", end: "07:00" }, mutedSessions: [] },
+    latest: 9002,
+    seen: { upTo: 0, ids: [] },
+  });
+  const seenPosts = [];
+  const onNotifyPaused = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.method !== "Fetch.requestPaused") return;
+    const url = msg.params.request?.url || "";
+    const seenPost = url.includes("/v1/notifications/seen");
+    if (seenPost) seenPosts.push(msg.params.request?.postData || "");
+    send("Fetch.fulfillRequest", {
+      requestId: msg.params.requestId,
+      responseCode: 200,
+      responseHeaders: [{ name: "Content-Type", value: "application/json" }],
+      body: Buffer.from(seenPost ? "{}" : notifyStub).toString("base64"),
+    });
+  };
+  ws.addEventListener("message", onNotifyPaused);
+  await send("Fetch.enable", {
+    patterns: [
+      { urlPattern: "*/v1/notifications", requestStage: "Request" },
+      { urlPattern: "*/v1/notifications/seen", requestStage: "Request" },
+    ],
+  });
+  try {
+    await evaluate(`(() => { if (!document.querySelector(".notify-panel")) document.querySelector(".notify-bell")?.click(); return true; })()`);
+    const groupProbe = `(() => {
+      const g = document.querySelector('.notify-panel [data-notify-group="smoke-grp-1"]');
+      const open = g && g.querySelector(".notify-open");
+      return {
+        group: !!g,
+        count: g ? g.getAttribute("data-count") : "",
+        expanded: open ? open.getAttribute("aria-expanded") : "",
+        dot: !!(g && g.querySelector(".notify-dot")),
+        members: [...document.querySelectorAll(".notify-panel .notify-member .notify-title")].map((t) => t.textContent.trim()),
+        approval: [...document.querySelectorAll(".notify-panel .notify-title")].some((t) => t.textContent.includes("smoke approval")),
+      };
+    })()`;
+    await waitFor(
+      "notification group collapsed with a count and unread dot",
+      async () => {
+        const v = await evaluate(groupProbe);
+        return { ok: v.group && v.count === "2" && v.expanded === "false" && v.dot && v.members.length === 0 && v.approval, ...v };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await evaluate(`document.querySelector('.notify-panel [data-notify-group="smoke-grp-1"] .notify-open').click()`);
+    await waitFor(
+      "notification group expands and marks every member read",
+      async () => {
+        const v = await evaluate(groupProbe);
+        const posted = seenPosts.some((b) => b.includes("smoke-grp-1") && b.includes("smoke-grp-2"));
+        return {
+          ok:
+            v.expanded === "true" &&
+            !v.dot &&
+            v.members.join("|") === "smoke child two finished|smoke child one finished" &&
+            posted,
+          posted,
+          seenPosts: seenPosts.slice(0, 3),
+          ...v,
+        };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+  } finally {
+    await send("Fetch.disable", {});
+    ws.removeEventListener("message", onNotifyPaused);
+    await evaluate(`(() => { if (document.querySelector(".notify-panel")) document.querySelector(".notify-bell")?.click(); return true; })()`);
+  }
+
   await runPalette("Memory");
   const memoryText = (
     await waitFor(
@@ -3330,6 +3514,104 @@ try {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
+  // Lessons slice 2 (#1874): an untrusted workspace refuses a proposal; a
+  // proposal then waits pending in the Memory panel (nothing stored);
+  // Dismiss stores nothing; Approve stores a lesson-tagged entry; the next
+  // turn auto-loads it and the session marker lists exactly that entry.
+  {
+    const authed = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const api = (path, init = {}) => fetch(`http://127.0.0.1:${port}${path}`, { headers: authed, ...init });
+    const proposedKey = "lesson-smoke-proposed";
+    const propose = (key, value) =>
+      api("/v1/memory/proposals", { method: "POST", body: JSON.stringify({ key, value, scope: "project" }) });
+    const trust = await (await api("/v1/workspace/trust")).json();
+    let granted = false;
+    if (!trust.trusted) {
+      const refused = await propose("lesson-smoke-untrusted", "refused while untrusted");
+      if (refused.status !== 403) throw new Error(`untrusted propose ${refused.status} ${await refused.text()}`);
+      const grant = await api("/v1/workspace/trust", { method: "POST", body: JSON.stringify({ action: "grant" }) });
+      if (!grant.ok) throw new Error(`lessons smoke: trust grant ${grant.status} ${await grant.text()}`);
+      granted = true;
+    }
+    try {
+      const dismissRes = await propose("lesson-smoke-dismissed", "dismiss me");
+      if (dismissRes.status !== 201) throw new Error(`propose ${dismissRes.status} ${await dismissRes.text()}`);
+      const proposedRes = await propose(proposedKey, "Run make test-fast before pushing.");
+      if (proposedRes.status !== 201) throw new Error(`propose ${proposedRes.status} ${await proposedRes.text()}`);
+      if ((await memoryKeys()).some((r) => r.key === proposedKey)) throw new Error("a pending proposal was stored");
+      await runPalette("Memory");
+      const pendingRow = (key) =>
+        `[...document.querySelectorAll('[data-lesson-pending="section"] .lesson-pending-row')].find((r) => r.innerText.includes(${JSON.stringify(key)}))`;
+      await waitFor(
+        "pending lessons section lists both proposals",
+        async () => ({
+          ok: (await evaluate(`!!(${pendingRow(proposedKey)}) && !!(${pendingRow("lesson-smoke-dismissed")})`)) === true,
+        }),
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      await evaluate(`(${pendingRow("lesson-smoke-dismissed")}).querySelector('[data-lesson-pending="dismiss"]').click()`);
+      await waitFor(
+        "dismissed proposal leaves the list and stores nothing",
+        async () => ({
+          ok:
+            (await evaluate(`!(${pendingRow("lesson-smoke-dismissed")})`)) === true &&
+            !(await memoryKeys()).some((r) => r.key === "lesson-smoke-dismissed"),
+        }),
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      await evaluate(`(${pendingRow(proposedKey)}).querySelector('[data-lesson-pending="approve"]').click()`);
+      await waitFor(
+        "approved proposal is stored lesson-tagged and leaves pending",
+        async () => {
+          const row = (await memoryKeys()).find((r) => r.key === proposedKey);
+          const pending = await evaluate(`!!(${pendingRow(proposedKey)})`);
+          return { ok: !!row && row.tags.includes("lesson") && pending === false, body: JSON.stringify(row) };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      // The next turn's prompt auto-loads the approved lesson.
+      const turn = await api("/v1/ops", {
+        method: "POST",
+        body: JSON.stringify({ type: "user.input", data: { text: "lessons smoke turn" } }),
+      });
+      if (!turn.ok) throw new Error(`lessons smoke turn ${turn.status} ${await turn.text()}`);
+      const st = await (await api("/v1/status")).json();
+      if (!st.sessionId) throw new Error(`lessons smoke: no live session id ${JSON.stringify(st)}`);
+      await waitFor(
+        "daemon records the approved lesson as used by this session",
+        async () => {
+          const used = await (await api(`/v1/sessions/${encodeURIComponent(st.sessionId)}/lessons-used`)).json();
+          return { ok: (used.entries || []).some((e) => e.key === proposedKey), body: JSON.stringify(used).slice(0, 400) };
+        },
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      const usedSel = `[data-lessons-used="marker"] [data-lesson-used-key="${proposedKey}"]`;
+      await waitFor(
+        "session header marker lists the approved lesson",
+        async () => ({
+          ok: (await evaluate(`(() => {
+            const m = document.querySelector('[data-lessons-used="marker"]');
+            if (!m || !m.querySelector('${usedSel}')) return false;
+            return /\\d+ lessons? used/.test(m.querySelector('[data-lessons-used="summary"]').innerText);
+          })()`)) === true,
+        }),
+        { timeout: WAIT_MS, interval: 250 },
+      );
+      await evaluate(`(() => {
+        document.querySelector('[data-lessons-used="marker"]').open = true;
+        document.querySelector('${usedSel} details').open = true;
+        return true;
+      })()`);
+      const usedText = String(await evaluate(`document.querySelector('${usedSel}').innerText`));
+      if (!usedText.includes("Run make test-fast before pushing.")) {
+        throw new Error(`marker entry does not expand to the lesson text: ${usedText}`);
+      }
+      await evaluate(`document.querySelector('[data-lessons-used="marker"]').open = false`);
+    } finally {
+      await api(`/v1/memory/${proposedKey}?scope=project`, { method: "DELETE" });
+      if (granted) await api("/v1/workspace/trust", { method: "POST", body: JSON.stringify({ action: "revoke" }) });
+    }
+  }
   // Local issues (#1500): create → listed under Open → close → listed under
   // Closed → still closed after the panel remounts (fresh daemon read) and
   // in the daemon's own list. An empty title is refused inline.
@@ -3546,15 +3828,19 @@ try {
       async () => {
         const raw = await evaluate(`(() => {
           const row = document.querySelector('[data-idea="${ideaId}"]');
+          const badge = document.querySelector('[data-nav="header"] [data-ideas-badge]');
           return JSON.stringify({
             root: !!document.querySelector("#ideas-root"),
             row: !!row,
             text: row ? row.innerText : "",
+            badge: badge ? badge.innerText : "",
+            quiet: !!document.querySelector("[data-ideas-quiet]"),
           });
         })()`);
         const p = JSON.parse(raw || "{}");
+        // #1926: the open-count badge lives in the shell header, not the rail.
         return {
-          ok: !!(p.root && p.row && p.text.includes("tidy the README") && p.text.includes("stale section") && p.text.includes("Smoke evidence")),
+          ok: !!(p.root && p.row && p.text.includes("tidy the README") && p.text.includes("stale section") && p.text.includes("Smoke evidence") && p.badge.includes("1") && p.quiet),
           ...p,
         };
       },
@@ -3566,10 +3852,13 @@ try {
         const raw = await evaluate(`(() => {
           const btn = document.querySelector('[data-idea="${ideaId}"] .ideas-dismiss');
           if (btn && !btn.disabled) btn.click();
-          return JSON.stringify({ empty: !!document.querySelector("[data-ideas-empty]") });
+          return JSON.stringify({
+            empty: !!document.querySelector("[data-ideas-empty]"),
+            badge: !!document.querySelector('[data-nav="header"] [data-ideas-badge]'),
+          });
         })()`);
         const p = JSON.parse(raw || "{}");
-        return { ok: !!p.empty, ...p };
+        return { ok: !!p.empty && !p.badge, ...p };
       },
       { timeout: WAIT_MS, interval: 400 },
     );
@@ -3577,6 +3866,25 @@ try {
     const stored = (ideasAfter.suggestions || []).find((x) => x.id === ideaId);
     if (!stored || stored.state !== "dismissed" || ideasAfter.open !== 0) {
       throw new Error(`dismissed idea state = ${JSON.stringify(ideasAfter).slice(0, 400)}`);
+    }
+    // #1926: quiet hours are store-enforced; reserved producer sources are
+    // refused over HTTP.
+    const prefsUrl = `${ideasUrl}/prefs`;
+    const allDay = { mutedSources: [], mutedKinds: [], quietHours: { enabled: true, start: "00:00", end: "00:00" } };
+    const quietSet = await fetch(prefsUrl, { method: "PUT", headers: ideaAuth, body: JSON.stringify(allDay) });
+    if (quietSet.status !== 200) {
+      throw new Error(`suggestions quiet hours = ${quietSet.status} ${await quietSet.text()}`);
+    }
+    const quietIdea = { ...idea, evidenceKey: "smoke:quiet" };
+    const held = await fetch(ideasUrl, { method: "POST", headers: ideaAuth, body: JSON.stringify(quietIdea) });
+    if (held.status !== 409) {
+      throw new Error(`suggestions create in quiet hours = ${held.status}`);
+    }
+    allDay.quietHours.enabled = false;
+    await fetch(prefsUrl, { method: "PUT", headers: ideaAuth, body: JSON.stringify(allDay) });
+    const reserved = await fetch(ideasUrl, { method: "POST", headers: ideaAuth, body: JSON.stringify({ ...idea, source: "scheduler" }) });
+    if (reserved.status !== 400) {
+      throw new Error(`suggestions create as reserved producer = ${reserved.status}`);
     }
   }
 
@@ -4429,7 +4737,92 @@ try {
       await new Promise((resolve) => fixture.close(resolve));
     }
   }
+  // PR watch (#1356): link the live session to a non-GitHub PR through its
+  // meta sidecar (the host's PR capture writes the same fields). The
+  // daemon must degrade GET /v1/sessions/{id}/pr to "tracking unavailable"
+  // without running gh and with polling off, and opening the Git tab must
+  // render that chip state with no "Fix in this session" action. The PR
+  // fields are removed from the sidecar again afterwards.
+  const prHeaders = { Authorization: `Bearer ${token}` };
+  const prSessions = await (await fetch(`http://127.0.0.1:${port}/v1/sessions`, { headers: prHeaders })).json();
+  const prLiveId = prSessions.liveId || "";
+  if (!prLiveId) {
+    throw new Error(`PR watch: no live session id in /v1/sessions\n${JSON.stringify(prSessions).slice(0, 300)}`);
+  }
+  const prMetaPath = join(sessionsDir, `${prLiveId}.meta.json`);
+  const readPRMeta = async () => {
+    try {
+      return JSON.parse(await readFile(prMetaPath, "utf8"));
+    } catch {
+      return {};
+    }
+  };
+  const prGitLab = "https://gitlab.example.com/acme/widgets/-/merge_requests/7";
+  await writeFile(
+    prMetaPath,
+    JSON.stringify({ ...(await readPRMeta()), prUrl: prGitLab, prNumber: 7, prState: "open" }) + "\n",
+  );
+  const prRes = await fetch(`http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(prLiveId)}/pr`, {
+    headers: prHeaders,
+  });
+  const prBody = await prRes.json();
+  if (
+    !prRes.ok ||
+    !prBody.linked ||
+    prBody.available ||
+    prBody.poll ||
+    prBody.attention ||
+    !String(prBody.reason || "").includes("GitHub pull requests only")
+  ) {
+    throw new Error(`PR watch route: HTTP ${prRes.status} ${JSON.stringify(prBody)}`);
+  }
+  const prList = await (await fetch(`http://127.0.0.1:${port}/v1/sessions`, { headers: prHeaders })).json();
+  const prRow = (prList.sessions || []).find((s) => s.id === prLiveId);
+  if (prRow && (prRow.prUrl !== prGitLab || prRow.prNumber !== 7 || prRow.prState !== "open")) {
+    throw new Error(`PR watch: /v1/sessions row lacks PR fields: ${JSON.stringify(prRow)}`);
+  }
+  const prDraft = await fetch(
+    `http://127.0.0.1:${port}/v1/sessions/${encodeURIComponent(prLiveId)}/pr/fix-draft`,
+    { method: "POST", headers: prHeaders },
+  );
+  if (prDraft.status !== 409) {
+    throw new Error(`PR watch: fix-draft on an untracked PR should be 409, got ${prDraft.status}`);
+  }
   await clickSideTab("Git", "Staged");
+  await waitFor(
+    "PR watch chip shows tracking unavailable (data-pr-watch)",
+    async () => {
+      const raw = await evaluate(`JSON.stringify((() => {
+        const root = document.querySelector("[data-pr-watch]");
+        if (!root) return null;
+        const chip = root.querySelector("[data-pr-chip]");
+        const why = root.querySelector("[data-pr-unavailable]");
+        return {
+          tone: root.getAttribute("data-pr-tone"),
+          chip: chip ? chip.textContent : "",
+          why: why ? why.textContent : "",
+          fix: !!root.querySelector("[data-pr-fix]"),
+        };
+      })())`);
+      const got = JSON.parse(raw || "null");
+      const ok =
+        !!got &&
+        got.tone === "unavailable" &&
+        got.chip.includes("PR #7") &&
+        got.why.includes("GitHub pull requests only") &&
+        !got.fix;
+      return { ok, got };
+    },
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  {
+    const meta = await readPRMeta();
+    delete meta.prUrl;
+    delete meta.prNumber;
+    delete meta.prState;
+    delete meta.prUpdatedAt;
+    await writeFile(prMetaPath, JSON.stringify(meta) + "\n");
+  }
   // Pre-push review (#1487): the preview route sizes the diff and names the
   // read-only reviewer profile, a start without confirm never spawns (400),
   // and the Git tab's "Review this branch" panel renders the same state
@@ -5258,6 +5651,96 @@ try {
     },
     { timeout: STEP_MS, interval: 250 },
   );
+  // Session rewind (#1336): the prompt's Rewind… action opens a preview
+  // fed by the daemon; the bash warning blocks a code restore until it is
+  // acknowledged; Cancel changes nothing; a conversation-only rewind
+  // drops the turn on the daemon and puts the prompt back in the composer
+  // without sending it.
+  {
+    const rewindPoints = async () => {
+      const res = await fetch(`http://127.0.0.1:${port}/v1/sessions/rewind-session/rewind_points`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return ((await res.json()).points || []).length;
+    };
+    if ((await rewindPoints()) !== 2) throw new Error("rewind fixture should start with 2 turns");
+    const rowRW = `[data-session-id="rewind-session"]`;
+    await waitFor(
+      "rewind fixture row",
+      async () => ({ ok: (await evaluate(`!!document.querySelector(${JSON.stringify(rowRW)})`)) === true }),
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await evaluate(`document.querySelector(${JSON.stringify(rowRW)}).querySelector(".ss-main").click()`);
+    const rewindBtn = `[data-rewind-keep="8"]`;
+    await waitFor(
+      "Rewind… action on the second prompt",
+      async () => ({ ok: (await evaluate(`!!document.querySelector(${JSON.stringify(rewindBtn)})`)) === true }),
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    const rwDialog = async () =>
+      JSON.parse(
+        (await evaluate(`(() => {
+          const d = document.querySelector("[data-rewind='dialog']");
+          const c = document.querySelector("[data-rewind='confirm']");
+          return JSON.stringify({
+            open: !!d,
+            text: d ? d.innerText : "",
+            confirmDisabled: c ? c.disabled : null,
+            blocked: document.querySelector("[data-rewind='blocked']")?.innerText || "",
+          });
+        })()`)) || "{}",
+      );
+    await evaluate(`document.querySelector(${JSON.stringify(rewindBtn)}).click()`);
+    const shown = await waitFor(
+      "rewind preview with the uncovered bash warning",
+      async () => {
+        const d = await rwDialog();
+        return { ok: d.open && d.text.includes("Rewind to before turn 2?") && d.text.includes("bash"), ...d };
+      },
+      { timeout: WAIT_MS, interval: 200 },
+    );
+    if (!shown.text.includes("db/schema.sql") || !shown.text.includes("Restore code only")) {
+      throw new Error(`rewind preview incomplete: ${shown.text.slice(0, 400)}`);
+    }
+    if (shown.confirmDisabled !== true || !shown.blocked.includes("Acknowledge")) {
+      throw new Error(`uncovered warning did not block the code restore: ${JSON.stringify(shown).slice(0, 400)}`);
+    }
+    await evaluate(`document.querySelector("[data-rewind='cancel']").click()`);
+    await waitFor("rewind dialog closes on cancel", async () => ({ ok: !(await rwDialog()).open }), {
+      timeout: STEP_MS,
+      interval: 200,
+    });
+    if ((await rewindPoints()) !== 2) throw new Error("cancelled rewind changed the session");
+    await evaluate(`document.querySelector(${JSON.stringify(rewindBtn)}).click()`);
+    await waitFor(
+      "rewind preview reopens",
+      async () => ({ ok: (await rwDialog()).text.includes("Rewind to before turn 2?") }),
+      { timeout: WAIT_MS, interval: 200 },
+    );
+    await evaluate(`document.querySelector("[data-rewind-mode='conversation'] input").click()`);
+    await waitFor(
+      "conversation-only rewind is not blocked",
+      async () => ({ ok: (await rwDialog()).confirmDisabled === false }),
+      { timeout: STEP_MS, interval: 200 },
+    );
+    await evaluate(`document.querySelector("[data-rewind='confirm']").click()`);
+    await waitFor(
+      "rewind drops the turn and returns the prompt to the composer",
+      async () => {
+        const points = await rewindPoints();
+        const composer = (await evaluate(`document.querySelector("#composer-input")?.value || ""`)) || "";
+        return { ok: points === 1 && composer.includes("run the migration script"), points, composer };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    await evaluate(`(() => {
+      const el = document.querySelector("#composer-input");
+      const proto = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value");
+      proto.set.call(el, "");
+      el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    })()`);
+  }
+
   // Global transcript search (#1355): the palette opens the overlay; a
   // query with no matches says so; a content match in a session shows a
   // highlighted snippet; picking it opens that session and hands the
@@ -5580,6 +6063,65 @@ try {
     }),
     { timeout: STEP_MS, interval: 250 },
   );
+  // Regenerate title (#1370): the row action proposes a title from the
+  // drifted conversation in the shared confirm. Cancel must leave the
+  // daemon's title untouched; Confirm must store the proposal and update
+  // the list entry.
+  const retitleID = "retitle-session";
+  const retitleSel = `[data-ss-regen-id="${retitleID}"]`;
+  const savedTitle = async (id) =>
+    ((await listJSON("/v1/sessions")).sessions || []).find((s) => s.id === id)?.title || "";
+  await waitFor(
+    "regenerate title row action",
+    async () => ({ ok: (await evaluate(`!!document.querySelector(${JSON.stringify(retitleSel)})`)) === true }),
+    { timeout: STEP_MS, interval: 250 },
+  );
+  await clickSel(retitleSel);
+  const proposalText = await waitFor(
+    "regenerate title proposal in the confirm",
+    async () => {
+      const t = (await dialogText()) || "";
+      return { ok: t.includes("split the session store") && t.includes("fix the login bug"), text: t };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if (!proposalText.text.includes("Rename to")) {
+    throw new Error(`regenerate confirm copy wrong: ${proposalText.text.slice(0, 300)}`);
+  }
+  await clickSel("[data-confirm='cancel']");
+  await waitFor(
+    "regenerate confirm to close on cancel",
+    async () => ({
+      ok: (await evaluate(`!!document.querySelector("[data-confirm='dialog']")`)) === false,
+    }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  if ((await savedTitle(retitleID)) !== "fix the login bug") {
+    throw new Error(`cancelled regenerate changed the title to ${await savedTitle(retitleID)}`);
+  }
+  await clickSel(retitleSel);
+  await waitFor(
+    "regenerate confirm to reopen",
+    async () => ({ ok: ((await dialogText()) || "").includes("split the session store") }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await clickSel("[data-confirm='accept']");
+  await waitFor(
+    "confirmed regenerate stores the new title and updates the row",
+    async () => {
+      const stored = await savedTitle(retitleID);
+      const row = (await evaluate(
+        `(() => { const r = document.querySelector(${JSON.stringify(rowSel(retitleID))}); return r ? r.innerText : ""; })()`,
+      )) || "";
+      return {
+        ok: stored.startsWith("split the session store") && row.includes("split the session store"),
+        stored,
+        row,
+      };
+    },
+    { timeout: STEP_MS, interval: 250 },
+  );
+
   const openIDs = await rootIDs();
   if (!openIDs.length) {
     throw new Error("session-delete 409 check found no open root");
@@ -6342,6 +6884,66 @@ try {
     await rm(invalidatedPath, { force: true });
   }
 
+  // Diagnostics refresh on files.invalidated (#1894): with the
+  // diagnostics pane shown, resuming a replay with an invalidation burst
+  // refetches /v1/diagnostics once (the same 400 ms debounce as Files).
+  await runPalette("Code diagnostics");
+  await waitFor(
+    "files.invalidated diagnostics: pane shown",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-diagnostics-pane]")`)) === true }),
+    { timeout: WAIT_MS, interval: 250 },
+  );
+  let diagFetches = 0;
+  const onDiagRequest = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.method === "Network.requestWillBeSent" && (msg.params?.request?.url || "").includes("/v1/diagnostics")) {
+      diagFetches += 1;
+    }
+  };
+  ws.addEventListener("message", onDiagRequest);
+  try {
+    // Let the palette-open fetch settle, then count only what follows.
+    await new Promise((r) => setTimeout(r, 1000));
+    diagFetches = 0;
+    let diagResume = "missing";
+    try {
+      await waitFor(
+        "files.invalidated diagnostics resume row",
+        async () => {
+          diagResume = await evaluate(`(() => {
+            const row = document.querySelector('[data-session-id="invalidated-diag-session"]');
+            const btn = row && row.querySelector(".ss-main");
+            if (!btn) return "missing";
+            btn.click();
+            return "clicked";
+          })()`);
+          return { ok: diagResume === "clicked", clicked: diagResume };
+        },
+        { timeout: STEP_MS, interval: 250 },
+      );
+    } catch {
+      // Reported by the throw below with the last observed state.
+    }
+    if (diagResume !== "clicked") {
+      throw new Error(`files.invalidated diagnostics resume click -> ${diagResume}`);
+    }
+    await waitFor(
+      "files.invalidated diagnostics: replay applied and diagnostics refetched",
+      async () => {
+        const replayed = (await evaluate(`(document.body.textContent || "").includes("lsp tree touched")`)) === true;
+        return { ok: replayed && diagFetches >= 1, replayed, diagFetches };
+      },
+      { timeout: WAIT_MS, interval: 250 },
+    );
+    // Past the debounce window the burst must still have cost one fetch.
+    await new Promise((r) => setTimeout(r, 1500));
+    if (diagFetches !== 1) {
+      throw new Error(`files.invalidated diagnostics: want 1 refetch for the burst, got ${diagFetches}\n${await diagnostics()}`);
+    }
+  } finally {
+    ws.removeEventListener("message", onDiagRequest);
+  }
+
   // Per-turn file summary (#1365): resume the seeded session; each turn
   // that changed files carries one collapsed summary on its own final
   // line, the no-change turn carries none, and expanding shows the paths
@@ -7024,6 +7626,158 @@ try {
     { timeout: STEP_MS, interval: 200 },
   );
 
+  // Prompt library (#1357): save the draft as a named prompt (browser-
+  // local, strike.prompts), reject a malformed placeholder at save time,
+  // insert through the searchable picker with a {{variable}} fill-in
+  // form (a repeated placeholder is asked once), never auto-send, and
+  // delete behind the shared confirm.
+  const libField = async (sel, value) => {
+    const ok = await evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(sel)});
+      if (!el) return false;
+      el.focus();
+      const proto = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value");
+      proto.set.call(el, ${JSON.stringify(value)});
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true }));
+      return el.value === ${JSON.stringify(value)};
+    })()`);
+    if (ok !== true) throw new Error(`prompt library: ${sel} did not accept ${JSON.stringify(value)}`);
+  };
+  const libClick = async (sel) => {
+    const ok = await evaluate(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (el) el.click(); return !!el; })()`);
+    if (ok !== true) throw new Error(`prompt library: ${sel} missing`);
+  };
+  const libKey = async (sel, key) =>
+    evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(sel)});
+      if (!el) return false;
+      el.focus();
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, code: ${JSON.stringify(key)}, bubbles: true, cancelable: true }));
+      return true;
+    })()`);
+  const libPlus = async (sel) => {
+    await waitFor(
+      `composer + menu row ${sel}`,
+      async () => {
+        const has = await evaluate(`!!document.querySelector(${JSON.stringify(sel)})`);
+        if (!has) await evaluate(`document.querySelector('[data-composer-triggers="plus-button"]')?.click()`);
+        return { ok: has === true };
+      },
+      { timeout: STEP_MS, interval: 250 },
+    );
+    await libClick(sel);
+  };
+  const libStored = async () => JSON.parse((await evaluate(`localStorage.getItem("strike.prompts") || "[]"`)) || "[]");
+  const libBody = "Review {{file}} for {{concern}}, then re-read {{file}}.";
+  await setDraft(libBody);
+  await libPlus("[data-prompts-save-menu]");
+  await waitFor(
+    "save-as-prompt editor prefilled from the draft",
+    async () => {
+      const body = await evaluate(`document.querySelector("[data-prompt-body]")?.value ?? null`);
+      return { ok: body === libBody, body };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libField("[data-prompt-name]", "Smoke review");
+  await libClick("[data-prompt-save]");
+  await waitFor(
+    "prompt saved browser-locally and editor closed",
+    async () => {
+      const list = await libStored();
+      const open = await evaluate(`!!document.querySelector("[data-prompt-library]")`);
+      return { ok: !open && list.length === 1 && list[0].name === "Smoke review" && list[0].body === libBody, list, open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  // Malformed placeholder: rejected at save time, nothing stored.
+  await setDraft("fix {{file");
+  await libPlus("[data-prompts-save-menu]");
+  await waitFor(
+    "malformed-placeholder editor open",
+    async () => ({ ok: (await evaluate(`document.querySelector("[data-prompt-body]")?.value ?? null`)) === "fix {{file" }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libField("[data-prompt-name]", "Broken");
+  await libClick("[data-prompt-save]");
+  await waitFor(
+    "unclosed placeholder rejected at save time",
+    async () => {
+      const err = (await evaluate(`document.querySelector("[data-prompt-error]")?.innerText || ""`)) || "";
+      const list = await libStored();
+      return { ok: /unclosed/i.test(err) && list.length === 1, err, count: list.length };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libKey("[data-prompt-name]", "Escape");
+  await setDraft("");
+  // Picker: search, Enter, fill-in form, insert into the composer.
+  await libPlus("[data-prompts-open-menu]");
+  await waitFor(
+    "prompt library picker open",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-prompt-search]")`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libField("[data-prompt-search]", "smoke");
+  await waitFor(
+    "search filters to the saved prompt",
+    async () => {
+      const rows = await evaluate(`document.querySelectorAll("[data-prompt-row]").length`);
+      return { ok: rows === 1, rows };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libKey("[data-prompt-search]", "Enter");
+  await waitFor(
+    "fill-in form asks each placeholder once",
+    async () => {
+      const vars = JSON.parse((await evaluate(`JSON.stringify([...document.querySelectorAll("[data-prompt-var]")].map((el) => el.getAttribute("data-prompt-var")))`)) || "[]");
+      return { ok: vars.join(",") === "file,concern", vars };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libField('[data-prompt-var="file"]', "a.go");
+  await libField('[data-prompt-var="concern"]', "races");
+  await libClick("[data-prompt-fill-insert]");
+  await waitFor(
+    "filled prompt lands in the composer, not sent",
+    async () => {
+      const value = await evaluate(`document.querySelector("#composer-input")?.value ?? null`);
+      const open = await evaluate(`!!document.querySelector("[data-prompt-library]")`);
+      return { ok: !open && value === "Review a.go for races, then re-read a.go.", value, open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  // Delete with confirm.
+  await setDraft("");
+  await libPlus("[data-prompts-open-menu]");
+  await waitFor(
+    "library lists the prompt for delete",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-prompt-delete]")`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libClick("[data-prompt-delete]");
+  await waitFor(
+    "delete asks the shared confirm first",
+    async () => {
+      const open = await evaluate(`!!document.querySelector("[data-confirm='dialog']")`);
+      return { ok: open && (await libStored()).length === 1, open };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libClick("[data-confirm='accept']");
+  await waitFor(
+    "prompt deleted after confirm",
+    async () => ({ ok: (await libStored()).length === 0 }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await libKey("[data-prompt-search]", "Escape");
+  await waitFor(
+    "prompt library closed",
+    async () => ({ ok: (await evaluate(`!!document.querySelector("[data-prompt-library]")`)) === false }),
+    { timeout: STEP_MS, interval: 200 },
+  );
+
   // Prompt sharpen (#1385): Alt+P sends the draft to the daemon's
   // one-shot rewrite (echo stands in for the model), shows the
   // original-vs-sharpened preview, and changes nothing until Accept.
@@ -7147,6 +7901,45 @@ try {
     async () => {
       const chip = await evaluate(`document.querySelector('[data-autonomy-status]')?.textContent || ""`);
       return { ok: chip.includes("Autonomy · supervised"), chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+
+  // Model fallback (#1350): no chip until a fallback is confirmed by the
+  // daemon; picking a catalog model shows it, "No fallback" removes it.
+  // (The failover itself is covered by harness/engine fallback tests with
+  // a provider that really fails.)
+  await waitFor(
+    "no fallback chip by default",
+    async () => {
+      const has = await evaluate(`!!document.querySelector('[data-fallback-status]')`);
+      return { ok: has === false, has };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await palettePick("model.fallback");
+  await delay(250);
+  await evaluate(`(() => {
+    const row = [...document.querySelectorAll('[data-choice-id]')].find((el) => (el.getAttribute("data-choice-id") || "").includes("\t"));
+    if (row) row.click();
+    return !!row;
+  })()`);
+  await waitFor(
+    "fallback chip appears on daemon confirmation",
+    async () => {
+      const chip = await evaluate(`document.querySelector('[data-fallback-status]')?.textContent || ""`);
+      return { ok: chip.startsWith("Fallback · ") && chip.length > "Fallback · ".length, chip };
+    },
+    { timeout: STEP_MS, interval: 200 },
+  );
+  await palettePick("model.fallback");
+  await delay(250);
+  await evaluate(`document.querySelector('[data-choice-id="none"]')?.click()`);
+  await waitFor(
+    "fallback chip clears on daemon confirmation",
+    async () => {
+      const has = await evaluate(`!!document.querySelector('[data-fallback-status]')`);
+      return { ok: has === false, has };
     },
     { timeout: STEP_MS, interval: 200 },
   );
@@ -7901,7 +8694,7 @@ try {
   }
 
   await seedRepeatedWorkflow({ home, port, token });
-  await skillProposalsCheck({ send, repoDir: process.cwd() });
+  await skillProposalsCheck({ send, repoDir: process.cwd(), port, token });
   await bestOfNCheck({ send });
 
   console.log("webui-smoke ok");

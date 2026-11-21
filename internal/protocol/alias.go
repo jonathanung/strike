@@ -50,6 +50,9 @@ const (
 	AutonomySkipAll    = pub.AutonomySkipAll
 )
 
+// Model fallback reasons (#1350).
+const ModelFallbackReasonUnavailable = pub.ModelFallbackReasonUnavailable
+
 // Verbosity dial (#1369).
 type Verbosity = pub.Verbosity
 
@@ -169,6 +172,7 @@ type (
 	InputQueueReorder       = pub.InputQueueReorder
 	InputQueueSendNow       = pub.InputQueueSendNow
 	SelectModel             = pub.SelectModel
+	SetFallbackModel        = pub.SetFallbackModel
 	SelectAgent             = pub.SelectAgent
 	SetEffort               = pub.SetEffort
 	SetAutonomy             = pub.SetAutonomy
@@ -226,6 +230,8 @@ type (
 	VerificationCompleted   = pub.VerificationCompleted
 	HarnessProgress         = pub.HarnessProgress
 	ModelSelected           = pub.ModelSelected
+	FallbackModelSelected   = pub.FallbackModelSelected
+	ModelFallback           = pub.ModelFallback
 	AgentSelected           = pub.AgentSelected
 	PhaseChanged            = pub.PhaseChanged
 	PlanHandoff             = pub.PlanHandoff
