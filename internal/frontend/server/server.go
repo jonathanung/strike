@@ -703,7 +703,11 @@ func (s *Server) withMiddleware(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if stateChanging(r.Method) {
+		// /preview/<key>/ is the user's own app behind an unguessable key
+		// (#1341). Its sandboxed frame posts with Origin: null, and the
+		// gateway cookie is never honoured there, so the CSRF origin check
+		// for gateway routes does not apply to it.
+		if stateChanging(r.Method) && !strings.HasPrefix(r.URL.Path, previewPathPrefix) {
 			if origin := r.Header.Get("Origin"); origin != "" && !requestOriginAllowed(r) {
 				http.Error(w, "origin not allowed", http.StatusForbidden)
 				return

@@ -317,3 +317,36 @@ func TestPreviewPortsListsAndHidesGateway(t *testing.T) {
 		t.Fatalf("unsupported = %s", rec.Body.String())
 	}
 }
+
+func TestPreviewFormPostFromSandboxedFrameReachesApp(t *testing.T) {
+	var mu sync.Mutex
+	var got string
+	app := loopbackApp(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		mu.Lock()
+		got = r.Method + " " + r.Form.Get("name")
+		mu.Unlock()
+		_, _ = w.Write([]byte("saved"))
+	}))
+	srv := newPreviewServer(t)
+	target := selectPreview(t, srv, app)
+	req := httptest.NewRequest(http.MethodPost, target.Path+"save", strings.NewReader("name=ada"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "null")
+	rec := previewDo(t, srv, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "saved" {
+		t.Fatalf("sandboxed form post = %d %s", rec.Code, rec.Body.String())
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got != "POST ada" {
+		t.Fatalf("app saw %q", got)
+	}
+
+	// Gateway routes keep the origin check.
+	gw := httptest.NewRequest(http.MethodPut, "/v1/preview", strings.NewReader(`{"port":3000}`))
+	gw.Header.Set("Origin", "null")
+	if rec := previewDo(t, srv, gw); rec.Code != http.StatusForbidden {
+		t.Fatalf("null-origin gateway PUT = %d, want 403", rec.Code)
+	}
+}
