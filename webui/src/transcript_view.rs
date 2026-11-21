@@ -62,8 +62,10 @@ pub fn TranscriptPane(
     note: RwSignal<String>,
     handlers: TranscriptHandlers,
     find: RwSignal<FindView>,
-    /// Message pins for the viewed session (#1528).
-    pins: crate::transcript_pins::PinStore,
+    /// Message pins for the viewed session (#1528). Absent on the
+    /// read-only share view: no rail and no Pin action there.
+    #[prop(optional)]
+    pins: Option<crate::transcript_pins::PinStore>,
 ) -> impl IntoView {
     let editing = RwSignal::new(false);
     // Controlled fold open-state (#1441): message id -> open override.
@@ -77,6 +79,9 @@ pub fn TranscriptPane(
     };
     let draft = RwSignal::new(String::new());
     let pinned = RwSignal::new(true);
+    // A share link renders this pane read-only (#1565): no rename, retry,
+    // fork, regenerate, export, or Share of its own.
+    let read_only = use_context::<crate::share::ReadOnlyTranscript>().is_some();
     let cursor = RwSignal::new(None::<u32>);
     let cursor_session = RwSignal::new(String::new());
     let rename_for = RwSignal::new(String::new());
@@ -370,6 +375,9 @@ pub fn TranscriptPane(
             pinned.set(false);
             scroll_message(next);
         };
+        if read_only && matches!(key.as_str(), "t" | "f" | "r" | "g" | "e") {
+            return;
+        }
         match key.as_str() {
             "j" | "ArrowDown" => {
                 ev.prevent_default();
@@ -565,6 +573,10 @@ pub fn TranscriptPane(
                     <button type="button" class="sx-quiet" on:click=move |_| commit_rename()>"Save"</button>
                     <button type="button" class="sx-quiet" on:click=cancel_rename>"Cancel"</button>
                 </Show>
+                <Show when=move || !read_only && !editing.get()>
+                    <button type="button" class="sx-quiet" data-share-open="true" title="Share a read-only link to this session"
+                        on:click=move |_| crate::share::request_open()>"Share"</button>
+                </Show>
             </div>
             <Show when=move || !note.get().is_empty()>
                 <p class="sx-note" role="alert">{move || note.get()}</p>
@@ -602,7 +614,7 @@ pub fn TranscriptPane(
                 }
             }}
         </div>
-        <crate::transcript_pins::PinRail store=pins transcript=transcript />
+        {pins.map(|store| view! { <crate::transcript_pins::PinRail store=store transcript=transcript /> })}
         <div class="sx-stage">
             <div
                 class="transcript sx-transcript"
@@ -622,8 +634,9 @@ pub fn TranscriptPane(
                 <Show when=move || !loading.get() && transcript.with(|t| t.messages.is_empty()) && load_error.get().is_empty()>
                     <div class="sx-empty">
                         <strong>{move || empty_headline(tick.get())}</strong>
-                        <p>"Send a message to start."</p>
+                        <p>{if read_only { "Nothing in this session yet." } else { "Send a message to start." }}</p>
                         <button
+                            hidden=read_only
                             type="button"
                             class="secondary"
                             data-add-provider="true"
@@ -670,7 +683,7 @@ pub fn TranscriptPane(
                                 let fold_open = folds.map.with(|m| fold_is_open(m, r.msg.id));
                                 view! {
                                     {r.sep.map(|label| view! { <div class="day-sep" role="separator">{label}</div> })}
-                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, pins, r.pin, r.hits, r.current, r.elapsed, r.usage, r.verify, r.tail, fold_open, folds)}
+                                    {message_view(r.msg, idx, cursor, open_file, retry, fork, pins, r.pin, r.hits, r.current, r.elapsed, r.usage, r.verify, r.steer, r.tail, fold_open, folds)}
                                 }
                             })
                         }
@@ -817,6 +830,7 @@ struct RowData {
     elapsed: Option<String>,
     usage: Option<(String, String)>,
     verify: Option<crate::turn_verify::TurnVerify>,
+    steer: Option<crate::steer_ack::AckState>,
     tail: Option<crate::tool_tail::ToolTail>,
     /// Anchor, excerpt and time when the message can be pinned (#1528).
     pin: Option<(message_pins::Anchor, String, f64)>,
@@ -848,6 +862,7 @@ fn row_at(t: &Transcript, fv: &FindView, idx: usize) -> Option<RowData> {
             .usage_for(msg.id)
             .and_then(|u| u.label().map(|label| (label, u.detail()))),
         verify: t.verify_for(msg.id).cloned(),
+        steer: t.steer_acks.get(msg.id),
         tail: t.tail_for(msg.id).cloned(),
         pin: t.pin_anchor_at(idx),
     })
@@ -1056,13 +1071,14 @@ fn message_view(
     open_file: Callback<(String, u32)>,
     retry: Callback<(String,)>,
     _fork: Callback<(i32,)>,
-    pins: crate::transcript_pins::PinStore,
+    pins: Option<crate::transcript_pins::PinStore>,
     pin: Option<(message_pins::Anchor, String, f64)>,
     find_hits: Vec<crate::transcript_find::TMatch>,
     find_current: Option<crate::transcript_find::TMatch>,
     turn_elapsed: Option<String>,
     turn_usage: Option<(String, String)>,
     turn_verify: Option<crate::turn_verify::TurnVerify>,
+    steer: Option<crate::steer_ack::AckState>,
     tail: Option<crate::tool_tail::ToolTail>,
     fold_open: bool,
     folds: FoldState,
@@ -1076,6 +1092,7 @@ fn message_view(
     let detail = msg.detail.clone();
     let diff = msg.diff.clone();
     let chips = msg.chips.clone();
+    let sent_attachments = msg.attachments.clone();
     let copy_text = if msg.copy_text.is_empty() {
         body.clone()
     } else {
@@ -1195,7 +1212,7 @@ fn message_view(
                             crate::clipboard::after_ms(2_000, move || copy_state.set(None));
                         });
                     }>{move || crate::clipboard::transcript_copy_label(copy_state.get())}</button>
-                    {pin.map(|(anchor, excerpt, at_ms)| {
+                    {pin.zip(pins).map(|((anchor, excerpt, at_ms), pins)| {
                         let label_anchor = anchor.clone();
                         let pressed_anchor = anchor.clone();
                         view! {
@@ -1233,6 +1250,9 @@ fn message_view(
             } else {
                 view! { <p class="sx-body">{body.clone()}</p> }.into_any()
             }}
+            {steer.map(|ack| view! {
+                <p class="steer-ack" data-steer-state=ack.key() role="note">{ack.text()}</p>
+            })}
             {if !prose && !chips.is_empty() {
                 view! {
                     <div class="sx-chips">
@@ -1242,6 +1262,9 @@ fn message_view(
             } else {
                 view! { <span></span> }.into_any()
             }}
+            {(!sent_attachments.is_empty()).then(|| view! {
+                <crate::transcript_attachments::SentAttachments items=sent_attachments.clone() />
+            })}
             {tail.map(crate::tool_tail::tail_view)}
             {auth_notice.then(|| {
                 let target = reconnect.clone();

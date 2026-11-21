@@ -22,6 +22,9 @@ const (
 	KindGitHubChecks = "github_checks"
 	// KindHTTP probes a URL and compares the response status.
 	KindHTTP = "http"
+	// KindShell runs a workspace-configured command; exit 0 is healthy
+	// (#1783).
+	KindShell = "shell"
 )
 
 // Per-check states.
@@ -83,6 +86,9 @@ type CheckSpec struct {
 	URL string `json:"url,omitempty"`
 	// ExpectStatus is the healthy HTTP status (kind http). Zero means 200.
 	ExpectStatus int `json:"expectStatus,omitempty"`
+	// Command is the shell check (kind shell), run with bash -c under the
+	// user's sandbox preference.
+	Command string `json:"command,omitempty"`
 }
 
 // CheckResult is one observation of one check.
@@ -103,12 +109,15 @@ type Round struct {
 // Watch is one post-merge watch record. Rounds keep the newest maxRounds
 // observations as verdict evidence.
 type Watch struct {
-	ID              string      `json:"id"`
-	Repo            string      `json:"repo"`
-	PR              int         `json:"pr,omitempty"`
-	SHA             string      `json:"sha"`
-	Environment     string      `json:"environment,omitempty"`
-	SessionID       string      `json:"sessionId,omitempty"`
+	ID          string `json:"id"`
+	Repo        string `json:"repo"`
+	PR          int    `json:"pr,omitempty"`
+	SHA         string `json:"sha"`
+	Environment string `json:"environment,omitempty"`
+	SessionID   string `json:"sessionId,omitempty"`
+	// SessionMode is the watch session's permission posture, reused when the
+	// verdict is posted to it so posting never loosens or tightens it.
+	SessionMode     string      `json:"sessionMode,omitempty"`
 	Checks          []CheckSpec `json:"checks"`
 	WindowSeconds   int         `json:"windowSeconds"`
 	IntervalSeconds int         `json:"intervalSeconds"`
@@ -124,7 +133,14 @@ type Watch struct {
 	CreatedAt        time.Time     `json:"createdAt"`
 	Deadline         time.Time     `json:"deadline"`
 	LastPolledAt     time.Time     `json:"lastPolledAt,omitzero"`
-	FinishedAt       time.Time     `json:"finishedAt,omitzero"`
+	// NotifyError is the last failure to post the plan or verdict to the PR
+	// or session. Posting is best effort; it never changes the verdict.
+	NotifyError string `json:"notifyError,omitempty"`
+	// FixSession and RevertPR record the confirmed regression handoffs
+	// (#1784). Each runs at most once per watch.
+	FixSession *Handoff  `json:"fixSession,omitempty"`
+	RevertPR   *Handoff  `json:"revertPr,omitempty"`
+	FinishedAt time.Time `json:"finishedAt,omitzero"`
 }
 
 // Active reports whether the watch still polls.

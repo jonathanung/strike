@@ -81,6 +81,12 @@ strike trust list            # trusted roots
 strike trust --dir <path>    # act on another checkout
 ```
 
+The web cockpit (`strike serve`) shows an **Untrusted workspace** badge while
+the live root's repo ships gated config, and a trust card listing exactly what
+trusting would load, with Grant / Keep untrusted (`GET/POST
+/v1/workspace/trust`, #1781). A grant there also takes effect on the next
+start.
+
 While untrusted and the repo ships gated config, startup prints
 `strike: untrusted workspace: repo config inert (…)` and the session
 transcript records an `admission.decided` event with `surface: "workspace"`

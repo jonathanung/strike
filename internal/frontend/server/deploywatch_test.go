@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jonathanung/strike/internal/daemon/deploywatch"
+	"github.com/jonathanung/strike/internal/daemon/rootstart"
 )
 
 func newDeployWatchServer(t *testing.T, readOnly bool) (http.Handler, *httptest.Server) {
@@ -148,4 +150,89 @@ func TestDeployWatchRoutesReadOnlyAndUnavailable(t *testing.T) {
 	if rec := dwDo(t, srv.Handler(), http.MethodGet, "/v1/deploy-watches", "", true); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("nil service = %d", rec.Code)
 	}
+}
+
+func TestDeployWatchHandoffRoutes(t *testing.T) {
+	h, target := newDeployWatchServer(t, false)
+	body := `{"repo":"acme/app","sha":"abc1234","failureThreshold":1,"windowSeconds":600,"checks":[{"kind":"http","name":"api","url":"` + target.URL + `"}]}`
+	rec := dwDo(t, h, http.MethodPost, "/v1/deploy-watches", body, true)
+	var created deploywatch.Watch
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil || created.ID == "" {
+		t.Fatalf("create = %d %s", rec.Code, rec.Body.String())
+	}
+	fix := "/v1/deploy-watches/" + created.ID + "/fix-session"
+	revert := "/v1/deploy-watches/" + created.ID + "/revert-pr"
+
+	if rec := dwDo(t, h, http.MethodPost, fix, `{"confirm":true}`, false); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauth fix = %d", rec.Code)
+	}
+	for _, path := range []string{fix, revert} {
+		if rec := dwDo(t, h, http.MethodPost, path, `{}`, true); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "confirmation required") {
+			t.Fatalf("unconfirmed %s = %d %s", path, rec.Code, rec.Body.String())
+		}
+	}
+	// This server has no launcher or reverter wired.
+	if rec := dwDo(t, h, http.MethodPost, fix, `{"confirm":true}`, true); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("fix without launcher = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := dwDo(t, h, http.MethodPost, revert, `{"confirm":true,"permissionMode":"plan"}`, true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("revert with mode = %d", rec.Code)
+	}
+	if rec := dwDo(t, h, http.MethodPost, revert, `{"confirm":true}`, true); rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("revert without reverter = %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := dwDo(t, h, http.MethodPost, "/v1/deploy-watches/dw_missing/fix-session", `{"confirm":true}`, true); rec.Code != http.StatusServiceUnavailable && rec.Code != http.StatusNotFound {
+		t.Fatalf("missing fix = %d", rec.Code)
+	}
+
+	ro, _ := newDeployWatchServer(t, true)
+	if rec := dwDo(t, ro, http.MethodPost, fix, `{"confirm":true}`, true); rec.Code != http.StatusForbidden {
+		t.Fatalf("read-only fix = %d", rec.Code)
+	}
+}
+
+func TestDeployWatchFixSessionRoute(t *testing.T) {
+	st, err := deploywatch.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch := &handoffLaunch{}
+	svc := deploywatch.New(st, deploywatch.Config{Launcher: launch})
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(target.Close)
+	srv, err := New(Options{SessionDir: t.TempDir(), Auth: true, Token: "t", DeployWatches: svc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := srv.Handler()
+	w, err := svc.Create(deploywatch.Input{Repo: "acme/app", SHA: "abc1234", FailureThreshold: 1, WindowSeconds: 600,
+		Checks: []deploywatch.CheckSpec{{Kind: deploywatch.KindHTTP, URL: target.URL}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fix := "/v1/deploy-watches/" + w.ID + "/fix-session"
+	if rec := dwDo(t, h, http.MethodPost, fix, `{"confirm":true}`, true); rec.Code != http.StatusConflict {
+		t.Fatalf("fix before regression = %d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := svc.Poll(context.Background(), w.ID); err != nil {
+		t.Fatal(err)
+	}
+	rec := dwDo(t, h, http.MethodPost, fix, `{"confirm":true,"permissionMode":"plan"}`, true)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"fixSession":{`) || !strings.Contains(rec.Body.String(), `"sessionId":"root-fix"`) {
+		t.Fatalf("fix = %d %s", rec.Code, rec.Body.String())
+	}
+	if len(launch.reqs) != 1 || launch.reqs[0].PermissionMode != "plan" {
+		t.Fatalf("launch = %+v", launch.reqs)
+	}
+}
+
+type handoffLaunch struct {
+	reqs []rootstart.Request
+}
+
+func (l *handoffLaunch) StartRoot(_ context.Context, req rootstart.Request) (rootstart.Result, error) {
+	l.reqs = append(l.reqs, req)
+	return rootstart.Result{SessionID: "root-fix", Created: true}, nil
 }
