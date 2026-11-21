@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/jonathanung/strike/harness/elicit"
 	"github.com/jonathanung/strike/harness/permission"
 	"github.com/jonathanung/strike/harness/provider"
 	"github.com/jonathanung/strike/harness/question"
@@ -1497,6 +1498,16 @@ func (e *Engine) execToolCall(ctx context.Context, call provider.ToolCall, corr 
 					return tool.QuestionResponse{}, err
 				}
 				return tool.QuestionResponse{Answers: answers}, nil
+			},
+			Elicit: func(ctx context.Context, req tool.ElicitRequest) tool.ElicitResponse {
+				res := e.elicits.Ask(ctx, corr, elicit.Request{
+					Server:          req.Server,
+					Message:         req.Message,
+					Mode:            req.Mode,
+					RequestedSchema: req.RequestedSchema,
+					URL:             req.URL,
+				})
+				return tool.ElicitResponse{Action: res.Action, Content: res.Content}
 			},
 			SwitchAgent:    e.queueSwitchAgent,
 			EnterPlanPhase: e.enterPlanPhase,
