@@ -2493,6 +2493,14 @@ try {
     await send("Fetch.disable", {});
     ws.removeEventListener("message", onDiagPaused);
   }
+  // Close the document again: the viewer takes the transcript's place,
+  // and later steps read transcript rows.
+  await evaluate(`document.querySelector("[data-ev-back]")?.click()`);
+  await waitFor(
+    "diagnostics check closes the document viewer",
+    async () => ({ ok: (await evaluate(`!document.querySelector('[data-ev-root="open"]')`)) === true }),
+    { timeout: STEP_MS, interval: 200 },
+  );
 
   await runPalette("Memory");
   const memoryText = (
