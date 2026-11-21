@@ -2097,7 +2097,7 @@ pub fn WorktreePanel(
                         {hint}
                         " "
                         <button type="button" class="secondary" data-action="open-guardrails" on:click=move |_| {
-                            let _ = crate::shell::host::set_view("settings");
+                            let _ = crate::shell::set_view("settings");
                         }>"Open Settings"</button>
                     </p>
                 }
